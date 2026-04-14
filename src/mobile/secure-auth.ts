@@ -12,7 +12,14 @@
  * All types are immutable (readonly). Functions return new objects.
  */
 
-import { randomUUID, randomBytes, createHash, createCipheriv, createDecipheriv, createECDH } from "node:crypto";
+import {
+  randomUUID,
+  randomBytes,
+  createHash,
+  createCipheriv,
+  createDecipheriv,
+  createECDH,
+} from "node:crypto";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -97,7 +104,10 @@ export class SecureAuthManager {
   generateKeyPair(): KeyPair {
     const ecdh = createECDH("prime256v1");
     const publicKey = ecdh.generateKeys("hex");
-    const privateKey = ecdh.getPrivateKey("hex");
+    // P-256 private key is 32 bytes; OpenSSL drops leading zero bytes
+    // in hex form (occasional 62/60 chars instead of 64). Pad to fixed
+    // 64-char length so callers can rely on the size invariant.
+    const privateKey = ecdh.getPrivateKey("hex").padStart(64, "0");
     return { publicKey, privateKey };
   }
 
@@ -138,12 +148,22 @@ export class SecureAuthManager {
   verifyPairing(request: PairingRequest): PairingResult {
     const pending = this.pendingPairings.get(request.requestId);
     if (!pending) {
-      return { success: false, sessionToken: null, sharedSecretHash: null, error: "Unknown pairing request" };
+      return {
+        success: false,
+        sessionToken: null,
+        sharedSecretHash: null,
+        error: "Unknown pairing request",
+      };
     }
 
     if (new Date(pending.expiresAt) < new Date()) {
       this.pendingPairings.delete(request.requestId);
-      return { success: false, sessionToken: null, sharedSecretHash: null, error: "Pairing request expired" };
+      return {
+        success: false,
+        sessionToken: null,
+        sharedSecretHash: null,
+        error: "Pairing request expired",
+      };
     }
 
     if (pending.pin !== request.pin) {
