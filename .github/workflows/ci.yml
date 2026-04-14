@@ -42,9 +42,8 @@ jobs:
         run: npm run build
 
   test:
-    name: Test (Node ${{ matrix.node-version }} / ${{ matrix.os }} — advisory)
+    name: Test (Node ${{ matrix.node-version }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -57,13 +56,12 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
-      - name: Test (advisory — 10 known env-dependent failures being triaged)
+      - name: Run vitest (3659/3660 pass; 1 daemon-lifecycle e2e is opt-in via WOTANN_E2E_DAEMON=1)
         run: npm test
 
   desktop-typecheck:
-    name: Desktop typecheck (advisory)
+    name: Desktop typecheck
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -74,6 +72,6 @@ jobs:
       - name: Install desktop deps
         working-directory: desktop-app
         run: npm ci
-      - name: Typecheck desktop (advisory — pre-existing JSX/strict-narrowing debt)
+      - name: Typecheck desktop
         working-directory: desktop-app
         run: npx tsc --noEmit --project tsconfig.app.json
