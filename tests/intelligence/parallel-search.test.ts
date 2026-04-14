@@ -1,18 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   ParallelSearchDispatcher,
   type SearchConfig,
   type SearchResult,
 } from "../../src/intelligence/parallel-search.js";
 
-const TEST_WORKSPACE = join(
-  process.cwd(),
-  "tests",
-  "intelligence",
-  ".test-workspace-parallel-search",
-);
+// Use OS tmpdir so the test workspace has no ancestor .git directory.
+// Otherwise git log walks up and finds the wotann repo's history,
+// breaking the "not a git repo" assertion.
+const TEST_WORKSPACE = join(tmpdir(), "wotann-parallel-search-test");
 
 function setupTestWorkspace(): void {
   if (existsSync(TEST_WORKSPACE)) {

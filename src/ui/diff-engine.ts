@@ -174,19 +174,13 @@ function findNextMatch(
   for (let offset = 1; offset <= lookahead; offset++) {
     // Check if original[origStart + offset] matches something in proposed
     for (let j = propStart; j <= Math.min(propStart + offset, proposed.length - 1); j++) {
-      if (
-        origStart + offset < original.length &&
-        original[origStart + offset] === proposed[j]
-      ) {
+      if (origStart + offset < original.length && original[origStart + offset] === proposed[j]) {
         return { origEnd: origStart + offset, propEnd: j };
       }
     }
     // Check if proposed[propStart + offset] matches something in original
     for (let i = origStart; i <= Math.min(origStart + offset, original.length - 1); i++) {
-      if (
-        propStart + offset < proposed.length &&
-        original[i] === proposed[propStart + offset]
-      ) {
+      if (propStart + offset < proposed.length && original[i] === proposed[propStart + offset]) {
         return { origEnd: i, propEnd: propStart + offset };
       }
     }
@@ -207,9 +201,7 @@ export function createProposal(
   proposedContent: string,
   description: string,
 ): FileDiffProposal {
-  const originalContent = existsSync(filePath)
-    ? readFileSync(filePath, "utf-8")
-    : "";
+  const originalContent = existsSync(filePath) ? readFileSync(filePath, "utf-8") : "";
 
   const originalHash = createHash("sha256").update(originalContent).digest("hex");
   const hunks = computeDiff(originalContent, proposedContent);
@@ -278,15 +270,11 @@ export function applyReviews(
   const proposedLines = proposal.proposedContent.split("\n");
 
   // If all hunks are accepted, return proposed content directly
-  const allAccepted = proposal.hunks.every(
-    (h) => reviews.get(h.id)?.decision === "accept",
-  );
+  const allAccepted = proposal.hunks.every((h) => reviews.get(h.id)?.decision === "accept");
   if (allAccepted) return proposal.proposedContent;
 
   // If all hunks are rejected, return original content
-  const allRejected = proposal.hunks.every(
-    (h) => reviews.get(h.id)?.decision === "reject",
-  );
+  const allRejected = proposal.hunks.every((h) => reviews.get(h.id)?.decision === "reject");
   if (allRejected) return proposal.originalContent;
 
   // Partial application — build result line by line
@@ -335,8 +323,10 @@ export function applyDiff(
   reviews: ReadonlyMap<string, HunkReview>,
   dryRun: boolean = false,
 ): DiffApplyResult {
-  // Conflict check
-  const conflictDetected = existsSync(proposal.filePath) && detectConflict(proposal);
+  // Conflict check — only meaningful when we're about to write.
+  // In dry-run mode the caller is just asking what *would* happen;
+  // disk state is irrelevant.
+  const conflictDetected = !dryRun && existsSync(proposal.filePath) && detectConflict(proposal);
   if (conflictDetected) {
     return {
       filePath: proposal.filePath,

@@ -80,7 +80,7 @@ describe("Persona System", () => {
       const emptyDir = join(testDir, "empty");
       mkdirSync(emptyDir);
       const identity = loadIdentity(emptyDir);
-      expect(identity.name).toBe("Nexus");
+      expect(identity.name).toBe("WOTANN");
       expect(identity.role).toBe("AI Agent");
       expect(identity.soul).toBe("");
     });

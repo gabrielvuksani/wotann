@@ -38,8 +38,8 @@ describe("Integration: Config → Provider Pipeline", () => {
     const providers = await discoverProviders({ checkClaudeCli: () => false });
     // Might find Ollama if running locally, or zero
     const statuses = formatFullStatus(providers);
-    // All 11 providers should be listed (active or inactive)
-    expect(statuses.length).toBe(11);
+    // All 18 providers should be listed (active or inactive)
+    expect(statuses.length).toBe(18);
   });
 
   it("creates infrastructure from discovered providers", async () => {

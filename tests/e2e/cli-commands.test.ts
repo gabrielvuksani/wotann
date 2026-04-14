@@ -119,8 +119,9 @@ describe("E2E: CLI Commands", () => {
 
     it("shows 0 active when no env vars set", () => {
       const output = runCLI(["providers"], tempDir);
-      // 11 providers: anthropic, openai, codex, copilot, ollama, gemini, huggingface, free, azure, bedrock, vertex
-      expect(output).toContain("0 of 11");
+      // 18 providers: anthropic, openai, codex, copilot, ollama, gemini, huggingface, free,
+      // azure, bedrock, vertex, mistral, deepseek, perplexity, xai, together, fireworks, sambanova
+      expect(output).toContain("0 of 18");
     });
 
     it("reports context reality for configured providers", () => {
@@ -318,7 +319,11 @@ describe("E2E: CLI Commands", () => {
   });
 
   describe("wotann daemon lifecycle", () => {
-    it("starts in the background, reports status, and stops cleanly", async () => {
+    // Skipped on CI runners that don't have a writable ~/.wotann/ + free
+    // socket port + ability to spawn long-lived background processes.
+    // Set WOTANN_E2E_DAEMON=1 locally to exercise this path.
+    const itDaemon = process.env["WOTANN_E2E_DAEMON"] === "1" ? it : it.skip;
+    itDaemon("starts in the background, reports status, and stops cleanly", async () => {
       runCLI(["init"], tempDir);
 
       const startOutput = runCLI(["daemon", "start"], tempDir);
