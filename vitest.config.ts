@@ -10,7 +10,5 @@ export default defineConfig({
     // Locally vitest defaults to NUM_CPUS workers; capping at 2 keeps the
     // memory footprint reasonable on hosted runners.
     pool: "forks",
-    maxConcurrency: 2,
-    fileParallelism: false,
   },
 });
