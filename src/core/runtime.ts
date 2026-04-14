@@ -105,6 +105,7 @@ import * as DiffEngine from "../ui/diff-engine.js";
 import { CredentialPool } from "../providers/credential-pool.js";
 import { EpisodicMemory } from "../memory/episodic-memory.js";
 import { AutonomousExecutor } from "../orchestration/autonomous.js";
+import { NotificationManager } from "../desktop/notification-manager.js";
 import { ContextSourceInspector } from "../context/inspector.js";
 import { PersonaManager } from "../identity/persona.js";
 import { SelfHealingPipeline } from "../orchestration/self-healing-pipeline.js";
@@ -383,6 +384,7 @@ export class WotannRuntime {
   private credentialPool: CredentialPool;
   private episodicMemory: EpisodicMemory;
   private autonomousExecutor: AutonomousExecutor;
+  private notificationManager: NotificationManager;
   private contextInspector: ContextSourceInspector;
   private personaManager: PersonaManager;
   private selfHealingPipeline: SelfHealingPipeline;
@@ -647,6 +649,10 @@ export class WotannRuntime {
       enableCheckpoints: true,
       checkpointDir: join(config.workingDir, ".wotann", "autonomous-checkpoints"),
     });
+
+    // Notification manager: surface task-complete / error / budget-alert
+    // / channel-message / companion-paired events to desktop + iOS.
+    this.notificationManager = new NotificationManager();
 
     // Context source inspector: shows exactly what's in the context window (Ctrl+I)
     this.contextInspector = new ContextSourceInspector();
@@ -2981,6 +2987,10 @@ export class WotannRuntime {
   }
   getAutonomousExecutor(): AutonomousExecutor {
     return this.autonomousExecutor;
+  }
+
+  getNotificationManager(): NotificationManager {
+    return this.notificationManager;
   }
   getContextInspector(): ContextSourceInspector {
     return this.contextInspector;

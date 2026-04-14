@@ -2661,11 +2661,24 @@ export class KairosRPCHandler {
       if (!this.runtime) throw new Error("Runtime not initialized");
       // Verify executor is available, then route through runtime query
       this.runtime.getAutonomousExecutor();
-      let result = "";
-      for await (const chunk of this.runtime.query({ prompt: `[AUTONOMOUS MODE] ${task}` })) {
-        if (chunk.type === "text") result += chunk.content ?? "";
+      const notifier = this.runtime.getNotificationManager();
+      try {
+        let result = "";
+        for await (const chunk of this.runtime.query({ prompt: `[AUTONOMOUS MODE] ${task}` })) {
+          if (chunk.type === "text") result += chunk.content ?? "";
+        }
+        // Surface completion to desktop + iOS via notification queue.
+        notifier.push(
+          "task-complete",
+          "Autonomous task complete",
+          task.length > 120 ? task.slice(0, 117) + "..." : task,
+        );
+        return { task, result, timestamp: Date.now() };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        notifier.push("error", "Autonomous task failed", `${task}: ${message}`.slice(0, 180));
+        throw err;
       }
-      return { task, result, timestamp: Date.now() };
     });
 
     // session.resume — resume a saved session
