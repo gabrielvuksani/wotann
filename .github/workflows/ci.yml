@@ -33,7 +33,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Typecheck
         run: npm run typecheck
@@ -55,7 +55,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Run vitest (3659/3660 pass; 1 daemon-lifecycle e2e is opt-in via WOTANN_E2E_DAEMON=1)
         run: npm test
 
@@ -71,7 +71,7 @@ jobs:
           cache-dependency-path: desktop-app/package-lock.json
       - name: Install desktop deps
         working-directory: desktop-app
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Typecheck desktop
         working-directory: desktop-app
         run: npx tsc --noEmit --project tsconfig.app.json
