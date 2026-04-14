@@ -14,8 +14,8 @@ desktop-app/src-tauri/target/
 desktop-app/src-tauri/target-audit/
 desktop-app/src-tauri/gen/
 desktop-app/dist/
-"desktop-app/postcss.config 2.mjs"
-".wotann/memory [0-9]*.db*"
+desktop-app/postcss.config*2*.mjs
+.wotann/memory*[0-9]*.db*
 
 # Runtime data (user-specific, never commit)
 .wotann/memory.db
@@ -41,7 +41,7 @@ desktop-app/dist/
 .wotann/last-dream.json
 .wotann/token-stats.json
 .wotann/ui-state.json
-"\.wotann/memory [0-9]*.db*"
+.wotann/memory*[0-9]*.db*
 
 # Per-user caches (auth, plugins, stale xcodeproj bundles)
 .codex-home/
