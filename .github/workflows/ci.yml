@@ -63,6 +63,8 @@ jobs:
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
       - name: Run vitest shard ${{ matrix.shard }}/2
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npm test -- --shard ${{ matrix.shard }}/2
 
   desktop-typecheck:
