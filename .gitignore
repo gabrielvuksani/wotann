@@ -11,8 +11,11 @@ out/
 
 # Tauri
 desktop-app/src-tauri/target/
+desktop-app/src-tauri/target-audit/
 desktop-app/src-tauri/gen/
 desktop-app/dist/
+"desktop-app/postcss.config 2.mjs"
+".wotann/memory [0-9]*.db*"
 
 # Runtime data (user-specific, never commit)
 .wotann/memory.db
@@ -89,6 +92,7 @@ coverage/
 
 # iOS
 ios/build/
+ios/.build/
 ios/DerivedData/
 ios/Local.xcconfig
 ios/*.xcodeproj/xcuserdata/

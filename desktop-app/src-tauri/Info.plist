@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>WOTANN needs access to workspace files on your Desktop.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>WOTANN needs access to workspace files in Documents.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>WOTANN may need to read downloaded files for context.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>WOTANN uses the local network to connect with iOS companion devices.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_wotann._tcp</string>
+    </array>
+</dict>
+</plist>

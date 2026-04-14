@@ -1,0 +1,13 @@
+{
+  "identifier": "default",
+  "description": "Default capability set for WOTANN Desktop",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "notification:default",
+    "shell:default",
+    "dialog:default",
+    "global-shortcut:default",
+    "fs:default"
+  ]
+}

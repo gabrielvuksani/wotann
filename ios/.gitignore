@@ -1,0 +1,11 @@
+# Xcode generated
+WOTANN.xcodeproj/xcuserdata/
+WOTANN.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate
+
+# Local developer overrides (contains Team ID)
+Local.xcconfig
+
+# Build artifacts
+DerivedData/
+build/

@@ -1,0 +1,34 @@
+[net]
+# Retry up to 3 times with backoff before failing
+retry = 3
+# Use git CLI for fetching (more reliable than libgit2 on some networks)
+git-fetch-with-cli = true
+
+[registries.crates-io]
+# Sparse protocol is faster than git-based index (default since Cargo 1.70)
+protocol = "sparse"
+
+[http]
+# 15-second timeout prevents indefinite hangs on DNS/network issues
+# while still allowing normal downloads to complete
+timeout = 15
+# Enable HTTP/2 multiplexing for faster parallel downloads
+multiplexing = true
+# Low-speed limit: abort if transfer drops below 10 bytes/sec for 30 seconds
+low-speed-limit = 10
+
+[build]
+# Use all available CPU cores for compilation (omit jobs to use default = num CPUs)
+
+[profile.release]
+# Link-time optimization for smaller, faster binaries
+lto = "thin"
+# Strip debug symbols from release builds (smaller .app)
+strip = true
+# Single codegen unit for better optimization (slower compile, faster runtime)
+codegen-units = 1
+
+[target.aarch64-apple-darwin]
+# Apple Silicon specific: use the system linker
+linker = "clang"
+rustflags = ["-C", "target-cpu=native"]
