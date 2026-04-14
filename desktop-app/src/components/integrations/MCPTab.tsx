@@ -38,7 +38,7 @@ export function MCPTab({ onRefresh }: Props) {
 
   const toggle = useCallback(async (name: string, enabled: boolean) => {
     setBusy((p) => ({ ...p, [name]: true }));
-    await safeInvoke<unknown>("mcp.toggle", { name, enabled: !enabled });
+    await safeInvoke<unknown>("toggle_mcp_server", { name, enabled: !enabled });
     await load();
     if (onRefresh) await onRefresh();
     setBusy((p) => ({ ...p, [name]: false }));
@@ -47,7 +47,7 @@ export function MCPTab({ onRefresh }: Props) {
   const add = useCallback(async () => {
     if (draft.name.trim() === "" || draft.command.trim() === "") return;
     const args = draft.args.trim() === "" ? [] : draft.args.split(/\s+/).filter((a) => a.length > 0);
-    await safeInvoke<unknown>("mcp.add", {
+    await safeInvoke<unknown>("add_mcp_server", {
       name: draft.name.trim(), command: draft.command.trim(), args, transport: draft.transport,
     });
     setDraft({ name: "", command: "", args: "", transport: "stdio" });

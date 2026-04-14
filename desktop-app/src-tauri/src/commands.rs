@@ -2443,6 +2443,44 @@ pub fn get_mcp_servers() -> Vec<MCPServer> {
     vec![]
 }
 
+/// Toggle MCP server enabled flag — proxies to daemon `mcp.toggle` RPC.
+#[tauri::command]
+pub fn toggle_mcp_server(name: String, enabled: bool) -> Result<bool, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call("mcp.toggle", serde_json::json!({ "name": name, "enabled": enabled }))
+        .map_err(|e| e.to_string())?;
+    if result.get("ok") == Some(&serde_json::Value::Bool(true)) {
+        Ok(true)
+    } else {
+        Err(result.get("error").and_then(|v| v.as_str()).unwrap_or("toggle failed").to_string())
+    }
+}
+
+/// Register a new MCP server — proxies to daemon `mcp.add` RPC.
+#[tauri::command]
+pub fn add_mcp_server(
+    name: String,
+    command: String,
+    args: Vec<String>,
+    transport: String,
+) -> Result<bool, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call(
+            "mcp.add",
+            serde_json::json!({
+                "name": name, "command": command, "args": args, "transport": transport
+            }),
+        )
+        .map_err(|e| e.to_string())?;
+    if result.get("ok") == Some(&serde_json::Value::Bool(true)) {
+        Ok(true)
+    } else {
+        Err(result.get("error").and_then(|v| v.as_str()).unwrap_or("add failed").to_string())
+    }
+}
+
 /// Voice capability status
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]

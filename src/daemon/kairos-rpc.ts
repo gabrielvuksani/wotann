@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import type { WotannRuntime } from "../core/runtime.js";
@@ -2961,6 +2961,61 @@ export class KairosRPCHandler {
       } catch {
         // Best-effort path — caller gets a safe fallback, no user-facing error.
         return { servers: [], count: 0 };
+      }
+    });
+
+    // mcp.toggle — flip the `enabled` flag for a named MCP server.
+    this.handlers.set("mcp.toggle", async (params) => {
+      const name = (params as Record<string, unknown>)["name"] as string | undefined;
+      const enabled = (params as Record<string, unknown>)["enabled"] as boolean | undefined;
+      if (!name) return { ok: false, error: "name required" };
+      const configPath = join(homedir(), ".wotann", "wotann.yaml");
+      try {
+        const config = existsSync(configPath)
+          ? ((yamlParse(readFileSync(configPath, "utf-8")) ?? {}) as Record<string, unknown>)
+          : {};
+        const key = "mcpServers" in config ? "mcpServers" : "mcp_servers";
+        const servers = (config[key] ?? {}) as Record<string, Record<string, unknown>>;
+        const entry = servers[name];
+        if (!entry) return { ok: false, error: `MCP server '${name}' not found` };
+        const next: Record<string, Record<string, unknown>> = {
+          ...servers,
+          [name]: { ...entry, enabled: typeof enabled === "boolean" ? enabled : !entry["enabled"] },
+        };
+        const updated = { ...config, [key]: next };
+        writeFileSync(configPath, yamlStringify(updated), "utf-8");
+        return { ok: true, name, enabled: next[name]?.["enabled"] };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // mcp.add — register a new MCP server in wotann.yaml.
+    this.handlers.set("mcp.add", async (params) => {
+      const p = params as Record<string, unknown>;
+      const name = p["name"] as string | undefined;
+      const command = p["command"] as string | undefined;
+      const args = (p["args"] as string[] | undefined) ?? [];
+      const transport = ((p["transport"] as string | undefined) ?? "stdio") as "stdio" | "http";
+      if (!name || !command) return { ok: false, error: "name and command required" };
+      const configPath = join(homedir(), ".wotann", "wotann.yaml");
+      try {
+        if (!existsSync(dirname(configPath))) mkdirSync(dirname(configPath), { recursive: true });
+        const config = existsSync(configPath)
+          ? ((yamlParse(readFileSync(configPath, "utf-8")) ?? {}) as Record<string, unknown>)
+          : {};
+        const key = "mcp_servers" in config ? "mcp_servers" : "mcpServers";
+        const servers = (config[key] ?? {}) as Record<string, Record<string, unknown>>;
+        if (servers[name]) return { ok: false, error: `MCP server '${name}' already exists` };
+        const next: Record<string, Record<string, unknown>> = {
+          ...servers,
+          [name]: { command, args, transport, enabled: true },
+        };
+        const updated = { ...config, [key]: next };
+        writeFileSync(configPath, yamlStringify(updated), "utf-8");
+        return { ok: true, name };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
     });
 
