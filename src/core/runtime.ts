@@ -1479,7 +1479,7 @@ export class WotannRuntime {
       const baseTools: readonly ToolDefinition[] = options.tools ?? [];
       const toolSubstitutionProvider = options.provider ?? this.session.provider;
       const toolSubstitutionAdapter =
-        this.infra?.bridge.getAdapter(toolSubstitutionProvider) ?? null;
+        this.infra?.bridge?.getAdapter?.(toolSubstitutionProvider) ?? null;
       const toolSubstitutionCapabilities = toolSubstitutionAdapter?.capabilities;
       const FRONTIER_CONTEXT_THRESHOLD = 200_000;
       const shouldUseHashAnchoredEdit =
@@ -2738,7 +2738,7 @@ export class WotannRuntime {
     this.sessionAnalytics.updateContextUsage(this.contextIntelligence.getBudget().usagePercent);
 
     return {
-      providers: this.infra?.bridge.getAvailableProviders() ?? [],
+      providers: this.infra?.bridge?.getAvailableProviders?.() ?? [],
       activeProvider: this.session.provider,
       hookCount: this.hookEngine.getRegisteredHooks().length,
       middlewareLayers: this.pipeline.getLayerCount(),
@@ -3712,7 +3712,7 @@ export class WotannRuntime {
 
     // Build provider+model pairs from available provider names
     const providerPairs = providerNames.map((provider) => {
-      const status = this.infra?.bridge.getAvailableProviders() ?? [];
+      const status = this.infra?.bridge?.getAvailableProviders?.() ?? [];
       const defaultModel = status.includes(provider) ? "auto" : "auto";
       return { provider, model: defaultModel };
     });
