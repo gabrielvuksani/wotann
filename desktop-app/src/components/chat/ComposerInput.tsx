@@ -232,7 +232,7 @@ function measureCaret(el: HTMLTextAreaElement, position: number): CaretGeometry 
   const style = mirror.style;
   const computed = window.getComputedStyle(el);
   for (const prop of MIRROR_STYLE_PROPS) {
-    style[prop as any] = computed[prop as any];
+    style[prop as any] = computed[prop as any] ?? "";
   }
   style.position = "absolute";
   style.visibility = "hidden";
@@ -407,7 +407,8 @@ export function ComposerInput({
       }
 
       // Submit on Enter (no Shift) when popover is NOT open.
-      if (!atMatch && e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      // isComposing lives on nativeEvent in React 19 strict types.
+      if (!atMatch && e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         if (disabled) return;
         const trimmed = el.value.trim();

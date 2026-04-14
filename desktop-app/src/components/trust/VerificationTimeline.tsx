@@ -76,12 +76,14 @@ export function VerificationTimeline() {
         | readonly RawEvent[]
         | null;
       if (cancelled) return;
-      const raw = Array.isArray(result)
+      const raw: readonly RawEvent[] = Array.isArray(result)
         ? result
-        : Array.isArray(result?.events)
+        : result && "events" in result && Array.isArray(result.events)
           ? result.events
           : [];
-      const sorted = raw.map((r, i) => normalize(r, i)).sort((a, b) => b.startedAt - a.startedAt);
+      const sorted = raw
+        .map((r: RawEvent, i: number) => normalize(r, i))
+        .sort((a: VerificationEvent, b: VerificationEvent) => b.startedAt - a.startedAt);
       setEvents(sorted);
       setLoading(false);
     })();

@@ -54,12 +54,12 @@ export function ProofBundleList({
         | readonly Partial<ProofBundleSummary>[]
         | null;
       if (cancelled) return;
-      const raw = Array.isArray(result)
+      const raw: readonly Partial<ProofBundleSummary>[] = Array.isArray(result)
         ? result
-        : Array.isArray(result?.bundles)
+        : result && "bundles" in result && Array.isArray(result.bundles)
           ? result.bundles
           : [];
-      setBundles(raw.map((r, i) => normalize(r, i)));
+      setBundles(raw.map((r: Partial<ProofBundleSummary>, i: number) => normalize(r, i)));
       setLoading(false);
     })();
     return () => {

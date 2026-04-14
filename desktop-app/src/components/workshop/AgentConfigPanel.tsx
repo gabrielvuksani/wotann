@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { JSX } from "react";
 import { commands, type SkillInfo } from "../../hooks/useTauriCommand";
 import { useStore } from "../../store";
 import type { AgentInfo } from "../../types";
