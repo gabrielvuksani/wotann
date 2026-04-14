@@ -772,11 +772,17 @@ export class CompanionServer {
       this.httpServer = null;
     }
     this.wsServer = null;
-    // Kill Bonjour advertisement
+    // Kill Bonjour advertisement.
+    // CI runners restrict process.kill on subprocesses they didn't spawn,
+    // so swallow EPERM/ESRCH instead of letting it propagate.
     const bonjourProc = (this as Record<string, unknown>)._bonjourProc as
       | { kill?: () => void }
       | undefined;
-    bonjourProc?.kill?.();
+    try {
+      bonjourProc?.kill?.();
+    } catch {
+      /* sandbox/CI may forbid kill() — non-fatal */
+    }
   }
 
   isRunning(): boolean {
