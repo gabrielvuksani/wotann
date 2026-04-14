@@ -83,7 +83,7 @@ export function VerificationTimeline() {
           : [];
       const sorted = raw
         .map((r: RawEvent, i: number) => normalize(r, i))
-        .sort((a: VerificationEvent, b: VerificationEvent) => b.startedAt - a.startedAt);
+        .sort((a: TimelineEvent, b: TimelineEvent) => b.startedAt - a.startedAt);
       setEvents(sorted);
       setLoading(false);
     })();
