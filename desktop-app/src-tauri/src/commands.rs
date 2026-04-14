@@ -2481,6 +2481,38 @@ pub fn add_mcp_server(
     }
 }
 
+/// Save connector config — proxies to daemon `connectors.save_config` RPC.
+#[tauri::command]
+pub fn connector_save_config(
+    connector_type: String,
+    config: serde_json::Value,
+) -> Result<bool, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call(
+            "connectors.save_config",
+            serde_json::json!({ "connectorType": connector_type, "config": config }),
+        )
+        .map_err(|e| e.to_string())?;
+    if result.get("ok") == Some(&serde_json::Value::Bool(true)) {
+        Ok(true)
+    } else {
+        Err(result.get("error").and_then(|v| v.as_str()).unwrap_or("save failed").to_string())
+    }
+}
+
+/// Test connector connection — proxies to daemon `connectors.test` RPC.
+#[tauri::command]
+pub fn connector_test_connection(
+    connector_type: String,
+    _config: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call("connectors.test", serde_json::json!({ "connectorType": connector_type }))
+        .map_err(|e| e.to_string())
+}
+
 /// Voice capability status
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]

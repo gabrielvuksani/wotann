@@ -2346,6 +2346,56 @@ export class KairosRPCHandler {
       }
     });
 
+    // connectors.save_config — persist a channel/connector config to wotann.yaml.
+    this.handlers.set("connectors.save_config", async (params) => {
+      const p = params as Record<string, unknown>;
+      const connectorType = p["connectorType"] as string | undefined;
+      const config = (p["config"] as Record<string, unknown>) ?? {};
+      if (!connectorType) return { ok: false, error: "connectorType required" };
+      const configPath = join(homedir(), ".wotann", "wotann.yaml");
+      try {
+        if (!existsSync(dirname(configPath))) mkdirSync(dirname(configPath), { recursive: true });
+        const root = existsSync(configPath)
+          ? ((yamlParse(readFileSync(configPath, "utf-8")) ?? {}) as Record<string, unknown>)
+          : {};
+        const channels = (root["channels"] ?? {}) as Record<string, Record<string, unknown>>;
+        const next: Record<string, Record<string, unknown>> = {
+          ...channels,
+          [connectorType]: { ...config, savedAt: new Date().toISOString() },
+        };
+        writeFileSync(configPath, yamlStringify({ ...root, channels: next }), "utf-8");
+        return { ok: true, connectorType };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // connectors.test — probe current health for a connector type.
+    // Returns latest heartbeat from the dispatch plane (no live connect yet).
+    this.handlers.set("connectors.test", async (params) => {
+      const connectorType = (params as Record<string, unknown>)["connectorType"] as
+        | string
+        | undefined;
+      if (!connectorType) return { ok: false, error: "connectorType required" };
+      if (!this.runtime) return { ok: false, error: "Runtime not initialized" };
+      try {
+        const dispatch = this.runtime.getDispatchPlane();
+        const health = dispatch.getChannelHealth().find((h) => h.channelType === connectorType);
+        const connectedList = dispatch.getConnectedChannels() as readonly string[];
+        const connected = connectedList.includes(connectorType);
+        return {
+          ok: true,
+          connectorType,
+          connected,
+          latencyMs: health?.latencyMs ?? null,
+          lastMessageAt: health?.lastMessageAt ?? null,
+          errors: health?.errors ?? 0,
+        };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
     // Cron jobs list
     this.handlers.set("cron.list", async () => {
       return { jobs: [] };

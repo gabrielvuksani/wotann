@@ -148,6 +148,8 @@ pub fn run() {
             commands::get_mcp_servers,
             commands::toggle_mcp_server,
             commands::add_mcp_server,
+            commands::connector_save_config,
+            commands::connector_test_connection,
             commands::run_autonomous,
             commands::run_architect,
             commands::run_council,
