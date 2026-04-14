@@ -885,6 +885,50 @@ export class KairosDaemon {
       /* imessage not available — non-macOS or chat.db inaccessible */
     }
 
+    // IRC adapter (E9): opt-in via IRC_SERVER + IRC_NICK env vars.
+    // IRCAdapter implements gateway.ChannelAdapter directly — no wrap needed.
+    if (process.env["IRC_SERVER"] && process.env["IRC_NICK"]) {
+      try {
+        const { IRCAdapter } = await import("../channels/irc.js");
+        const ircAdapter = new IRCAdapter({
+          server: process.env["IRC_SERVER"]!,
+          port: parseInt(process.env["IRC_PORT"] ?? "6697", 10),
+          nick: process.env["IRC_NICK"]!,
+          user: process.env["IRC_USER"] ?? process.env["IRC_NICK"]!,
+          realname: process.env["IRC_REALNAME"] ?? "WOTANN",
+          channels: (process.env["IRC_CHANNELS"] ?? "").split(",").filter((c) => c.length > 0),
+          useTLS: process.env["IRC_TLS"] !== "false",
+        });
+        this.gateway.registerAdapter(ircAdapter);
+        this.appendLog({ type: "heartbeat", message: "Channel: IRC adapter registered" });
+      } catch (err) {
+        this.appendLog({
+          type: "heartbeat",
+          message: `Channel: IRC registration failed — ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+
+    // Google Chat adapter (E9): opt-in via GOOGLE_CHAT_WEBHOOK env var.
+    // GoogleChatAdapter implements gateway.ChannelAdapter directly — no wrap needed.
+    if (process.env["GOOGLE_CHAT_WEBHOOK"] || process.env["GOOGLE_CHAT_SERVICE_ACCOUNT"]) {
+      try {
+        const { GoogleChatAdapter } = await import("../channels/google-chat.js");
+        const gchat = new GoogleChatAdapter({
+          webhookUrl: process.env["GOOGLE_CHAT_WEBHOOK"],
+          serviceAccountKey: process.env["GOOGLE_CHAT_SERVICE_ACCOUNT"],
+          spaceName: process.env["GOOGLE_CHAT_SPACE"],
+        });
+        this.gateway.registerAdapter(gchat);
+        this.appendLog({ type: "heartbeat", message: "Channel: Google Chat adapter registered" });
+      } catch (err) {
+        this.appendLog({
+          type: "heartbeat",
+          message: `Channel: Google Chat registration failed — ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+
     // GitHub Bot: start webhook server for @wotann mentions in issues/PRs
     if (process.env["GITHUB_WEBHOOK_SECRET"] || options.webhook) {
       try {

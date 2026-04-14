@@ -41,7 +41,7 @@
     "macOS": {
       "minimumSystemVersion": "13.0",
       "infoPlist": "Info.plist",
-      "signingIdentity": "",
+      "signingIdentity": "-",
       "providerShortName": null,
       "entitlements": "Entitlements.plist"
     },
