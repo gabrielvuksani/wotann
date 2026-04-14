@@ -29,6 +29,21 @@ desktop-app/dist/
 .wotann/debug-report-*.md
 .wotann/profile.json
 .wotann/user-model.json
+.wotann/daemon.status.json
+.wotann/dreams/
+.wotann/episodes/
+.wotann/screenshots/
+.wotann/instincts.json
+.wotann/learnings.json
+.wotann/last-dream.json
+.wotann/token-stats.json
+.wotann/ui-state.json
+"\.wotann/memory [0-9]*.db*"
+
+# Per-user caches (auth, plugins, stale xcodeproj bundles)
+.codex-home/
+.superpowers/
+ios/WOTANN */
 
 # Legacy
 .nexus-archive/
