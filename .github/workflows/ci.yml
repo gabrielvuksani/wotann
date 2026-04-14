@@ -10,6 +10,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Node ${{ matrix.node-version }} / ${{ matrix.os }}
@@ -17,8 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        node-version: [20]
+        os: [ubuntu-latest, macos-latest]
+        node-version: [22]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,8 +38,32 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint --if-present
+
       - name: Test
         run: npm test
 
       - name: Build
         run: npm run build
+
+  desktop-app:
+    name: Desktop typecheck (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop-app/package-lock.json
+      - name: Install desktop deps
+        working-directory: desktop-app
+        run: npm ci
+      - name: Typecheck desktop
+        working-directory: desktop-app
+        run: npx tsc --noEmit --project tsconfig.app.json
