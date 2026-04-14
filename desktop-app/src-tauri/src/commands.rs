@@ -2412,6 +2412,37 @@ pub struct ChannelStatus {
     pub last_message_at: Option<u64>,
 }
 
+/// MCP server entry (registered via ~/.wotann/wotann.yaml).
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MCPServer {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub transport: String,
+    #[serde(default)]
+    pub tool_count: Option<u32>,
+    pub enabled: bool,
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+/// List MCP servers — proxies to KAIROS daemon `mcp.list` RPC.
+#[tauri::command]
+pub fn get_mcp_servers() -> Vec<MCPServer> {
+    if let Ok(client) = ipc_client::try_kairos() {
+        if let Ok(result) = client.call("mcp.list", serde_json::json!({})) {
+            if let Ok(servers) = serde_json::from_value::<Vec<MCPServer>>(
+                result.get("servers").cloned().unwrap_or(result.clone()),
+            ) {
+                return servers;
+            }
+        }
+    }
+    vec![]
+}
+
 /// Voice capability status
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]

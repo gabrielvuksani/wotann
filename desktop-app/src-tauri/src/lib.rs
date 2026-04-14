@@ -145,6 +145,7 @@ pub fn run() {
             commands::get_config,
             commands::set_config,
             commands::get_channels_status,
+            commands::get_mcp_servers,
             commands::run_autonomous,
             commands::run_architect,
             commands::run_council,

@@ -29,7 +29,7 @@ export function MCPTab({ onRefresh }: Props) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await safeInvoke<readonly MCPServer[]>("mcp.list");
+    const r = await safeInvoke<readonly MCPServer[]>("get_mcp_servers");
     setServers(r ?? []);
     setLoading(false);
   }, []);

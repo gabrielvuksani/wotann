@@ -52,7 +52,7 @@ export function IntegrationsView() {
     const [ch, co, mc, sk] = await Promise.all([
       tryList<{ connected?: boolean }>("get_channels_status"),
       tryList<{ connected?: boolean }>("get_connectors"),
-      tryList<{ enabled?: boolean }>("mcp.list"), // TODO: register get_mcp_list command in src-tauri
+      tryList<{ enabled?: boolean }>("get_mcp_servers"),
       tryList<unknown>("get_skills"),
     ]);
     setCounts({
