@@ -2481,6 +2481,15 @@ pub fn add_mcp_server(
     }
 }
 
+/// Apply multi-file edits — proxies to daemon `composer.apply` RPC.
+#[tauri::command]
+pub fn composer_apply(edits: serde_json::Value) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call("composer.apply", serde_json::json!({ "edits": edits }))
+        .map_err(|e| e.to_string())
+}
+
 /// Save connector config — proxies to daemon `connectors.save_config` RPC.
 #[tauri::command]
 pub fn connector_save_config(

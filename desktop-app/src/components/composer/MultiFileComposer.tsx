@@ -107,7 +107,7 @@ export function MultiFileComposer() {
         : requests;
 
       try {
-        await invoke("composer.apply", { edits: filtered });
+        await invoke("composer_apply", { edits: filtered });
         setState({ kind: "applied", count: filtered.length });
       } catch (err) {
         setState({

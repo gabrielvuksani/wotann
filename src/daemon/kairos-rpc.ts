@@ -3014,6 +3014,41 @@ export class KairosRPCHandler {
       }
     });
 
+    // composer.apply — apply a batch of multi-file edits.
+    // Accepts {edits: [{path, newContent, acceptedHunkIds?}]} and writes
+    // newContent to each path. Returns per-edit success/failure counts.
+    this.handlers.set("composer.apply", async (params) => {
+      const edits = ((params as Record<string, unknown>)["edits"] ?? []) as Array<{
+        path: string;
+        newContent: string;
+        acceptedHunkIds?: string[];
+      }>;
+      if (!Array.isArray(edits) || edits.length === 0) {
+        return { ok: false, error: "edits array required" };
+      }
+      let applied = 0;
+      const failures: Array<{ path: string; error: string }> = [];
+      for (const edit of edits) {
+        if (!edit.path || typeof edit.newContent !== "string") {
+          failures.push({ path: edit.path ?? "<unknown>", error: "invalid edit shape" });
+          continue;
+        }
+        try {
+          if (!existsSync(dirname(edit.path))) {
+            mkdirSync(dirname(edit.path), { recursive: true });
+          }
+          writeFileSync(edit.path, edit.newContent, "utf-8");
+          applied += 1;
+        } catch (err) {
+          failures.push({
+            path: edit.path,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      return { ok: failures.length === 0, applied, failures, total: edits.length };
+    });
+
     // mcp.toggle — flip the `enabled` flag for a named MCP server.
     this.handlers.set("mcp.toggle", async (params) => {
       const name = (params as Record<string, unknown>)["name"] as string | undefined;
