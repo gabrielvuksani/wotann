@@ -45,14 +45,14 @@ jobs:
         run: npm run build
 
   test:
-    name: Test ${{ matrix.shard }}/4 (Node ${{ matrix.node-version }} / ${{ matrix.os }})
+    name: Test ${{ matrix.shard }}/2 (Node ${{ matrix.node-version }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
         node-version: [22]
-        shard: [1, 2, 3, 4]
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,8 +62,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
-      - name: Run vitest shard ${{ matrix.shard }}/4
-        run: npm test -- --shard ${{ matrix.shard }}/4
+      - name: Run vitest shard ${{ matrix.shard }}/2
+        run: npm test -- --shard ${{ matrix.shard }}/2
 
   desktop-typecheck:
     name: Desktop typecheck
