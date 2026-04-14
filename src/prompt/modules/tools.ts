@@ -1,0 +1,95 @@
+/**
+ * Tools prompt module — dynamic tool loading for token efficiency.
+ *
+ * FROM CURSOR RESEARCH (Source #51):
+ * "Store descriptions as files, show only names. 46.9% token savings."
+ *
+ * FROM VERCEL FINDING (Source #50):
+ * "Went from 15 tools to 2 and accuracy went from 80% to 100%."
+ *
+ * Strategy: inject only tool NAMES into the system prompt (~50 tokens).
+ * Full tool schemas loaded on-demand when the model invokes a tool.
+ * Task-relevant tools get brief descriptions; irrelevant tools are name-only.
+ */
+
+import type { PromptContext, PromptModuleEntry } from "../engine.js";
+
+// ── Tool Categories ──────────────────────────────────────
+
+interface ToolEntry {
+  readonly name: string;
+  readonly brief: string; // One-line description (~10 tokens)
+  readonly category: "core" | "standard" | "enhanced" | "specialist";
+}
+
+const TOOL_CATALOG: readonly ToolEntry[] = [
+  // Core (always available)
+  { name: "Read", brief: "Read files with line numbers", category: "core" },
+  { name: "Write", brief: "Create or overwrite files", category: "core" },
+  { name: "Edit", brief: "String replacement in files", category: "core" },
+  { name: "Glob", brief: "File pattern matching", category: "core" },
+  { name: "Grep", brief: "Content search", category: "core" },
+  { name: "Bash", brief: "Shell command execution", category: "core" },
+  { name: "LSP", brief: "Language server operations", category: "core" },
+
+  // Standard (loaded by default)
+  { name: "WebSearch", brief: "Web search", category: "standard" },
+  { name: "WebFetch", brief: "Fetch URL content", category: "standard" },
+  { name: "Agent", brief: "Spawn subagent", category: "standard" },
+  { name: "Skill", brief: "Invoke a skill", category: "standard" },
+  { name: "TaskCreate", brief: "Create tracked task", category: "standard" },
+
+  // Enhanced (on-demand)
+  { name: "HashlineEdit", brief: "Edit by content hash", category: "enhanced" },
+  { name: "ComputerUse", brief: "Control the computer", category: "specialist" },
+];
+
+/**
+ * Determine which tools are relevant to the current task.
+ * Only relevant tools get brief descriptions; others are name-only.
+ */
+function getRelevantTools(ctx: PromptContext): readonly string[] {
+  const mode = ctx.mode ?? "default";
+
+  // Core tools always get descriptions
+  const lines: string[] = [
+    "Tools available (invoke by name — schemas loaded on use):",
+  ];
+
+  // Core tools — always listed with descriptions
+  const core = TOOL_CATALOG.filter((t) => t.category === "core");
+  lines.push(`Core: ${core.map((t) => t.name).join(", ")}`);
+
+  // Standard tools — listed with brief descriptions
+  const standard = TOOL_CATALOG.filter((t) => t.category === "standard");
+  lines.push(`Standard: ${standard.map((t) => t.name).join(", ")}`);
+
+  // Mode-specific tools
+  if (mode === "exploit") {
+    lines.push("Security: nmap, sqlmap, nuclei, gobuster (via Bash)");
+  }
+
+  if (mode === "autonomous" || mode === "auto") {
+    lines.push("Autonomous: TaskCreate for planning, Agent for parallel work");
+  }
+
+  // Enhanced tools — name only, schema loaded when invoked
+  const enhanced = TOOL_CATALOG.filter((t) => t.category === "enhanced" || t.category === "specialist");
+  if (enhanced.length > 0) {
+    lines.push(`Enhanced (on-demand): ${enhanced.map((t) => t.name).join(", ")}`);
+  }
+
+  return lines;
+}
+
+export const toolsPromptModule: PromptModuleEntry = {
+  name: "tools",
+  priority: 92,
+  build(ctx: PromptContext): readonly string[] {
+    if (ctx.isMinimal) {
+      // Sub-agents get minimal tool list
+      return ["Tools: Read, Edit, Glob, Grep, Bash"];
+    }
+    return getRelevantTools(ctx);
+  },
+};

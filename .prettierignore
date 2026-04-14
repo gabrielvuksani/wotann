@@ -1,0 +1,12 @@
+dist/
+node_modules/
+tests/
+coverage/
+desktop-app/dist/
+desktop-app/node_modules/
+desktop-app/src-tauri/target/
+ios/
+.wotann/
+.nexus-archive/
+package-lock.json
+*.min.js

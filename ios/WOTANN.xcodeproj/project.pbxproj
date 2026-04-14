@@ -1,0 +1,1702 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		008F45FEB71084BE45811782 /* CostViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 838F52E129844764764DBF15 /* CostViewModel.swift */; };
+		058CFF3CBE328B3860E9C89B /* OnDeviceModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D49F04230915DCF8EF70FF8 /* OnDeviceModelService.swift */; };
+		06F959DB4461DE45ABF3CF0B /* HeroAsk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0B5B7E2D8D66209D1CBA27 /* HeroAsk.swift */; };
+		076E0F0599458A931AAEE041 /* ViewModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B8A2E47A7D1FD56830C0BC1 /* ViewModifiers.swift */; };
+		0AA2DE9B6C1138BFE8CCC4BB /* EmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 905C2C8B236BC13E840A7AAE /* EmptyState.swift */; };
+		0C858D84A9A6C826AD4C3A29 /* RemoteDesktopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0AC9767EE7AB489B6DA7CD /* RemoteDesktopView.swift */; };
+		0D2161771F56E9914A1A66F3 /* HitTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B51AA79482C2489AC5AEAA5 /* HitTarget.swift */; };
+		10D035C5872E02E4275804F0 /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3778F3E86A9D37FCD0D2D540 /* KeychainManager.swift */; };
+		116A62D0408021CA869A4598 /* ConversationListVM.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8687FA620D2D98DCCB752FE9 /* ConversationListVM.swift */; };
+		144B74393C2F8D782E60B893 /* OnDeviceAIView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611674C7DEDCBC1D7044BE58 /* OnDeviceAIView.swift */; };
+		15F2E5C077176286C77718DA /* FilterPillBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17A6AF2E81E8E10A8600F1D2 /* FilterPillBar.swift */; };
+		187720B569EF3A7C7260D108 /* AgentTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E39BCBD812900AB19754199 /* AgentTask.swift */; };
+		1930CD58A874F7A219589044 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E80A34FF0260230786838F6 /* DashboardView.swift */; };
+		19922111F7A0157B18CDB60F /* TaskProgressActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3061F59CE68677C13F467CDB /* TaskProgressActivity.swift */; };
+		1B56EBCCAA296B201D4AF8A7 /* CrossDeviceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E64BDB7DBE8104D59B6AD95 /* CrossDeviceService.swift */; };
+		1B889BCE6A9F558698678104 /* AgentDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970D819FAD2DACD72B9298A0 /* AgentDetailView.swift */; };
+		1BB450DCEECB895E0324D45A /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E75044FBE1D670D8A9CC7A8 /* ErrorBanner.swift */; };
+		1BE91715B371ABB54F85F759 /* HealthInsightsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB9A981F573E85D37732C2E8 /* HealthInsightsSettingsView.swift */; };
+		1DA107A3700831948633643F /* WLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BCA579941CD0E9ACECB4761 /* WLogo.swift */; };
+		1DBF7CB49929C59A63CCC4B1 /* PairingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C15FCB52E102C803EB082B5 /* PairingViewModel.swift */; };
+		1DFA4133059A447B8F8FB65B /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85CD124246CE92A9A09C3C73 /* HomeView.swift */; };
+		1E7D23BB279777C85830341B /* ActiveWorkStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D2841CE2B1B3A5500D3B19C /* ActiveWorkStrip.swift */; };
+		21C6F764ABDF58935CE189D7 /* TaskApprovalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A13F72B52D66CA749AE5EB74 /* TaskApprovalView.swift */; };
+		23A7F86B00A7849DBD5969F7 /* AutoDetectedCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65F7C041405B0992A27A764 /* AutoDetectedCard.swift */; };
+		24F0739AE35AB50D5787EB29 /* MainShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F75BF4B301AF5FAFB55CCA6 /* MainShell.swift */; };
+		24F9C799AF6F91655A12D439 /* GitPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6609439B44645E24E2B4360 /* GitPanelView.swift */; };
+		27DF358B53800EFAE4FD906B /* BonjourDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B416704CA80DC04925F3D876 /* BonjourDiscovery.swift */; };
+		283F760619FED8BB30C03670 /* CodeBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EC540B66945EABBDF56F2E2 /* CodeBlockView.swift */; };
+		28A2824BEC70C5ADF79BF207 /* PairingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AEF285D12975DB9DF3083EC /* PairingManager.swift */; };
+		2AF95C23E99CE01ECD83D6DB /* CheckCostIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97B03ED4AEC0513C072A328F /* CheckCostIntent.swift */; };
+		2CF108523D67FA7C4C9983F9 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050C9F8CBB29129367DC8BF4 /* AboutView.swift */; };
+		2F0CB4588FA1E43FAF9BF67E /* A11y.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B475C2E6798FCE2B6B9024 /* A11y.swift */; };
+		2F5B8EAFD4FABDEE033D5493 /* ConversationRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 595256C0E55C3A3725A6466F /* ConversationRow.swift */; };
+		30087462EAC5BC14E4B612D0 /* WOTANNShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EE06820BB3F570376F5A8042 /* WOTANNShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3105B95658BA9F1860F8EC6C /* AgentListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EEA12DDC8F97D420CF68F55 /* AgentListView.swift */; };
+		3179FD6D4EA7D7389676167E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC65EC1A3C805E2E49DCE4D3 /* Theme.swift */; };
+		31E631218D44D08EB2669C06 /* BudgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C2E6003195A7CA1822E3D6A /* BudgetView.swift */; };
+		33A6BDF88FE9012783C96618 /* ToolCallCapsule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 308FE02E4FE66CDC94983874 /* ToolCallCapsule.swift */; };
+		3419E6A20D4E3CDACFD02F1C /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 212A1B208E121BEB41DED345 /* ShareViewController.swift */; };
+		34970A1A2199D90E20013CFF /* ArtifactEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A16DF73866A2EBC73B0F6F88 /* ArtifactEditorView.swift */; };
+		369783EB878E8A5C8637BB23 /* CarPlayService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62F56A2BBEBBD733E0895A87 /* CarPlayService.swift */; };
+		3DEC1C5EB1265F934EC04273 /* ProviderBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17F025A4946358EB8D1FEA23 /* ProviderBadge.swift */; };
+		418A37A17B04D896EF876A21 /* ChannelStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D31A3722B056BCD7AD34687F /* ChannelStatusView.swift */; };
+		4265C8FA93D8E2FB730D8D8D /* WOTANNIntents.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 57CF1DDF537E4D151BB26FD0 /* WOTANNIntents.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		42F5170B64F5447C38E3BDCD /* AutopilotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 610EF178DA5E748C345B1DED /* AutopilotView.swift */; };
+		471EB8BA3C2BD6D2C58F4AF5 /* Shimmer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5079BC1C4A5717046F98931 /* Shimmer.swift */; };
+		481C9D67B053D8902B076595 /* WOTANNWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07191AA06DB1EBD470BC3C6 /* WOTANNWidgetBundle.swift */; };
+		484A399229E3B32B2262F5B3 /* StreamHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94BB3B9EA1C286FDA30EBD5 /* StreamHandler.swift */; };
+		486ECB17F37AA67F81CC6E65 /* CostDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBCD366A7A90C0978E6EDFF8 /* CostDashboardView.swift */; };
+		49FF00FFD76483925D6BDD1C /* ProviderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A26BD8F0DAC8CF59E3802FDF /* ProviderSettings.swift */; };
+		4B2B8F9744436031A95B4521 /* AskWOTANNIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B13A84BD6A2788C00E99026 /* AskWOTANNIntent.swift */; };
+		4C5ADBCD4D292B72D1142701 /* MessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7BD8A16B6A0160E8B8DCCFC /* MessageRow.swift */; };
+		53F9BED5475B003FA048BF7A /* PINEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20EC6DEF7EC4A37874CAA0F2 /* PINEntryView.swift */; };
+		556EF43E876769037EEC1811 /* RPCClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 235498A0546BE5D42A6437FE /* RPCClient.swift */; };
+		565895F44E902F1D30AC4601 /* CostWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CA913FB6F34E3EE31044AA2 /* CostWidget.swift */; };
+		56709630C9E9D1D11C2C5EB9 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06A6206442D42B7BB2585617 /* DiagnosticsView.swift */; };
+		57F5310677D99B0A91F5A72D /* StreamingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50F79687CD9ACC0FE71D578 /* StreamingView.swift */; };
+		596DB0B2F312E6D0160D574C /* FloatingAsk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603E6C3BDB0224BE3A7D8B12 /* FloatingAsk.swift */; };
+		5A9F32A99B9FD86E7E024678 /* DispatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17F777D17CAB671B6045E8E2 /* DispatchView.swift */; };
+		5CBC6C38D262CD60D918712B /* TaskListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F185871EFBC6630B7745D21 /* TaskListView.swift */; };
+		5CE1863D7BF4B6033C59E94A /* BiometricAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FB16DF280858CD49AD1B3F5 /* BiometricAuth.swift */; };
+		5D1B69973011E11375176CBD /* PairingWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22870B229A1585EE0F44DB8 /* PairingWizardView.swift */; };
+		6086219917549243F13B1B7C /* ShareView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B4110A52172F8908E3648F /* ShareView.swift */; };
+		60CE56ECDEE5DEF93D769C48 /* AgentStatusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34E4F6B67C2504698AB54340 /* AgentStatusWidget.swift */; };
+		611373988311A3B3E2A5CD18 /* FileSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8DF872270329BF2E11EBC0A /* FileSearchView.swift */; };
+		62851FC178B0FDD3F466BECB /* ProactiveCardDeck.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7F96C4036290A8C8B239439 /* ProactiveCardDeck.swift */; };
+		63B40FE41687427AA5C2B89B /* Skeleton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A007D4F3BEDFA29BA1DF0D2 /* Skeleton.swift */; };
+		64CC32F1FBDEAEC93CBB59C5 /* AgentReplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEF22937DD902CE14C86941 /* AgentReplayView.swift */; };
+		64D3AB74590BD2B886C408CA /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6AD97E216D2F4F086620005 /* ChatView.swift */; };
+		699353ED9D4DD85DB9C47AE2 /* ArenaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ED3CBAA2B0A59B353A07492 /* ArenaView.swift */; };
+		69AA718A3EE4FBB9F5AAF1C1 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F7B412897DC8242A5AFD9E6 /* SettingsViewModel.swift */; };
+		6D9FCB29B376C6AA94E19C01 /* DispatchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEFC64EE4247F9862FA794C1 /* DispatchViewModel.swift */; };
+		73266E624343026C5AFC3C3A /* PairingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6AFCFB793FD11DF147F9C3 /* PairingState.swift */; };
+		7406720F1DD784F12A86D3E2 /* RecentConversationsStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A5B0DA01EDFD98EBDCCBD6 /* RecentConversationsStrip.swift */; };
+		774728664F1587E846DC9A5B /* VoiceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E83842536E65E46408B77A0 /* VoiceService.swift */; };
+		7796BA68CC5B47E97805AC83 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CCBB631AFE4063CE846F87 /* QRScannerView.swift */; };
+		794BCECECCB8D46E1BCB9A40 /* SupabaseRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 094D0FF0F115935B7CDBF190 /* SupabaseRelay.swift */; };
+		7C5DB31F78EE4CF18939BB50 /* WLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BCA579941CD0E9ACECB4761 /* WLogo.swift */; };
+		7E01AEED7B70EB12EB164EB9 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35578B937A1B6B65955180A /* Haptics.swift */; };
+		7E4CCC0F4227467CFBCB39E8 /* HealthKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36E5C03AEA8B07FACAC501D6 /* HealthKitService.swift */; };
+		7EEC1BDFC9CEF03871815FBE /* WOTANNWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0C79EAE15678770DA497F0A0 /* WOTANNWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8340D1E69B31722DA04724B4 /* NotificationSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70B0D67B2B376870737B3A1 /* NotificationSettings.swift */; };
+		864813A7534355CE58542EA5 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125D3C15B8578307FEF2095C /* NotificationService.swift */; };
+		86675FE0ED30D9994CE2E446 /* AppearanceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEDEFF86ED0D1D206C647A00 /* AppearanceSettings.swift */; };
+		871BB82A92C276EC6868E2C9 /* WOTANNIntentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13D11F800D2E1302A53FC22 /* WOTANNIntentService.swift */; };
+		8C3A07A7CE3DB458DF44220E /* ClipboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A08D5EC8EAB796C0AF51590C /* ClipboardService.swift */; };
+		8CA256DC034090CF00E61EAD /* NFCPairingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310AB0D5FB3641506FFCB027 /* NFCPairingService.swift */; };
+		8CA837F135574304F597E3D1 /* ConversationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 618A285B9CDB746289274028 /* ConversationListView.swift */; };
+		8CD1000C24268974A13A84DA /* A11y.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B475C2E6798FCE2B6B9024 /* A11y.swift */; };
+		8DE374868B52FC320ED7A786 /* WorkflowsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F950D55B6D1A8E84E4BE2E7B /* WorkflowsView.swift */; };
+		92E2718A3D0DB518166127B9 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49CEAA7515F27EDBDD03C465 /* ConversationStore.swift */; };
+		953C508A8DB81E3ABCD570C5 /* StreamHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94BB3B9EA1C286FDA30EBD5 /* StreamHandler.swift */; };
+		95929E4DD403D4A69BE7C835 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B13E4DA73820D9FCF4970BD /* Conversation.swift */; };
+		96304EB62393E395A9A37663 /* QuickActionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B555E3593E5CDF1B76E6429D /* QuickActionCard.swift */; };
+		969787205F01442A0DC13CF0 /* CostModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B1EA5CCD16314B7069723 /* CostModels.swift */; };
+		977BE94DFFE3286BA4D78D9D /* ECDHManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D3A7144D5D2C2E6EB4EF9D /* ECDHManager.swift */; };
+		9835229EE035E2B4898820FD /* WebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614A3CF377AB282F4EC259AA /* WebSocketClient.swift */; };
+		990C890CAE5FBECE7E2E4F4F /* OfflineQueueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A75380AA0684C081EB6D23C /* OfflineQueueService.swift */; };
+		993CFBFB8CAE451C9E1EF8F9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF2C467534932F2AF3DCB79A /* SettingsView.swift */; };
+		998D71138E45B7A604532EEB /* ArtifactView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B9CB078FE7FC0A34309DE0 /* ArtifactView.swift */; };
+		9B588BC0138AD9FF2BD6DE77 /* CodePlaygroundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0179DCE406DE010D855EF594 /* CodePlaygroundView.swift */; };
+		9D0CB4E6733C8D83A34869E5 /* HapticService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6F9658FE45E7FE8311F9EB /* HapticService.swift */; };
+		9D8FF141344C6372A82215F0 /* ECDHManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D3A7144D5D2C2E6EB4EF9D /* ECDHManager.swift */; };
+		9E264C61DB06CCD1B40A7B25 /* ConnectionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81F687B73AF01D49E756D61A /* ConnectionManager.swift */; };
+		9F38CBCE604ED8AD3820D1A1 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D81D0D4601DC4E1978C613A /* SettingsStore.swift */; };
+		9F89ED08AF025EF6D023A4C2 /* AskComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A8CD5169D018512AF6FEAA /* AskComposer.swift */; };
+		9FBFA9C82DA6256A88B85A91 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC4279027D915B49348FAA83 /* TaskDetailView.swift */; };
+		A03D49902DB81EDABBF7AA7E /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C012EDDADB27EC369CCE908 /* ChatViewModel.swift */; };
+		A06637D2F6798AE52479F327 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B13E4DA73820D9FCF4970BD /* Conversation.swift */; };
+		A180D7C55613211C0E2CBC3C /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 858AA65551925BEBA0EA15AB /* CameraService.swift */; };
+		A40364EE35BEA39B46687167 /* CostModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B1EA5CCD16314B7069723 /* CostModels.swift */; };
+		A45BC07A68BE82906EE9B33F /* MessageContextMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D1475BC2D39CBC79EC84BB /* MessageContextMenu.swift */; };
+		A50C3F5DFB305F442FB771FD /* MorningBriefingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E92B4BEAF19FA0607CA6F71B /* MorningBriefingView.swift */; };
+		A6523704243D55763683EBA0 /* StatusShape.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79F94065DC79C5DD95E0B57 /* StatusShape.swift */; };
+		A73E02B2EBF5CA8537EEE89B /* Composer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F352D939AEC62F19C0BB8665 /* Composer.swift */; };
+		A80352E10915D95DD40DE52C /* RPCClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 235498A0546BE5D42A6437FE /* RPCClient.swift */; };
+		A8A17DD957291B9C44210711 /* A11y.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B475C2E6798FCE2B6B9024 /* A11y.swift */; };
+		A997C22906B6716C70982FA5 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 134BED7028B56BDFE8D4A930 /* PairingView.swift */; };
+		AAB58C5698706D15C1332B73 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC65EC1A3C805E2E49DCE4D3 /* Theme.swift */; };
+		ACE160DE9818A098FC0B25C0 /* IntelligenceDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09855C29973798472692575A /* IntelligenceDashboardView.swift */; };
+		AE9A4FCB2188846E1B96851E /* PairedDevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6330D9E5EFE3324DF6B561 /* PairedDevicesView.swift */; };
+		B038DB6D5D3F891F43BCE49F /* LocalSendService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B71A549F1B1CF80DA2FCC16 /* LocalSendService.swift */; };
+		B30108A450FFF40ABC15EFBF /* DaemonOfflineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60A02D77F3AD07FFEF284BB3 /* DaemonOfflineView.swift */; };
+		B332DB97CAE8EE6EC894FAC0 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1AC815672F2931B534B035 /* OnboardingView.swift */; };
+		B533B879C329A2F4E77C73B6 /* WorkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AE979FB78EEF7B4849BC02A /* WorkView.swift */; };
+		B5D719F763D10BEA6B95C1A5 /* TaskMonitorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE6F0024F27A003599CDE94 /* TaskMonitorViewModel.swift */; };
+		B7DEE1B41664EF83A02442A2 /* ShimmerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 627097A2A23EDE498587CEB1 /* ShimmerView.swift */; };
+		C150949361BD4DF3D0AE95E8 /* ViewModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B8A2E47A7D1FD56830C0BC1 /* ViewModifiers.swift */; };
+		C476112B7F6A9A0697855FAB /* NodeCapabilityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2901E175D942A163F3E0637 /* NodeCapabilityService.swift */; };
+		C5CE1A66DC1EB161C1558B32 /* SkillsBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9003A806325BCF9CDBF76A53 /* SkillsBrowserView.swift */; };
+		C6D37DF08E7E309327EBD44E /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3778F3E86A9D37FCD0D2D540 /* KeychainManager.swift */; };
+		C807759AE01BCE6E7B7E8129 /* AmbientCrossDeviceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56AF325DD086EFD6F26C3C66 /* AmbientCrossDeviceView.swift */; };
+		C96331771429D701D552F114 /* PairingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6AFCFB793FD11DF147F9C3 /* PairingState.swift */; };
+		C97535C1C7CBB9374DA8CF0D /* LiveAgentsStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1E3D232B8A02D70DE2E3DFA /* LiveAgentsStrip.swift */; };
+		C9C160C262631B5FA00E7261 /* MemoryBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7841A145185DEE82B176AB6 /* MemoryBrowserView.swift */; };
+		CA0831D8884602417CF3BE91 /* WLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BCA579941CD0E9ACECB4761 /* WLogo.swift */; };
+		CA4C17B7A6FEEA2DC20CB39F /* TaskTemplateList.swift in Sources */ = {isa = PBXBuildFile; fileRef = D81724F343CBDD8E59ED5936 /* TaskTemplateList.swift */; };
+		CC3432EA06134C2A73D69FBA /* EnhancePromptIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93EFE65AEEFF4E0EF383473B /* EnhancePromptIntent.swift */; };
+		CF8CC29F03A7EE59B96038ED /* WOTANNWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91970939E16FE1FF8AF08D8C /* WOTANNWatchApp.swift */; };
+		D05531BF06FD020A4325BE87 /* AgentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 773471553AF410408E96A632 /* AgentRow.swift */; };
+		D37C0F031AE32EABC89CC558 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5EA8ED3C46E34C217DC9906 /* MarkdownView.swift */; };
+		D7B9EB89239758BBCF0F2C2A /* DispatchComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64652E5E2C9C5206F40AE7FF /* DispatchComposer.swift */; };
+		DA26FD22682FF3AF5EB51FF6 /* WOTANNApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C97237B85B61F2D27207DF /* WOTANNApp.swift */; };
+		DAF5C6C1AA00339232EB1692 /* WebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614A3CF377AB282F4EC259AA /* WebSocketClient.swift */; };
+		DF9033D947B907AA1E6ABC5F /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC65EC1A3C805E2E49DCE4D3 /* Theme.swift */; };
+		E05C161E29A356E16CC3ACF5 /* ContinuityCameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA0CD3724CA1F7EC99FA705 /* ContinuityCameraService.swift */; };
+		E29DAFD5639C5B66B7817553 /* VoiceInlineSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8AD8628EEF43D2366116211 /* VoiceInlineSheet.swift */; };
+		E62DAA859946DB68FB459F8E /* ChatInputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EA375824DDFAE6048A43B02 /* ChatInputBar.swift */; };
+		E6B2B04A350B2B58C408694F /* CostLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27041BBB4A499FA6232D20B4 /* CostLabel.swift */; };
+		E7C41640239D4E1F319CC684 /* StatusRibbon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BBC6FB23CC47F27B73087F3 /* StatusRibbon.swift */; };
+		E80B08833BB301F43D25EB3D /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB3A4D972FF429F30DBDA45 /* AppState.swift */; };
+		EB49E2B72F4A095909B6277D /* ViewModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B8A2E47A7D1FD56830C0BC1 /* ViewModifiers.swift */; };
+		EBC08C53232FDF7C5AA0B5FB /* LoadingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D48D608B58154F3ED996D202 /* LoadingIndicator.swift */; };
+		EE0FB2F4EA7FA60934689E9A /* EnhanceButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69324BDC59EEFDF470114614 /* EnhanceButton.swift */; };
+		EE61CFA43ADDB4BB7956B18C /* PromptLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 357743E15EBA4BB774DF6140 /* PromptLibraryView.swift */; };
+		EF32E44B039590F9A43F1878 /* VoiceInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 246E781BB6179F288DFFFCB2 /* VoiceInputView.swift */; };
+		F640A158673C1F54B094EA0A /* AgentTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E39BCBD812900AB19754199 /* AgentTask.swift */; };
+		F64E395C5C2C344017428679 /* MeetModeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC0FC0180D8891370210124 /* MeetModeView.swift */; };
+		FB73488C0CB7A86377A9230E /* FirstRunSuccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDE936CC278C00E570B63335 /* FirstRunSuccessView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		30A75ACC1FB04BD317191DCE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2C087ECC97BEADD530602CB3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E84547DFBB1E22DB65F26E2F;
+			remoteInfo = WOTANNIntents;
+		};
+		770095FEBCCC011C10618659 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2C087ECC97BEADD530602CB3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4AA05FB79F11644DCEF35297;
+			remoteInfo = WOTANNWidgets;
+		};
+		E44C0F288C7678054B36844D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2C087ECC97BEADD530602CB3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9994611A4FEA35394C416EF1;
+			remoteInfo = WOTANNShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		297392390CACD18E2A62C1A9 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7EEC1BDFC9CEF03871815FBE /* WOTANNWidgets.appex in Embed Foundation Extensions */,
+				4265C8FA93D8E2FB730D8D8D /* WOTANNIntents.appex in Embed Foundation Extensions */,
+				30087462EAC5BC14E4B612D0 /* WOTANNShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		004B1EA5CCD16314B7069723 /* CostModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostModels.swift; sourceTree = "<group>"; };
+		0179DCE406DE010D855EF594 /* CodePlaygroundView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodePlaygroundView.swift; sourceTree = "<group>"; };
+		050C9F8CBB29129367DC8BF4 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		06A6206442D42B7BB2585617 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
+		08D3A7144D5D2C2E6EB4EF9D /* ECDHManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ECDHManager.swift; sourceTree = "<group>"; };
+		094D0FF0F115935B7CDBF190 /* SupabaseRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseRelay.swift; sourceTree = "<group>"; };
+		09855C29973798472692575A /* IntelligenceDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelligenceDashboardView.swift; sourceTree = "<group>"; };
+		0B71A549F1B1CF80DA2FCC16 /* LocalSendService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalSendService.swift; sourceTree = "<group>"; };
+		0C15FCB52E102C803EB082B5 /* PairingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingViewModel.swift; sourceTree = "<group>"; };
+		0C79EAE15678770DA497F0A0 /* WOTANNWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = WOTANNWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		0D2841CE2B1B3A5500D3B19C /* ActiveWorkStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveWorkStrip.swift; sourceTree = "<group>"; };
+		0E39BCBD812900AB19754199 /* AgentTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTask.swift; sourceTree = "<group>"; };
+		0EA375824DDFAE6048A43B02 /* ChatInputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInputBar.swift; sourceTree = "<group>"; };
+		125D3C15B8578307FEF2095C /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		134BED7028B56BDFE8D4A930 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
+		17A6AF2E81E8E10A8600F1D2 /* FilterPillBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterPillBar.swift; sourceTree = "<group>"; };
+		17F025A4946358EB8D1FEA23 /* ProviderBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderBadge.swift; sourceTree = "<group>"; };
+		17F777D17CAB671B6045E8E2 /* DispatchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchView.swift; sourceTree = "<group>"; };
+		1FB16DF280858CD49AD1B3F5 /* BiometricAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricAuth.swift; sourceTree = "<group>"; };
+		20EC6DEF7EC4A37874CAA0F2 /* PINEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PINEntryView.swift; sourceTree = "<group>"; };
+		212A1B208E121BEB41DED345 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		235498A0546BE5D42A6437FE /* RPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCClient.swift; sourceTree = "<group>"; };
+		246E781BB6179F288DFFFCB2 /* VoiceInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputView.swift; sourceTree = "<group>"; };
+		24C97237B85B61F2D27207DF /* WOTANNApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WOTANNApp.swift; sourceTree = "<group>"; };
+		27041BBB4A499FA6232D20B4 /* CostLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostLabel.swift; sourceTree = "<group>"; };
+		2B13E4DA73820D9FCF4970BD /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
+		2E75044FBE1D670D8A9CC7A8 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
+		2E83842536E65E46408B77A0 /* VoiceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceService.swift; sourceTree = "<group>"; };
+		2ED3CBAA2B0A59B353A07492 /* ArenaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaView.swift; sourceTree = "<group>"; };
+		2F185871EFBC6630B7745D21 /* TaskListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListView.swift; sourceTree = "<group>"; };
+		3061F59CE68677C13F467CDB /* TaskProgressActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressActivity.swift; sourceTree = "<group>"; };
+		308FE02E4FE66CDC94983874 /* ToolCallCapsule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCallCapsule.swift; sourceTree = "<group>"; };
+		310AB0D5FB3641506FFCB027 /* NFCPairingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NFCPairingService.swift; sourceTree = "<group>"; };
+		31B475C2E6798FCE2B6B9024 /* A11y.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = A11y.swift; sourceTree = "<group>"; };
+		34E4F6B67C2504698AB54340 /* AgentStatusWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusWidget.swift; sourceTree = "<group>"; };
+		357743E15EBA4BB774DF6140 /* PromptLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptLibraryView.swift; sourceTree = "<group>"; };
+		36E5C03AEA8B07FACAC501D6 /* HealthKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitService.swift; sourceTree = "<group>"; };
+		3778F3E86A9D37FCD0D2D540 /* KeychainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManager.swift; sourceTree = "<group>"; };
+		3AEF285D12975DB9DF3083EC /* PairingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingManager.swift; sourceTree = "<group>"; };
+		3BCA579941CD0E9ACECB4761 /* WLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WLogo.swift; sourceTree = "<group>"; };
+		3D49F04230915DCF8EF70FF8 /* OnDeviceModelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnDeviceModelService.swift; sourceTree = "<group>"; };
+		43A84DF0B729ED60922A2B55 /* WOTANN.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = WOTANN.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		49CEAA7515F27EDBDD03C465 /* ConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
+		4A75380AA0684C081EB6D23C /* OfflineQueueService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineQueueService.swift; sourceTree = "<group>"; };
+		4B51AA79482C2489AC5AEAA5 /* HitTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HitTarget.swift; sourceTree = "<group>"; };
+		4C56C340F9DDD344E0CBCE44 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		4E80A34FF0260230786838F6 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		4EEA12DDC8F97D420CF68F55 /* AgentListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentListView.swift; sourceTree = "<group>"; };
+		4F7B412897DC8242A5AFD9E6 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
+		56AF325DD086EFD6F26C3C66 /* AmbientCrossDeviceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCrossDeviceView.swift; sourceTree = "<group>"; };
+		57CF1DDF537E4D151BB26FD0 /* WOTANNIntents.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = WOTANNIntents.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		595256C0E55C3A3725A6466F /* ConversationRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationRow.swift; sourceTree = "<group>"; };
+		5A007D4F3BEDFA29BA1DF0D2 /* Skeleton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Skeleton.swift; sourceTree = "<group>"; };
+		5B13A84BD6A2788C00E99026 /* AskWOTANNIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskWOTANNIntent.swift; sourceTree = "<group>"; };
+		5D81D0D4601DC4E1978C613A /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		603E6C3BDB0224BE3A7D8B12 /* FloatingAsk.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingAsk.swift; sourceTree = "<group>"; };
+		60A02D77F3AD07FFEF284BB3 /* DaemonOfflineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonOfflineView.swift; sourceTree = "<group>"; };
+		610EF178DA5E748C345B1DED /* AutopilotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopilotView.swift; sourceTree = "<group>"; };
+		611674C7DEDCBC1D7044BE58 /* OnDeviceAIView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnDeviceAIView.swift; sourceTree = "<group>"; };
+		614A3CF377AB282F4EC259AA /* WebSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketClient.swift; sourceTree = "<group>"; };
+		618A285B9CDB746289274028 /* ConversationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationListView.swift; sourceTree = "<group>"; };
+		627097A2A23EDE498587CEB1 /* ShimmerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShimmerView.swift; sourceTree = "<group>"; };
+		62F56A2BBEBBD733E0895A87 /* CarPlayService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayService.swift; sourceTree = "<group>"; };
+		64652E5E2C9C5206F40AE7FF /* DispatchComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchComposer.swift; sourceTree = "<group>"; };
+		69324BDC59EEFDF470114614 /* EnhanceButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnhanceButton.swift; sourceTree = "<group>"; };
+		6BBC6FB23CC47F27B73087F3 /* StatusRibbon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusRibbon.swift; sourceTree = "<group>"; };
+		6C2E6003195A7CA1822E3D6A /* BudgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetView.swift; sourceTree = "<group>"; };
+		6E64BDB7DBE8104D59B6AD95 /* CrossDeviceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceService.swift; sourceTree = "<group>"; };
+		773471553AF410408E96A632 /* AgentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRow.swift; sourceTree = "<group>"; };
+		7AC0FC0180D8891370210124 /* MeetModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetModeView.swift; sourceTree = "<group>"; };
+		7AE979FB78EEF7B4849BC02A /* WorkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkView.swift; sourceTree = "<group>"; };
+		7B8A2E47A7D1FD56830C0BC1 /* ViewModifiers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModifiers.swift; sourceTree = "<group>"; };
+		7CA913FB6F34E3EE31044AA2 /* CostWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostWidget.swift; sourceTree = "<group>"; };
+		7F0B5B7E2D8D66209D1CBA27 /* HeroAsk.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroAsk.swift; sourceTree = "<group>"; };
+		80CCBB631AFE4063CE846F87 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
+		81F687B73AF01D49E756D61A /* ConnectionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionManager.swift; sourceTree = "<group>"; };
+		838F52E129844764764DBF15 /* CostViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostViewModel.swift; sourceTree = "<group>"; };
+		858AA65551925BEBA0EA15AB /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
+		85CD124246CE92A9A09C3C73 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		8687FA620D2D98DCCB752FE9 /* ConversationListVM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationListVM.swift; sourceTree = "<group>"; };
+		8F6330D9E5EFE3324DF6B561 /* PairedDevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedDevicesView.swift; sourceTree = "<group>"; };
+		8F6F9658FE45E7FE8311F9EB /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
+		9003A806325BCF9CDBF76A53 /* SkillsBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsBrowserView.swift; sourceTree = "<group>"; };
+		905C2C8B236BC13E840A7AAE /* EmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyState.swift; sourceTree = "<group>"; };
+		91970939E16FE1FF8AF08D8C /* WOTANNWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WOTANNWatchApp.swift; sourceTree = "<group>"; };
+		93EFE65AEEFF4E0EF383473B /* EnhancePromptIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnhancePromptIntent.swift; sourceTree = "<group>"; };
+		970D819FAD2DACD72B9298A0 /* AgentDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDetailView.swift; sourceTree = "<group>"; };
+		97B03ED4AEC0513C072A328F /* CheckCostIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckCostIntent.swift; sourceTree = "<group>"; };
+		9BA0CD3724CA1F7EC99FA705 /* ContinuityCameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuityCameraService.swift; sourceTree = "<group>"; };
+		9C012EDDADB27EC369CCE908 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		9EC540B66945EABBDF56F2E2 /* CodeBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeBlockView.swift; sourceTree = "<group>"; };
+		9F75BF4B301AF5FAFB55CCA6 /* MainShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainShell.swift; sourceTree = "<group>"; };
+		A08D5EC8EAB796C0AF51590C /* ClipboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardService.swift; sourceTree = "<group>"; };
+		A0BB16A6AF74F8E65E311128 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		A13F72B52D66CA749AE5EB74 /* TaskApprovalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskApprovalView.swift; sourceTree = "<group>"; };
+		A16DF73866A2EBC73B0F6F88 /* ArtifactEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactEditorView.swift; sourceTree = "<group>"; };
+		A26BD8F0DAC8CF59E3802FDF /* ProviderSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSettings.swift; sourceTree = "<group>"; };
+		A70B0D67B2B376870737B3A1 /* NotificationSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSettings.swift; sourceTree = "<group>"; };
+		A8DF872270329BF2E11EBC0A /* FileSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSearchView.swift; sourceTree = "<group>"; };
+		ADD5836F07E1C1BE75980F43 /* WOTANN.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WOTANN.entitlements; sourceTree = "<group>"; };
+		B2901E175D942A163F3E0637 /* NodeCapabilityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeCapabilityService.swift; sourceTree = "<group>"; };
+		B416704CA80DC04925F3D876 /* BonjourDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourDiscovery.swift; sourceTree = "<group>"; };
+		B4A5B0DA01EDFD98EBDCCBD6 /* RecentConversationsStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentConversationsStrip.swift; sourceTree = "<group>"; };
+		B50F79687CD9ACC0FE71D578 /* StreamingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingView.swift; sourceTree = "<group>"; };
+		B555E3593E5CDF1B76E6429D /* QuickActionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionCard.swift; sourceTree = "<group>"; };
+		B6609439B44645E24E2B4360 /* GitPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitPanelView.swift; sourceTree = "<group>"; };
+		BA6AFCFB793FD11DF147F9C3 /* PairingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingState.swift; sourceTree = "<group>"; };
+		BCE6F0024F27A003599CDE94 /* TaskMonitorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMonitorViewModel.swift; sourceTree = "<group>"; };
+		BEEF22937DD902CE14C86941 /* AgentReplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentReplayView.swift; sourceTree = "<group>"; };
+		C1E3D232B8A02D70DE2E3DFA /* LiveAgentsStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveAgentsStrip.swift; sourceTree = "<group>"; };
+		C3FD1D51374D9D7EBDC14002 /* WOTANNWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WOTANNWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C5079BC1C4A5717046F98931 /* Shimmer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shimmer.swift; sourceTree = "<group>"; };
+		C8AD8628EEF43D2366116211 /* VoiceInlineSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInlineSheet.swift; sourceTree = "<group>"; };
+		CA1AC815672F2931B534B035 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		CB9A981F573E85D37732C2E8 /* HealthInsightsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthInsightsSettingsView.swift; sourceTree = "<group>"; };
+		CDE936CC278C00E570B63335 /* FirstRunSuccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstRunSuccessView.swift; sourceTree = "<group>"; };
+		D31A3722B056BCD7AD34687F /* ChannelStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelStatusView.swift; sourceTree = "<group>"; };
+		D48D608B58154F3ED996D202 /* LoadingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingIndicator.swift; sourceTree = "<group>"; };
+		D6AD97E216D2F4F086620005 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		D6B4110A52172F8908E3648F /* ShareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareView.swift; sourceTree = "<group>"; };
+		D7BD8A16B6A0160E8B8DCCFC /* MessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageRow.swift; sourceTree = "<group>"; };
+		D7F96C4036290A8C8B239439 /* ProactiveCardDeck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactiveCardDeck.swift; sourceTree = "<group>"; };
+		D81724F343CBDD8E59ED5936 /* TaskTemplateList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTemplateList.swift; sourceTree = "<group>"; };
+		D8D1475BC2D39CBC79EC84BB /* MessageContextMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageContextMenu.swift; sourceTree = "<group>"; };
+		DC0AC9767EE7AB489B6DA7CD /* RemoteDesktopView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteDesktopView.swift; sourceTree = "<group>"; };
+		DEFC64EE4247F9862FA794C1 /* DispatchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchViewModel.swift; sourceTree = "<group>"; };
+		E13D11F800D2E1302A53FC22 /* WOTANNIntentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WOTANNIntentService.swift; sourceTree = "<group>"; };
+		E35578B937A1B6B65955180A /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
+		E4B9CB078FE7FC0A34309DE0 /* ArtifactView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactView.swift; sourceTree = "<group>"; };
+		E5EA8ED3C46E34C217DC9906 /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
+		E7841A145185DEE82B176AB6 /* MemoryBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryBrowserView.swift; sourceTree = "<group>"; };
+		E92B4BEAF19FA0607CA6F71B /* MorningBriefingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MorningBriefingView.swift; sourceTree = "<group>"; };
+		E94BB3B9EA1C286FDA30EBD5 /* StreamHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamHandler.swift; sourceTree = "<group>"; };
+		EAB3A4D972FF429F30DBDA45 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		EC65EC1A3C805E2E49DCE4D3 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		EE06820BB3F570376F5A8042 /* WOTANNShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = WOTANNShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		EEDEFF86ED0D1D206C647A00 /* AppearanceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettings.swift; sourceTree = "<group>"; };
+		F07191AA06DB1EBD470BC3C6 /* WOTANNWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WOTANNWidgetBundle.swift; sourceTree = "<group>"; };
+		F0A8CD5169D018512AF6FEAA /* AskComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskComposer.swift; sourceTree = "<group>"; };
+		F22870B229A1585EE0F44DB8 /* PairingWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingWizardView.swift; sourceTree = "<group>"; };
+		F352D939AEC62F19C0BB8665 /* Composer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Composer.swift; sourceTree = "<group>"; };
+		F65F7C041405B0992A27A764 /* AutoDetectedCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDetectedCard.swift; sourceTree = "<group>"; };
+		F79F94065DC79C5DD95E0B57 /* StatusShape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusShape.swift; sourceTree = "<group>"; };
+		F950D55B6D1A8E84E4BE2E7B /* WorkflowsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowsView.swift; sourceTree = "<group>"; };
+		FBCA5677FBF5FF63F853CA43 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FBCD366A7A90C0978E6EDFF8 /* CostDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostDashboardView.swift; sourceTree = "<group>"; };
+		FC4279027D915B49348FAA83 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
+		FD4FCFB6760540EF97A7DA40 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FF2C467534932F2AF3DCB79A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		"TEMP_42C199A8-4003-4D4F-A80D-F761E27AA1FA" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		06B30E30899409704CF236BE /* Cost */ = {
+			isa = PBXGroup;
+			children = (
+				6C2E6003195A7CA1822E3D6A /* BudgetView.swift */,
+				FBCD366A7A90C0978E6EDFF8 /* CostDashboardView.swift */,
+			);
+			path = Cost;
+			sourceTree = "<group>";
+		};
+		06B9E95B25C34EBAF37CFC09 /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				49CEAA7515F27EDBDD03C465 /* ConversationStore.swift */,
+				5D81D0D4601DC4E1978C613A /* SettingsStore.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		14F01B247623B4F04EA41FD6 /* WOTANNWatch */ = {
+			isa = PBXGroup;
+			children = (
+				91970939E16FE1FF8AF08D8C /* WOTANNWatchApp.swift */,
+			);
+			path = WOTANNWatch;
+			sourceTree = "<group>";
+		};
+		187DBCC6415809F3220DB86C /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				246E781BB6179F288DFFFCB2 /* VoiceInputView.swift */,
+			);
+			path = Voice;
+			sourceTree = "<group>";
+		};
+		18B3719BE8006789E4EACB69 /* OnDeviceAI */ = {
+			isa = PBXGroup;
+			children = (
+				611674C7DEDCBC1D7044BE58 /* OnDeviceAIView.swift */,
+			);
+			path = OnDeviceAI;
+			sourceTree = "<group>";
+		};
+		1B31F7EBAF893729C6723F2B = {
+			isa = PBXGroup;
+			children = (
+				51204C585D67BB42709EC91A /* WOTANN */,
+				289EA053335C16D7678B1C72 /* WOTANNIntents */,
+				3E0471DB8E92C0552DD174C3 /* WOTANNLiveActivity */,
+				DD8E5B2B88FFBADD23B350D5 /* WOTANNShareExtension */,
+				14F01B247623B4F04EA41FD6 /* WOTANNWatch */,
+				3EF14D6DE5DAC26F5509ED0B /* WOTANNWidgets */,
+				3F7295AD78E6B01E782B45A0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		21E89837A91A15BD49AD75D7 /* Skills */ = {
+			isa = PBXGroup;
+			children = (
+				9003A806325BCF9CDBF76A53 /* SkillsBrowserView.swift */,
+			);
+			path = Skills;
+			sourceTree = "<group>";
+		};
+		2389A6CBA2BE20C4AFBC50EF /* MorningBriefing */ = {
+			isa = PBXGroup;
+			children = (
+				E92B4BEAF19FA0607CA6F71B /* MorningBriefingView.swift */,
+			);
+			path = MorningBriefing;
+			sourceTree = "<group>";
+		};
+		25F6A93B3B8F16CECA54819C /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				A16DF73866A2EBC73B0F6F88 /* ArtifactEditorView.swift */,
+				E4B9CB078FE7FC0A34309DE0 /* ArtifactView.swift */,
+				D6AD97E216D2F4F086620005 /* ChatView.swift */,
+				9EC540B66945EABBDF56F2E2 /* CodeBlockView.swift */,
+				F352D939AEC62F19C0BB8665 /* Composer.swift */,
+				E5EA8ED3C46E34C217DC9906 /* MarkdownView.swift */,
+				D8D1475BC2D39CBC79EC84BB /* MessageContextMenu.swift */,
+				D7BD8A16B6A0160E8B8DCCFC /* MessageRow.swift */,
+				B50F79687CD9ACC0FE71D578 /* StreamingView.swift */,
+				308FE02E4FE66CDC94983874 /* ToolCallCapsule.swift */,
+				C8AD8628EEF43D2366116211 /* VoiceInlineSheet.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
+		289EA053335C16D7678B1C72 /* WOTANNIntents */ = {
+			isa = PBXGroup;
+			children = (
+				5B13A84BD6A2788C00E99026 /* AskWOTANNIntent.swift */,
+				97B03ED4AEC0513C072A328F /* CheckCostIntent.swift */,
+				93EFE65AEEFF4E0EF383473B /* EnhancePromptIntent.swift */,
+				FD4FCFB6760540EF97A7DA40 /* Info.plist */,
+				E13D11F800D2E1302A53FC22 /* WOTANNIntentService.swift */,
+			);
+			path = WOTANNIntents;
+			sourceTree = "<group>";
+		};
+		2E5E16E8F340919C8B638404 /* TaskMonitor */ = {
+			isa = PBXGroup;
+			children = (
+				FC4279027D915B49348FAA83 /* TaskDetailView.swift */,
+				2F185871EFBC6630B7745D21 /* TaskListView.swift */,
+			);
+			path = TaskMonitor;
+			sourceTree = "<group>";
+		};
+		3105D322DF7096028FE48443 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				B416704CA80DC04925F3D876 /* BonjourDiscovery.swift */,
+				858AA65551925BEBA0EA15AB /* CameraService.swift */,
+				62F56A2BBEBBD733E0895A87 /* CarPlayService.swift */,
+				A08D5EC8EAB796C0AF51590C /* ClipboardService.swift */,
+				9BA0CD3724CA1F7EC99FA705 /* ContinuityCameraService.swift */,
+				6E64BDB7DBE8104D59B6AD95 /* CrossDeviceService.swift */,
+				E35578B937A1B6B65955180A /* Haptics.swift */,
+				8F6F9658FE45E7FE8311F9EB /* HapticService.swift */,
+				36E5C03AEA8B07FACAC501D6 /* HealthKitService.swift */,
+				0B71A549F1B1CF80DA2FCC16 /* LocalSendService.swift */,
+				310AB0D5FB3641506FFCB027 /* NFCPairingService.swift */,
+				B2901E175D942A163F3E0637 /* NodeCapabilityService.swift */,
+				125D3C15B8578307FEF2095C /* NotificationService.swift */,
+				4A75380AA0684C081EB6D23C /* OfflineQueueService.swift */,
+				3D49F04230915DCF8EF70FF8 /* OnDeviceModelService.swift */,
+				2E83842536E65E46408B77A0 /* VoiceService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		313C773B098558A71092BA0E /* Work */ = {
+			isa = PBXGroup;
+			children = (
+				0D2841CE2B1B3A5500D3B19C /* ActiveWorkStrip.swift */,
+				773471553AF410408E96A632 /* AgentRow.swift */,
+				64652E5E2C9C5206F40AE7FF /* DispatchComposer.swift */,
+				17A6AF2E81E8E10A8600F1D2 /* FilterPillBar.swift */,
+				7AE979FB78EEF7B4849BC02A /* WorkView.swift */,
+			);
+			path = Work;
+			sourceTree = "<group>";
+		};
+		3393BFCD04CBA1C852246E74 /* Intelligence */ = {
+			isa = PBXGroup;
+			children = (
+				09855C29973798472692575A /* IntelligenceDashboardView.swift */,
+			);
+			path = Intelligence;
+			sourceTree = "<group>";
+		};
+		3500F3EE7F6B808EF5E3846F /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				CDE936CC278C00E570B63335 /* FirstRunSuccessView.swift */,
+				CA1AC815672F2931B534B035 /* OnboardingView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		376923C18D6FC1B435E5D5B5 /* RemoteDesktop */ = {
+			isa = PBXGroup;
+			children = (
+				DC0AC9767EE7AB489B6DA7CD /* RemoteDesktopView.swift */,
+			);
+			path = RemoteDesktop;
+			sourceTree = "<group>";
+		};
+		3AA735BFBAF544A13285DDCD /* Git */ = {
+			isa = PBXGroup;
+			children = (
+				B6609439B44645E24E2B4360 /* GitPanelView.swift */,
+			);
+			path = Git;
+			sourceTree = "<group>";
+		};
+		3D70A0821B733EEF8ABAB438 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				701C1ADEE8EB886D93326B89 /* Agents */,
+				427767620AD647E4806F3020 /* Arena */,
+				761B307E3E8615F3001FA68E /* Autopilot */,
+				E13A91DB89A4255351D6C3EF /* Channels */,
+				25F6A93B3B8F16CECA54819C /* Chat */,
+				9C52AE7DB02EBE4E2F7F13A8 /* Components */,
+				4B47FAB798359E766201E9A7 /* Conversations */,
+				06B30E30899409704CF236BE /* Cost */,
+				FFF42E5B67DDBBBAF7295F21 /* Dashboard */,
+				79502DF274C1995CCE9D3943 /* Diagnostics */,
+				AB55D9B21047A132051E8739 /* Dispatch */,
+				94297DE6D58A00DFC2B7E243 /* Files */,
+				3AA735BFBAF544A13285DDCD /* Git */,
+				BBE6C92F985FEBF2111AA34B /* Home */,
+				997C05BA2CCDB4334A8E9829 /* Input */,
+				3393BFCD04CBA1C852246E74 /* Intelligence */,
+				EBB73DE893B34D11E03FB5C6 /* Meet */,
+				CA8293042ECAAC0CAF4E68D0 /* Memory */,
+				2389A6CBA2BE20C4AFBC50EF /* MorningBriefing */,
+				3500F3EE7F6B808EF5E3846F /* Onboarding */,
+				18B3719BE8006789E4EACB69 /* OnDeviceAI */,
+				FC28B7796D8AED6DBF394892 /* Pairing */,
+				4FA6DBCAE4B4A13A91F9945D /* Playground */,
+				99FA469217FC9D061894B873 /* PromptLibrary */,
+				376923C18D6FC1B435E5D5B5 /* RemoteDesktop */,
+				70DB2F8ED6088332E423D69B /* Settings */,
+				8F483A2E59E9A0BF896C7942 /* Shell */,
+				21E89837A91A15BD49AD75D7 /* Skills */,
+				2E5E16E8F340919C8B638404 /* TaskMonitor */,
+				187DBCC6415809F3220DB86C /* Voice */,
+				313C773B098558A71092BA0E /* Work */,
+				B6BA126DED8DC97E8F223AF0 /* Workflows */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		3E0471DB8E92C0552DD174C3 /* WOTANNLiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				3061F59CE68677C13F467CDB /* TaskProgressActivity.swift */,
+			);
+			path = WOTANNLiveActivity;
+			sourceTree = "<group>";
+		};
+		3EF14D6DE5DAC26F5509ED0B /* WOTANNWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				34E4F6B67C2504698AB54340 /* AgentStatusWidget.swift */,
+				7CA913FB6F34E3EE31044AA2 /* CostWidget.swift */,
+				A0BB16A6AF74F8E65E311128 /* Info.plist */,
+				F07191AA06DB1EBD470BC3C6 /* WOTANNWidgetBundle.swift */,
+			);
+			path = WOTANNWidgets;
+			sourceTree = "<group>";
+		};
+		3F7295AD78E6B01E782B45A0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				43A84DF0B729ED60922A2B55 /* WOTANN.app */,
+				57CF1DDF537E4D151BB26FD0 /* WOTANNIntents.appex */,
+				EE06820BB3F570376F5A8042 /* WOTANNShareExtension.appex */,
+				C3FD1D51374D9D7EBDC14002 /* WOTANNWatch.app */,
+				0C79EAE15678770DA497F0A0 /* WOTANNWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		427767620AD647E4806F3020 /* Arena */ = {
+			isa = PBXGroup;
+			children = (
+				2ED3CBAA2B0A59B353A07492 /* ArenaView.swift */,
+			);
+			path = Arena;
+			sourceTree = "<group>";
+		};
+		4B47FAB798359E766201E9A7 /* Conversations */ = {
+			isa = PBXGroup;
+			children = (
+				618A285B9CDB746289274028 /* ConversationListView.swift */,
+				595256C0E55C3A3725A6466F /* ConversationRow.swift */,
+			);
+			path = Conversations;
+			sourceTree = "<group>";
+		};
+		4FA6DBCAE4B4A13A91F9945D /* Playground */ = {
+			isa = PBXGroup;
+			children = (
+				0179DCE406DE010D855EF594 /* CodePlaygroundView.swift */,
+			);
+			path = Playground;
+			sourceTree = "<group>";
+		};
+		51204C585D67BB42709EC91A /* WOTANN */ = {
+			isa = PBXGroup;
+			children = (
+				FBCA5677FBF5FF63F853CA43 /* Info.plist */,
+				ADD5836F07E1C1BE75980F43 /* WOTANN.entitlements */,
+				24C97237B85B61F2D27207DF /* WOTANNApp.swift */,
+				6668B4CD798E30B5590A7175 /* DesignSystem */,
+				76D30D35B3F8B36DB52BF45C /* Models */,
+				51A15F38F5E8AF6A77C358E4 /* Networking */,
+				06B9E95B25C34EBAF37CFC09 /* Persistence */,
+				94D88348386C978F860EE3AB /* Security */,
+				3105D322DF7096028FE48443 /* Services */,
+				99EDEE5F68258ACF2D7B1EF2 /* ViewModels */,
+				3D70A0821B733EEF8ABAB438 /* Views */,
+			);
+			path = WOTANN;
+			sourceTree = "<group>";
+		};
+		51A15F38F5E8AF6A77C358E4 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				81F687B73AF01D49E756D61A /* ConnectionManager.swift */,
+				3AEF285D12975DB9DF3083EC /* PairingManager.swift */,
+				235498A0546BE5D42A6437FE /* RPCClient.swift */,
+				E94BB3B9EA1C286FDA30EBD5 /* StreamHandler.swift */,
+				094D0FF0F115935B7CDBF190 /* SupabaseRelay.swift */,
+				614A3CF377AB282F4EC259AA /* WebSocketClient.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		6668B4CD798E30B5590A7175 /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				31B475C2E6798FCE2B6B9024 /* A11y.swift */,
+				F79F94065DC79C5DD95E0B57 /* StatusShape.swift */,
+				EC65EC1A3C805E2E49DCE4D3 /* Theme.swift */,
+				7B8A2E47A7D1FD56830C0BC1 /* ViewModifiers.swift */,
+				3BCA579941CD0E9ACECB4761 /* WLogo.swift */,
+			);
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		701C1ADEE8EB886D93326B89 /* Agents */ = {
+			isa = PBXGroup;
+			children = (
+				970D819FAD2DACD72B9298A0 /* AgentDetailView.swift */,
+				4EEA12DDC8F97D420CF68F55 /* AgentListView.swift */,
+				BEEF22937DD902CE14C86941 /* AgentReplayView.swift */,
+				A13F72B52D66CA749AE5EB74 /* TaskApprovalView.swift */,
+			);
+			path = Agents;
+			sourceTree = "<group>";
+		};
+		70DB2F8ED6088332E423D69B /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				050C9F8CBB29129367DC8BF4 /* AboutView.swift */,
+				EEDEFF86ED0D1D206C647A00 /* AppearanceSettings.swift */,
+				CB9A981F573E85D37732C2E8 /* HealthInsightsSettingsView.swift */,
+				A70B0D67B2B376870737B3A1 /* NotificationSettings.swift */,
+				8F6330D9E5EFE3324DF6B561 /* PairedDevicesView.swift */,
+				A26BD8F0DAC8CF59E3802FDF /* ProviderSettings.swift */,
+				FF2C467534932F2AF3DCB79A /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		761B307E3E8615F3001FA68E /* Autopilot */ = {
+			isa = PBXGroup;
+			children = (
+				610EF178DA5E748C345B1DED /* AutopilotView.swift */,
+			);
+			path = Autopilot;
+			sourceTree = "<group>";
+		};
+		76D30D35B3F8B36DB52BF45C /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				0E39BCBD812900AB19754199 /* AgentTask.swift */,
+				2B13E4DA73820D9FCF4970BD /* Conversation.swift */,
+				004B1EA5CCD16314B7069723 /* CostModels.swift */,
+				BA6AFCFB793FD11DF147F9C3 /* PairingState.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		79502DF274C1995CCE9D3943 /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				06A6206442D42B7BB2585617 /* DiagnosticsView.swift */,
+			);
+			path = Diagnostics;
+			sourceTree = "<group>";
+		};
+		8F483A2E59E9A0BF896C7942 /* Shell */ = {
+			isa = PBXGroup;
+			children = (
+				F0A8CD5169D018512AF6FEAA /* AskComposer.swift */,
+				603E6C3BDB0224BE3A7D8B12 /* FloatingAsk.swift */,
+				9F75BF4B301AF5FAFB55CCA6 /* MainShell.swift */,
+			);
+			path = Shell;
+			sourceTree = "<group>";
+		};
+		94297DE6D58A00DFC2B7E243 /* Files */ = {
+			isa = PBXGroup;
+			children = (
+				A8DF872270329BF2E11EBC0A /* FileSearchView.swift */,
+			);
+			path = Files;
+			sourceTree = "<group>";
+		};
+		94D88348386C978F860EE3AB /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				1FB16DF280858CD49AD1B3F5 /* BiometricAuth.swift */,
+				08D3A7144D5D2C2E6EB4EF9D /* ECDHManager.swift */,
+				3778F3E86A9D37FCD0D2D540 /* KeychainManager.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
+		997C05BA2CCDB4334A8E9829 /* Input */ = {
+			isa = PBXGroup;
+			children = (
+				0EA375824DDFAE6048A43B02 /* ChatInputBar.swift */,
+			);
+			path = Input;
+			sourceTree = "<group>";
+		};
+		99EDEE5F68258ACF2D7B1EF2 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				EAB3A4D972FF429F30DBDA45 /* AppState.swift */,
+				9C012EDDADB27EC369CCE908 /* ChatViewModel.swift */,
+				8687FA620D2D98DCCB752FE9 /* ConversationListVM.swift */,
+				838F52E129844764764DBF15 /* CostViewModel.swift */,
+				DEFC64EE4247F9862FA794C1 /* DispatchViewModel.swift */,
+				0C15FCB52E102C803EB082B5 /* PairingViewModel.swift */,
+				4F7B412897DC8242A5AFD9E6 /* SettingsViewModel.swift */,
+				BCE6F0024F27A003599CDE94 /* TaskMonitorViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		99FA469217FC9D061894B873 /* PromptLibrary */ = {
+			isa = PBXGroup;
+			children = (
+				357743E15EBA4BB774DF6140 /* PromptLibraryView.swift */,
+			);
+			path = PromptLibrary;
+			sourceTree = "<group>";
+		};
+		9A244B4F3C8C2AFDFBAEF17D /* Sections */ = {
+			isa = PBXGroup;
+			children = (
+				56AF325DD086EFD6F26C3C66 /* AmbientCrossDeviceView.swift */,
+				7F0B5B7E2D8D66209D1CBA27 /* HeroAsk.swift */,
+				C1E3D232B8A02D70DE2E3DFA /* LiveAgentsStrip.swift */,
+				D7F96C4036290A8C8B239439 /* ProactiveCardDeck.swift */,
+				B4A5B0DA01EDFD98EBDCCBD6 /* RecentConversationsStrip.swift */,
+				6BBC6FB23CC47F27B73087F3 /* StatusRibbon.swift */,
+			);
+			path = Sections;
+			sourceTree = "<group>";
+		};
+		9C52AE7DB02EBE4E2F7F13A8 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				27041BBB4A499FA6232D20B4 /* CostLabel.swift */,
+				60A02D77F3AD07FFEF284BB3 /* DaemonOfflineView.swift */,
+				905C2C8B236BC13E840A7AAE /* EmptyState.swift */,
+				69324BDC59EEFDF470114614 /* EnhanceButton.swift */,
+				2E75044FBE1D670D8A9CC7A8 /* ErrorBanner.swift */,
+				4B51AA79482C2489AC5AEAA5 /* HitTarget.swift */,
+				D48D608B58154F3ED996D202 /* LoadingIndicator.swift */,
+				17F025A4946358EB8D1FEA23 /* ProviderBadge.swift */,
+				B555E3593E5CDF1B76E6429D /* QuickActionCard.swift */,
+				C5079BC1C4A5717046F98931 /* Shimmer.swift */,
+				627097A2A23EDE498587CEB1 /* ShimmerView.swift */,
+				5A007D4F3BEDFA29BA1DF0D2 /* Skeleton.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		AB55D9B21047A132051E8739 /* Dispatch */ = {
+			isa = PBXGroup;
+			children = (
+				17F777D17CAB671B6045E8E2 /* DispatchView.swift */,
+				D81724F343CBDD8E59ED5936 /* TaskTemplateList.swift */,
+			);
+			path = Dispatch;
+			sourceTree = "<group>";
+		};
+		B6BA126DED8DC97E8F223AF0 /* Workflows */ = {
+			isa = PBXGroup;
+			children = (
+				F950D55B6D1A8E84E4BE2E7B /* WorkflowsView.swift */,
+			);
+			path = Workflows;
+			sourceTree = "<group>";
+		};
+		BBE6C92F985FEBF2111AA34B /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				85CD124246CE92A9A09C3C73 /* HomeView.swift */,
+				9A244B4F3C8C2AFDFBAEF17D /* Sections */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		CA8293042ECAAC0CAF4E68D0 /* Memory */ = {
+			isa = PBXGroup;
+			children = (
+				E7841A145185DEE82B176AB6 /* MemoryBrowserView.swift */,
+			);
+			path = Memory;
+			sourceTree = "<group>";
+		};
+		DD8E5B2B88FFBADD23B350D5 /* WOTANNShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				4C56C340F9DDD344E0CBCE44 /* Info.plist */,
+				D6B4110A52172F8908E3648F /* ShareView.swift */,
+				212A1B208E121BEB41DED345 /* ShareViewController.swift */,
+			);
+			path = WOTANNShareExtension;
+			sourceTree = "<group>";
+		};
+		E13A91DB89A4255351D6C3EF /* Channels */ = {
+			isa = PBXGroup;
+			children = (
+				D31A3722B056BCD7AD34687F /* ChannelStatusView.swift */,
+			);
+			path = Channels;
+			sourceTree = "<group>";
+		};
+		EBB73DE893B34D11E03FB5C6 /* Meet */ = {
+			isa = PBXGroup;
+			children = (
+				7AC0FC0180D8891370210124 /* MeetModeView.swift */,
+			);
+			path = Meet;
+			sourceTree = "<group>";
+		};
+		FC28B7796D8AED6DBF394892 /* Pairing */ = {
+			isa = PBXGroup;
+			children = (
+				F65F7C041405B0992A27A764 /* AutoDetectedCard.swift */,
+				134BED7028B56BDFE8D4A930 /* PairingView.swift */,
+				F22870B229A1585EE0F44DB8 /* PairingWizardView.swift */,
+				20EC6DEF7EC4A37874CAA0F2 /* PINEntryView.swift */,
+				80CCBB631AFE4063CE846F87 /* QRScannerView.swift */,
+			);
+			path = Pairing;
+			sourceTree = "<group>";
+		};
+		FFF42E5B67DDBBBAF7295F21 /* Dashboard */ = {
+			isa = PBXGroup;
+			children = (
+				4E80A34FF0260230786838F6 /* DashboardView.swift */,
+			);
+			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		"TEMP_C39C2A34-6E35-454A-82D4-07F1490F065F" /* ios */ = {
+			isa = PBXGroup;
+			children = (
+				"TEMP_42C199A8-4003-4D4F-A80D-F761E27AA1FA" /* Local.xcconfig */,
+			);
+			path = ios;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		4AA05FB79F11644DCEF35297 /* WOTANNWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E1CE4CA3757A630A434B16E0 /* Build configuration list for PBXNativeTarget "WOTANNWidgets" */;
+			buildPhases = (
+				B8B4F75FFB0D137E80C431A6 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WOTANNWidgets;
+			packageProductDependencies = (
+			);
+			productName = WOTANNWidgets;
+			productReference = 0C79EAE15678770DA497F0A0 /* WOTANNWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		4FD20671B55D4180CA6C9C38 /* WOTANNWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F4597E98D42D0F747B7C3DAB /* Build configuration list for PBXNativeTarget "WOTANNWatch" */;
+			buildPhases = (
+				4079FA1681C541104E799D8B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WOTANNWatch;
+			packageProductDependencies = (
+			);
+			productName = WOTANNWatch;
+			productReference = C3FD1D51374D9D7EBDC14002 /* WOTANNWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		8D63C446098A941773904477 /* WOTANN */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B0F5DEF458467161C83D1E74 /* Build configuration list for PBXNativeTarget "WOTANN" */;
+			buildPhases = (
+				C6035D241C600C863AB0FD65 /* Sources */,
+				297392390CACD18E2A62C1A9 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A8DF5DB339F41C7C19E0AA99 /* PBXTargetDependency */,
+				989E5C2BF1E5B07D63A2ED27 /* PBXTargetDependency */,
+				426C96F87B5AD36CD531219C /* PBXTargetDependency */,
+			);
+			name = WOTANN;
+			packageProductDependencies = (
+			);
+			productName = WOTANN;
+			productReference = 43A84DF0B729ED60922A2B55 /* WOTANN.app */;
+			productType = "com.apple.product-type.application";
+		};
+		9994611A4FEA35394C416EF1 /* WOTANNShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 09E5B89E94706842ADB7FF65 /* Build configuration list for PBXNativeTarget "WOTANNShareExtension" */;
+			buildPhases = (
+				88646726C8F15AD042DA2CBD /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WOTANNShareExtension;
+			packageProductDependencies = (
+			);
+			productName = WOTANNShareExtension;
+			productReference = EE06820BB3F570376F5A8042 /* WOTANNShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		E84547DFBB1E22DB65F26E2F /* WOTANNIntents */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D6DD2843D6BFD1C35C8329F0 /* Build configuration list for PBXNativeTarget "WOTANNIntents" */;
+			buildPhases = (
+				94A6038A2033999F3520AAB6 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WOTANNIntents;
+			packageProductDependencies = (
+			);
+			productName = WOTANNIntents;
+			productReference = 57CF1DDF537E4D151BB26FD0 /* WOTANNIntents.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		2C087ECC97BEADD530602CB3 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					4AA05FB79F11644DCEF35297 = {
+						DevelopmentTeam = NR4NKYBZ95;
+						ProvisioningStyle = Automatic;
+					};
+					4FD20671B55D4180CA6C9C38 = {
+						DevelopmentTeam = NR4NKYBZ95;
+						ProvisioningStyle = Automatic;
+					};
+					8D63C446098A941773904477 = {
+						DevelopmentTeam = NR4NKYBZ95;
+						ProvisioningStyle = Automatic;
+					};
+					9994611A4FEA35394C416EF1 = {
+						DevelopmentTeam = NR4NKYBZ95;
+						ProvisioningStyle = Automatic;
+					};
+					E84547DFBB1E22DB65F26E2F = {
+						DevelopmentTeam = NR4NKYBZ95;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 5276B36D72C2CE83AC41B81E /* Build configuration list for PBXProject "WOTANN" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 1B31F7EBAF893729C6723F2B;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 3F7295AD78E6B01E782B45A0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8D63C446098A941773904477 /* WOTANN */,
+				E84547DFBB1E22DB65F26E2F /* WOTANNIntents */,
+				9994611A4FEA35394C416EF1 /* WOTANNShareExtension */,
+				4FD20671B55D4180CA6C9C38 /* WOTANNWatch */,
+				4AA05FB79F11644DCEF35297 /* WOTANNWidgets */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4079FA1681C541104E799D8B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CF8CC29F03A7EE59B96038ED /* WOTANNWatchApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		88646726C8F15AD042DA2CBD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A8A17DD957291B9C44210711 /* A11y.swift in Sources */,
+				6086219917549243F13B1B7C /* ShareView.swift in Sources */,
+				3419E6A20D4E3CDACFD02F1C /* ShareViewController.swift in Sources */,
+				DF9033D947B907AA1E6ABC5F /* Theme.swift in Sources */,
+				C150949361BD4DF3D0AE95E8 /* ViewModifiers.swift in Sources */,
+				7C5DB31F78EE4CF18939BB50 /* WLogo.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		94A6038A2033999F3520AAB6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F640A158673C1F54B094EA0A /* AgentTask.swift in Sources */,
+				4B2B8F9744436031A95B4521 /* AskWOTANNIntent.swift in Sources */,
+				2AF95C23E99CE01ECD83D6DB /* CheckCostIntent.swift in Sources */,
+				A06637D2F6798AE52479F327 /* Conversation.swift in Sources */,
+				A40364EE35BEA39B46687167 /* CostModels.swift in Sources */,
+				9D8FF141344C6372A82215F0 /* ECDHManager.swift in Sources */,
+				CC3432EA06134C2A73D69FBA /* EnhancePromptIntent.swift in Sources */,
+				10D035C5872E02E4275804F0 /* KeychainManager.swift in Sources */,
+				73266E624343026C5AFC3C3A /* PairingState.swift in Sources */,
+				556EF43E876769037EEC1811 /* RPCClient.swift in Sources */,
+				953C508A8DB81E3ABCD570C5 /* StreamHandler.swift in Sources */,
+				871BB82A92C276EC6868E2C9 /* WOTANNIntentService.swift in Sources */,
+				9835229EE035E2B4898820FD /* WebSocketClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B8B4F75FFB0D137E80C431A6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8CD1000C24268974A13A84DA /* A11y.swift in Sources */,
+				60CE56ECDEE5DEF93D769C48 /* AgentStatusWidget.swift in Sources */,
+				565895F44E902F1D30AC4601 /* CostWidget.swift in Sources */,
+				3179FD6D4EA7D7389676167E /* Theme.swift in Sources */,
+				EB49E2B72F4A095909B6277D /* ViewModifiers.swift in Sources */,
+				1DA107A3700831948633643F /* WLogo.swift in Sources */,
+				481C9D67B053D8902B076595 /* WOTANNWidgetBundle.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C6035D241C600C863AB0FD65 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2F0CB4588FA1E43FAF9BF67E /* A11y.swift in Sources */,
+				2CF108523D67FA7C4C9983F9 /* AboutView.swift in Sources */,
+				1E7D23BB279777C85830341B /* ActiveWorkStrip.swift in Sources */,
+				1B889BCE6A9F558698678104 /* AgentDetailView.swift in Sources */,
+				3105B95658BA9F1860F8EC6C /* AgentListView.swift in Sources */,
+				64CC32F1FBDEAEC93CBB59C5 /* AgentReplayView.swift in Sources */,
+				D05531BF06FD020A4325BE87 /* AgentRow.swift in Sources */,
+				187720B569EF3A7C7260D108 /* AgentTask.swift in Sources */,
+				C807759AE01BCE6E7B7E8129 /* AmbientCrossDeviceView.swift in Sources */,
+				E80B08833BB301F43D25EB3D /* AppState.swift in Sources */,
+				86675FE0ED30D9994CE2E446 /* AppearanceSettings.swift in Sources */,
+				699353ED9D4DD85DB9C47AE2 /* ArenaView.swift in Sources */,
+				34970A1A2199D90E20013CFF /* ArtifactEditorView.swift in Sources */,
+				998D71138E45B7A604532EEB /* ArtifactView.swift in Sources */,
+				9F89ED08AF025EF6D023A4C2 /* AskComposer.swift in Sources */,
+				23A7F86B00A7849DBD5969F7 /* AutoDetectedCard.swift in Sources */,
+				42F5170B64F5447C38E3BDCD /* AutopilotView.swift in Sources */,
+				5CE1863D7BF4B6033C59E94A /* BiometricAuth.swift in Sources */,
+				27DF358B53800EFAE4FD906B /* BonjourDiscovery.swift in Sources */,
+				31E631218D44D08EB2669C06 /* BudgetView.swift in Sources */,
+				A180D7C55613211C0E2CBC3C /* CameraService.swift in Sources */,
+				369783EB878E8A5C8637BB23 /* CarPlayService.swift in Sources */,
+				418A37A17B04D896EF876A21 /* ChannelStatusView.swift in Sources */,
+				E62DAA859946DB68FB459F8E /* ChatInputBar.swift in Sources */,
+				64D3AB74590BD2B886C408CA /* ChatView.swift in Sources */,
+				A03D49902DB81EDABBF7AA7E /* ChatViewModel.swift in Sources */,
+				8C3A07A7CE3DB458DF44220E /* ClipboardService.swift in Sources */,
+				283F760619FED8BB30C03670 /* CodeBlockView.swift in Sources */,
+				9B588BC0138AD9FF2BD6DE77 /* CodePlaygroundView.swift in Sources */,
+				A73E02B2EBF5CA8537EEE89B /* Composer.swift in Sources */,
+				9E264C61DB06CCD1B40A7B25 /* ConnectionManager.swift in Sources */,
+				E05C161E29A356E16CC3ACF5 /* ContinuityCameraService.swift in Sources */,
+				95929E4DD403D4A69BE7C835 /* Conversation.swift in Sources */,
+				116A62D0408021CA869A4598 /* ConversationListVM.swift in Sources */,
+				8CA837F135574304F597E3D1 /* ConversationListView.swift in Sources */,
+				2F5B8EAFD4FABDEE033D5493 /* ConversationRow.swift in Sources */,
+				92E2718A3D0DB518166127B9 /* ConversationStore.swift in Sources */,
+				486ECB17F37AA67F81CC6E65 /* CostDashboardView.swift in Sources */,
+				E6B2B04A350B2B58C408694F /* CostLabel.swift in Sources */,
+				969787205F01442A0DC13CF0 /* CostModels.swift in Sources */,
+				008F45FEB71084BE45811782 /* CostViewModel.swift in Sources */,
+				1B56EBCCAA296B201D4AF8A7 /* CrossDeviceService.swift in Sources */,
+				B30108A450FFF40ABC15EFBF /* DaemonOfflineView.swift in Sources */,
+				1930CD58A874F7A219589044 /* DashboardView.swift in Sources */,
+				56709630C9E9D1D11C2C5EB9 /* DiagnosticsView.swift in Sources */,
+				D7B9EB89239758BBCF0F2C2A /* DispatchComposer.swift in Sources */,
+				5A9F32A99B9FD86E7E024678 /* DispatchView.swift in Sources */,
+				6D9FCB29B376C6AA94E19C01 /* DispatchViewModel.swift in Sources */,
+				977BE94DFFE3286BA4D78D9D /* ECDHManager.swift in Sources */,
+				0AA2DE9B6C1138BFE8CCC4BB /* EmptyState.swift in Sources */,
+				EE0FB2F4EA7FA60934689E9A /* EnhanceButton.swift in Sources */,
+				1BB450DCEECB895E0324D45A /* ErrorBanner.swift in Sources */,
+				611373988311A3B3E2A5CD18 /* FileSearchView.swift in Sources */,
+				15F2E5C077176286C77718DA /* FilterPillBar.swift in Sources */,
+				FB73488C0CB7A86377A9230E /* FirstRunSuccessView.swift in Sources */,
+				596DB0B2F312E6D0160D574C /* FloatingAsk.swift in Sources */,
+				24F9C799AF6F91655A12D439 /* GitPanelView.swift in Sources */,
+				9D0CB4E6733C8D83A34869E5 /* HapticService.swift in Sources */,
+				7E01AEED7B70EB12EB164EB9 /* Haptics.swift in Sources */,
+				1BE91715B371ABB54F85F759 /* HealthInsightsSettingsView.swift in Sources */,
+				7E4CCC0F4227467CFBCB39E8 /* HealthKitService.swift in Sources */,
+				06F959DB4461DE45ABF3CF0B /* HeroAsk.swift in Sources */,
+				0D2161771F56E9914A1A66F3 /* HitTarget.swift in Sources */,
+				1DFA4133059A447B8F8FB65B /* HomeView.swift in Sources */,
+				ACE160DE9818A098FC0B25C0 /* IntelligenceDashboardView.swift in Sources */,
+				C6D37DF08E7E309327EBD44E /* KeychainManager.swift in Sources */,
+				C97535C1C7CBB9374DA8CF0D /* LiveAgentsStrip.swift in Sources */,
+				EBC08C53232FDF7C5AA0B5FB /* LoadingIndicator.swift in Sources */,
+				B038DB6D5D3F891F43BCE49F /* LocalSendService.swift in Sources */,
+				24F0739AE35AB50D5787EB29 /* MainShell.swift in Sources */,
+				D37C0F031AE32EABC89CC558 /* MarkdownView.swift in Sources */,
+				F64E395C5C2C344017428679 /* MeetModeView.swift in Sources */,
+				C9C160C262631B5FA00E7261 /* MemoryBrowserView.swift in Sources */,
+				A45BC07A68BE82906EE9B33F /* MessageContextMenu.swift in Sources */,
+				4C5ADBCD4D292B72D1142701 /* MessageRow.swift in Sources */,
+				A50C3F5DFB305F442FB771FD /* MorningBriefingView.swift in Sources */,
+				8CA256DC034090CF00E61EAD /* NFCPairingService.swift in Sources */,
+				C476112B7F6A9A0697855FAB /* NodeCapabilityService.swift in Sources */,
+				864813A7534355CE58542EA5 /* NotificationService.swift in Sources */,
+				8340D1E69B31722DA04724B4 /* NotificationSettings.swift in Sources */,
+				990C890CAE5FBECE7E2E4F4F /* OfflineQueueService.swift in Sources */,
+				144B74393C2F8D782E60B893 /* OnDeviceAIView.swift in Sources */,
+				058CFF3CBE328B3860E9C89B /* OnDeviceModelService.swift in Sources */,
+				B332DB97CAE8EE6EC894FAC0 /* OnboardingView.swift in Sources */,
+				53F9BED5475B003FA048BF7A /* PINEntryView.swift in Sources */,
+				AE9A4FCB2188846E1B96851E /* PairedDevicesView.swift in Sources */,
+				28A2824BEC70C5ADF79BF207 /* PairingManager.swift in Sources */,
+				C96331771429D701D552F114 /* PairingState.swift in Sources */,
+				A997C22906B6716C70982FA5 /* PairingView.swift in Sources */,
+				1DBF7CB49929C59A63CCC4B1 /* PairingViewModel.swift in Sources */,
+				5D1B69973011E11375176CBD /* PairingWizardView.swift in Sources */,
+				62851FC178B0FDD3F466BECB /* ProactiveCardDeck.swift in Sources */,
+				EE61CFA43ADDB4BB7956B18C /* PromptLibraryView.swift in Sources */,
+				3DEC1C5EB1265F934EC04273 /* ProviderBadge.swift in Sources */,
+				49FF00FFD76483925D6BDD1C /* ProviderSettings.swift in Sources */,
+				7796BA68CC5B47E97805AC83 /* QRScannerView.swift in Sources */,
+				96304EB62393E395A9A37663 /* QuickActionCard.swift in Sources */,
+				A80352E10915D95DD40DE52C /* RPCClient.swift in Sources */,
+				7406720F1DD784F12A86D3E2 /* RecentConversationsStrip.swift in Sources */,
+				0C858D84A9A6C826AD4C3A29 /* RemoteDesktopView.swift in Sources */,
+				9F38CBCE604ED8AD3820D1A1 /* SettingsStore.swift in Sources */,
+				993CFBFB8CAE451C9E1EF8F9 /* SettingsView.swift in Sources */,
+				69AA718A3EE4FBB9F5AAF1C1 /* SettingsViewModel.swift in Sources */,
+				471EB8BA3C2BD6D2C58F4AF5 /* Shimmer.swift in Sources */,
+				B7DEE1B41664EF83A02442A2 /* ShimmerView.swift in Sources */,
+				63B40FE41687427AA5C2B89B /* Skeleton.swift in Sources */,
+				C5CE1A66DC1EB161C1558B32 /* SkillsBrowserView.swift in Sources */,
+				E7C41640239D4E1F319CC684 /* StatusRibbon.swift in Sources */,
+				A6523704243D55763683EBA0 /* StatusShape.swift in Sources */,
+				484A399229E3B32B2262F5B3 /* StreamHandler.swift in Sources */,
+				57F5310677D99B0A91F5A72D /* StreamingView.swift in Sources */,
+				794BCECECCB8D46E1BCB9A40 /* SupabaseRelay.swift in Sources */,
+				21C6F764ABDF58935CE189D7 /* TaskApprovalView.swift in Sources */,
+				9FBFA9C82DA6256A88B85A91 /* TaskDetailView.swift in Sources */,
+				5CBC6C38D262CD60D918712B /* TaskListView.swift in Sources */,
+				B5D719F763D10BEA6B95C1A5 /* TaskMonitorViewModel.swift in Sources */,
+				19922111F7A0157B18CDB60F /* TaskProgressActivity.swift in Sources */,
+				CA4C17B7A6FEEA2DC20CB39F /* TaskTemplateList.swift in Sources */,
+				AAB58C5698706D15C1332B73 /* Theme.swift in Sources */,
+				33A6BDF88FE9012783C96618 /* ToolCallCapsule.swift in Sources */,
+				076E0F0599458A931AAEE041 /* ViewModifiers.swift in Sources */,
+				E29DAFD5639C5B66B7817553 /* VoiceInlineSheet.swift in Sources */,
+				EF32E44B039590F9A43F1878 /* VoiceInputView.swift in Sources */,
+				774728664F1587E846DC9A5B /* VoiceService.swift in Sources */,
+				CA0831D8884602417CF3BE91 /* WLogo.swift in Sources */,
+				DA26FD22682FF3AF5EB51FF6 /* WOTANNApp.swift in Sources */,
+				DAF5C6C1AA00339232EB1692 /* WebSocketClient.swift in Sources */,
+				B533B879C329A2F4E77C73B6 /* WorkView.swift in Sources */,
+				8DE374868B52FC320ED7A786 /* WorkflowsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		426C96F87B5AD36CD531219C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9994611A4FEA35394C416EF1 /* WOTANNShareExtension */;
+			targetProxy = E44C0F288C7678054B36844D /* PBXContainerItemProxy */;
+		};
+		989E5C2BF1E5B07D63A2ED27 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E84547DFBB1E22DB65F26E2F /* WOTANNIntents */;
+			targetProxy = 30A75ACC1FB04BD317191DCE /* PBXContainerItemProxy */;
+		};
+		A8DF5DB339F41C7C19E0AA99 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4AA05FB79F11644DCEF35297 /* WOTANNWidgets */;
+			targetProxy = 770095FEBCCC011C10618659 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		05A3AA2ABB7FE59A661169A2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = WOTANNIntents/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.intents;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		0C3751E1E0FB64BA64D75EA9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = WOTANNShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.share;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1E55B9DBD1B2D96514CC4A93 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = WOTANNShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.share;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2DB8FA8C772BE97A15BFF8F4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WOTANN/Info.plist;
+				INFOPLIST_GENERATION_MODE = GeneratedByXcode;
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "WOTANN needs calendar access to help manage your schedule";
+				INFOPLIST_KEY_NSCameraUsageDescription = "WOTANN uses the camera for QR code scanning and photo-to-code features";
+				INFOPLIST_KEY_NSContactsUsageDescription = "WOTANN can search your contacts when asked by the AI agent";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "WOTANN uses Face ID to protect your sessions";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "WOTANN reads step count, sleep, and active energy data to correlate health trends with your coding sessions";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "WOTANN discovers your desktop on the local network for pairing";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "WOTANN uses your location for location-triggered automations";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "WOTANN uses the microphone for voice input and dictation";
+				INFOPLIST_KEY_NSNFCReaderUsageDescription = "WOTANN uses NFC for quick device pairing";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "WOTANN needs reminders access to create task reminders";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "WOTANN uses speech recognition for voice input and real-time transcription";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortraitUpsideDown";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		35715A6A8931B13D7362B776 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = "TEMP_42C199A8-4003-4D4F-A80D-F761E27AA1FA" /* Local.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		3A24A52EBD497DD04A13C507 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_GENERATION_MODE = GeneratedByXcode;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		9C9E56B90C26606EE9121F25 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = WOTANNIntents/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.intents;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A4E882950D67813BD28C3F4F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_IDENTIFIER = group.com.wotann.shared;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = WOTANNWidgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.widgets;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B545795AF2671D9B24D4AEAE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_GENERATION_MODE = GeneratedByXcode;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		CB00548235E5779EC541E992 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WOTANN/Info.plist;
+				INFOPLIST_GENERATION_MODE = GeneratedByXcode;
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "WOTANN needs calendar access to help manage your schedule";
+				INFOPLIST_KEY_NSCameraUsageDescription = "WOTANN uses the camera for QR code scanning and photo-to-code features";
+				INFOPLIST_KEY_NSContactsUsageDescription = "WOTANN can search your contacts when asked by the AI agent";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "WOTANN uses Face ID to protect your sessions";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "WOTANN reads step count, sleep, and active energy data to correlate health trends with your coding sessions";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "WOTANN discovers your desktop on the local network for pairing";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "WOTANN uses your location for location-triggered automations";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "WOTANN uses the microphone for voice input and dictation";
+				INFOPLIST_KEY_NSNFCReaderUsageDescription = "WOTANN uses NFC for quick device pairing";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "WOTANN needs reminders access to create task reminders";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "WOTANN uses speech recognition for voice input and real-time transcription";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortraitUpsideDown";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		E96B011291432A6F1F017F8B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = "TEMP_42C199A8-4003-4D4F-A80D-F761E27AA1FA" /* Local.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		F32BCC0CF85F41DB2ED2C404 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_IDENTIFIER = group.com.wotann.shared;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = WOTANNWidgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.widgets;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		09E5B89E94706842ADB7FF65 /* Build configuration list for PBXNativeTarget "WOTANNShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0C3751E1E0FB64BA64D75EA9 /* Debug */,
+				1E55B9DBD1B2D96514CC4A93 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5276B36D72C2CE83AC41B81E /* Build configuration list for PBXProject "WOTANN" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E96B011291432A6F1F017F8B /* Debug */,
+				35715A6A8931B13D7362B776 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B0F5DEF458467161C83D1E74 /* Build configuration list for PBXNativeTarget "WOTANN" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2DB8FA8C772BE97A15BFF8F4 /* Debug */,
+				CB00548235E5779EC541E992 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D6DD2843D6BFD1C35C8329F0 /* Build configuration list for PBXNativeTarget "WOTANNIntents" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9C9E56B90C26606EE9121F25 /* Debug */,
+				05A3AA2ABB7FE59A661169A2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E1CE4CA3757A630A434B16E0 /* Build configuration list for PBXNativeTarget "WOTANNWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A4E882950D67813BD28C3F4F /* Debug */,
+				F32BCC0CF85F41DB2ED2C404 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F4597E98D42D0F747B7C3DAB /* Build configuration list for PBXNativeTarget "WOTANNWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B545795AF2671D9B24D4AEAE /* Debug */,
+				3A24A52EBD497DD04A13C507 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 2C087ECC97BEADD530602CB3 /* Project object */;
+}

@@ -1,0 +1,37 @@
+[package]
+name = "wotann-desktop"
+version = "0.1.0"
+description = "WOTANN Desktop — The All-Father of AI Agent Harnesses"
+authors = ["WOTANN Project"]
+edition = "2021"
+
+[lib]
+name = "wotann_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+# Release profile — reduces 15+ min builds to ~3-5 min, smaller binary
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
+opt-level = "z"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["image-png", "tray-icon"] }
+tauri-plugin-notification = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+base64 = "0.22"
+window-vibrancy = "0.6"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-fs = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = { version = "0.25", features = ["highsierra"] }

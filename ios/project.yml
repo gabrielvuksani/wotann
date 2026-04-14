@@ -1,0 +1,185 @@
+name: WOTANN
+options:
+  bundleIdPrefix: com.wotann
+  deploymentTarget:
+    iOS: "18.0"
+    watchOS: "11.0"
+  xcodeVersion: "16.0"
+  defaultConfig: Debug
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+
+configFiles:
+  Debug: Local.xcconfig
+  Release: Local.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "5"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGNING_ALLOWED: "YES"
+    DEAD_CODE_STRIPPING: "YES"
+    ENABLE_USER_SCRIPT_SANDBOXING: "YES"
+    SWIFT_EMIT_LOC_STRINGS: "YES"
+
+schemes:
+  WOTANN:
+    build:
+      targets:
+        WOTANN: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    archive:
+      config: Release
+
+targets:
+
+  # ── Main iOS App ────────────────────────────
+  WOTANN:
+    type: application
+    platform: iOS
+    supportedDestinations: [iOS]
+    sources:
+      - path: WOTANN
+        type: group
+      - path: WOTANNLiveActivity
+        type: group
+        buildPhase: sources
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        SUPPORTED_PLATFORMS: "iphonesimulator iphoneos"
+        SUPPORTS_MACCATALYST: false
+        PRODUCT_BUNDLE_IDENTIFIER: com.wotann.ios
+        INFOPLIST_GENERATION_MODE: GeneratedByXcode
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: true
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortraitUpsideDown"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortraitUpsideDown"
+        INFOPLIST_KEY_NSCameraUsageDescription: "WOTANN uses the camera for QR code scanning and photo-to-code features"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "WOTANN uses the microphone for voice input and dictation"
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "WOTANN discovers your desktop on the local network for pairing"
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "WOTANN uses speech recognition for voice input and real-time transcription"
+        INFOPLIST_KEY_NSFaceIDUsageDescription: "WOTANN uses Face ID to protect your sessions"
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "WOTANN uses your location for location-triggered automations"
+        INFOPLIST_KEY_NSContactsUsageDescription: "WOTANN can search your contacts when asked by the AI agent"
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: "WOTANN needs calendar access to help manage your schedule"
+        INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: "WOTANN needs reminders access to create task reminders"
+        INFOPLIST_KEY_NSNFCReaderUsageDescription: "WOTANN uses NFC for quick device pairing"
+        INFOPLIST_KEY_NSHealthShareUsageDescription: "WOTANN reads step count, sleep, and active energy data to correlate health trends with your coding sessions"
+    info:
+      path: WOTANN/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - wotann
+            CFBundleURLName: com.wotann.ios
+        NSBonjourServices:
+          - _wotann._tcp
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations:
+            CPTemplateApplicationSceneSessionRoleApplication:
+              - UISceneConfigurationName: CarPlay
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).CarPlaySceneDelegate
+    dependencies:
+      - target: WOTANNWidgets
+      - target: WOTANNIntents
+      - target: WOTANNShareExtension
+
+  # ── Widgets Extension ───────────────────────
+  WOTANNWidgets:
+    type: app-extension
+    platform: iOS
+    supportedDestinations: [iOS]
+    sources:
+      - path: WOTANNWidgets
+        type: group
+      - path: WOTANN/DesignSystem
+        type: group
+        buildPhase: sources
+        excludes:
+          # StatusShape.swift references TaskState which lives in the main
+          # app's Models target; extensions use their own status tokens.
+          - "StatusShape.swift"
+    settings:
+      base:
+        SUPPORTED_PLATFORMS: "iphonesimulator iphoneos"
+        PRODUCT_BUNDLE_IDENTIFIER: com.wotann.ios.widgets
+        INFOPLIST_FILE: WOTANNWidgets/Info.plist
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        APP_GROUP_IDENTIFIER: group.com.wotann.shared
+
+  # ── App Intents Extension ───────────────────
+  WOTANNIntents:
+    type: app-extension
+    platform: iOS
+    supportedDestinations: [iOS]
+    sources:
+      - path: WOTANNIntents
+        type: group
+      # Shared networking/security files needed by the intents service
+      - path: WOTANN/Networking/RPCClient.swift
+      - path: WOTANN/Networking/WebSocketClient.swift
+      - path: WOTANN/Security/KeychainManager.swift
+      - path: WOTANN/Security/ECDHManager.swift
+      - path: WOTANN/Models
+        type: group
+        buildPhase: sources
+      - path: WOTANN/Networking/StreamHandler.swift
+    settings:
+      base:
+        SUPPORTED_PLATFORMS: "iphonesimulator iphoneos"
+        PRODUCT_BUNDLE_IDENTIFIER: com.wotann.ios.intents
+        INFOPLIST_FILE: WOTANNIntents/Info.plist
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+
+  # ── Share Extension ─────────────────────────
+  WOTANNShareExtension:
+    type: app-extension
+    platform: iOS
+    supportedDestinations: [iOS]
+    sources:
+      - path: WOTANNShareExtension
+        type: group
+      - path: WOTANN/DesignSystem
+        type: group
+        buildPhase: sources
+        excludes:
+          # StatusShape.swift references TaskState which lives in the main
+          # app's Models target; extensions use their own status tokens.
+          - "StatusShape.swift"
+    settings:
+      base:
+        SUPPORTED_PLATFORMS: "iphonesimulator iphoneos"
+        PRODUCT_BUNDLE_IDENTIFIER: com.wotann.ios.share
+        INFOPLIST_FILE: WOTANNShareExtension/Info.plist
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+
+  # ── Watch App ───────────────────────────────
+  WOTANNWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: WOTANNWatch
+        type: group
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wotann.ios.watchkitapp
+        INFOPLIST_GENERATION_MODE: GeneratedByXcode
+        GENERATE_INFOPLIST_FILE: true
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        WATCHOS_DEPLOYMENT_TARGET: "11.0"

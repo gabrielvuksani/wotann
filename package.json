@@ -1,0 +1,90 @@
+{
+  "name": "wotann",
+  "version": "0.1.0",
+  "description": "WOTANN — The All-Father of AI Agent Harnesses",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "wotann": "dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./lib": "./dist/lib.js"
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    "install.sh"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gabrielvuksani/wotann.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gabrielvuksani/wotann/issues"
+  },
+  "homepage": "https://wotann.com",
+  "scripts": {
+    "build": "tsc && chmod +x dist/index.js",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.{ts,tsx,js,jsx}\"",
+    "lint:fix": "eslint --fix \"src/**/*.{ts,tsx,js,jsx}\"",
+    "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,md}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepare": "tsc && chmod +x dist/index.js",
+    "postinstall": "npm run build || echo 'Build failed — run npm run build manually'",
+    "wotann": "tsx src/index.ts",
+    "test-provider": "tsx src/cli/test-provider.ts"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "harness",
+    "llm",
+    "cli",
+    "wotann",
+    "multi-provider"
+  ],
+  "author": "WOTANN Project",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.90",
+    "@anthropic-ai/sdk": "^0.82.0",
+    "better-sqlite3": "^12.8.0",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "ink": "^6.8.0",
+    "react": "^19.2.4",
+    "ws": "^8.18.0",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/ws": "^8.5.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.1.0",
+    "ink-testing-library": "^4.0.0",
+    "prettier": "^3.4.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
+  },
+  "overrides": {
+    "picomatch": "3.0.1"
+  }
+}

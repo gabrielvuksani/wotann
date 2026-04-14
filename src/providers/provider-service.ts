@@ -1,0 +1,1306 @@
+/**
+ * Unified provider service — single source of truth for provider state.
+ *
+ * Handles credential detection, model discovery, login flows, and state
+ * synchronisation across the daemon, desktop UI, and iOS companion. Replaces
+ * the ad-hoc per-call probes that used to live inside the RPC handler.
+ *
+ * Architecture:
+ *   - A static registry of PROVIDER_SPECS defines every supported provider
+ *   - CredentialStore unifies env vars + ~/.wotann/providers.env + OAuth files
+ *   - Per-provider `detect` and `listModels` functions encapsulate discovery
+ *   - ProviderService caches discovery results with TTL and emits change events
+ *   - Login dispatch picks the right flow (apiKey/oauth/subscription/cli) per provider
+ *
+ * This is the only module that should read provider env vars. Every other
+ * consumer (adapters, router, UI) goes through the service.
+ */
+
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { EventEmitter } from "node:events";
+import { execFileSync } from "node:child_process";
+
+// ── Types ──────────────────────────────────────────────────────
+
+export type AuthMethod = "apiKey" | "oauth" | "subscription" | "cli" | "local";
+export type ProviderTier = "frontier" | "fast" | "local" | "specialised" | "free";
+
+export interface ProviderModel {
+  readonly id: string;
+  readonly name: string;
+  readonly contextWindow: number;
+  /** USD per million input tokens. 0 = free (local or included). */
+  readonly costPerMTokInput: number;
+  /** USD per million output tokens. */
+  readonly costPerMTokOutput: number;
+  readonly supportsVision?: boolean;
+  readonly supportsTools?: boolean;
+  readonly supportsThinking?: boolean;
+}
+
+export interface ProviderCredential {
+  readonly method: AuthMethod;
+  /** Human-readable label for the active credential (e.g. "ChatGPT Plus", "API Key"). */
+  readonly label: string;
+  /** Opaque token material — never returned to UI in full. */
+  readonly token?: string;
+  /** Where the credential was sourced from, for debugging. */
+  readonly source: "env" | "providers.env" | "oauth-file" | "cli" | "keychain";
+  /** Unix seconds when the credential expires, if applicable. */
+  readonly expiresAt?: number;
+}
+
+export interface ProviderState {
+  readonly id: string;
+  readonly name: string;
+  readonly tier: ProviderTier;
+  readonly configured: boolean;
+  readonly credential: ProviderCredential | null;
+  readonly models: readonly ProviderModel[];
+  readonly defaultModel: string | null;
+  /** Unix ms when model list was last refreshed. */
+  readonly lastRefreshedAt: number;
+  /** Last discovery error message, if discovery failed. */
+  readonly lastError?: string;
+}
+
+export interface ProviderSpec {
+  readonly id: string;
+  readonly name: string;
+  readonly tier: ProviderTier;
+  /** Env var names accepted for this provider, in priority order. */
+  readonly envKeys: readonly string[];
+  /** Auth methods supported by this provider, in priority order. */
+  readonly supportedMethods: readonly AuthMethod[];
+  /** Public docs URL (for UI "How to get a key" link). */
+  readonly docsUrl?: string;
+  /** OAuth-specific config if supportedMethods includes oauth. */
+  readonly oauth?: {
+    readonly authorizeUrl: string;
+    readonly tokenUrl: string;
+    readonly clientId: string;
+    readonly scopes: readonly string[];
+  };
+  /** Built-in fallback model list, used when API discovery fails. */
+  readonly fallbackModels: readonly ProviderModel[];
+  /**
+   * Detect whether this provider has usable credentials.
+   * Returns null if not configured.
+   */
+  detectCredential(ctx: DetectContext): Promise<ProviderCredential | null>;
+  /**
+   * Fetch the live model list. Should return fallbackModels on API failure.
+   */
+  listModels(credential: ProviderCredential | null): Promise<readonly ProviderModel[]>;
+}
+
+export interface DetectContext {
+  readonly env: Readonly<NodeJS.ProcessEnv>;
+  readonly storedCredentials: Readonly<Record<string, SavedCredential>>;
+}
+
+export interface SavedCredential {
+  readonly method: AuthMethod;
+  readonly token: string;
+  readonly expiresAt?: number;
+  readonly label?: string;
+  readonly savedAt: number;
+}
+
+// ── Credential Store ───────────────────────────────────────────
+
+/**
+ * Unified credential store. Writes to ~/.wotann/credentials.json with 0600
+ * permissions. Env vars always win over stored creds (to honour user intent
+ * when they explicitly export a key in their shell).
+ */
+export class CredentialStore {
+  private readonly path: string;
+  private cache: Record<string, SavedCredential> | null = null;
+
+  constructor(path?: string) {
+    this.path = path ?? join(homedir(), ".wotann", "credentials.json");
+  }
+
+  load(): Record<string, SavedCredential> {
+    if (this.cache) return this.cache;
+    if (!existsSync(this.path)) {
+      this.cache = {};
+      return this.cache;
+    }
+    try {
+      const raw = readFileSync(this.path, "utf-8");
+      const parsed = JSON.parse(raw) as Record<string, SavedCredential>;
+      this.cache = parsed;
+      return parsed;
+    } catch {
+      this.cache = {};
+      return this.cache;
+    }
+  }
+
+  save(providerId: string, credential: SavedCredential): void {
+    const current = this.load();
+    this.cache = { ...current, [providerId]: credential };
+    this.persist();
+  }
+
+  delete(providerId: string): void {
+    const current = this.load();
+    const { [providerId]: _removed, ...rest } = current;
+    this.cache = rest;
+    this.persist();
+  }
+
+  get(providerId: string): SavedCredential | undefined {
+    return this.load()[providerId];
+  }
+
+  all(): Readonly<Record<string, SavedCredential>> {
+    return this.load();
+  }
+
+  private persist(): void {
+    const dir = join(this.path, "..");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(this.path, JSON.stringify(this.cache, null, 2), { encoding: "utf-8" });
+    try {
+      chmodSync(this.path, 0o600);
+    } catch {
+      /* best effort on FSes without chmod */
+    }
+  }
+}
+
+// ── providers.env loader ───────────────────────────────────────
+
+/**
+ * Load ~/.wotann/providers.env key=value lines into the returned record.
+ * Does NOT mutate process.env — callers can merge if they want.
+ */
+export function loadProvidersEnvFile(path?: string): Record<string, string> {
+  const resolved = path ?? join(homedir(), ".wotann", "providers.env");
+  if (!existsSync(resolved)) return {};
+  try {
+    const raw = readFileSync(resolved, "utf-8");
+    const out: Record<string, string> = {};
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const match = trimmed.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+      if (!match) continue;
+      const key = match[1]!;
+      let value = match[2] ?? "";
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      out[key] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Write a single key to ~/.wotann/providers.env, preserving other lines
+ * and comments. Atomic — writes to temp + rename.
+ */
+export function writeProvidersEnvKey(key: string, value: string, path?: string): void {
+  const resolved = path ?? join(homedir(), ".wotann", "providers.env");
+  const dir = join(resolved, "..");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  let existing = "";
+  if (existsSync(resolved)) {
+    try {
+      existing = readFileSync(resolved, "utf-8");
+    } catch {
+      existing = "";
+    }
+  }
+  const lines = existing.split(/\r?\n/);
+  const keyPattern = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=`);
+  let replaced = false;
+  const newLines = lines.map((line) => {
+    if (keyPattern.test(line)) {
+      replaced = true;
+      return `${key}=${value}`;
+    }
+    return line;
+  });
+  if (!replaced) newLines.push(`${key}=${value}`);
+  // Strip trailing empties
+  while (newLines.length > 0 && newLines[newLines.length - 1] === "") newLines.pop();
+  const tmp = `${resolved}.tmp`;
+  writeFileSync(tmp, newLines.join("\n") + "\n", { encoding: "utf-8" });
+  try {
+    chmodSync(tmp, 0o600);
+  } catch {
+    /* best effort */
+  }
+  const { renameSync } = require("node:fs") as typeof import("node:fs");
+  renameSync(tmp, resolved);
+}
+
+/**
+ * Delete a key from ~/.wotann/providers.env.
+ */
+export function deleteProvidersEnvKey(key: string, path?: string): void {
+  const resolved = path ?? join(homedir(), ".wotann", "providers.env");
+  if (!existsSync(resolved)) return;
+  const existing = readFileSync(resolved, "utf-8");
+  const keyPattern = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=`);
+  const lines = existing.split(/\r?\n/).filter((line) => !keyPattern.test(line));
+  writeFileSync(resolved, lines.join("\n"), { encoding: "utf-8" });
+  try {
+    chmodSync(resolved, 0o600);
+  } catch {
+    /* best effort */
+  }
+}
+
+// ── Helpers ────────────────────────────────────────────────────
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = 5000,
+): Promise<Response | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch {
+    return null;
+  }
+}
+
+function pickEnv(
+  keys: readonly string[],
+  env: Readonly<NodeJS.ProcessEnv>,
+): { key: string; value: string } | null {
+  for (const key of keys) {
+    const v = env[key];
+    if (v && v.trim().length > 0) return { key, value: v };
+  }
+  return null;
+}
+
+// ── Built-in Provider Specs ────────────────────────────────────
+
+const ANTHROPIC_FALLBACK: readonly ProviderModel[] = [
+  {
+    id: "claude-opus-4-6",
+    name: "Claude Opus 4.6",
+    contextWindow: 200_000,
+    costPerMTokInput: 15,
+    costPerMTokOutput: 75,
+    supportsVision: true,
+    supportsTools: true,
+    supportsThinking: true,
+  },
+  {
+    id: "claude-sonnet-4-6",
+    name: "Claude Sonnet 4.6",
+    contextWindow: 200_000,
+    costPerMTokInput: 3,
+    costPerMTokOutput: 15,
+    supportsVision: true,
+    supportsTools: true,
+    supportsThinking: true,
+  },
+  {
+    id: "claude-haiku-4-5-20251001",
+    name: "Claude Haiku 4.5",
+    contextWindow: 200_000,
+    costPerMTokInput: 0.25,
+    costPerMTokOutput: 1.25,
+    supportsVision: true,
+    supportsTools: true,
+  },
+];
+
+const anthropicSpec: ProviderSpec = {
+  id: "anthropic",
+  name: "Anthropic",
+  tier: "frontier",
+  envKeys: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
+  supportedMethods: ["apiKey", "oauth", "subscription", "cli"],
+  docsUrl: "https://console.anthropic.com/settings/keys",
+  fallbackModels: ANTHROPIC_FALLBACK,
+  async detectCredential(ctx) {
+    // 1. API key from env (highest priority)
+    const env = pickEnv(["ANTHROPIC_API_KEY"], ctx.env);
+    if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
+    // 2. Claude Code OAuth token
+    const oauth = pickEnv(["CLAUDE_CODE_OAUTH_TOKEN"], ctx.env);
+    if (oauth)
+      return { method: "oauth", label: "Claude Code OAuth", token: oauth.value, source: "env" };
+    // 3. Saved credential (via Sign in with Claude Max)
+    const saved = ctx.storedCredentials["anthropic"];
+    if (saved)
+      return {
+        method: saved.method,
+        label: saved.label ?? "Claude Max",
+        token: saved.token,
+        source: "keychain",
+        expiresAt: saved.expiresAt,
+      };
+    // 4. Anthropic OAuth file written by prior login
+    const oauthFile = join(homedir(), ".wotann", "anthropic-oauth.json");
+    if (existsSync(oauthFile)) {
+      try {
+        const data = JSON.parse(readFileSync(oauthFile, "utf-8")) as {
+          access_token?: string;
+          expires_at?: number;
+        };
+        if (data.access_token)
+          return {
+            method: "oauth",
+            label: "Claude Max",
+            token: data.access_token,
+            source: "oauth-file",
+            expiresAt: data.expires_at,
+          };
+      } catch {
+        /* malformed */
+      }
+    }
+    // 5. Claude CLI detection (last resort — no token, just presence)
+    try {
+      execFileSync("claude", ["--version"], { stdio: "pipe", timeout: 2000 });
+      return { method: "cli", label: "Claude CLI", source: "cli" };
+    } catch {
+      /* claude CLI not installed */
+    }
+    return null;
+  },
+  async listModels(credential) {
+    if (credential?.method === "apiKey" && credential.token) {
+      const res = await fetchWithTimeout("https://api.anthropic.com/v1/models", {
+        headers: { "x-api-key": credential.token, "anthropic-version": "2023-06-01" },
+      });
+      if (res?.ok) {
+        const data = (await res.json()) as { data?: Array<{ id: string; display_name?: string }> };
+        const models = (data.data ?? []).map((m) => ({
+          id: m.id,
+          name: m.display_name ?? m.id,
+          contextWindow: 200_000,
+          costPerMTokInput: 3,
+          costPerMTokOutput: 15,
+          supportsVision: true,
+          supportsTools: true,
+          supportsThinking: m.id.includes("opus") || m.id.includes("sonnet"),
+        }));
+        if (models.length > 0) return models;
+      }
+    }
+    return ANTHROPIC_FALLBACK;
+  },
+};
+
+const openaiSpec: ProviderSpec = {
+  id: "openai",
+  name: "OpenAI",
+  tier: "frontier",
+  envKeys: ["OPENAI_API_KEY"],
+  supportedMethods: ["apiKey"],
+  docsUrl: "https://platform.openai.com/api-keys",
+  fallbackModels: [
+    {
+      id: "gpt-5",
+      name: "GPT-5",
+      contextWindow: 400_000,
+      costPerMTokInput: 5,
+      costPerMTokOutput: 15,
+      supportsVision: true,
+      supportsTools: true,
+      supportsThinking: true,
+    },
+    {
+      id: "o4-mini",
+      name: "o4-mini",
+      contextWindow: 128_000,
+      costPerMTokInput: 3,
+      costPerMTokOutput: 12,
+      supportsThinking: true,
+      supportsTools: true,
+    },
+    {
+      id: "gpt-4.1",
+      name: "GPT-4.1",
+      contextWindow: 1_000_000,
+      costPerMTokInput: 2,
+      costPerMTokOutput: 8,
+      supportsVision: true,
+      supportsTools: true,
+    },
+  ],
+  async detectCredential(ctx) {
+    const env = pickEnv(this.envKeys, ctx.env);
+    if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
+    const saved = ctx.storedCredentials["openai"];
+    if (saved)
+      return {
+        method: saved.method,
+        label: saved.label ?? "API Key",
+        token: saved.token,
+        source: "keychain",
+      };
+    return null;
+  },
+  async listModels(credential) {
+    if (credential?.token) {
+      const res = await fetchWithTimeout("https://api.openai.com/v1/models", {
+        headers: { Authorization: `Bearer ${credential.token}` },
+      });
+      if (res?.ok) {
+        const data = (await res.json()) as { data?: Array<{ id: string }> };
+        const chatModels = (data.data ?? []).filter(
+          (m) =>
+            m.id.includes("gpt") ||
+            m.id.startsWith("o3") ||
+            m.id.startsWith("o4") ||
+            m.id.startsWith("o5"),
+        );
+        const models = chatModels.map((m) => ({
+          id: m.id,
+          name: m.id,
+          contextWindow: m.id.includes("gpt-4.1") ? 1_000_000 : 128_000,
+          costPerMTokInput: 2,
+          costPerMTokOutput: 8,
+          supportsVision: true,
+          supportsTools: true,
+          supportsThinking: m.id.startsWith("o") || m.id.includes("thinking"),
+        }));
+        if (models.length > 0) return models;
+      }
+    }
+    return this.fallbackModels;
+  },
+};
+
+const codexSpec: ProviderSpec = {
+  id: "codex",
+  name: "ChatGPT (Codex)",
+  tier: "frontier",
+  envKeys: ["CODEX_API_KEY"],
+  supportedMethods: ["subscription", "apiKey", "oauth"],
+  docsUrl: "https://chatgpt.com/codex",
+  fallbackModels: [
+    {
+      id: "gpt-5-codex",
+      name: "GPT-5 Codex",
+      contextWindow: 200_000,
+      costPerMTokInput: 0,
+      costPerMTokOutput: 0,
+      supportsTools: true,
+    },
+    {
+      id: "gpt-5.4",
+      name: "GPT-5.4",
+      contextWindow: 1_000_000,
+      costPerMTokInput: 0,
+      costPerMTokOutput: 0,
+      supportsTools: true,
+      supportsThinking: true,
+    },
+    {
+      id: "o4-mini",
+      name: "o4-mini",
+      contextWindow: 200_000,
+      costPerMTokInput: 0,
+      costPerMTokOutput: 0,
+      supportsThinking: true,
+    },
+    {
+      id: "gpt-4.1",
+      name: "GPT-4.1",
+      contextWindow: 1_000_000,
+      costPerMTokInput: 0,
+      costPerMTokOutput: 0,
+      supportsTools: true,
+    },
+  ],
+  async detectCredential(ctx) {
+    const env = pickEnv(["CODEX_API_KEY"], ctx.env);
+    if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
+    const authPath = join(homedir(), ".codex", "auth.json");
+    if (existsSync(authPath)) {
+      try {
+        const data = JSON.parse(readFileSync(authPath, "utf-8")) as {
+          tokens?: { id_token?: string; access_token?: string };
+        };
+        const token = data.tokens?.id_token ?? data.tokens?.access_token;
+        if (token)
+          return { method: "subscription", label: "ChatGPT Plus/Pro", token, source: "oauth-file" };
+      } catch {
+        /* malformed auth.json */
+      }
+    }
+    return null;
+  },
+  async listModels(credential) {
+    if (credential?.method === "subscription" && credential.token) {
+      // Decode the plan type from the JWT payload (no signature verify here — that's
+      // done elsewhere before the credential is accepted into the store)
+      try {
+        const parts = credential.token.split(".");
+        if (parts.length >= 2) {
+          const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf-8")) as {
+            "https://api.openai.com/auth"?: { chatgpt_plan_type?: string };
+          };
+          const plan = payload["https://api.openai.com/auth"]?.chatgpt_plan_type ?? "free";
+          const freeModels = codexSpec.fallbackModels.filter(
+            (m) => m.id.includes("mini") || m.id.includes("nano"),
+          );
+          if (plan === "free")
+            return freeModels.length > 0 ? freeModels : codexSpec.fallbackModels.slice(0, 2);
+        }
+      } catch {
+        /* payload decode failed */
+      }
+    }
+    return codexSpec.fallbackModels;
+  },
+};
+
+const geminiSpec: ProviderSpec = {
+  id: "gemini",
+  name: "Google Gemini",
+  tier: "frontier",
+  envKeys: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+  supportedMethods: ["apiKey"],
+  docsUrl: "https://aistudio.google.com/apikey",
+  fallbackModels: [
+    {
+      id: "gemini-2.5-pro",
+      name: "Gemini 2.5 Pro",
+      contextWindow: 2_000_000,
+      costPerMTokInput: 1.25,
+      costPerMTokOutput: 5,
+      supportsVision: true,
+      supportsTools: true,
+      supportsThinking: true,
+    },
+    {
+      id: "gemini-2.5-flash",
+      name: "Gemini 2.5 Flash",
+      contextWindow: 1_000_000,
+      costPerMTokInput: 0.3,
+      costPerMTokOutput: 1.2,
+      supportsVision: true,
+      supportsTools: true,
+    },
+  ],
+  async detectCredential(ctx) {
+    const env = pickEnv(this.envKeys, ctx.env);
+    if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
+    const saved = ctx.storedCredentials["gemini"];
+    if (saved)
+      return { method: "apiKey", label: "API Key", token: saved.token, source: "keychain" };
+    return null;
+  },
+  async listModels(credential) {
+    if (credential?.token) {
+      const res = await fetchWithTimeout(
+        "https://generativelanguage.googleapis.com/v1beta/models",
+        { headers: { "x-goog-api-key": credential.token } },
+      );
+      if (res?.ok) {
+        const data = (await res.json()) as {
+          models?: Array<{ name: string; displayName?: string; inputTokenLimit?: number }>;
+        };
+        const models = (data.models ?? [])
+          .filter((m) => m.name.includes("gemini"))
+          .map((m) => ({
+            id: m.name.replace("models/", ""),
+            name: m.displayName ?? m.name,
+            contextWindow: m.inputTokenLimit ?? 1_000_000,
+            costPerMTokInput: 0.5,
+            costPerMTokOutput: 1.5,
+            supportsVision: true,
+            supportsTools: true,
+          }));
+        if (models.length > 0) return models;
+      }
+    }
+    return this.fallbackModels;
+  },
+};
+
+const ollamaSpec: ProviderSpec = {
+  id: "ollama",
+  name: "Ollama (Local)",
+  tier: "local",
+  envKeys: ["OLLAMA_HOST", "OLLAMA_URL"],
+  supportedMethods: ["local"],
+  fallbackModels: [],
+  async detectCredential(ctx) {
+    const host = ctx.env["OLLAMA_HOST"] ?? ctx.env["OLLAMA_URL"] ?? "http://localhost:11434";
+    const res = await fetchWithTimeout(`${host}/api/tags`, {}, 2000);
+    if (res?.ok) return { method: "local", label: "Local daemon", source: "env" };
+    return null;
+  },
+  async listModels(_credential) {
+    const host =
+      process.env["OLLAMA_HOST"] ?? process.env["OLLAMA_URL"] ?? "http://localhost:11434";
+    const res = await fetchWithTimeout(`${host}/api/tags`, {}, 3000);
+    if (!res?.ok) return [];
+    try {
+      const data = (await res.json()) as {
+        models?: Array<{ name: string; details?: { parameter_size?: string } }>;
+      };
+      return (data.models ?? []).map((m) => ({
+        id: m.name,
+        name: m.name.replace(":latest", ""),
+        contextWindow: 128_000,
+        costPerMTokInput: 0,
+        costPerMTokOutput: 0,
+        supportsTools: true,
+      }));
+    } catch {
+      return [];
+    }
+  },
+};
+
+const groqSpec: ProviderSpec = {
+  id: "groq",
+  name: "Groq",
+  tier: "fast",
+  envKeys: ["GROQ_API_KEY"],
+  supportedMethods: ["apiKey"],
+  docsUrl: "https://console.groq.com/keys",
+  fallbackModels: [
+    {
+      id: "llama-3.3-70b-versatile",
+      name: "Llama 3.3 70B",
+      contextWindow: 128_000,
+      costPerMTokInput: 0.59,
+      costPerMTokOutput: 0.79,
+      supportsTools: true,
+    },
+  ],
+  async detectCredential(ctx) {
+    const env = pickEnv(this.envKeys, ctx.env);
+    if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
+    const saved = ctx.storedCredentials["groq"];
+    if (saved)
+      return { method: "apiKey", label: "API Key", token: saved.token, source: "keychain" };
+    return null;
+  },
+  async listModels(credential) {
+    if (credential?.token) {
+      const res = await fetchWithTimeout("https://api.groq.com/openai/v1/models", {
+        headers: { Authorization: `Bearer ${credential.token}` },
+      });
+      if (res?.ok) {
+        const data = (await res.json()) as { data?: Array<{ id: string }> };
+        return (data.data ?? []).map((m) => ({
+          id: m.id,
+          name: m.id,
+          contextWindow: 128_000,
+          costPerMTokInput: 0.5,
+          costPerMTokOutput: 0.5,
+          supportsTools: true,
+        }));
+      }
+    }
+    return this.fallbackModels;
+  },
+};
+
+// Generic OpenAI-compatible provider factory used by Mistral / DeepSeek / xAI / Perplexity /
+// Together / Fireworks / SambaNova / OpenRouter / Cerebras / HuggingFace.
+function openAICompatSpec(args: {
+  id: string;
+  name: string;
+  tier: ProviderTier;
+  envKeys: readonly string[];
+  baseUrl: string;
+  fallback: readonly ProviderModel[];
+  docsUrl?: string;
+}): ProviderSpec {
+  const docsUrlEntry: Pick<ProviderSpec, "docsUrl"> = args.docsUrl ? { docsUrl: args.docsUrl } : {};
+  return {
+    id: args.id,
+    name: args.name,
+    tier: args.tier,
+    envKeys: args.envKeys,
+    supportedMethods: ["apiKey"],
+    ...docsUrlEntry,
+    fallbackModels: args.fallback,
+    async detectCredential(ctx) {
+      const env = pickEnv(args.envKeys, ctx.env);
+      if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
+      const saved = ctx.storedCredentials[args.id];
+      if (saved)
+        return { method: "apiKey", label: "API Key", token: saved.token, source: "keychain" };
+      return null;
+    },
+    async listModels(credential) {
+      if (credential?.token) {
+        const res = await fetchWithTimeout(`${args.baseUrl}/models`, {
+          headers: { Authorization: `Bearer ${credential.token}` },
+        });
+        if (res?.ok) {
+          const data = (await res.json()) as { data?: Array<{ id: string; name?: string }> };
+          const models = (data.data ?? []).map((m) => ({
+            id: m.id,
+            name: m.name ?? m.id,
+            contextWindow: 128_000,
+            costPerMTokInput: 1,
+            costPerMTokOutput: 3,
+            supportsTools: true,
+          }));
+          if (models.length > 0) return models;
+        }
+      }
+      return args.fallback;
+    },
+  };
+}
+
+const copilotSpec: ProviderSpec = {
+  id: "copilot",
+  name: "GitHub Copilot",
+  tier: "frontier",
+  envKeys: ["GH_TOKEN", "GITHUB_TOKEN"],
+  supportedMethods: ["oauth", "apiKey"],
+  docsUrl: "https://github.com/settings/tokens",
+  fallbackModels: [
+    {
+      id: "copilot-gpt-4.1",
+      name: "GPT-4.1 (Copilot)",
+      contextWindow: 128_000,
+      costPerMTokInput: 0,
+      costPerMTokOutput: 0,
+      supportsTools: true,
+    },
+    {
+      id: "copilot-claude-sonnet",
+      name: "Claude Sonnet (Copilot)",
+      contextWindow: 200_000,
+      costPerMTokInput: 0,
+      costPerMTokOutput: 0,
+      supportsTools: true,
+    },
+  ],
+  async detectCredential(ctx) {
+    const env = pickEnv(this.envKeys, ctx.env);
+    if (env) return { method: "apiKey", label: "GitHub PAT", token: env.value, source: "env" };
+    const saved = ctx.storedCredentials["copilot"];
+    if (saved)
+      return {
+        method: saved.method,
+        label: saved.label ?? "GitHub Copilot",
+        token: saved.token,
+        source: "keychain",
+      };
+    return null;
+  },
+  async listModels(credential) {
+    if (credential?.token) {
+      const tokenRes = await fetchWithTimeout("https://api.github.com/copilot_internal/v2/token", {
+        headers: { Authorization: `token ${credential.token}` },
+      });
+      if (tokenRes?.ok) {
+        const tokenData = (await tokenRes.json()) as {
+          token?: string;
+          endpoints?: { api?: string };
+        };
+        const copilotToken = tokenData.token;
+        const apiBase = tokenData.endpoints?.api ?? "https://api.githubcopilot.com";
+        if (copilotToken) {
+          const modelsRes = await fetchWithTimeout(`${apiBase}/models`, {
+            headers: { Authorization: `Bearer ${copilotToken}` },
+          });
+          if (modelsRes?.ok) {
+            const modelsData = (await modelsRes.json()) as {
+              data?: Array<{ id: string; name?: string }>;
+            };
+            const models = (modelsData.data ?? []).map((m) => ({
+              id: m.id,
+              name: m.name ?? m.id,
+              contextWindow: 128_000,
+              costPerMTokInput: 0,
+              costPerMTokOutput: 0,
+              supportsTools: true,
+            }));
+            if (models.length > 0) return models;
+          }
+        }
+      }
+    }
+    return this.fallbackModels;
+  },
+};
+
+export const PROVIDER_SPECS: readonly ProviderSpec[] = [
+  anthropicSpec,
+  openaiSpec,
+  codexSpec,
+  geminiSpec,
+  ollamaSpec,
+  groqSpec,
+  copilotSpec,
+  openAICompatSpec({
+    id: "mistral",
+    name: "Mistral",
+    tier: "frontier",
+    envKeys: ["MISTRAL_API_KEY"],
+    baseUrl: "https://api.mistral.ai/v1",
+    docsUrl: "https://console.mistral.ai/api-keys",
+    fallback: [
+      {
+        id: "mistral-large-latest",
+        name: "Mistral Large",
+        contextWindow: 128_000,
+        costPerMTokInput: 2,
+        costPerMTokOutput: 6,
+        supportsTools: true,
+      },
+      {
+        id: "codestral-latest",
+        name: "Codestral",
+        contextWindow: 128_000,
+        costPerMTokInput: 0.3,
+        costPerMTokOutput: 0.9,
+        supportsTools: true,
+      },
+    ],
+  }),
+  openAICompatSpec({
+    id: "deepseek",
+    name: "DeepSeek",
+    tier: "fast",
+    envKeys: ["DEEPSEEK_API_KEY"],
+    baseUrl: "https://api.deepseek.com",
+    docsUrl: "https://platform.deepseek.com/api_keys",
+    fallback: [
+      {
+        id: "deepseek-chat",
+        name: "DeepSeek V3",
+        contextWindow: 64_000,
+        costPerMTokInput: 0.27,
+        costPerMTokOutput: 1.1,
+        supportsTools: true,
+      },
+      {
+        id: "deepseek-reasoner",
+        name: "DeepSeek R1",
+        contextWindow: 64_000,
+        costPerMTokInput: 0.55,
+        costPerMTokOutput: 2.19,
+        supportsThinking: true,
+      },
+    ],
+  }),
+  openAICompatSpec({
+    id: "perplexity",
+    name: "Perplexity",
+    tier: "specialised",
+    envKeys: ["PERPLEXITY_API_KEY"],
+    baseUrl: "https://api.perplexity.ai",
+    docsUrl: "https://www.perplexity.ai/settings/api",
+    fallback: [
+      {
+        id: "sonar-pro",
+        name: "Sonar Pro",
+        contextWindow: 128_000,
+        costPerMTokInput: 3,
+        costPerMTokOutput: 15,
+      },
+    ],
+  }),
+  openAICompatSpec({
+    id: "xai",
+    name: "xAI (Grok)",
+    tier: "frontier",
+    envKeys: ["XAI_API_KEY"],
+    baseUrl: "https://api.x.ai/v1",
+    docsUrl: "https://console.x.ai/",
+    fallback: [
+      {
+        id: "grok-4-0709",
+        name: "Grok 4",
+        contextWindow: 256_000,
+        costPerMTokInput: 3,
+        costPerMTokOutput: 15,
+        supportsVision: true,
+        supportsTools: true,
+      },
+      {
+        id: "grok-code-fast-1",
+        name: "Grok Code Fast",
+        contextWindow: 128_000,
+        costPerMTokInput: 0.2,
+        costPerMTokOutput: 1.5,
+      },
+    ],
+  }),
+  openAICompatSpec({
+    id: "together",
+    name: "Together AI",
+    tier: "fast",
+    envKeys: ["TOGETHER_API_KEY"],
+    baseUrl: "https://api.together.xyz/v1",
+    docsUrl: "https://api.together.xyz/settings/api-keys",
+    fallback: [
+      {
+        id: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        name: "Llama 3.3 70B Turbo",
+        contextWindow: 131_072,
+        costPerMTokInput: 0.88,
+        costPerMTokOutput: 0.88,
+        supportsTools: true,
+      },
+    ],
+  }),
+  openAICompatSpec({
+    id: "fireworks",
+    name: "Fireworks AI",
+    tier: "fast",
+    envKeys: ["FIREWORKS_API_KEY"],
+    baseUrl: "https://api.fireworks.ai/inference/v1",
+    docsUrl: "https://fireworks.ai/account/api-keys",
+    fallback: [
+      {
+        id: "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        name: "Llama 3.3 70B",
+        contextWindow: 131_072,
+        costPerMTokInput: 0.9,
+        costPerMTokOutput: 0.9,
+        supportsTools: true,
+      },
+    ],
+  }),
+  openAICompatSpec({
+    id: "sambanova",
+    name: "SambaNova",
+    tier: "fast",
+    envKeys: ["SAMBANOVA_API_KEY"],
+    baseUrl: "https://api.sambanova.ai/v1",
+    docsUrl: "https://cloud.sambanova.ai/apis",
+    fallback: [
+      {
+        id: "Meta-Llama-3.3-70B-Instruct",
+        name: "Llama 3.3 70B",
+        contextWindow: 131_072,
+        costPerMTokInput: 0.6,
+        costPerMTokOutput: 1.2,
+        supportsTools: true,
+      },
+    ],
+  }),
+  openAICompatSpec({
+    id: "openrouter",
+    name: "OpenRouter",
+    tier: "specialised",
+    envKeys: ["OPENROUTER_API_KEY"],
+    baseUrl: "https://openrouter.ai/api/v1",
+    docsUrl: "https://openrouter.ai/keys",
+    fallback: [],
+  }),
+  openAICompatSpec({
+    id: "cerebras",
+    name: "Cerebras",
+    tier: "fast",
+    envKeys: ["CEREBRAS_API_KEY"],
+    baseUrl: "https://api.cerebras.ai/v1",
+    docsUrl: "https://cloud.cerebras.ai/",
+    fallback: [
+      {
+        id: "llama-3.3-70b",
+        name: "Llama 3.3 70B (Cerebras)",
+        contextWindow: 128_000,
+        costPerMTokInput: 0.6,
+        costPerMTokOutput: 0.6,
+        supportsTools: true,
+      },
+    ],
+  }),
+  openAICompatSpec({
+    id: "huggingface",
+    name: "Hugging Face",
+    tier: "specialised",
+    envKeys: ["HF_TOKEN", "HUGGINGFACE_API_KEY", "HUGGING_FACE_HUB_TOKEN"],
+    baseUrl: "https://api-inference.huggingface.co/v1",
+    docsUrl: "https://huggingface.co/settings/tokens",
+    fallback: [],
+  }),
+];
+
+// ── ProviderService ────────────────────────────────────────────
+
+/**
+ * Events emitted by the ProviderService:
+ *
+ *   - "changed"        — any provider state changed
+ *   - "credential"     — a credential was added/updated/removed
+ *   - "activeChanged"  — the active provider+model changed
+ *   - "refreshed"      — a discovery pass completed
+ */
+export type ProviderEvent = "changed" | "credential" | "activeChanged" | "refreshed";
+
+export interface ProviderSnapshot {
+  readonly providers: readonly ProviderState[];
+  readonly active: { provider: string; model: string } | null;
+  readonly lastRefreshedAt: number;
+}
+
+export class ProviderService extends EventEmitter {
+  private readonly store: CredentialStore;
+  private readonly specs: ReadonlyMap<string, ProviderSpec>;
+  private states: Map<string, ProviderState> = new Map();
+  private lastRefreshedAt = 0;
+  private refreshing: Promise<void> | null = null;
+  private active: { provider: string; model: string } | null = null;
+  /** TTL for cached discovery results — forced refresh returns earlier. */
+  private readonly cacheTtlMs: number;
+
+  constructor(options: { cacheTtlMs?: number; credentialStorePath?: string } = {}) {
+    super();
+    this.store = new CredentialStore(options.credentialStorePath);
+    this.specs = new Map(PROVIDER_SPECS.map((s) => [s.id, s]));
+    this.cacheTtlMs = options.cacheTtlMs ?? 60_000;
+  }
+
+  /** Available providers (even those not configured). */
+  knownProviderIds(): readonly string[] {
+    return [...this.specs.keys()];
+  }
+
+  getSpec(id: string): ProviderSpec | undefined {
+    return this.specs.get(id);
+  }
+
+  /**
+   * Return the current snapshot. If the cache is older than `cacheTtlMs`
+   * or `force` is true, triggers a refresh first.
+   */
+  async getSnapshot(options: { force?: boolean } = {}): Promise<ProviderSnapshot> {
+    const stale = Date.now() - this.lastRefreshedAt > this.cacheTtlMs;
+    if (options.force || stale || this.states.size === 0) {
+      await this.refresh();
+    }
+    return this.currentSnapshot();
+  }
+
+  /** Snapshot without refreshing — for hot-path callers that need speed. */
+  currentSnapshot(): ProviderSnapshot {
+    return {
+      providers: [...this.states.values()].sort((a, b) => a.name.localeCompare(b.name)),
+      active: this.active,
+      lastRefreshedAt: this.lastRefreshedAt,
+    };
+  }
+
+  /** Re-discover all providers concurrently. Safe to call repeatedly. */
+  async refresh(): Promise<void> {
+    if (this.refreshing) return this.refreshing;
+    this.refreshing = this.doRefresh();
+    try {
+      await this.refreshing;
+    } finally {
+      this.refreshing = null;
+    }
+  }
+
+  private async doRefresh(): Promise<void> {
+    // Merge ~/.wotann/providers.env into process.env so user-saved keys are
+    // picked up without a daemon restart. We do NOT overwrite env vars that
+    // are already set — explicit shell exports always win.
+    const fileEnv = loadProvidersEnvFile();
+    for (const [key, value] of Object.entries(fileEnv)) {
+      if (!process.env[key]) process.env[key] = value;
+    }
+
+    const storedCredentials = this.store.all();
+    const ctx: DetectContext = { env: process.env, storedCredentials };
+
+    const tasks = [...this.specs.values()].map(async (spec) => {
+      try {
+        const credential = await spec.detectCredential(ctx);
+        const models = credential ? await spec.listModels(credential) : [];
+        const defaultModel = models[0]?.id ?? null;
+        const state: ProviderState = {
+          id: spec.id,
+          name: spec.name,
+          tier: spec.tier,
+          configured: credential !== null,
+          credential,
+          models,
+          defaultModel,
+          lastRefreshedAt: Date.now(),
+        };
+        this.states.set(spec.id, state);
+      } catch (err) {
+        const prev = this.states.get(spec.id);
+        const errState: ProviderState = {
+          id: spec.id,
+          name: spec.name,
+          tier: spec.tier,
+          configured: false,
+          credential: null,
+          models: prev?.models ?? spec.fallbackModels,
+          defaultModel: prev?.defaultModel ?? spec.fallbackModels[0]?.id ?? null,
+          lastRefreshedAt: Date.now(),
+          lastError: err instanceof Error ? err.message : String(err),
+        };
+        this.states.set(spec.id, errState);
+      }
+    });
+
+    await Promise.all(tasks);
+    this.lastRefreshedAt = Date.now();
+    this.emit("refreshed");
+    this.emit("changed");
+  }
+
+  /** Save an API key (or OAuth access token) for a provider. */
+  async saveCredential(
+    providerId: string,
+    params: {
+      method: AuthMethod;
+      token: string;
+      expiresAt?: number;
+      label?: string;
+    },
+  ): Promise<ProviderState | null> {
+    const spec = this.specs.get(providerId);
+    if (!spec) throw new Error(`Unknown provider: ${providerId}`);
+    if (!spec.supportedMethods.includes(params.method)) {
+      throw new Error(`${spec.name} does not support ${params.method}`);
+    }
+
+    const cred: SavedCredential = {
+      method: params.method,
+      token: params.token,
+      ...(params.expiresAt !== undefined ? { expiresAt: params.expiresAt } : {}),
+      ...(params.label !== undefined ? { label: params.label } : {}),
+      savedAt: Date.now(),
+    };
+    this.store.save(providerId, cred);
+
+    // For API keys, also mirror into providers.env so shell / launchd can see it
+    if (params.method === "apiKey") {
+      const primaryEnvKey = spec.envKeys[0];
+      if (primaryEnvKey) {
+        try {
+          writeProvidersEnvKey(primaryEnvKey, params.token);
+          process.env[primaryEnvKey] = params.token;
+        } catch (err) {
+          // Non-fatal — credential is stored in credentials.json regardless.
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[providers] providers.env write failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
+
+    this.emit("credential", { providerId, action: "save" });
+    await this.refresh();
+    return this.states.get(providerId) ?? null;
+  }
+
+  /** Remove credentials for a provider. Clears providers.env mirror and keychain entry. */
+  async deleteCredential(providerId: string): Promise<void> {
+    const spec = this.specs.get(providerId);
+    if (!spec) throw new Error(`Unknown provider: ${providerId}`);
+    this.store.delete(providerId);
+    for (const key of spec.envKeys) {
+      try {
+        deleteProvidersEnvKey(key);
+        delete process.env[key];
+      } catch {
+        /* best effort */
+      }
+    }
+    this.emit("credential", { providerId, action: "delete" });
+    await this.refresh();
+  }
+
+  /** Ping the provider's API with the current credential to validate. */
+  async testCredential(
+    providerId: string,
+  ): Promise<{ ok: boolean; error?: string; modelCount?: number }> {
+    const spec = this.specs.get(providerId);
+    if (!spec) return { ok: false, error: `Unknown provider: ${providerId}` };
+    const state = this.states.get(providerId);
+    if (!state?.credential) return { ok: false, error: "Not configured" };
+    try {
+      const models = await spec.listModels(state.credential);
+      return { ok: models.length > 0, modelCount: models.length };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** Validate and set the active provider+model. Throws on invalid combos. */
+  setActive(providerId: string, modelId: string): void {
+    const state = this.states.get(providerId);
+    if (!state) throw new Error(`Unknown provider: ${providerId}`);
+    if (!state.configured) throw new Error(`${state.name} is not configured`);
+    const model = state.models.find((m) => m.id === modelId);
+    if (!model) throw new Error(`Model ${modelId} not available on ${state.name}`);
+    this.active = { provider: providerId, model: modelId };
+    this.emit("activeChanged", this.active);
+    this.emit("changed");
+  }
+
+  getActive(): { provider: string; model: string } | null {
+    return this.active;
+  }
+
+  /**
+   * Import credentials from a discovered auth file path (e.g. ~/.codex/auth.json).
+   * This is a convenience for "Found existing ChatGPT Plus login — tap to import".
+   */
+  async importFromPath(providerId: string, path: string): Promise<ProviderState | null> {
+    const spec = this.specs.get(providerId);
+    if (!spec) throw new Error(`Unknown provider: ${providerId}`);
+    if (!existsSync(path)) throw new Error(`File not found: ${path}`);
+    const raw = readFileSync(path, "utf-8");
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    // Codex auth.json shape
+    if (providerId === "codex") {
+      const tokens = data["tokens"] as { id_token?: string; access_token?: string } | undefined;
+      const token = tokens?.id_token ?? tokens?.access_token;
+      if (token)
+        return this.saveCredential("codex", {
+          method: "subscription",
+          token,
+          label: "ChatGPT (imported)",
+        });
+    }
+    // Generic: look for access_token or api_key
+    const token =
+      (data["access_token"] as string | undefined) ?? (data["api_key"] as string | undefined);
+    if (token)
+      return this.saveCredential(providerId, { method: "apiKey", token, label: "Imported" });
+    throw new Error(`Could not extract credential from ${path}`);
+  }
+}
+
+// ── Singleton instance (process-wide) ──────────────────────────
+
+let SINGLETON: ProviderService | null = null;
+
+export function getProviderService(): ProviderService {
+  if (!SINGLETON) SINGLETON = new ProviderService();
+  return SINGLETON;
+}
+
+export function resetProviderService(): void {
+  SINGLETON = null;
+}
