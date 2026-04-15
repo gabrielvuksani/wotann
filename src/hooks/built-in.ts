@@ -784,8 +784,18 @@ export function createPreToolCostLimiter(budgetUsd?: number): HookHandler {
 
 // ── Git Checkpoint Hook (standard) — shadow-git checkpoint after file edits ──
 
-export function createGitCheckpointHook(workDir?: string): HookHandler {
-  let shadowGit: InstanceType<typeof ShadowGitClass> | undefined;
+export function createGitCheckpointHook(
+  shared?: InstanceType<typeof ShadowGitClass> | string,
+): HookHandler {
+  // `shared` can be either the runtime's existing ShadowGit singleton or a
+  // working-directory string (the legacy signature). Using the singleton
+  // keeps the in-memory recentCheckpoints ring buffer consistent with the
+  // shadow.undo / shadow.checkpoints RPC path, so the auto-checkpoint
+  // chain is observable end-to-end. Fresh-instance creation remains the
+  // no-runtime fallback for standalone test harnesses.
+  let shadowGit: InstanceType<typeof ShadowGitClass> | undefined =
+    typeof shared === "object" ? shared : undefined;
+  const workDir = typeof shared === "string" ? shared : undefined;
 
   return {
     name: "GitCheckpoint",
@@ -826,8 +836,17 @@ export function createGitCheckpointHook(workDir?: string): HookHandler {
 // and getRecentCheckpoints had ZERO callsites — the entire S3-3 API was dead.
 // Registering this hook on the newly-live PreToolUse event makes the S3-3
 // rollback capability real.
-export function createGitPreCheckpointHook(workDir?: string): HookHandler {
-  let shadowGit: InstanceType<typeof ShadowGitClass> | undefined;
+export function createGitPreCheckpointHook(
+  shared?: InstanceType<typeof ShadowGitClass> | string,
+): HookHandler {
+  // Shared ShadowGit singleton (preferred) so the ring-buffer populated by
+  // `beforeTool` here is the same buffer that shadow.undo / shadow.checkpoints
+  // read via runtime.getShadowGit(). Without this the RPC handlers always
+  // saw empty checkpoints and restoreLastBefore silently returned false —
+  // end-to-end rollback was broken despite the individual APIs working.
+  let shadowGit: InstanceType<typeof ShadowGitClass> | undefined =
+    typeof shared === "object" ? shared : undefined;
+  const workDir = typeof shared === "string" ? shared : undefined;
 
   return {
     name: "GitPreCheckpoint",
@@ -1147,7 +1166,10 @@ import { HookEngine } from "./engine.js";
 import { ShadowGit as ShadowGitClass } from "../utils/shadow-git.js";
 import { validateArchive } from "../security/archive-preflight.js";
 
-export function registerBuiltinHooks(engine: HookEngine): void {
+export function registerBuiltinHooks(
+  engine: HookEngine,
+  shadowGit?: InstanceType<typeof ShadowGitClass>,
+): void {
   // Minimal profile (always active)
   engine.register(secretScanner);
   engine.register(destructiveGuard);
@@ -1168,8 +1190,11 @@ export function registerBuiltinHooks(engine: HookEngine): void {
   engine.register(autoLint);
   engine.register(createCacheMonitor());
   engine.register(autoTestSuggestion);
-  engine.register(createGitCheckpointHook());
-  engine.register(createGitPreCheckpointHook());
+  // Share the runtime's ShadowGit singleton so the pre/post checkpoint
+  // hooks and the shadow.undo / shadow.checkpoints RPC surface all see
+  // the same in-memory ring buffer (S3-3 end-to-end rollback).
+  engine.register(createGitCheckpointHook(shadowGit));
+  engine.register(createGitPreCheckpointHook(shadowGit));
   engine.register(resultInjectionScanner);
   engine.register(createToolPairValidator());
   engine.register(archivePreflightGuard);

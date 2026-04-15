@@ -3865,9 +3865,14 @@ export class KairosRPCHandler {
         };
       }
       try {
-        const { ShadowGit } = await import("../utils/shadow-git.js");
-        const workDir = this.runtime?.getWorkingDir() ?? process.cwd();
-        const shadowGit = new ShadowGit(workDir);
+        // Use the runtime's ShadowGit singleton — the same instance the
+        // GitPreCheckpointHook populates via `beforeTool`. A fresh instance
+        // would have an empty in-memory ring buffer and restoreLastBefore
+        // would silently return false for every call.
+        const shadowGit = this.runtime?.getShadowGit();
+        if (!shadowGit) {
+          return { ok: false, error: "Runtime not initialized" };
+        }
         const restored = await shadowGit.restoreLastBefore(toolName);
         const recent = shadowGit.getRecentCheckpoints();
         return {
@@ -3891,9 +3896,12 @@ export class KairosRPCHandler {
     // the user can see what's recoverable before invoking shadow.undo.
     this.handlers.set("shadow.checkpoints", async () => {
       try {
-        const { ShadowGit } = await import("../utils/shadow-git.js");
-        const workDir = this.runtime?.getWorkingDir() ?? process.cwd();
-        const shadowGit = new ShadowGit(workDir);
+        // Share the runtime's ShadowGit singleton — same instance as
+        // shadow.undo and the GitPreCheckpointHook ring-buffer writer.
+        const shadowGit = this.runtime?.getShadowGit();
+        if (!shadowGit) {
+          return { ok: false, checkpoints: [], error: "Runtime not initialized" };
+        }
         const recent = shadowGit.getRecentCheckpoints();
         return {
           ok: true,

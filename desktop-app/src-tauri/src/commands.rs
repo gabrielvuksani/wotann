@@ -391,94 +391,10 @@ pub async fn send_message(
         .map_err(|e| format!("send_message: failed to serialize daemon response: {e}"))
 }
 
-// Legacy send_message body removed — the real send_message above now
-// forwards to the daemon via UDS, so the legacy reference impl is no
-// longer informative. Kept only the comment so future readers know what
-// was here. Original removed for codebase cleanup (commit a683faf+).
-#[allow(dead_code)]
-async fn _removed_send_message_legacy(
-    app: AppHandle,
-    prompt: String,
-    message_id: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    let provider = state.provider.lock().map_err(|e| e.to_string())?.clone();
-    let model = state.model.lock().map_err(|e| e.to_string())?.clone();
-    let message_id = message_id.unwrap_or_else(|| format!("msg-{}", chrono_ts()));
-
-    // Try KAIROS daemon first — this routes to real AI providers
-    if let Ok(client) = ipc_client::try_kairos() {
-        let app_clone = app.clone();
-        let msg_id = message_id.clone();
-        let provider_clone = provider.clone();
-        let model_clone = model.clone();
-        let prompt_clone = prompt.clone();
-
-        // Send query via IPC and stream response chunks back as Tauri events
-        tauri::async_runtime::spawn(async move {
-            match client.call("query", serde_json::json!({ "prompt": prompt_clone })) {
-                Ok(result) => {
-                    // The daemon returns the full response — emit as chunks
-                    let text = result.as_str().unwrap_or("").to_string();
-                    if !text.is_empty() {
-                        // Emit the response in chunks for streaming feel
-                        let chars: Vec<char> = text.chars().collect();
-                        let mut pos = 0;
-                        while pos < chars.len() {
-                            let chunk_size = (4 + (pos % 3)).min(chars.len() - pos);
-                            let chunk: String =
-                                chars[pos..pos + chunk_size].iter().collect();
-                            pos += chunk_size;
-                            let _ = app_clone.emit(
-                                "stream-chunk",
-                                &StreamChunk {
-                                    r#type: "text".into(),
-                                    content: chunk,
-                                    provider: provider_clone.clone(),
-                                    model: model_clone.clone(),
-                                    message_id: msg_id.clone(),
-                                    tokens_used: None,
-                                    cost_usd: None,
-                                },
-                            );
-                            tokio::time::sleep(tokio::time::Duration::from_millis(8))
-                                .await;
-                        }
-                    }
-                    let _ = app_clone.emit(
-                        "stream-chunk",
-                        &StreamChunk {
-                            r#type: "done".into(),
-                            content: String::new(),
-                            provider: provider_clone,
-                            model: model_clone,
-                            message_id: msg_id,
-                            tokens_used: Some((text.len() / 4) as u64),
-                            cost_usd: Some(text.len() as f64 * 0.00004),
-                        },
-                    );
-                }
-                Err(e) => {
-                    eprintln!("[WOTANN IPC] query RPC failed: {}", e);
-                    // IPC call failed — fall back to local response
-                    emit_streaming_response(
-                        &app_clone,
-                        &prompt_clone,
-                        &provider_clone,
-                        &model_clone,
-                        &msg_id,
-                    );
-                }
-            }
-        });
-
-        return Ok(message_id);
-    }
-
-    // Fallback: no daemon available — emit local contextual response
-    emit_streaming_response(&app, &prompt, &provider, &model, &message_id);
-    Ok(message_id)
-}
+// Legacy send_message body (the fabricate-success stub that hid 13 broken
+// RPC paths for a release) fully removed — the real send_message above
+// forwards to the KAIROS daemon via UDS. History preserved in git; no
+// runtime code retained so a reader can't accidentally revive the stub.
 
 /// Get available providers and their models — routes through KAIROS `providers.list`
 #[tauri::command]

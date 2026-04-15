@@ -511,6 +511,9 @@ export class QueryPipeline {
                 event: "PreToolUse",
                 toolName: chunk.toolName,
                 toolInput: chunk.toolInput as Record<string, unknown> | undefined,
+                filePath:
+                  extractTrackedFilePath(chunk.toolInput as Record<string, unknown> | undefined) ??
+                  undefined,
                 content:
                   typeof chunk.toolInput === "object"
                     ? JSON.stringify(chunk.toolInput ?? {})

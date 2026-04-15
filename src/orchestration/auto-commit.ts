@@ -297,11 +297,11 @@ function simulateCommit(
   } catch (err) {
     return {
       success: false,
-      commitHash: "",
+      commitHash: null,
       message: commit.formatted,
       filesCommitted: [],
       timestamp: now,
       error: `git not available: ${err instanceof Error ? err.message : "unknown"}`,
-    } as CommitResult;
+    };
   }
 }

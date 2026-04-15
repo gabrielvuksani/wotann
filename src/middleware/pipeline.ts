@@ -17,11 +17,9 @@ import {
   toolErrorMiddleware,
   summarizationMiddleware,
   memoryMiddleware,
-  subagentLimitMiddleware,
   clarificationMiddleware,
   cacheMiddleware,
   autonomyMiddleware,
-  lspMiddleware,
   fileTrackMiddleware,
   forcedVerificationMiddleware,
   frustrationMiddleware,
@@ -35,30 +33,15 @@ import {
   SystemNotificationTracker,
   createSystemNotificationsMiddleware,
 } from "./system-notifications.js";
-import {
-  NonInteractiveMiddleware,
-  createNonInteractiveMiddleware,
-} from "./non-interactive.js";
-import {
-  PlanEnforcementMiddleware,
-  createPlanEnforcementMiddleware,
-} from "./plan-enforcement.js";
+import { NonInteractiveMiddleware, createNonInteractiveMiddleware } from "./non-interactive.js";
+import { PlanEnforcementMiddleware, createPlanEnforcementMiddleware } from "./plan-enforcement.js";
 import {
   VerificationEnforcementMiddleware,
   createVerificationEnforcementMiddleware,
 } from "./verification-enforcement.js";
-import {
-  AutoInstallMiddleware,
-  createAutoInstallMiddleware,
-} from "./auto-install.js";
-import {
-  StaleDetectionMiddleware,
-  createStaleDetectionMiddleware,
-} from "./stale-detection.js";
-import {
-  DoomLoopMiddleware,
-  createDoomLoopMiddleware,
-} from "./doom-loop.js";
+import { AutoInstallMiddleware, createAutoInstallMiddleware } from "./auto-install.js";
+import { StaleDetectionMiddleware, createStaleDetectionMiddleware } from "./stale-detection.js";
+import { DoomLoopMiddleware, createDoomLoopMiddleware } from "./doom-loop.js";
 import {
   OutputTruncationMiddleware,
   createOutputTruncationMiddleware,
@@ -85,33 +68,31 @@ const defaultToolPairValidatorInstance = new ToolPairValidatorMiddleware();
 
 const PIPELINE: readonly Middleware[] = [
   createToolPairValidatorMiddleware(defaultToolPairValidatorInstance), // 0. Tool use/result pair validation
-  intentGateMiddleware,                                           // 1. Intent analysis
-  threadDataMiddleware,                                           // 2. Thread isolation
-  uploadsMiddleware,                                              // 3. File uploads
-  sandboxMiddleware,                                              // 4. Sandbox env
-  guardrailMiddleware,                                            // 5. Pre-execution auth
-  toolErrorMiddleware,                                            // 6. Error standardization
+  intentGateMiddleware, // 1. Intent analysis
+  threadDataMiddleware, // 2. Thread isolation
+  uploadsMiddleware, // 3. File uploads
+  sandboxMiddleware, // 4. Sandbox env
+  guardrailMiddleware, // 5. Pre-execution auth
+  toolErrorMiddleware, // 6. Error standardization
   createOutputTruncationMiddleware(defaultOutputTruncationInstance), // 6.5. Output truncation
-  summarizationMiddleware,                                        // 7. Token management
-  memoryMiddleware,                                               // 8. Memory extraction
-  subagentLimitMiddleware,                                        // 9. Subagent count (max 3)
-  clarificationMiddleware,                                        // 10. User clarification
-  cacheMiddleware,                                                // 11. Cache tracking
-  autonomyMiddleware,                                             // 12. Risk classification
-  lspMiddleware,                                                  // 13. LSP context
-  fileTrackMiddleware,                                            // 14. File tracking
-  forcedVerificationMiddleware,                                   // 15. Auto-verify writes
-  frustrationMiddleware,                                          // 16. Frustration detection
-  createPreCompletionMiddleware(defaultChecklistInstance),         // 17. Pre-completion gate
+  summarizationMiddleware, // 7. Token management
+  memoryMiddleware, // 8. Memory extraction
+  clarificationMiddleware, // 10. User clarification (S5-4: 9 SubagentLimit deleted as dead code)
+  cacheMiddleware, // 11. Cache tracking
+  autonomyMiddleware, // 12. Risk classification
+  fileTrackMiddleware, // 14. File tracking (S5-4: 13 LSP deleted as dead code)
+  forcedVerificationMiddleware, // 15. Auto-verify writes
+  frustrationMiddleware, // 16. Frustration detection
+  createPreCompletionMiddleware(defaultChecklistInstance), // 17. Pre-completion gate
   createSystemNotificationsMiddleware(defaultNotificationTracker), // 18. System notifications
   // ── TerminalBench Accuracy Optimizations ──────────────────
-  createNonInteractiveMiddleware(defaultNonInteractiveInstance),   // 19. Non-interactive mode
+  createNonInteractiveMiddleware(defaultNonInteractiveInstance), // 19. Non-interactive mode
   createPlanEnforcementMiddleware(defaultPlanEnforcementInstance), // 20. Mandatory planning gate
   createVerificationEnforcementMiddleware(defaultVerificationInstance), // 21. Verification enforcement
-  createAutoInstallMiddleware(defaultAutoInstallInstance),         // 22. Auto-install missing deps
-  createStaleDetectionMiddleware(defaultStaleDetectionInstance),   // 23. Stale-read detection
-  createDoomLoopMiddleware(defaultDoomLoopInstance),               // 24. Doom loop detection
-  selfReflectionMiddleware,                                        // 25. Self-reflection (post-response validation)
+  createAutoInstallMiddleware(defaultAutoInstallInstance), // 22. Auto-install missing deps
+  createStaleDetectionMiddleware(defaultStaleDetectionInstance), // 23. Stale-read detection
+  createDoomLoopMiddleware(defaultDoomLoopInstance), // 24. Doom loop detection
+  selfReflectionMiddleware, // 25. Self-reflection (post-response validation)
 ];
 
 // ── Pipeline Executor ───────────────────────────────────────
@@ -217,11 +198,9 @@ export function createPipelineWithInstances(
     createOutputTruncationMiddleware(outputTruncation),
     summarizationMiddleware,
     memoryMiddleware,
-    subagentLimitMiddleware,
     clarificationMiddleware,
     cacheMiddleware,
     autonomyMiddleware,
-    lspMiddleware,
     fileTrackMiddleware,
     forcedVerificationMiddleware,
     frustrationMiddleware,

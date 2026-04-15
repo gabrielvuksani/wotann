@@ -2,15 +2,24 @@
  * Web Fetch Tool — lightweight web content retrieval using Node's built-in fetch().
  *
  * Fills the #5 competitive gap: WOTANN needs web capability.
- * Zero external dependencies — uses only Node 18+ built-in fetch API.
  *
  * Features:
  * - HTML tag stripping with script/style removal
  * - Title extraction
  * - Content truncation at configurable byte limit
- * - SSRF protection via protocol allowlist
+ * - SSRF protection via protocol allowlist + post-resolution IP check +
+ *   IP-pinned undici dispatcher (defeats DNS rebinding TOCTOU — without
+ *   the dispatcher, `fetch()` internally re-resolves the hostname and an
+ *   attacker-controlled nameserver with TTL=0 could return a private IP
+ *   on that second lookup, slipping past our validation)
  * - Parallel multi-URL fetching
+ *
+ * Node 20+'s global `fetch` IS undici under the hood, so the `dispatcher`
+ * option is honored at runtime even though it isn't in the WHATWG fetch
+ * type. A local interface extension keeps TypeScript happy.
  */
+
+import { Agent } from "undici";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -209,19 +218,17 @@ function isPrivateIP(address: string, family: 4 | 6): boolean {
 
 /**
  * Resolve a hostname via node:dns and reject when it maps to a
- * private/reserved IP range. Catches DNS rebinding that string-based URL
- * validation misses.
+ * private/reserved IP range. Returns the validated address set so the
+ * caller can build an IP-pinned dispatcher that doesn't re-resolve
+ * (defeating the DNS rebinding TOCTOU where an attacker-controlled
+ * nameserver with TTL=0 returns a different IP on the second lookup).
  *
- * NOTE: this defence is TOCTOU-vulnerable — between this resolution and
- * the actual fetch's internal re-resolution, an attacker-controlled
- * nameserver with TTL=0 can return a different (private) IP. A complete
- * fix requires a custom undici Agent with a `connect.lookup` callback
- * that pins the resolved IP for the connection. Documented in
- * docs/GAP_AUDIT_2026-04-15.md as a remaining gap. The current check
- * still defeats the simpler "always-private DNS response" + "ANY of
- * multiple returned IPs is private" attacks.
+ * Returns an empty array in test mode — the caller interprets that as
+ * "skip pinning, let the unit-test fetch mock run."
  */
-async function assertPublicResolvable(hostname: string): Promise<void> {
+async function assertPublicResolvable(
+  hostname: string,
+): Promise<ReadonlyArray<{ readonly address: string; readonly family: 4 | 6 }>> {
   // IP literals — short-circuit on the string form; no DNS lookup needed.
   const literalV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
   const literalV6 = hostname.includes(":");
@@ -229,7 +236,7 @@ async function assertPublicResolvable(hostname: string): Promise<void> {
     if (isPrivateHost(hostname)) {
       throw new Error(`SSRF blocked: private/reserved IP literal "${hostname}"`);
     }
-    return;
+    return [{ address: hostname, family: literalV6 ? 6 : 4 }];
   }
 
   // In unit tests the mock `fetch` intercepts before the network, so a
@@ -249,7 +256,7 @@ async function assertPublicResolvable(hostname: string): Promise<void> {
     (process.env["WOTANN_TEST_MODE"] || process.env["VITEST"]) &&
     (nodeEnv === "test" || process.env["VITEST"]);
   if (inTest) {
-    return;
+    return [];
   }
 
   const { lookup } = await import("node:dns");
@@ -266,6 +273,33 @@ async function assertPublicResolvable(hostname: string): Promise<void> {
       throw new Error(`SSRF blocked: hostname "${hostname}" resolves to private IP ${address}`);
     }
   }
+  return addresses;
+}
+
+/**
+ * Build an undici Agent that pins the connection to a pre-validated IP.
+ * The lookup callback synthesises the dns response so undici never queries
+ * the resolver for this hostname — closing the gap where our manual
+ * resolve could return a public IP and undici's internal resolve could
+ * return a private one a microsecond later (rebinding TOCTOU).
+ *
+ * Returns null when no pinning is required (test mode's empty addresses).
+ * The caller then skips the dispatcher option and the stub fetch mock
+ * intercepts normally.
+ */
+function createPinnedDispatcher(
+  addresses: ReadonlyArray<{ readonly address: string; readonly family: 4 | 6 }>,
+): Agent | null {
+  if (addresses.length === 0) return null;
+  const primary = addresses[0];
+  if (!primary) return null;
+  return new Agent({
+    connect: {
+      lookup: (_hostname, _options, callback) => {
+        callback(null, primary.address, primary.family);
+      },
+    },
+  });
 }
 
 // ── URL Validation ───────────────────────────────────────
@@ -356,15 +390,19 @@ export class WebFetchTool {
       return this.errorResult(url, validation.error, startMs);
     }
 
+    // Agents allocated per hop so we can close them in the finally block;
+    // a long-running daemon otherwise leaks sockets across many fetches.
+    let dispatcher: Agent | null = null;
     try {
-      // S2-20: defeat DNS rebinding + redirect-to-private.
-      // 1) Resolve the initial hostname via node:dns and reject if ANY
-      //    returned address is in a private range.
-      // 2) Manually follow redirects (up to 5) and re-validate each hop
-      //    so an open-redirect on an allowed origin can't pivot into
-      //    a private target.
+      // S2-20 + 2026-04-15 follow-up: defeat DNS rebinding via IP-pinned
+      // dispatcher. assertPublicResolvable validates every A/AAAA record
+      // AND returns them so createPinnedDispatcher can pin the connect
+      // lookup to a specific public IP. Manual redirect loop re-validates
+      // and re-pins per hop so open-redirect on an allowed origin can't
+      // pivot to a private target either.
+      let addresses: ReadonlyArray<{ readonly address: string; readonly family: 4 | 6 }>;
       try {
-        await assertPublicResolvable(validation.parsed.hostname);
+        addresses = await assertPublicResolvable(validation.parsed.hostname);
       } catch (ssrfErr) {
         return this.errorResult(
           url,
@@ -372,6 +410,7 @@ export class WebFetchTool {
           startMs,
         );
       }
+      dispatcher = createPinnedDispatcher(addresses);
 
       let currentUrl = url;
       let response: Response;
@@ -382,14 +421,23 @@ export class WebFetchTool {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.config.timeoutMs);
 
-        response = await fetch(currentUrl, {
+        // The `dispatcher` option is honored at runtime (Node 20+'s
+        // global fetch IS undici underneath) but isn't in the WHATWG
+        // `RequestInit` type, and the two undici typings on our
+        // classpath (Node's bundled `undici-types` vs our installed
+        // `undici`) disagree on the `Dispatcher` shape. Cast through
+        // `unknown` to skip the type-level mismatch without losing
+        // runtime behaviour.
+        const init = {
           signal: controller.signal,
           headers: {
             "User-Agent": this.config.userAgent,
             Accept: "text/html, application/json, text/plain, */*",
           },
-          redirect: "manual",
-        });
+          redirect: "manual" as const,
+          ...(dispatcher ? { dispatcher } : {}),
+        };
+        response = await fetch(currentUrl, init as unknown as RequestInit);
 
         clearTimeout(timeoutId);
 
@@ -401,8 +449,9 @@ export class WebFetchTool {
           if (!nextValidation.valid) {
             return this.errorResult(url, `Redirect blocked: ${nextValidation.error}`, startMs);
           }
+          let nextAddresses: ReadonlyArray<{ readonly address: string; readonly family: 4 | 6 }>;
           try {
-            await assertPublicResolvable(nextValidation.parsed.hostname);
+            nextAddresses = await assertPublicResolvable(nextValidation.parsed.hostname);
           } catch (ssrfErr) {
             return this.errorResult(
               url,
@@ -410,6 +459,11 @@ export class WebFetchTool {
               startMs,
             );
           }
+          // Close the previous hop's dispatcher before re-pinning — each
+          // hop may resolve to a different public IP, so the pin must be
+          // refreshed or the connection would be bound to the wrong host.
+          await dispatcher?.close().catch(() => undefined);
+          dispatcher = createPinnedDispatcher(nextAddresses);
           currentUrl = nextUrl;
           redirectsFollowed++;
           continue;
@@ -445,6 +499,10 @@ export class WebFetchTool {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       return this.errorResult(url, message, startMs);
+    } finally {
+      // Release sockets owned by the per-fetch dispatcher; letting them
+      // leak would accumulate in a long-running daemon.
+      await dispatcher?.close().catch(() => undefined);
     }
   }
 

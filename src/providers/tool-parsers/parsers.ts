@@ -78,10 +78,54 @@ export function parseHermes(text: string): ParsedToolCall | null {
 //
 // [TOOL_CALLS][{"name": "fn", "arguments": {...}}]
 // Used by: mistral-large, mistral-small, codestral
+//
+// Bracket-balanced extraction (the original lazy `\]` regex broke the
+// moment an argument contained a nested array like `{"items":[1,2,3]}` —
+// common in real Mistral output).
 export function parseMistral(text: string): ParsedToolCall | null {
-  const match = text.match(/\[TOOL_CALLS\]\s*(\[[\s\S]*?\])/);
-  if (!match) return null;
-  const arr = tolerantJSONParse(match[1] ?? "");
+  const markerIdx = text.indexOf("[TOOL_CALLS]");
+  if (markerIdx < 0) return null;
+  const afterMarker = markerIdx + "[TOOL_CALLS]".length;
+  // Skip whitespace to find the opening '[' of the JSON array.
+  let start = -1;
+  for (let i = afterMarker; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === "[") {
+      start = i;
+      break;
+    }
+    if (!/\s/.test(ch)) return null;
+  }
+  if (start < 0) return null;
+  // Walk forward with a bracket/string-aware counter so arrays/objects
+  // nested inside argument values don't terminate the match early.
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let end = -1;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "[") depth++;
+    else if (ch === "]") {
+      depth--;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end < 0) return null;
+  const arr = tolerantJSONParse(text.slice(start, end + 1));
   if (!Array.isArray(arr) || arr.length === 0) return null;
   const first = arr[0] as { name?: unknown; arguments?: unknown };
   if (typeof first?.name !== "string") return null;
@@ -116,12 +160,33 @@ export function parseQwen(text: string): ParsedToolCall | null {
 
 // ── 5. DeepSeek ─────────────────────────────────────────────
 //
-// Two formats observed:
-//  a) <｜tool▁calls▁begin｜>...<｜tool▁call▁end｜> with ```json fenced inside
-//  b) Standard OpenAI-style function_call within text
+// Real DeepSeek V3 format (the name lives BEFORE the JSON fence, separated
+// by <｜tool▁sep｜>, NOT as a `name` key inside the JSON object):
+//   <｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>NAME
+//   ```json
+//   {args...}
+//   ```<｜tool▁call▁end｜><｜tool▁calls▁end｜>
+//
+// Earlier version read `obj.name` from the parsed JSON — which always
+// returned null for real DeepSeek output because the JSON has only args.
 // Used by: deepseek-v3, deepseek-v4, deepseek-r1
 export function parseDeepSeek(text: string): ParsedToolCall | null {
-  // Format (a): tool_calls fenced block (note: DeepSeek uses unicode pipe char）
+  // Format (a): V3 structured call with explicit separator — name lives
+  // outside the JSON fence. Pipes can be either unicode (U+FF5C) or ASCII
+  // and the separator glyph can be either ▁ (U+2581) or underscore.
+  const sepMatch = text.match(
+    // eslint-disable-next-line no-useless-escape
+    /<[｜|]tool[▁_]call[▁_]begin[｜|]>\s*function\s*<[｜|]tool[▁_]sep[｜|]>\s*([^\n`]+?)\s*\n+\s*```(?:json)?\s*([\s\S]*?)\s*```\s*<[｜|]tool[▁_]call[▁_]end[｜|]>/,
+  );
+  if (sepMatch) {
+    const name = (sepMatch[1] ?? "").trim();
+    if (name) {
+      const json = tolerantJSONParse(sepMatch[2] ?? "");
+      return { name, args: asArgs(json) };
+    }
+  }
+  // Format (a'): older variant where the JSON object itself carries the
+  // name key — retained for back-compat with earlier DeepSeek fine-tunes.
   const blockMatch = text.match(
     /<[｜|]tool[▁_]calls[▁_]begin[｜|]>([\s\S]*?)<[｜|]tool[▁_]call[▁_]end[｜|]>/,
   );
@@ -159,17 +224,39 @@ export function parseFunctionary(text: string): ParsedToolCall | null {
 
 // ── 7. Jamba (AI21) ─────────────────────────────────────────
 //
-// <function_calls>
-//   <function_call>name="fn">{json args}</function_call>
-// </function_calls>
+// Real Jamba 1.5 format uses nested child elements (per AI21's tool-use
+// spec), NOT an attribute-on-tag shape:
+//   <tool_calls>
+//     <tool_call>
+//       <name>fn</name>
+//       <arguments>{json}</arguments>
+//     </tool_call>
+//   </tool_calls>
+//
 // Used by: jamba-1.5-large, jamba-1.5-mini
 export function parseJamba(text: string): ParsedToolCall | null {
-  const match = text.match(/<function_call(?:\s+name="([^"]+)")?\s*>([\s\S]*?)<\/function_call>/);
-  if (!match) return null;
-  const name = match[1] ?? "";
-  if (!name) return null;
-  const json = tolerantJSONParse(match[2] ?? "");
-  return { name, args: asArgs(json) };
+  // Primary: nested-child format per AI21 spec.
+  const nestedMatch = text.match(
+    /<tool_calls?>\s*<tool_call>\s*<name>\s*([^<]+?)\s*<\/name>\s*<arguments>\s*([\s\S]*?)\s*<\/arguments>\s*<\/tool_call>/,
+  );
+  if (nestedMatch) {
+    const name = (nestedMatch[1] ?? "").trim();
+    if (name) {
+      const json = tolerantJSONParse(nestedMatch[2] ?? "");
+      return { name, args: asArgs(json) };
+    }
+  }
+  // Fallback: older attribute-on-tag format observed in some fine-tunes.
+  const attrMatch = text.match(
+    /<function_call(?:\s+name="([^"]+)")?\s*>([\s\S]*?)<\/function_call>/,
+  );
+  if (attrMatch) {
+    const name = attrMatch[1] ?? "";
+    if (!name) return null;
+    const json = tolerantJSONParse(attrMatch[2] ?? "");
+    return { name, args: asArgs(json) };
+  }
+  return null;
 }
 
 // ── 8. Command R / R+ (Cohere) ──────────────────────────────
@@ -276,21 +363,27 @@ export type ParserFn = (text: string) => ParsedToolCall | null;
  * Map model-name patterns to specific parsers. The first regex match
  * wins. The order is meaningful — more-specific patterns first.
  */
+//
+// Note on the `^` anchor: without the non-capturing group wrapper, the
+// anchor only applies to the first alternation branch (`/^a|b|c/` parses
+// as `/(^a)|b|c/`), so substrings in the middle of the model name could
+// accidentally match unrelated patterns. Each entry is therefore wrapped
+// in `(?:...)` so every alternation is properly start-anchored.
 const PARSER_REGISTRY: ReadonlyArray<{
   readonly pattern: RegExp;
   readonly parser: ParserFn;
   readonly family: string;
 }> = [
-  { pattern: /^hermes|nous-?hermes|openhermes/i, parser: parseHermes, family: "hermes" },
-  { pattern: /^mistral|codestral|mixtral/i, parser: parseMistral, family: "mistral" },
-  { pattern: /^llama-?[34]|llama-?\d{1,2}\.\d/i, parser: parseLlama, family: "llama" },
-  { pattern: /^qwen[23]?\.?\d|qwen-?coder/i, parser: parseQwen, family: "qwen" },
-  { pattern: /^deepseek/i, parser: parseDeepSeek, family: "deepseek" },
-  { pattern: /^functionary/i, parser: parseFunctionary, family: "functionary" },
-  { pattern: /^jamba/i, parser: parseJamba, family: "jamba" },
-  { pattern: /^command-?r/i, parser: parseCommandR, family: "command-r" },
-  { pattern: /^toolbench|chatglm/i, parser: parseToolBench, family: "toolbench" },
-  { pattern: /^glaive/i, parser: parseGlaive, family: "glaive" },
+  { pattern: /^(?:hermes|nous-?hermes|openhermes)/i, parser: parseHermes, family: "hermes" },
+  { pattern: /^(?:mistral|codestral|mixtral)/i, parser: parseMistral, family: "mistral" },
+  { pattern: /^(?:llama-?[34]|llama-?\d{1,2}\.\d)/i, parser: parseLlama, family: "llama" },
+  { pattern: /^(?:qwen[23]?\.?\d|qwen-?coder)/i, parser: parseQwen, family: "qwen" },
+  { pattern: /^(?:deepseek)/i, parser: parseDeepSeek, family: "deepseek" },
+  { pattern: /^(?:functionary)/i, parser: parseFunctionary, family: "functionary" },
+  { pattern: /^(?:jamba)/i, parser: parseJamba, family: "jamba" },
+  { pattern: /^(?:command-?r|cohere)/i, parser: parseCommandR, family: "command-r" },
+  { pattern: /^(?:toolbench|chatglm)/i, parser: parseToolBench, family: "toolbench" },
+  { pattern: /^(?:glaive)/i, parser: parseGlaive, family: "glaive" },
 ];
 
 /**

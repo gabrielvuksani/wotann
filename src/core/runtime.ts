@@ -536,7 +536,13 @@ export class WotannRuntime {
         ? (envProfile as "minimal" | "standard" | "strict")
         : undefined;
     this.hookEngine = new HookEngine(config.hookProfile ?? profileFromEnv ?? "standard");
-    registerBuiltinHooks(this.hookEngine);
+    // Shadow git: checkpoint-based rollback. Instantiated early so the
+    // built-in pre/post checkpoint hooks can share this singleton with
+    // the shadow.undo / shadow.checkpoints RPC handlers (otherwise the
+    // RPC handlers see an empty ring buffer and restoreLastBefore
+    // silently returns false).
+    this.shadowGit = new ShadowGit(config.workingDir);
+    registerBuiltinHooks(this.hookEngine, this.shadowGit);
 
     // Initialize doom loop detector
     this.doomLoop = new DoomLoopDetector();
@@ -676,9 +682,6 @@ export class WotannRuntime {
     // bootstrap provider so telemetry attribution matches the session.
     this.sessionRecorder = new SessionRecorder(bootstrapProvider, config.defaultModel ?? "auto");
     this.sessionRecorder.start();
-
-    // Shadow git: checkpoint-based rollback for autonomous mode
-    this.shadowGit = new ShadowGit(config.workingDir);
 
     // Canvas editor: hunk-level collaborative editing
     this.canvasEditor = new CanvasEditor();
@@ -1913,6 +1916,9 @@ export class WotannRuntime {
                 event: "PreToolUse",
                 toolName: chunk.toolName,
                 toolInput: chunk.toolInput as Record<string, unknown> | undefined,
+                filePath:
+                  extractTrackedFilePath(chunk.toolInput as Record<string, unknown> | undefined) ??
+                  undefined,
                 // content fallback lets hooks like DestructiveGuard regex
                 // over a stringified view of the input when the hook's
                 // match logic lives in `content`.

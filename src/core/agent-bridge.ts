@@ -162,7 +162,13 @@ export class AgentBridge {
             } else if (chunk.type === "text") {
               emulatedTextBuffer += chunk.content;
               if (!emulatedToolEmitted) {
-                const parsed = parseToolCallFromText(emulatedTextBuffer);
+                // S3-2: pass model name so parseToolCallFromText can
+                // dispatch to the family-specific parser (Hermes / Mistral
+                // / Llama / Qwen / DeepSeek / Functionary / Jamba /
+                // Command R / ToolBench / Glaive). Without the model name
+                // the 11-parser dispatch is dead code and every call
+                // falls through to parseAny's try-everything path.
+                const parsed = parseToolCallFromText(emulatedTextBuffer, adapterOptions.model);
                 if (parsed) {
                   // Synthesize a structured tool_use chunk. Suppress the raw
                   // XML text so downstream consumers don't see it twice.
@@ -185,7 +191,8 @@ export class AgentBridge {
               // Re-run the parser on the final buffer in case the tool XML
               // only became complete on the last delta (rare but possible).
               if (!emulatedToolEmitted) {
-                const parsed = parseToolCallFromText(emulatedTextBuffer);
+                // S3-2: see note above — pass modelName for family dispatch.
+                const parsed = parseToolCallFromText(emulatedTextBuffer, adapterOptions.model);
                 if (parsed) {
                   emulatedToolEmitted = true;
                   yield {

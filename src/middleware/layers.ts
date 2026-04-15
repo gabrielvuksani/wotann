@@ -108,7 +108,8 @@ export const summarizationMiddleware: Middleware = {
   before(ctx: MiddlewareContext): MiddlewareContext {
     // Estimate tokens in recent history and flag if nearing limit
     const historyTokens = ctx.recentHistory.reduce(
-      (sum, msg) => sum + Math.ceil(msg.content.length / 4), 0
+      (sum, msg) => sum + Math.ceil(msg.content.length / 4),
+      0,
     );
     const contextLimit = 200_000; // Default context limit estimate
     const utilizationPercent = Math.round((historyTokens / contextLimit) * 100);
@@ -139,37 +140,6 @@ export const memoryMiddleware: Middleware = {
   },
 };
 
-// ── Layer 9: Subagent Limit — max 3 concurrent subagents ────
-
-let activeSubagents = 0;
-const MAX_SUBAGENTS = 3;
-
-export const subagentLimitMiddleware: Middleware = {
-  name: "SubagentLimit",
-  order: 9,
-  before(ctx: MiddlewareContext): MiddlewareContext {
-    if (ctx.taskType === "subagent" && activeSubagents >= MAX_SUBAGENTS) {
-      return {
-        ...ctx,
-        resolvedIntent: {
-          ...ctx.resolvedIntent!,
-          type: "queued",
-          confidence: 1,
-          keywords: [],
-          category: "queued",
-          complexity: "medium",
-        },
-      };
-    }
-    if (ctx.taskType === "subagent") activeSubagents++;
-    return ctx;
-  },
-  after(_ctx: MiddlewareContext, result: AgentResult): AgentResult {
-    if (_ctx.taskType === "subagent") activeSubagents = Math.max(0, activeSubagents - 1);
-    return result;
-  },
-};
-
 // ── Layer 10: Clarification — detect when user input is ambiguous ──
 
 const AMBIGUITY_SIGNALS: readonly RegExp[] = [
@@ -186,7 +156,8 @@ export const clarificationMiddleware: Middleware = {
     if (ctx.userMessage.length > 100) return ctx;
 
     const ambiguityScore = AMBIGUITY_SIGNALS.reduce(
-      (score, pattern) => score + (pattern.test(ctx.userMessage) ? 1 : 0), 0
+      (score, pattern) => score + (pattern.test(ctx.userMessage) ? 1 : 0),
+      0,
     );
     return { ...ctx, ambiguityScore, needsClarification: ambiguityScore >= 2 };
   },
@@ -201,9 +172,7 @@ export const cacheMiddleware: Middleware = {
   order: 11,
   before(ctx: MiddlewareContext): MiddlewareContext {
     cacheStats.totalRequests++;
-    const hitRate = cacheStats.totalRequests > 0
-      ? cacheStats.hits / cacheStats.totalRequests
-      : 0;
+    const hitRate = cacheStats.totalRequests > 0 ? cacheStats.hits / cacheStats.totalRequests : 0;
     return { ...ctx, cacheHitRate: hitRate };
   },
   after(_ctx: MiddlewareContext, result: AgentResult): AgentResult {
@@ -240,21 +209,6 @@ export const autonomyMiddleware: Middleware = {
     // Classify risk based on intent and complexity
     const risk: RiskLevel = ctx.complexity === "high" ? "high" : "medium";
     return { ...ctx, riskLevel: risk };
-  },
-};
-
-// ── Layer 13: LSP — inject language server context ───────────
-
-export const lspMiddleware: Middleware = {
-  name: "LSP",
-  order: 13,
-  before(ctx: MiddlewareContext): MiddlewareContext {
-    // Detect if an LSP server would be useful for the current file context
-    const lspRelevantExtensions = [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java"];
-    const hasLspRelevantFile = ctx.filePath
-      ? lspRelevantExtensions.some((ext) => ctx.filePath!.endsWith(ext))
-      : false;
-    return { ...ctx, lspAvailable: hasLspRelevantFile };
   },
 };
 
@@ -417,7 +371,10 @@ const INCOMPLETE_INDICATORS: readonly RegExp[] = [
  * Each pair detects opposing claims appearing in the same text.
  */
 const CONTRADICTION_PAIRS: readonly [RegExp, RegExp][] = [
-  [/\bfile (?:exists|is present|was found)\b/i, /\bfile (?:does not exist|not found|is missing)\b/i],
+  [
+    /\bfile (?:exists|is present|was found)\b/i,
+    /\bfile (?:does not exist|not found|is missing)\b/i,
+  ],
   [/\bsucceeded|success(?:ful(?:ly)?)\b/i, /\bfailed|failure|error occurred\b/i],
   [/\bis (?:enabled|active|on|running)\b/i, /\bis (?:disabled|inactive|off|stopped)\b/i],
   [/\bno (?:errors?|issues?|problems?)\b/i, /\berror|issue|problem/i],
@@ -500,13 +457,19 @@ function formatReflectionNotice(issues: readonly SelfReflectionIssue[]): string 
     const severity = issue.severity === "high" ? "(!)" : "(*)";
     switch (issue.type) {
       case "hallucinated-path":
-        lines.push(`  ${severity} Possibly hallucinated path: ${issue.evidence} — verify this path exists`);
+        lines.push(
+          `  ${severity} Possibly hallucinated path: ${issue.evidence} — verify this path exists`,
+        );
         break;
       case "incomplete":
-        lines.push(`  ${severity} Response may be incomplete: ${issue.evidence} — consider providing a concrete answer`);
+        lines.push(
+          `  ${severity} Response may be incomplete: ${issue.evidence} — consider providing a concrete answer`,
+        );
         break;
       case "contradiction":
-        lines.push(`  ${severity} Contradictory statements detected: ${issue.evidence} — re-check for consistency`);
+        lines.push(
+          `  ${severity} Contradictory statements detected: ${issue.evidence} — re-check for consistency`,
+        );
         break;
     }
   }
