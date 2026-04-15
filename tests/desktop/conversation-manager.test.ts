@@ -37,7 +37,13 @@ describe("createConversation", () => {
     expect(conv.id).toMatch(/^conv_/);
     expect(conv.title).toBe("New Conversation");
     expect(conv.messages).toHaveLength(0);
-    expect(conv.provider).toBe("anthropic");
+    // S1-18 vendor-bias elimination (commit ad37d2c): when no credentials
+    // are discovered (CI without API keys), provider/model resolve to null
+    // so the UI can prompt the user instead of silently picking Anthropic.
+    // When creds ARE discovered (typical local dev), provider is a string.
+    // Either is valid here; the explicit-provider case is covered below.
+    expect(conv.provider === null || typeof conv.provider === "string").toBe(true);
+    expect(conv.model === null || typeof conv.model === "string").toBe(true);
     expect(conv.pinned).toBe(false);
     expect(conv.archived).toBe(false);
     expect(conv.tags).toHaveLength(0);
