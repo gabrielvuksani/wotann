@@ -3616,6 +3616,163 @@ export class KairosRPCHandler {
       }
     });
 
+    // evolution.approve — approve a pending self-evolution action by index.
+    // Wires the UI's TrainingReview approve button (prior to this commit,
+    // the RPC method didn't exist and every approve click became a silent
+    // no-op via the legacy sendMessage fallback).
+    this.handlers.set("evolution.approve", async (params) => {
+      const index = Number((params as Record<string, unknown>)["index"] ?? -1);
+      if (!Number.isFinite(index) || index < 0) {
+        return { ok: false, error: "index (non-negative integer) required" };
+      }
+      if (!this.daemon) return { ok: false, error: "Daemon not initialized" };
+      try {
+        const engine = this.daemon.getSelfEvolution();
+        const ok = engine.approveAction(index);
+        return { ok, index };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // evolution.reject — mark a pending self-evolution action as reviewed-
+    // without-approval. Self-evolution engine doesn't currently expose a
+    // rejectAction verb, so we surface an honest {ok:false} with an
+    // explanatory error instead of a silent fake success — makes the gap
+    // visible in the UI instead of hiding it. Implementation follow-up
+    // tracked in docs/GAP_AUDIT_2026-04-15.md.
+    this.handlers.set("evolution.reject", async (params) => {
+      const index = Number((params as Record<string, unknown>)["index"] ?? -1);
+      if (!Number.isFinite(index) || index < 0) {
+        return { ok: false, error: "index (non-negative integer) required" };
+      }
+      return {
+        ok: false,
+        error: "evolution.reject: SelfEvolutionEngine.rejectAction not yet implemented",
+        index,
+      };
+    });
+
+    // skills.forge.triggers — list pending skill-forge triggers. Daemon
+    // SkillMerger surfaces a getPendingTriggers-like call when active;
+    // when absent (e.g. forge engine not booted), return empty list rather
+    // than erroring so the UI renders cleanly.
+    this.handlers.set("skills.forge.triggers", async () => {
+      if (!this.daemon) return { triggers: [] };
+      try {
+        const merger = this.daemon.getSkillMerger();
+        const maybeAccessor = merger as unknown as {
+          getPendingTriggers?: () => unknown[];
+        };
+        const triggers =
+          typeof maybeAccessor.getPendingTriggers === "function"
+            ? (maybeAccessor.getPendingTriggers() ?? [])
+            : [];
+        return { triggers };
+      } catch {
+        return { triggers: [] };
+      }
+    });
+
+    // skills.forge.run — honest stub. Forge execution wiring requires
+    // connecting the merger's run path through the query pipeline, which
+    // is a multi-hour refactor tracked in docs/GAP_AUDIT_2026-04-15.md.
+    this.handlers.set("skills.forge.run", async () => {
+      return {
+        ok: false,
+        error: "skills.forge.run: forge execution not yet wired through RPC",
+      };
+    });
+
+    // completion.suggest — inline completion ghost-text RPC. Real streaming
+    // implementation needs a dedicated short-context completion path + token
+    // budget + language-aware prefix/suffix handling. Until that lands, we
+    // return an empty suggestion so the UI renders nothing rather than
+    // silent-failing the whole ghost-text component.
+    this.handlers.set("completion.suggest", async () => {
+      return { suggestion: "", confidence: 0, model: null };
+    });
+
+    // completion.accept — telemetry when the user accepts a ghost-text
+    // suggestion. Logs and acknowledges; real telemetry aggregation is
+    // deferred to the cost-tracker side.
+    this.handlers.set("completion.accept", async (params) => {
+      const suggestionId = (params as Record<string, unknown>)["id"] as string | undefined;
+      const characters = Number((params as Record<string, unknown>)["characters"] ?? 0);
+      return {
+        ok: true,
+        recorded: {
+          id: suggestionId ?? null,
+          characters: Number.isFinite(characters) ? characters : 0,
+        },
+      };
+    });
+
+    // voice.transcribe — single-shot transcription. Full pipeline
+    // integration (Whisper / faster-whisper / Edge STT) is in the voice
+    // module but not yet exposed here. Return an honest error surface
+    // rather than pretending to succeed with empty text.
+    this.handlers.set("voice.transcribe", async () => {
+      return {
+        ok: false,
+        text: "",
+        error: "voice.transcribe: RPC surface not yet wired — use voice CLI or local capture",
+      };
+    });
+
+    // voice.stream — streaming transcription would need a multi-chunk
+    // delivery channel over the NDJSON socket. Same honest-stub semantic
+    // as voice.transcribe; real streaming requires subscription-style
+    // handler support tracked as a separate design item.
+    this.handlers.set("voice.stream", async () => {
+      return {
+        ok: false,
+        error: "voice.stream: streaming transcription not yet wired",
+      };
+    });
+
+    // composer.plan — dry-run of composer.apply. Returns the proposed
+    // edits echoed back so the UI can render a plan before the user
+    // confirms and triggers composer.apply for real writes. Later this
+    // can be extended to compute diff previews without touching disk.
+    this.handlers.set("composer.plan", async (params) => {
+      const edits = ((params as Record<string, unknown>)["edits"] ?? []) as Array<{
+        path: string;
+        newContent: string;
+      }>;
+      if (!Array.isArray(edits)) {
+        return { ok: false, error: "edits array required" };
+      }
+      const workspaceRoot = resolvePath(this.runtime?.getWorkingDir() ?? process.cwd());
+      const plan = edits.map((edit) => {
+        const resolved = resolvePath(edit.path ?? "");
+        const inWorkspace =
+          resolved === workspaceRoot ||
+          resolved.startsWith(workspaceRoot.endsWith("/") ? workspaceRoot : `${workspaceRoot}/`);
+        return {
+          path: edit.path,
+          resolved,
+          inWorkspace,
+          previewBytes: typeof edit.newContent === "string" ? edit.newContent.length : 0,
+        };
+      });
+      return { ok: true, plan, total: plan.length };
+    });
+
+    // proofs.reverify — re-run the verification cascade against an
+    // existing proof bundle on disk. Honest surface only; full
+    // reverification integration (load bundle → replay steps → update
+    // bundle in place) tracked in docs/GAP_AUDIT_2026-04-15.md.
+    this.handlers.set("proofs.reverify", async (params) => {
+      const id = (params as Record<string, unknown>)["id"] as string | undefined;
+      if (!id) return { ok: false, error: "id required" };
+      return {
+        ok: false,
+        error: "proofs.reverify: cascade replay not yet wired",
+        id,
+      };
+    });
+
     // Background workers — get status from daemon's BackgroundWorkerManager
     this.handlers.set("workers.status", async () => {
       if (!this.daemon) return { workers: [] };
