@@ -23,19 +23,14 @@ import { tmpdir, platform } from "node:os";
 
 // ── Types ───────────────────────────────────────────────
 
-export type TTSProviderType =
-  | "web-speech-api"
-  | "system"
-  | "piper"
-  | "elevenlabs"
-  | "openai-tts";
+export type TTSProviderType = "web-speech-api" | "system" | "piper" | "elevenlabs" | "openai-tts";
 
 export interface TTSEngineConfig {
   readonly language: string;
   readonly voice: string;
-  readonly rate: number;       // 0.1 - 10.0 (1.0 = normal)
-  readonly pitch: number;      // 0.0 - 2.0 (1.0 = normal)
-  readonly volume: number;     // 0.0 - 1.0
+  readonly rate: number; // 0.1 - 10.0 (1.0 = normal)
+  readonly pitch: number; // 0.0 - 2.0 (1.0 = normal)
+  readonly volume: number; // 0.0 - 1.0
   readonly maxTextLength: number;
   readonly stripCodeBlocks: boolean;
   readonly openaiModel: "tts-1" | "tts-1-hd";
@@ -220,7 +215,12 @@ export class TTSEngine {
     // Skip actual audio output during tests to prevent sounds playing
     if (process.env["WOTANN_TEST_MODE"] || process.env["VITEST"]) {
       this.speaking = false;
-      return { success: true, provider: "system", durationMs: 0, textLength: utterance.text.length };
+      return {
+        success: true,
+        provider: "system",
+        durationMs: 0,
+        textLength: utterance.text.length,
+      };
     }
 
     const provider = this.detectProvider();
@@ -371,7 +371,10 @@ export class TTSEngine {
 
   off(eventType: TTSEventType, listener: TTSEventListener): void {
     const existing = this.listeners.get(eventType) ?? [];
-    this.listeners.set(eventType, existing.filter((l) => l !== listener));
+    this.listeners.set(
+      eventType,
+      existing.filter((l) => l !== listener),
+    );
   }
 
   // ── Web Speech API (Primary — Free, Built-In) ──────────
@@ -428,16 +431,13 @@ export class TTSEngine {
     if (platform() !== "darwin") return false;
 
     try {
-      const voice = utterance.voice && utterance.voice !== "default"
-        ? utterance.voice
-        : "Samantha";
+      const voice = utterance.voice && utterance.voice !== "default" ? utterance.voice : "Samantha";
       const rate = Math.round((utterance.rate ?? 1.0) * 175);
 
-      execFileSync("say", [
-        "-v", voice,
-        "-r", String(rate),
-        utterance.text,
-      ], { timeout: 60_000, stdio: "pipe" });
+      execFileSync("say", ["-v", voice, "-r", String(rate), utterance.text], {
+        timeout: 60_000,
+        stdio: "pipe",
+      });
 
       return true;
     } catch {
@@ -450,12 +450,19 @@ export class TTSEngine {
   private speakPiper(utterance: TTSUtterance): boolean {
     try {
       const outputPath = join(tmpdir(), `wotann-tts-${Date.now()}.wav`);
-      const escapedText = utterance.text.replace(/"/g, '\\"');
 
-      execFileSync("sh", [
-        "-c",
-        `echo "${escapedText}" | piper --output_file "${outputPath}"`,
-      ], { timeout: 30_000, stdio: "pipe" });
+      // S2-4 — fix shell injection.
+      // The previous `execFileSync("sh", ["-c", `echo "${escaped}" | piper …`])`
+      // escaped only double quotes, leaving backticks, `$(…)`, `${…}`, and
+      // newlines exploitable. Since utterance.text can come from LLM output
+      // or inbound relay messages, a single prompt-injection payload could
+      // spawn arbitrary shell commands. Fix: invoke piper directly with
+      // argv-only args and pipe text via stdin — no shell in the path.
+      execFileSync("piper", ["--output_file", outputPath], {
+        input: utterance.text,
+        timeout: 30_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
 
       if (!existsSync(outputPath)) return false;
 
@@ -475,27 +482,24 @@ export class TTSEngine {
 
     try {
       const voiceId = this.config.elevenLabsVoiceId;
-      const response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-        {
-          method: "POST",
-          headers: {
-            "xi-api-key": apiKey,
-            "Content-Type": "application/json",
-            "Accept": "audio/mpeg",
-          },
-          body: JSON.stringify({
-            text: utterance.text,
-            model_id: "eleven_multilingual_v2",
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.75,
-              style: 0.0,
-              use_speaker_boost: true,
-            },
-          }),
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg",
         },
-      );
+        body: JSON.stringify({
+          text: utterance.text,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.0,
+            use_speaker_boost: true,
+          },
+        }),
+      });
 
       if (!response.ok) return false;
 
@@ -517,15 +521,13 @@ export class TTSEngine {
     if (!apiKey) return false;
 
     try {
-      const voice = utterance.voice && utterance.voice !== "default"
-        ? utterance.voice
-        : "alloy";
+      const voice = utterance.voice && utterance.voice !== "default" ? utterance.voice : "alloy";
       const speed = utterance.rate ?? this.config.rate;
 
       const response = await fetch("https://api.openai.com/v1/audio/speech", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -575,7 +577,8 @@ export class TTSEngine {
 
     // Truncate to max length
     if (processed.length > this.config.maxTextLength) {
-      processed = processed.slice(0, this.config.maxTextLength) + "... Response truncated for voice.";
+      processed =
+        processed.slice(0, this.config.maxTextLength) + "... Response truncated for voice.";
     }
 
     return processed;
@@ -644,7 +647,11 @@ function getWebSpeechVoices(): readonly string[] {
 function getSystemVoices(): readonly string[] {
   if (platform() !== "darwin") return [];
   try {
-    const output = execFileSync("say", ["-v", "?"], { encoding: "utf-8", timeout: 5000, stdio: "pipe" });
+    const output = execFileSync("say", ["-v", "?"], {
+      encoding: "utf-8",
+      timeout: 5000,
+      stdio: "pipe",
+    });
     return output
       .split("\n")
       .filter((line) => line.trim().length > 0)
@@ -671,7 +678,11 @@ function isCommandAvailable(cmd: string): boolean {
  */
 function playAudioFile(filePath: string): void {
   const cleanup = () => {
-    try { unlinkSync(filePath); } catch { /* ignore */ }
+    try {
+      unlinkSync(filePath);
+    } catch {
+      /* ignore */
+    }
   };
 
   if (platform() === "darwin") {

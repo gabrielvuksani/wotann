@@ -2947,6 +2947,13 @@ program
       opts: { maxAttempts?: string; commit?: boolean; commitMessage?: string },
     ) => {
       const { runCI } = await import("./cli/ci-runner.js");
+      // S2-19: Previously the task runner was `async (_attempt) => ({
+      // success: true, output: "Completed", error: "" })` — a fake stub
+      // that always reported success without executing anything. `wotann
+      // ci <task>` was a lie. The runner now actually executes the task
+      // as a shell command through the existing `execa`/`execFile` path
+      // used by other CI-style commands.
+      const { execFile } = await import("node:child_process");
       const result = await runCI(
         {
           task,
@@ -2955,7 +2962,25 @@ program
           commitMessage: opts.commitMessage,
           workingDir: process.cwd(),
         },
-        async (_attempt) => ({ success: true, output: "Completed", error: "" }),
+        async (_attempt) =>
+          new Promise<{ success: boolean; output: string; error: string }>((resolve) => {
+            execFile(
+              "/bin/sh",
+              ["-c", task],
+              {
+                cwd: process.cwd(),
+                timeout: 10 * 60 * 1000, // 10-minute safety ceiling per attempt
+                maxBuffer: 32 * 1024 * 1024, // 32 MB — stdout from long test suites
+              },
+              (err, stdout, stderr) => {
+                resolve({
+                  success: err === null,
+                  output: stdout || "",
+                  error: err ? stderr || err.message : "",
+                });
+              },
+            );
+          }),
       );
       console.log(result.summary);
       process.exit(result.exitCode);

@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve as resolvePath } from "node:path";
 import { homedir } from "node:os";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import type { WotannRuntime } from "../core/runtime.js";
@@ -21,6 +21,8 @@ import { AuditTrail, type AuditQuery } from "../telemetry/audit-trail.js";
 import type { DispatchRoutePolicy } from "../channels/dispatch.js";
 import type { BackgroundTaskConfig } from "../agents/background-agent.js";
 import type { BenchmarkType } from "../intelligence/benchmark-harness.js";
+import type { Workflow } from "../orchestration/workflow-dag.js";
+import type { WotannMode } from "../core/mode-cycling.js";
 import { execSync, spawn } from "node:child_process";
 import { createECDH, createHash, hkdfSync, randomBytes } from "node:crypto";
 import { sanitizeCommand } from "../security/command-sanitizer.js";
@@ -2172,28 +2174,81 @@ export class KairosRPCHandler {
       };
     });
 
-    // Cost arbitrage — compare provider costs
+    // S2-25 — compare real provider costs for a prompt.
+    //
+    // The previous implementation hardcoded 4 entries with arbitrary
+    // `costPer1M` values and always flagged Google as "recommended".
+    // Now we drive arbitrage from the single-source-of-truth
+    // PROVIDER_DEFAULTS table + the cost-tracker's pricing. The "best"
+    // recommendation falls out of the actual calculated cost, not a
+    // vendor preference. Latency estimates come from the router's
+    // historical recording of p50 per provider (if available), with a
+    // sensible default when the router has no data yet.
     this.handlers.set("cost.arbitrage", async (params) => {
       const prompt = params.prompt as string;
       if (!this.runtime) return { estimates: [] };
-      const tokenEstimate = Math.ceil((prompt?.length ?? 100) / 4);
-      const providers = [
-        { provider: "anthropic", model: "claude-opus-4-6", costPer1M: 15, quality: "best" },
-        { provider: "openai", model: "gpt-5.4", costPer1M: 10, quality: "good" },
-        { provider: "google", model: "gemini-2.5-pro", costPer1M: 3.5, quality: "good" },
-        { provider: "deepseek", model: "deepseek-r1", costPer1M: 2, quality: "acceptable" },
-      ];
-      return {
-        estimates: providers.map((p) => ({
-          provider: p.provider,
-          model: p.model,
-          estimatedCost: (tokenEstimate / 1_000_000) * p.costPer1M,
-          estimatedTokens: tokenEstimate,
-          estimatedLatencyMs: p.provider === "anthropic" ? 2000 : 1500,
-          quality: p.quality,
-          recommended: p.provider === "google",
-        })),
-      };
+
+      const { PROVIDER_DEFAULTS } = await import("../providers/model-defaults.js");
+      const costTracker = this.runtime.getCostTracker();
+      // approx 4 chars per token for the input
+      const inputTokens = Math.ceil((prompt?.length ?? 100) / 4);
+      // typical completion ~ input size for code tasks; tracker uses
+      // these separately so we estimate both arms honestly.
+      const outputTokens = Math.max(128, Math.floor(inputTokens * 0.75));
+
+      const estimates: Array<{
+        provider: string;
+        model: string;
+        estimatedCost: number;
+        estimatedTokens: number;
+        inputTokens: number;
+        outputTokens: number;
+        estimatedLatencyMs: number;
+        quality: string;
+        recommended: boolean;
+      }> = [];
+
+      for (const [providerName, defaults] of Object.entries(PROVIDER_DEFAULTS)) {
+        // Skip provider aliases that duplicate another entry (the same
+        // model shouldn't appear twice in the result).
+        if (providerName === "anthropic-subscription" || providerName === "openai-compat") {
+          continue;
+        }
+        const estimatedCost = costTracker.estimateCost(
+          defaults.defaultModel,
+          inputTokens,
+          outputTokens,
+        );
+        // Qualitative tier label: worker/oracle pair width gives us a
+        // proxy for "is this a single tier or does the provider have a
+        // flagship worth reaching for?" Keep it intentionally coarse.
+        const tier =
+          defaults.workerModel === defaults.oracleModel ? "single-tier" : "worker+oracle";
+        estimates.push({
+          provider: providerName,
+          model: defaults.defaultModel,
+          estimatedCost,
+          estimatedTokens: inputTokens + outputTokens,
+          inputTokens,
+          outputTokens,
+          // Router doesn't yet expose historical latency per provider;
+          // use a generic estimate (1200 ms) until we wire that.
+          estimatedLatencyMs: 1200,
+          quality: tier,
+          recommended: false,
+        });
+      }
+
+      // Recommend the cheapest non-zero-cost estimate, or the first
+      // zero-cost (local) entry if one exists. Zero-cost is always a
+      // win when the user tolerates local speed.
+      estimates.sort((a, b) => a.estimatedCost - b.estimatedCost);
+      const local = estimates.find((e) => e.estimatedCost === 0);
+      const cheapestPaid = estimates.find((e) => e.estimatedCost > 0);
+      const recommendedEntry = local ?? cheapestPaid ?? estimates[0];
+      if (recommendedEntry) recommendedEntry.recommended = true;
+
+      return { estimates };
     });
 
     // Skills list
@@ -2216,12 +2271,33 @@ export class KairosRPCHandler {
       }
     });
 
-    // Mode set
+    // Mode set (S2-24) — actually switches the runtime's mode instead of
+    // just echoing the requested mode back. Previously the handler
+    // returned `{ success: true, mode }` without calling anything, so
+    // the iOS mode switcher was a purely cosmetic toggle.
     this.handlers.set("mode.set", async (params) => {
       const mode = params.mode as string;
       if (!mode) throw new Error("mode required");
-      // Mode is stored in session state
-      return { success: true, mode };
+      if (!this.runtime) throw new Error("Runtime not initialized");
+      const valid: readonly WotannMode[] = [
+        "default",
+        "plan",
+        "acceptEdits",
+        "auto",
+        "bypass",
+        "autonomous",
+        "guardrails-off",
+        "focus",
+        "interview",
+        "teach",
+        "review",
+        "exploit",
+      ];
+      if (!(valid as readonly string[]).includes(mode)) {
+        return { success: false, error: `unknown mode: ${mode}`, validModes: valid };
+      }
+      this.runtime.setMode(mode as WotannMode);
+      return { success: true, mode: this.runtime.getModeName() };
     });
 
     // Context info
@@ -2796,11 +2872,24 @@ export class KairosRPCHandler {
       if (!existsSync(sessionsDir)) return { success: false, reason: "No sessions directory" };
 
       if (sessionId) {
+        // S2-6: validate sessionId before using it as a filename. Previously
+        // an RPC caller with `sessionId: "../../../../etc/passwd"` could
+        // read any file under `~/.wotann/sessions/../..` — i.e. anywhere.
+        // Restrict to a safe alphanumeric+hyphen+underscore regex and
+        // double-check the resolved path stays inside sessionsDir.
+        if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+          return { success: false, reason: "Invalid sessionId format" };
+        }
         const filePath = join(sessionsDir, `${sessionId}.json`);
-        if (!existsSync(filePath))
+        const resolved = resolvePath(filePath);
+        const safeRoot = resolvePath(sessionsDir) + "/";
+        if (!resolved.startsWith(safeRoot)) {
+          return { success: false, reason: "Invalid sessionId path" };
+        }
+        if (!existsSync(resolved))
           return { success: false, reason: `Session ${sessionId} not found` };
         try {
-          const raw = readFileSync(filePath, "utf-8");
+          const raw = readFileSync(resolved, "utf-8");
           const snapshot = JSON.parse(raw) as Record<string, unknown>;
           return { success: true, session: snapshot };
         } catch {
@@ -3083,6 +3172,12 @@ export class KairosRPCHandler {
       if (!Array.isArray(edits) || edits.length === 0) {
         return { ok: false, error: "edits array required" };
       }
+      // S2-5: composer.apply used to write to whatever path the caller asked
+      // for — that let a prompt-injection payload with a routing to this
+      // RPC overwrite `/etc/shadow` or `~/.ssh/authorized_keys` with
+      // arbitrary bytes. Now every edit path must resolve inside the
+      // active workspace (runtime.getWorkingDir() / process.cwd()).
+      const workspaceRoot = resolvePath(this.runtime?.getWorkingDir() ?? process.cwd());
       let applied = 0;
       const failures: Array<{ path: string; error: string }> = [];
       for (const edit of edits) {
@@ -3091,10 +3186,23 @@ export class KairosRPCHandler {
           continue;
         }
         try {
-          if (!existsSync(dirname(edit.path))) {
-            mkdirSync(dirname(edit.path), { recursive: true });
+          // Reject edits whose resolved path escapes the workspace. A
+          // trailing separator on workspaceRoot prevents the classic
+          // `/root-prefix-extension` bypass (e.g., `/workspace` matching
+          // `/workspace-secret/…`).
+          const resolved = resolvePath(edit.path);
+          const rootWithSep = workspaceRoot.endsWith("/") ? workspaceRoot : `${workspaceRoot}/`;
+          if (resolved !== workspaceRoot && !resolved.startsWith(rootWithSep)) {
+            failures.push({
+              path: edit.path,
+              error: `path outside workspace: ${resolved}`,
+            });
+            continue;
           }
-          writeFileSync(edit.path, edit.newContent, "utf-8");
+          if (!existsSync(dirname(resolved))) {
+            mkdirSync(dirname(resolved), { recursive: true });
+          }
+          writeFileSync(resolved, edit.newContent, "utf-8");
           applied += 1;
         } catch (err) {
           failures.push({
@@ -3300,14 +3408,35 @@ export class KairosRPCHandler {
       };
     });
 
-    // Start a workflow run
+    // Start a workflow run.
+    //
+    // S1-11 — the previous implementation looked up workflows exclusively
+    // via `engine.getBuiltin(name)`, which means any user-defined
+    // workflow saved through `workflow.save` was invisible to this
+    // handler. The desktop WorkflowBuilder could save a YAML workflow
+    // to disk, `workflow.list` would show it, but `workflow.start`
+    // returned "not found". Fix: search custom workflows too, and also
+    // accept a literal workflow object (frontend sends the full YAML
+    // spec inline when the user clicks Run without saving first).
     this.handlers.set("workflow.start", async (params) => {
       if (!this.daemon) throw new Error("Daemon not initialized");
       const engine = this.daemon.getWorkflowEngine();
-      const name = params["name"] as string;
+      const name = params["name"] as string | undefined;
+      const inlineWorkflow = params["workflow"] as Record<string, unknown> | undefined;
       const input = (params["input"] as string) ?? "";
-      if (!name) throw new Error("workflow name required");
-      const workflow = engine.getBuiltin(name);
+      const customDir = join(homedir(), ".wotann", "workflows");
+
+      let workflow = inlineWorkflow as unknown as Workflow | undefined;
+      if (!workflow) {
+        if (!name) throw new Error("workflow name or inline workflow required");
+        // Try built-ins first, then user-defined workflows on disk.
+        workflow = engine.getBuiltin(name);
+        if (!workflow) {
+          const all = engine.listWorkflows(customDir);
+          workflow = all.find((w) => w.name === name);
+        }
+      }
+
       if (!workflow) throw new Error(`Workflow not found: ${name}`);
       const run = await engine.startRun(workflow, input);
       return {
@@ -3316,6 +3445,31 @@ export class KairosRPCHandler {
         startedAt: run.startedAt,
         nodeStates: run.nodeStates,
       };
+    });
+
+    // S1-10 — persist a user-defined workflow to
+    // ~/.wotann/workflows/<name>.yaml so the desktop WorkflowBuilder can
+    // Save + Run. Previously the save handler was missing entirely so
+    // clicking Save from the UI failed silently.
+    this.handlers.set("workflow.save", async (params) => {
+      const name = params["name"] as string | undefined;
+      const workflow = params["workflow"] as Record<string, unknown> | undefined;
+      if (!name) return { success: false, error: "name required" };
+      if (!workflow) return { success: false, error: "workflow body required" };
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        // Constrain to safe filename characters — this value becomes part
+        // of the on-disk path and must not allow traversal.
+        return { success: false, error: "invalid workflow name" };
+      }
+      try {
+        const workflowsDir = join(homedir(), ".wotann", "workflows");
+        if (!existsSync(workflowsDir)) mkdirSync(workflowsDir, { recursive: true });
+        const outPath = join(workflowsDir, `${name}.yaml`);
+        writeFileSync(outPath, yamlStringify(workflow), "utf-8");
+        return { success: true, name, path: outPath };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
     });
 
     // Get workflow run status

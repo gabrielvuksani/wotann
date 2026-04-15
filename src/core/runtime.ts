@@ -966,6 +966,15 @@ export class WotannRuntime {
   }
 
   /**
+   * Read the current runtime mode name. Paired with the existing
+   * setMode() below — added so the daemon's mode.set RPC can echo the
+   * new mode back to the caller (S2-24).
+   */
+  getModeName(): WotannMode {
+    return this.modeCycler.getModeName();
+  }
+
+  /**
    * Initialize the runtime — discover providers, gather local context,
    * assemble system prompt. Must be called before querying.
    */

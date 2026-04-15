@@ -68,7 +68,7 @@ Sprint 6: Differentiation (Phase 8 + Phase 11 + Phase 14 + Phase 15)
 - Middleware pattern: every cross-cutting concern is a composable layer
 - Progressive disclosure: skills load on demand, zero cost until invoked
 - Guards are guarantees: every behavioral rule is a guard, not a prompt
-- Immutable data patterns throughout (return new objects, never mutate)
+- Immutable value types; encapsulated mutable services (return new objects for data; services own their internal state)
 - 200-400 lines per file, 800 max
 
 ## Directory Structure

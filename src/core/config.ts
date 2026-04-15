@@ -7,11 +7,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, parse } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import type {
-  WotannConfig,
-  HookProfile,
-  ProviderName,
-} from "./types.js";
+import type { WotannConfig, HookProfile, ProviderName } from "./types.js";
 
 // ── Zod Schemas ─────────────────────────────────────────────
 
@@ -109,7 +105,10 @@ export function loadConfigFromEnv(): Partial<WotannConfig> {
     providers["codex"] = { enabled: true, apiKey: process.env["CODEX_API_KEY"] };
   }
   if (process.env["GH_TOKEN"] || process.env["GITHUB_TOKEN"]) {
-    providers["copilot"] = { enabled: true, apiKey: process.env["GH_TOKEN"] ?? process.env["GITHUB_TOKEN"] };
+    providers["copilot"] = {
+      enabled: true,
+      apiKey: process.env["GH_TOKEN"] ?? process.env["GITHUB_TOKEN"],
+    };
   }
   if (process.env["OLLAMA_URL"] || process.env["OLLAMA_HOST"]) {
     providers["ollama"] = {
@@ -117,10 +116,17 @@ export function loadConfigFromEnv(): Partial<WotannConfig> {
       baseUrl: process.env["OLLAMA_URL"] ?? process.env["OLLAMA_HOST"] ?? "http://localhost:11434",
     };
   }
-  if (process.env["HF_TOKEN"] || process.env["HUGGINGFACE_API_KEY"] || process.env["HUGGING_FACE_HUB_TOKEN"]) {
+  if (
+    process.env["HF_TOKEN"] ||
+    process.env["HUGGINGFACE_API_KEY"] ||
+    process.env["HUGGING_FACE_HUB_TOKEN"]
+  ) {
     providers["huggingface"] = {
       enabled: true,
-      apiKey: process.env["HF_TOKEN"] ?? process.env["HUGGINGFACE_API_KEY"] ?? process.env["HUGGING_FACE_HUB_TOKEN"],
+      apiKey:
+        process.env["HF_TOKEN"] ??
+        process.env["HUGGINGFACE_API_KEY"] ??
+        process.env["HUGGING_FACE_HUB_TOKEN"],
       baseUrl: "https://router.huggingface.co/v1",
     };
   }
@@ -157,18 +163,10 @@ function mergeConfig(base: WotannConfig, override: Partial<WotannConfig>): Wotan
       ...base.providers,
       ...override.providers,
     },
-    hooks: override.hooks
-      ? { ...base.hooks, ...override.hooks }
-      : base.hooks,
-    memory: override.memory
-      ? { ...base.memory, ...override.memory }
-      : base.memory,
-    ui: override.ui
-      ? { ...base.ui, ...override.ui }
-      : base.ui,
-    daemon: override.daemon
-      ? { ...base.daemon, ...override.daemon }
-      : base.daemon,
+    hooks: override.hooks ? { ...base.hooks, ...override.hooks } : base.hooks,
+    memory: override.memory ? { ...base.memory, ...override.memory } : base.memory,
+    ui: override.ui ? { ...base.ui, ...override.ui } : base.ui,
+    daemon: override.daemon ? { ...base.daemon, ...override.daemon } : base.daemon,
   };
 }
 
@@ -182,9 +180,19 @@ export function loadConfig(
 ): WotannConfig {
   let config: WotannConfig = { ...DEFAULT_CONFIG };
 
+  // S2-13: guard against `.wotann/.wotann/` nesting. If the caller passes
+  // an already-.wotann'd path (which happened when findWorkspaceRoot
+  // returned the workspace and a second caller layered `.wotann` on top
+  // without checking), strip the trailing `.wotann` segment so we don't
+  // produce `…/.wotann/.wotann/config.yaml`.
+  const normalizedRoot =
+    workspaceRoot && workspaceRoot.endsWith("/.wotann")
+      ? workspaceRoot.slice(0, -".wotann".length - 1)
+      : workspaceRoot;
+
   // Layer 1: YAML file
-  if (workspaceRoot) {
-    const filePath = join(workspaceRoot, ".wotann", "config.yaml");
+  if (normalizedRoot) {
+    const filePath = join(normalizedRoot, ".wotann", "config.yaml");
     const fileConfig = loadConfigFromFile(filePath);
     config = mergeConfig(config, fileConfig);
   }

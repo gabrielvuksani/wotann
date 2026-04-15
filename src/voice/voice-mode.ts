@@ -165,9 +165,14 @@ export class VoiceMode {
     }
 
     // If no audio path, record first
-    const input = audioPath ?? await this.recordAudio();
+    const input = audioPath ?? (await this.recordAudio());
     if (!input) {
-      return { text: "[No audio input available]", confidence: 0, language: this.config.language, duration: 0 };
+      return {
+        text: "[No audio input available]",
+        confidence: 0,
+        language: this.config.language,
+        duration: 0,
+      };
     }
 
     try {
@@ -181,13 +186,18 @@ export class VoiceMode {
       const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: formData,
       });
 
       if (!response.ok) {
-        return { text: `[Whisper API error: ${response.status}]`, confidence: 0, language: this.config.language, duration: 0 };
+        return {
+          text: `[Whisper API error: ${response.status}]`,
+          confidence: 0,
+          language: this.config.language,
+          duration: 0,
+        };
       }
 
       const data = (await response.json()) as {
@@ -212,7 +222,11 @@ export class VoiceMode {
     } finally {
       // Clean up recorded audio if we recorded it
       if (!audioPath && input) {
-        try { unlinkSync(input); } catch { /* ignore */ }
+        try {
+          unlinkSync(input);
+        } catch {
+          /* ignore */
+        }
       }
     }
   }
@@ -227,7 +241,12 @@ export class VoiceMode {
     try {
       const recorded = await this.recordAudioToPath(tempAudio);
       if (!recorded) {
-        return { text: "[No audio recorder available]", confidence: 0, language: this.config.language, duration: 0 };
+        return {
+          text: "[No audio recorder available]",
+          confidence: 0,
+          language: this.config.language,
+          duration: 0,
+        };
       }
 
       // If whisper CLI is available, use it for transcription
@@ -240,11 +259,20 @@ export class VoiceMode {
         return this.transcribeOpenAIWhisper(tempAudio);
       }
 
-      return { text: "[Audio recorded but no transcription engine available]", confidence: 0.5, language: this.config.language, duration: 5 };
+      return {
+        text: "[Audio recorded but no transcription engine available]",
+        confidence: 0.5,
+        language: this.config.language,
+        duration: 5,
+      };
     } catch {
       return { text: "", confidence: 0, language: this.config.language, duration: 0 };
     } finally {
-      try { if (existsSync(tempAudio)) unlinkSync(tempAudio); } catch { /* ignore */ }
+      try {
+        if (existsSync(tempAudio)) unlinkSync(tempAudio);
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -254,15 +282,27 @@ export class VoiceMode {
     if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
     try {
-      execFileSync("whisper", [
-        input,
-        "--model", "base",
-        "--language", this.config.language,
-        "--output_format", "txt",
-        "--output_dir", outputDir,
-      ], { timeout: 30_000, stdio: "pipe" });
+      execFileSync(
+        "whisper",
+        [
+          input,
+          "--model",
+          "base",
+          "--language",
+          this.config.language,
+          "--output_format",
+          "txt",
+          "--output_dir",
+          outputDir,
+        ],
+        { timeout: 30_000, stdio: "pipe" },
+      );
 
-      const baseName = input.split("/").pop()?.replace(/\.\w+$/, "") ?? "audio";
+      const baseName =
+        input
+          .split("/")
+          .pop()
+          ?.replace(/\.\w+$/, "") ?? "audio";
       const txtPath = join(outputDir, `${baseName}.txt`);
 
       if (existsSync(txtPath)) {
@@ -279,12 +319,22 @@ export class VoiceMode {
   private async transcribeDeepgram(audioPath?: string): Promise<STTResult> {
     const apiKey = process.env["DEEPGRAM_API_KEY"];
     if (!apiKey) {
-      return { text: "[Deepgram API key not set]", confidence: 0, language: this.config.language, duration: 0 };
+      return {
+        text: "[Deepgram API key not set]",
+        confidence: 0,
+        language: this.config.language,
+        duration: 0,
+      };
     }
 
-    const input = audioPath ?? await this.recordAudio();
+    const input = audioPath ?? (await this.recordAudio());
     if (!input) {
-      return { text: "[No audio input]", confidence: 0, language: this.config.language, duration: 0 };
+      return {
+        text: "[No audio input]",
+        confidence: 0,
+        language: this.config.language,
+        duration: 0,
+      };
     }
 
     try {
@@ -295,7 +345,7 @@ export class VoiceMode {
         {
           method: "POST",
           headers: {
-            "Authorization": `Token ${apiKey}`,
+            Authorization: `Token ${apiKey}`,
             "Content-Type": "audio/wav",
           },
           body: audioData,
@@ -303,7 +353,12 @@ export class VoiceMode {
       );
 
       if (!response.ok) {
-        return { text: `[Deepgram error: ${response.status}]`, confidence: 0, language: this.config.language, duration: 0 };
+        return {
+          text: `[Deepgram error: ${response.status}]`,
+          confidence: 0,
+          language: this.config.language,
+          duration: 0,
+        };
       }
 
       const data = (await response.json()) as {
@@ -395,7 +450,7 @@ export class VoiceMode {
       const response = await fetch("https://api.openai.com/v1/audio/speech", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -416,11 +471,19 @@ export class VoiceMode {
       // Play the audio
       if (platform() === "darwin") {
         execFile("afplay", [tempMp3], () => {
-          try { unlinkSync(tempMp3); } catch { /* ignore */ }
+          try {
+            unlinkSync(tempMp3);
+          } catch {
+            /* ignore */
+          }
         });
       } else {
         execFile("mpv", ["--no-video", tempMp3], () => {
-          try { unlinkSync(tempMp3); } catch { /* ignore */ }
+          try {
+            unlinkSync(tempMp3);
+          } catch {
+            /* ignore */
+          }
         });
       }
 
@@ -437,27 +500,24 @@ export class VoiceMode {
     try {
       const voiceId = this.config.elevenLabsVoiceId ?? "21m00Tcm4TlvDq8ikWAM"; // Rachel (default)
 
-      const response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-        {
-          method: "POST",
-          headers: {
-            "xi-api-key": apiKey,
-            "Content-Type": "application/json",
-            "Accept": "audio/mpeg",
-          },
-          body: JSON.stringify({
-            text: options.text,
-            model_id: "eleven_multilingual_v2",
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.75,
-              style: 0.0,
-              use_speaker_boost: true,
-            },
-          }),
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg",
         },
-      );
+        body: JSON.stringify({
+          text: options.text,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            style: 0.0,
+            use_speaker_boost: true,
+          },
+        }),
+      });
 
       if (!response.ok) return false;
 
@@ -467,11 +527,19 @@ export class VoiceMode {
 
       if (platform() === "darwin") {
         execFile("afplay", [tempMp3], () => {
-          try { unlinkSync(tempMp3); } catch { /* ignore */ }
+          try {
+            unlinkSync(tempMp3);
+          } catch {
+            /* ignore */
+          }
         });
       } else {
         execFile("mpv", ["--no-video", tempMp3], () => {
-          try { unlinkSync(tempMp3); } catch { /* ignore */ }
+          try {
+            unlinkSync(tempMp3);
+          } catch {
+            /* ignore */
+          }
         });
       }
 
@@ -488,11 +556,10 @@ export class VoiceMode {
       const voice = options.voice ?? this.config.ttsVoice ?? "Samantha";
       const rate = Math.round((options.speed ?? this.config.ttsSpeed ?? 1.0) * 175);
 
-      execFileSync("say", [
-        "-v", voice,
-        "-r", String(rate),
-        options.text,
-      ], { timeout: 30_000, stdio: "pipe" });
+      execFileSync("say", ["-v", voice, "-r", String(rate), options.text], {
+        timeout: 30_000,
+        stdio: "pipe",
+      });
 
       return true;
     } catch {
@@ -505,18 +572,36 @@ export class VoiceMode {
       const tempWav = join(tmpdir(), `wotann-tts-${Date.now()}.wav`);
       const input = options.text;
 
-      writeFileSync(join(tmpdir(), "wotann-tts-input.txt"), input);
-      execFileSync("sh", ["-c", `echo "${input.replace(/"/g, '\\"')}" | piper --output_file "${tempWav}"`], {
-        timeout: 15_000, stdio: "pipe",
+      // S2-3 — fix shell injection.
+      // Previously: execFileSync("sh", ["-c", `echo "${input.replace(/"/g, '\\"')}" | piper ...`])
+      // This is the classic unsafe pattern — escaping only `"` leaves
+      // backticks, `$(…)`, `${…}`, `$var`, and newline injection wide
+      // open. Since TTS input often comes from LLM output or relay
+      // messages, a prompt-injection payload could spawn arbitrary
+      // commands. Fix: invoke piper directly as an argv-safe binary and
+      // pipe the text via stdin — piper accepts lines on stdin when no
+      // text argument is provided, so no shell is involved at any point.
+      execFileSync("piper", ["--output_file", tempWav], {
+        input,
+        timeout: 15_000,
+        stdio: ["pipe", "pipe", "pipe"],
       });
 
       if (platform() === "darwin") {
         execFile("afplay", [tempWav], () => {
-          try { unlinkSync(tempWav); } catch { /* ignore */ }
+          try {
+            unlinkSync(tempWav);
+          } catch {
+            /* ignore */
+          }
         });
       } else {
         execFile("aplay", [tempWav], () => {
-          try { unlinkSync(tempWav); } catch { /* ignore */ }
+          try {
+            unlinkSync(tempWav);
+          } catch {
+            /* ignore */
+          }
         });
       }
 
@@ -537,23 +622,38 @@ export class VoiceMode {
   private async recordAudioToPath(outputPath: string, durationSec: number = 5): Promise<boolean> {
     try {
       if (isCommandAvailable("sox")) {
-        execFileSync("sox", [
-          "-d", "-r", "16000", "-c", "1", "-b", "16", outputPath,
-          "trim", "0", String(durationSec),
-        ], { timeout: (durationSec + 5) * 1000, stdio: "pipe" });
+        execFileSync(
+          "sox",
+          [
+            "-d",
+            "-r",
+            "16000",
+            "-c",
+            "1",
+            "-b",
+            "16",
+            outputPath,
+            "trim",
+            "0",
+            String(durationSec),
+          ],
+          { timeout: (durationSec + 5) * 1000, stdio: "pipe" },
+        );
         return true;
       }
       if (isCommandAvailable("rec")) {
         execFileSync("rec", [outputPath, "trim", "0", String(durationSec)], {
-          timeout: (durationSec + 5) * 1000, stdio: "pipe",
+          timeout: (durationSec + 5) * 1000,
+          stdio: "pipe",
         });
         return true;
       }
       if (platform() === "linux" && isCommandAvailable("arecord")) {
-        execFileSync("arecord", [
-          "-f", "S16_LE", "-r", "16000", "-c", "1",
-          "-d", String(durationSec), outputPath,
-        ], { timeout: (durationSec + 5) * 1000, stdio: "pipe" });
+        execFileSync(
+          "arecord",
+          ["-f", "S16_LE", "-r", "16000", "-c", "1", "-d", String(durationSec), outputPath],
+          { timeout: (durationSec + 5) * 1000, stdio: "pipe" },
+        );
         return true;
       }
     } catch {
