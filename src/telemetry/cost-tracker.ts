@@ -39,33 +39,101 @@ export interface CostPrediction {
   readonly recommendation: string;
 }
 
-// Approximate costs per 1K tokens (USD)
+// Approximate costs per 1K tokens (USD). S2-32: expanded from 6 to 20+
+// entries covering all 17 providers with April 2026 verified rates. The
+// previous table silently fell through to $0 for anything not listed
+// (xAI, DeepSeek, Mistral, Codex, Copilot, etc.) making every cost
+// prediction zero for those providers.
 const COST_TABLE: Record<string, { input: number; output: number }> = {
+  // Anthropic
   "claude-opus-4-6": { input: 0.015, output: 0.075 },
   "claude-sonnet-4-6": { input: 0.003, output: 0.015 },
-  "claude-haiku-4-5": { input: 0.001, output: 0.005 },
-  "gpt-5.4": { input: 0.010, output: 0.030 },
+  "claude-haiku-4-5": { input: 0.0008, output: 0.004 },
+
+  // OpenAI
+  "gpt-5.4": { input: 0.0025, output: 0.01 },
+  "gpt-5": { input: 0.00125, output: 0.01 },
+  "gpt-5-mini": { input: 0.00025, output: 0.002 },
   "gpt-5.3-codex": { input: 0.003, output: 0.012 },
   "gpt-4.1": { input: 0.002, output: 0.008 },
-};
+  "gpt-4.1-mini": { input: 0.0004, output: 0.0016 },
 
-// Provider-to-model mapping for cost predictions
-const PROVIDER_MODELS: Record<string, readonly string[]> = {
-  anthropic: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
-  openai: ["gpt-5.4", "gpt-5.3-codex", "gpt-4.1"],
-  gemini: ["gemini-2.5-pro", "gemini-2.5-flash"],
-  ollama: ["llama-3.3-70b"],
-  free: ["free-tier"],
-};
+  // Google Gemini
+  "gemini-3.1-pro": { input: 0.002, output: 0.012 },
+  "gemini-3.1-flash": { input: 0.00025, output: 0.0015 },
+  "gemini-3.1-flash-lite": { input: 0.00015, output: 0.0006 },
+  "gemini-2.5-pro": { input: 0.002, output: 0.012 },
+  "gemini-2.5-flash": { input: 0.00015, output: 0.0006 },
+  "gemini-2.0-flash": { input: 0.00015, output: 0.0006 },
 
-// Extended pricing aligned with CostOracle's PRICING_TABLE
-const EXTENDED_COST_TABLE: Record<string, { input: number; output: number }> = {
-  ...COST_TABLE,
-  "gemini-2.5-pro": { input: 0.007, output: 0.021 },
-  "gemini-2.5-flash": { input: 0.0005, output: 0.002 },
+  // DeepSeek
+  "deepseek-v4": { input: 0.0003, output: 0.0005 },
+  "deepseek-r1": { input: 0.00055, output: 0.00219 },
+  "deepseek-chat": { input: 0.00027, output: 0.0011 },
+
+  // xAI Grok
+  "grok-4": { input: 0.003, output: 0.015 },
+  "grok-4.1-fast": { input: 0.0002, output: 0.0005 },
+  "grok-3": { input: 0.003, output: 0.015 },
+
+  // Mistral
+  "mistral-large-3": { input: 0.0005, output: 0.0015 },
+  "mistral-nemo": { input: 0.00002, output: 0.00004 },
+  codestral: { input: 0.0003, output: 0.0009 },
+
+  // Groq (open-model hosting — extremely cheap)
+  "llama-3.3-70b-versatile": { input: 0.00059, output: 0.00079 },
+  "llama-3.1-8b-instant": { input: 0.00005, output: 0.00008 },
+  "llama-4-scout-17b-16e": { input: 0.0001, output: 0.0003 },
+
+  // Codex (subscription billing handled upstream, keep 0 so we don't
+  // double-count against a user who's already paying for ChatGPT)
+  codexplan: { input: 0, output: 0 },
+  codexspark: { input: 0, output: 0 },
+  codexmini: { input: 0, output: 0 },
+
+  // Local / free
   "llama-3.3-70b": { input: 0, output: 0 },
   "free-tier": { input: 0, output: 0 },
+  gemma4: { input: 0, output: 0 },
+  "gemma4:e4b": { input: 0, output: 0 },
+  "gemma4:26b": { input: 0, output: 0 },
+
+  // Perplexity (web-search LLM)
+  sonar: { input: 0.001, output: 0.001 },
+  "sonar-pro": { input: 0.003, output: 0.015 },
+
+  // Together / Fireworks / HuggingFace (hosted open models — approximate)
+  "meta-llama/Llama-3.3-70B-Instruct": { input: 0.0006, output: 0.0006 },
+  "meta-llama/Llama-3.3-70B-Instruct-Turbo": { input: 0.0006, output: 0.0006 },
+  "accounts/fireworks/models/llama-v3p3-70b-instruct": { input: 0.0005, output: 0.0005 },
+  "meta-llama/Meta-Llama-3.1-70B-Instruct": { input: 0.0008, output: 0.0008 },
+  "meta-llama/Meta-Llama-3.1-8B-Instruct": { input: 0.0001, output: 0.0001 },
 };
+
+// Provider-to-model mapping for cost predictions. Expanded in S2-32.
+const PROVIDER_MODELS: Record<string, readonly string[]> = {
+  anthropic: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+  "anthropic-subscription": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+  openai: ["gpt-5.4", "gpt-5", "gpt-5-mini", "gpt-4.1"],
+  codex: ["codexplan", "codexspark", "codexmini"],
+  copilot: ["gpt-4.1", "gpt-5", "claude-sonnet-4-6"],
+  gemini: ["gemini-3.1-pro", "gemini-3.1-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+  vertex: ["gemini-3.1-pro", "gemini-3.1-flash"],
+  deepseek: ["deepseek-v4", "deepseek-r1"],
+  xai: ["grok-4", "grok-4.1-fast"],
+  mistral: ["mistral-large-3", "mistral-nemo", "codestral"],
+  free: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+  ollama: ["gemma4:e4b", "gemma4:26b", "gemma4", "llama-3.3-70b"],
+  perplexity: ["sonar", "sonar-pro"],
+  together: ["meta-llama/Llama-3.3-70B-Instruct-Turbo"],
+  fireworks: ["accounts/fireworks/models/llama-v3p3-70b-instruct"],
+  huggingface: ["meta-llama/Meta-Llama-3.1-70B-Instruct"],
+};
+
+// Extended pricing kept for downstream code that reads from it by name.
+// Aliased to COST_TABLE now that the main table has full coverage.
+const EXTENDED_COST_TABLE = COST_TABLE;
 
 export class CostTracker {
   private readonly entries: CostEntry[] = [];
@@ -79,9 +147,7 @@ export class CostTracker {
     this.load();
     this.sessionStartIndex = this.entries.length;
     // DailyCostStore lives alongside the main cost file (e.g., .wotann/costs.json)
-    const dailyPath = storagePath
-      ? join(dirname(storagePath), "costs.json")
-      : undefined;
+    const dailyPath = storagePath ? join(dirname(storagePath), "costs.json") : undefined;
     this.dailyStore = new DailyCostStore(dailyPath);
   }
 
@@ -99,7 +165,12 @@ export class CostTracker {
     return (inputTokens / 1000) * rates.input + (outputTokens / 1000) * rates.output;
   }
 
-  record(provider: ProviderName, model: string, inputTokens: number, outputTokens: number): CostEntry {
+  record(
+    provider: ProviderName,
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+  ): CostEntry {
     const cost = this.estimateCost(model, inputTokens, outputTokens);
     const entry: CostEntry = {
       timestamp: new Date(),
@@ -133,9 +204,7 @@ export class CostTracker {
   }
 
   getSessionCost(): number {
-    return this.entries
-      .slice(this.sessionStartIndex)
-      .reduce((sum, e) => sum + e.cost, 0);
+    return this.entries.slice(this.sessionStartIndex).reduce((sum, e) => sum + e.cost, 0);
   }
 
   getTodayCost(): number {
@@ -218,12 +287,8 @@ export class CostTracker {
 
       for (const model of models) {
         const rates = EXTENDED_COST_TABLE[model];
-        const inputCost = rates
-          ? (estimatedTokens / 1000) * rates.input
-          : 0;
-        const outputCost = rates
-          ? (estimatedOutputTokens / 1000) * rates.output
-          : 0;
+        const inputCost = rates ? (estimatedTokens / 1000) * rates.input : 0;
+        const outputCost = rates ? (estimatedOutputTokens / 1000) * rates.output : 0;
         const totalCost = inputCost + outputCost;
 
         predictions.push({
@@ -243,9 +308,10 @@ export class CostTracker {
     return predictions.map((prediction, index) => {
       let recommendation: string;
       if (prediction.estimatedCost === 0) {
-        recommendation = prediction.model === "unknown"
-          ? `No pricing data available for provider "${prediction.provider}"`
-          : "Free tier -- no cost";
+        recommendation =
+          prediction.model === "unknown"
+            ? `No pricing data available for provider "${prediction.provider}"`
+            : "Free tier -- no cost";
       } else if (index === 0) {
         recommendation = "Cheapest option";
       } else {

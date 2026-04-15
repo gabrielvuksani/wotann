@@ -36,13 +36,26 @@ case "$OS_NAME" in
   *) echo -e "${RED}Unsupported OS: $OS_NAME${NC}"; exit 1 ;;
 esac
 
-# Ensure we can find npm-global bin dirs on both platforms.
-if [ "$PLATFORM" = "macos" ]; then
-  # Homebrew (Apple Silicon and Intel) + nvm default.
-  for p in "/opt/homebrew/bin" "/usr/local/bin" "$HOME/.nvm/versions/node/$(command -v node >/dev/null && node -v | sed 's/v//' || echo NONE)/bin"; do
-    case ":$PATH:" in *":$p:"*) ;; *) PATH="$p:$PATH" ;; esac
-  done
-fi
+# Ensure we can find npm-global bin dirs on both platforms. S4-7: Linux +
+# nvm'd Node was missing — when `curl … | bash` runs as a subshell, the
+# nvm init isn't sourced, so Node ends up off PATH. Cover both platforms.
+case "$PLATFORM" in
+  macos)
+    for p in "/opt/homebrew/bin" "/usr/local/bin" "$HOME/.nvm/versions/node/$(command -v node >/dev/null && node -v | sed 's/v//' || echo NONE)/bin"; do
+      case ":$PATH:" in *":$p:"*) ;; *) PATH="$p:$PATH" ;; esac
+    done
+    ;;
+  linux)
+    # Source nvm if it's installed so the nvm'd Node becomes available.
+    if [ -s "$HOME/.nvm/nvm.sh" ]; then
+      # shellcheck disable=SC1091
+      . "$HOME/.nvm/nvm.sh"
+    fi
+    for p in "/usr/local/bin" "$HOME/.local/bin" "$HOME/.npm-global/bin"; do
+      case ":$PATH:" in *":$p:"*) ;; *) PATH="$p:$PATH" ;; esac
+    done
+    ;;
+esac
 export PATH
 
 echo ""
@@ -154,10 +167,35 @@ if command -v ollama >/dev/null 2>&1; then
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
 
+# S4-7 — offer to install Ollama when no providers are detected. Gated behind
+# WOTANN_INSTALL_OLLAMA=1 by default so we don't silently pull 700 MB over a
+# curl-pipe install; flag discovery gives the user an explicit opt-in.
 if [ "$PROVIDERS_FOUND" -eq 0 ]; then
   echo -e "${YELLOW}  No providers detected.${NC}"
-  echo -e "${DIM}  Run: wotann init --free  (Ollama + free APIs)${NC}"
-  echo -e "${DIM}  Or:  wotann init         (guided setup)${NC}"
+
+  if [ "${WOTANN_INSTALL_OLLAMA:-0}" = "1" ] && ! command -v ollama >/dev/null 2>&1; then
+    echo -e "${CYAN}  Installing Ollama (WOTANN_INSTALL_OLLAMA=1)...${NC}"
+    if [ "$PLATFORM" = "macos" ]; then
+      # The official installer respects sudo prompts; we don't
+      # swallow them — the user must opt into elevation.
+      curl -fsSL https://ollama.ai/install.sh | sh
+    elif [ "$PLATFORM" = "linux" ]; then
+      curl -fsSL https://ollama.ai/install.sh | sh
+    fi
+    if command -v ollama >/dev/null 2>&1; then
+      echo -e "${GREEN}  OK: Ollama installed. Start with: ollama serve${NC}"
+      echo -e "${DIM}  Pull a model: ollama pull gemma3${NC}"
+    else
+      echo -e "${YELLOW}  Ollama install failed. Install manually: https://ollama.ai${NC}"
+    fi
+  else
+    echo -e "${DIM}  Run: wotann init --free  (Ollama + free APIs)${NC}"
+    echo -e "${DIM}  Or:  wotann init         (guided setup)${NC}"
+    if ! command -v ollama >/dev/null 2>&1; then
+      echo -e "${DIM}  Install Ollama: WOTANN_INSTALL_OLLAMA=1 re-run this script${NC}"
+      echo -e "${DIM}                   or visit https://ollama.ai${NC}"
+    fi
+  fi
 fi
 
 echo ""
