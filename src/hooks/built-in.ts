@@ -698,6 +698,49 @@ export function createGitCheckpointHook(workDir?: string): HookHandler {
   };
 }
 
+// ── Git Pre-Checkpoint Hook (standard) — S3-3 auto-snapshot BEFORE mutating ──
+//
+// The PostToolUse GitCheckpoint above snapshots AFTER the tool has already run
+// — which captures the new state but not a recoverable rollback point. S3-3
+// added ShadowGit.beforeTool() to snapshot BEFORE mutating tools (Write, Edit,
+// NotebookEdit, MultiEdit, HashlineEdit) and recorded each snapshot in a
+// ring-buffer that restoreLastBefore(toolName) can use for rollback. However,
+// the Opus audit found ShadowGit.beforeTool, markStable, restoreLastBefore,
+// and getRecentCheckpoints had ZERO callsites — the entire S3-3 API was dead.
+// Registering this hook on the newly-live PreToolUse event makes the S3-3
+// rollback capability real.
+export function createGitPreCheckpointHook(workDir?: string): HookHandler {
+  let shadowGit: InstanceType<typeof ShadowGitClass> | undefined;
+
+  return {
+    name: "GitPreCheckpoint",
+    event: "PreToolUse",
+    profile: "standard",
+    async handler(payload: HookPayload): Promise<HookResult> {
+      const toolName = payload.toolName ?? "";
+      try {
+        if (!shadowGit) {
+          const dir = workDir ?? process.cwd();
+          shadowGit = new ShadowGitClass(dir);
+        }
+        const context =
+          (payload.filePath as string | undefined) ??
+          (payload.toolInput ? JSON.stringify(payload.toolInput).slice(0, 120) : undefined);
+        const hash = await shadowGit.beforeTool(toolName, context);
+        if (hash) {
+          return {
+            action: "allow",
+            message: `GitPreCheckpoint: ${hash.slice(0, 8)} (pre-${toolName})`,
+          };
+        }
+      } catch {
+        // Shadow git failures should never block the agent — allow through.
+      }
+      return { action: "allow" };
+    },
+  };
+}
+
 // ── Correction Capture (simple) (standard) — detect user corrections via pattern matching ──
 
 const SIMPLE_CORRECTION_PATTERNS: readonly RegExp[] = [
@@ -1009,6 +1052,7 @@ export function registerBuiltinHooks(engine: HookEngine): void {
   engine.register(createCacheMonitor());
   engine.register(autoTestSuggestion);
   engine.register(createGitCheckpointHook());
+  engine.register(createGitPreCheckpointHook());
   engine.register(resultInjectionScanner);
   engine.register(createToolPairValidator());
   engine.register(archivePreflightGuard);
