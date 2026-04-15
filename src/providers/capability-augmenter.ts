@@ -17,6 +17,7 @@
  */
 
 import type { ProviderCapabilities, UnifiedQueryOptions, ToolSchema } from "./types.js";
+import { parseToolCall } from "./tool-parsers/index.js";
 
 // ── Tool Calling Augmentation ──────────────────────────────
 
@@ -64,23 +65,26 @@ export function augmentToolCalling(
 }
 
 function formatToolsAsXML(tools: readonly ToolSchema[]): string {
-  return tools.map((tool) => {
-    const params = Object.entries(tool.inputSchema)
-      .filter(([key]) => key !== "type" && key !== "required")
-      .map(([key, val]) => {
-        const desc = typeof val === "object" && val !== null && "description" in val
-          ? ` — ${(val as { description: string }).description}`
-          : "";
-        return `  - ${key}${desc}`;
-      })
-      .join("\n");
+  return tools
+    .map((tool) => {
+      const params = Object.entries(tool.inputSchema)
+        .filter(([key]) => key !== "type" && key !== "required")
+        .map(([key, val]) => {
+          const desc =
+            typeof val === "object" && val !== null && "description" in val
+              ? ` — ${(val as { description: string }).description}`
+              : "";
+          return `  - ${key}${desc}`;
+        })
+        .join("\n");
 
-    return [
-      `## ${tool.name}`,
-      tool.description,
-      params ? `Parameters:\n${params}` : "No parameters.",
-    ].join("\n");
-  }).join("\n\n");
+      return [
+        `## ${tool.name}`,
+        tool.description,
+        params ? `Parameters:\n${params}` : "No parameters.",
+      ].join("\n");
+    })
+    .join("\n\n");
 }
 
 // ── Thinking Augmentation ──────────────────────────────────
@@ -144,7 +148,10 @@ export function augmentVision(
   // Replace image references with text-mediated descriptions
   const augmentedPrompt = options.prompt
     .replace(/\[image:[^\]]+\]/g, "[Image provided — see text description below]")
-    .replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, "[Base64 image — text description provided]");
+    .replace(
+      /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g,
+      "[Base64 image — text description provided]",
+    );
 
   const visionNote = [
     "",
@@ -185,22 +192,21 @@ export function augmentQuery(
  */
 export function parseToolCallFromText(
   text: string,
+  modelName?: string,
 ): { name: string; args: Record<string, string> } | null {
-  const toolUseMatch = text.match(/<tool_use>\s*<tool\s+name="([^"]+)">([\s\S]*?)<\/tool>\s*<\/tool_use>/);
-  if (!toolUseMatch) return null;
-
-  const name = toolUseMatch[1] ?? "";
-  const paramsBlock = toolUseMatch[2] ?? "";
-
+  // S3-2: dispatch to model-family-aware parser when modelName is known.
+  // The 11 ported parsers cover Hermes, Mistral, Llama, Qwen, DeepSeek,
+  // Functionary, Jamba, Command R, ToolBench, Glaive, ReAct — plus the
+  // legacy Wotann XML format that capability-augmenter injects. When
+  // modelName is unspecified, parseToolCall tries every parser in
+  // priority order until one matches. See ./tool-parsers/parsers.ts.
+  const parsed = parseToolCall(text, modelName);
+  if (!parsed) return null;
+  // Coerce args to Record<string, string> for the legacy contract that
+  // some downstream consumers still rely on.
   const args: Record<string, string> = {};
-  const paramMatches = paramsBlock.matchAll(/<param\s+name="([^"]+)">([^<]*)<\/param>/g);
-  for (const match of paramMatches) {
-    const key = match[1];
-    const val = match[2];
-    if (key !== undefined) {
-      args[key] = val ?? "";
-    }
+  for (const [k, v] of Object.entries(parsed.args)) {
+    args[k] = typeof v === "string" ? v : JSON.stringify(v);
   }
-
-  return { name, args };
+  return { name: parsed.name, args };
 }
