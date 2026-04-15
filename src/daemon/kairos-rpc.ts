@@ -334,7 +334,7 @@ export async function verifyCodexJWTSignature(
 
   try {
     const { createPublicKey, createVerify } = await import("node:crypto");
-     
+
     const pubKey = createPublicKey({ key: key as any, format: "jwk" });
     const signingInput = `${parts[0]}.${parts[1]}`;
     const signature = Buffer.from(parts[2]!, "base64url");
@@ -710,7 +710,7 @@ export class KairosRPCHandler {
 
     // Fallback: route through available providers directly (bypassing uninitialized runtime)
     // Smart routing: detect provider from model name
-     
+
     const _isOllamaModel =
       [
         "gemma",
@@ -3850,6 +3850,67 @@ export class KairosRPCHandler {
         };
       });
       return { ok: true, plan, total: plan.length };
+    });
+
+    // shadow.undo — restore the most recent shadow-git checkpoint that
+    // was created BEFORE the named tool last ran. Wires the S3-3
+    // restoreLastBefore() API into the user-visible undo gesture.
+    // Without this the GitPreCheckpointHook ring buffer was write-only.
+    this.handlers.set("shadow.undo", async (params) => {
+      const toolName = (params as Record<string, unknown>)["toolName"] as string | undefined;
+      if (!toolName) {
+        return {
+          ok: false,
+          error: "toolName required (e.g. 'Write', 'Edit', 'NotebookEdit')",
+        };
+      }
+      try {
+        const { ShadowGit } = await import("../utils/shadow-git.js");
+        const workDir = this.runtime?.getWorkingDir() ?? process.cwd();
+        const shadowGit = new ShadowGit(workDir);
+        const restored = await shadowGit.restoreLastBefore(toolName);
+        const recent = shadowGit.getRecentCheckpoints();
+        return {
+          ok: restored,
+          toolName,
+          restored,
+          recent: recent.map((c) => ({
+            hash: c.hash,
+            label: c.label,
+            timestamp: c.timestamp,
+            toolName: c.toolName,
+          })),
+        };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // shadow.checkpoints — list recent shadow-git checkpoints from the
+    // ring buffer. Used by the desktop to render an "undo history" so
+    // the user can see what's recoverable before invoking shadow.undo.
+    this.handlers.set("shadow.checkpoints", async () => {
+      try {
+        const { ShadowGit } = await import("../utils/shadow-git.js");
+        const workDir = this.runtime?.getWorkingDir() ?? process.cwd();
+        const shadowGit = new ShadowGit(workDir);
+        const recent = shadowGit.getRecentCheckpoints();
+        return {
+          ok: true,
+          checkpoints: recent.map((c) => ({
+            hash: c.hash,
+            label: c.label,
+            timestamp: c.timestamp,
+            toolName: c.toolName,
+          })),
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          checkpoints: [],
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     });
 
     // proofs.reverify — re-run the verification cascade against an
