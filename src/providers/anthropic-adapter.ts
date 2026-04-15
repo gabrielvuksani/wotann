@@ -4,7 +4,12 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { ProviderAdapter, UnifiedQueryOptions, StreamChunk, ProviderCapabilities } from "./types.js";
+import type {
+  ProviderAdapter,
+  UnifiedQueryOptions,
+  StreamChunk,
+  ProviderCapabilities,
+} from "./types.js";
 import { openAIToAnthropic } from "./format-translator.js";
 import { getModelContextConfig, isExtendedContextEnabled } from "../context/limits.js";
 
@@ -54,8 +59,7 @@ function buildSystemBlocks(
   // These are typically identity + tools + rules and change rarely.
   let breakpointsUsed = 0;
   return sections.map((text) => {
-    const shouldCache =
-      breakpointsUsed < MAX_CACHE_BREAKPOINTS && text.length >= CACHE_MIN_CHARS;
+    const shouldCache = breakpointsUsed < MAX_CACHE_BREAKPOINTS && text.length >= CACHE_MIN_CHARS;
     if (shouldCache) breakpointsUsed++;
     return {
       type: "text" as const,
@@ -98,14 +102,14 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
           .map((msg) =>
             msg.role === "tool"
               ? {
-                role: "tool" as const,
-                content: msg.content,
-                tool_call_id: msg.toolCallId,
-              }
+                  role: "tool" as const,
+                  content: msg.content,
+                  tool_call_id: msg.toolCallId,
+                }
               : {
-                role: msg.role,
-                content: msg.content,
-              },
+                  role: msg.role,
+                  content: msg.content,
+                },
           ),
       );
 
@@ -122,6 +126,18 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
     // so we mark it for Anthropic's prompt caching to avoid re-processing.
     const systemParam = buildSystemBlocks(options.systemPrompt);
 
+    // S1-3: Forward tool definitions into the request body. Anthropic's schema
+    // expects `{ name, description, input_schema }` — our UnifiedQueryOptions
+    // stores them in the same shape under `inputSchema`, so just map the key.
+    const anthropicTools =
+      options.tools && options.tools.length > 0
+        ? options.tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.inputSchema as Record<string, unknown>,
+          }))
+        : undefined;
+
     try {
       const stream = client.messages.stream({
         model,
@@ -129,21 +145,134 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
         system: systemParam,
         messages,
         temperature: options.temperature,
+        ...(anthropicTools ? { tools: anthropicTools as unknown as never } : {}),
       });
 
+      // S1-21: Parse the full content-block lifecycle.
+      // Anthropic streaming sends:
+      //   content_block_start { content_block: { type: "tool_use" | "text" | "thinking", ... } }
+      //   content_block_delta { delta: { type: "text_delta"|"input_json_delta"|"thinking_delta", ... } }
+      //   content_block_stop
+      // For tool_use blocks, the `name` and `id` arrive in content_block_start,
+      // and the argument JSON is streamed as input_json_delta fragments that
+      // must be concatenated before JSON.parse.
       let totalTokens = 0;
+      let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
+
+      // Per-block accumulators keyed by Anthropic's content block index.
+      const blockState = new Map<
+        number,
+        {
+          kind: "text" | "tool_use" | "thinking" | "redacted_thinking" | "other";
+          toolName?: string;
+          toolId?: string;
+          partialJson: string;
+          thinkingText: string;
+        }
+      >();
 
       for await (const event of stream) {
-        if (event.type === "content_block_delta") {
-          const delta = event.delta;
-          if ("text" in delta) {
+        if (event.type === "content_block_start") {
+          const block = event.content_block;
+          const index = event.index;
+          if (block.type === "tool_use") {
+            blockState.set(index, {
+              kind: "tool_use",
+              toolName: block.name,
+              toolId: block.id,
+              partialJson: "",
+              thinkingText: "",
+            });
+          } else if (block.type === "thinking") {
+            blockState.set(index, {
+              kind: "thinking",
+              partialJson: "",
+              thinkingText: "",
+            });
+          } else if (block.type === "text") {
+            blockState.set(index, {
+              kind: "text",
+              partialJson: "",
+              thinkingText: "",
+            });
+          } else {
+            blockState.set(index, {
+              kind: "other",
+              partialJson: "",
+              thinkingText: "",
+            });
+          }
+        } else if (event.type === "content_block_delta") {
+          const index = event.index;
+          const state = blockState.get(index);
+          const delta = event.delta as {
+            type?: string;
+            text?: string;
+            partial_json?: string;
+            thinking?: string;
+          };
+
+          if (delta.type === "text_delta" && typeof delta.text === "string") {
             yield {
               type: "text",
               content: delta.text,
               model,
               provider: "anthropic",
             };
+          } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
+            if (state) state.thinkingText += delta.thinking;
+            yield {
+              type: "thinking",
+              content: delta.thinking,
+              model,
+              provider: "anthropic",
+            };
+          } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
+            if (state) state.partialJson += delta.partial_json;
           }
+        } else if (event.type === "content_block_stop") {
+          const index = event.index;
+          const state = blockState.get(index);
+          if (state?.kind === "tool_use") {
+            let parsedInput: Record<string, unknown> = {};
+            try {
+              parsedInput =
+                state.partialJson.length > 0
+                  ? (JSON.parse(state.partialJson) as Record<string, unknown>)
+                  : {};
+            } catch {
+              // Malformed tool arguments — surface as an error chunk so the
+              // caller can decide to retry vs. hand raw text to the model.
+              yield {
+                type: "error",
+                content: `Anthropic: malformed tool_use arguments for ${state.toolName ?? "unknown"}`,
+                model,
+                provider: "anthropic",
+              };
+              continue;
+            }
+            yield {
+              type: "tool_use",
+              content: state.partialJson,
+              toolName: state.toolName,
+              toolCallId: state.toolId,
+              toolInput: parsedInput,
+              model,
+              provider: "anthropic",
+              stopReason: "tool_calls",
+            };
+            stopReason = "tool_calls";
+          }
+        } else if (event.type === "message_delta") {
+          // message_delta carries the final stop_reason and usage for this turn.
+          const delta = event as unknown as {
+            delta?: { stop_reason?: string };
+            usage?: { output_tokens?: number };
+          };
+          const reason = delta.delta?.stop_reason;
+          if (reason === "tool_use") stopReason = "tool_calls";
+          else if (reason === "max_tokens") stopReason = "max_tokens";
+          else if (reason === "end_turn" || reason === "stop_sequence") stopReason = "stop";
         } else if (event.type === "message_stop") {
           const usage = await stream.finalMessage();
           totalTokens = (usage.usage?.input_tokens ?? 0) + (usage.usage?.output_tokens ?? 0);
@@ -156,6 +285,7 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
         model,
         provider: "anthropic",
         tokensUsed: totalTokens,
+        stopReason,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";

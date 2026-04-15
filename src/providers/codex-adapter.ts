@@ -16,7 +16,12 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { ProviderAdapter, UnifiedQueryOptions, StreamChunk, ProviderCapabilities } from "./types.js";
+import type {
+  ProviderAdapter,
+  UnifiedQueryOptions,
+  StreamChunk,
+  ProviderCapabilities,
+} from "./types.js";
 import { getModelContextConfig } from "../context/limits.js";
 
 // ── Auth Types ──────────────────────────────────────────────
@@ -65,8 +70,7 @@ export function readCodexToken(): string | null {
   const authBlock = raw["auth"] as Record<string, unknown> | undefined;
   const tokenBlock = raw["token"] as Record<string, unknown> | undefined;
 
-  return (
-    tokens?.["access_token"] ??
+  return (tokens?.["access_token"] ??
     tokens?.["accessToken"] ??
     raw["access_token"] ??
     raw["accessToken"] ??
@@ -75,8 +79,7 @@ export function readCodexToken(): string | null {
     tokenBlock?.["access_token"] ??
     tokenBlock?.["accessToken"] ??
     raw["OPENAI_API_KEY"] ??
-    null
-  ) as string | null;
+    null) as string | null;
 }
 
 /**
@@ -174,7 +177,7 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
     if (!creds) {
       yield {
         type: "error",
-        content: "Codex auth not available. Run: npx @openai/codex --full-auto \"hello\"",
+        content: 'Codex auth not available. Run: npx @openai/codex --full-auto "hello"',
         provider: "codex",
       };
       return;
@@ -182,10 +185,14 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
 
     // Map model aliases to actual model IDs
     const inputModel = options.model ?? "codexspark";
-    const model = inputModel === "codexplan" ? "gpt-5.4"
-      : inputModel === "codexspark" ? "gpt-5.3-codex"
-      : inputModel === "codexmini" ? "gpt-5.1-codex"
-      : inputModel;
+    const model =
+      inputModel === "codexplan"
+        ? "gpt-5.4"
+        : inputModel === "codexspark"
+          ? "gpt-5.3-codex"
+          : inputModel === "codexmini"
+            ? "gpt-5.1-codex"
+            : inputModel;
 
     // Build Responses API request body
     const input: Array<Record<string, unknown>> = [];
@@ -196,10 +203,12 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
         input.push({
           type: "message",
           role: msg.role === "assistant" ? "assistant" : "user",
-          content: [{
-            type: msg.role === "assistant" ? "output_text" : "input_text",
-            text: msg.content,
-          }],
+          content: [
+            {
+              type: msg.role === "assistant" ? "output_text" : "input_text",
+              text: msg.content,
+            },
+          ],
         });
       }
     }
@@ -211,6 +220,20 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
       content: [{ type: "input_text", text: options.prompt }],
     });
 
+    // S1-6: Codex Responses API accepts a flat `tools` array. Each tool is a
+    // top-level object with `type: "function"`, `name`, `description`,
+    // `parameters` (different from OpenAI Chat Completions where it's nested
+    // under `function`).
+    const codexTools =
+      options.tools && options.tools.length > 0
+        ? options.tools.map((t) => ({
+            type: "function" as const,
+            name: t.name,
+            description: t.description,
+            parameters: t.inputSchema as Record<string, unknown>,
+          }))
+        : undefined;
+
     const body = JSON.stringify({
       model,
       instructions: options.systemPrompt ?? "",
@@ -218,6 +241,7 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
       stream: true,
       store: false,
       ...(inputModel === "codexplan" ? { reasoning: { effort: "high" } } : {}),
+      ...(codexTools ? { tools: codexTools } : {}),
     });
 
     try {
@@ -225,7 +249,7 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${creds.token}`,
+          Authorization: `Bearer ${creds.token}`,
           "ChatGPT-Account-Id": creds.accountId,
           "User-Agent": "wotann-cli",
         },
@@ -249,7 +273,8 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
           } else {
             yield {
               type: "error",
-              content: "Codex session expired. Re-authenticate with: npx @openai/codex --full-auto \"hello\"",
+              content:
+                'Codex session expired. Re-authenticate with: npx @openai/codex --full-auto "hello"',
               model: inputModel,
               provider: "codex",
             };
@@ -276,6 +301,17 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
       const decoder = new TextDecoder();
       let buffer = "";
       let totalTokens = 0;
+      let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
+
+      // S1-23: Codex Responses API tool-call + reasoning events.
+      // The stream sends response.function_call_arguments.delta fragments
+      // keyed by item_id, plus response.reasoning.delta for chain-of-thought.
+      // Function call metadata (name, id) arrives on response.output_item.added
+      // before any argument fragments.
+      const codexToolState = new Map<
+        string,
+        { name: string; callId: string; args: string; emitted: boolean }
+      >();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -300,11 +336,73 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
               if (delta) {
                 yield { type: "text", content: delta, model: inputModel, provider: "codex" };
               }
+            } else if (eventType === "response.reasoning.delta") {
+              const delta = event["delta"] as string | undefined;
+              if (delta) {
+                yield { type: "thinking", content: delta, model: inputModel, provider: "codex" };
+              }
+            } else if (eventType === "response.output_item.added") {
+              const item = event["item"] as Record<string, unknown> | undefined;
+              if (item && item["type"] === "function_call") {
+                const id = (item["id"] as string) ?? "";
+                const callId = (item["call_id"] as string) ?? id;
+                const name = (item["name"] as string) ?? "";
+                if (id) {
+                  codexToolState.set(id, { name, callId, args: "", emitted: false });
+                }
+              }
+            } else if (eventType === "response.function_call_arguments.delta") {
+              const itemId = (event["item_id"] as string) ?? "";
+              const delta = (event["delta"] as string) ?? "";
+              if (itemId) {
+                const state = codexToolState.get(itemId) ?? {
+                  name: "",
+                  callId: itemId,
+                  args: "",
+                  emitted: false,
+                };
+                state.args += delta;
+                codexToolState.set(itemId, state);
+              }
+            } else if (eventType === "response.function_call_arguments.done") {
+              const itemId = (event["item_id"] as string) ?? "";
+              const state = codexToolState.get(itemId);
+              if (state && !state.emitted && state.name) {
+                let parsedInput: Record<string, unknown> = {};
+                try {
+                  parsedInput = state.args
+                    ? (JSON.parse(state.args) as Record<string, unknown>)
+                    : {};
+                } catch {
+                  yield {
+                    type: "error",
+                    content: `Codex: malformed tool arguments for ${state.name}`,
+                    model: inputModel,
+                    provider: "codex",
+                  };
+                  state.emitted = true;
+                  continue;
+                }
+                yield {
+                  type: "tool_use",
+                  content: state.args,
+                  toolName: state.name,
+                  toolCallId: state.callId,
+                  toolInput: parsedInput,
+                  model: inputModel,
+                  provider: "codex",
+                  stopReason: "tool_calls",
+                };
+                state.emitted = true;
+                stopReason = "tool_calls";
+              }
             } else if (eventType === "response.completed" || eventType === "response.done") {
               const resp = event["response"] as Record<string, unknown> | undefined;
-              const usage = (resp?.["usage"] ?? event["usage"]) as Record<string, number> | undefined;
+              const usage = (resp?.["usage"] ?? event["usage"]) as
+                | Record<string, number>
+                | undefined;
               if (usage) {
-                totalTokens = (usage["total_tokens"] ?? 0);
+                totalTokens = usage["total_tokens"] ?? 0;
               }
             } else if (eventType === "response.failed") {
               const error = event["error"] as Record<string, unknown> | undefined;
@@ -321,10 +419,22 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
         }
       }
 
-      yield { type: "done", content: "", model: inputModel, provider: "codex", tokensUsed: totalTokens };
+      yield {
+        type: "done",
+        content: "",
+        model: inputModel,
+        provider: "codex",
+        tokensUsed: totalTokens,
+        stopReason,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      yield { type: "error", content: `Codex error: ${message}`, model: inputModel, provider: "codex" };
+      yield {
+        type: "error",
+        content: `Codex error: ${message}`,
+        model: inputModel,
+        provider: "codex",
+      };
     }
   }
 

@@ -37,6 +37,23 @@ export interface ToolSchema {
   readonly inputSchema: Record<string, unknown>;
 }
 
+/**
+ * Reason the model stopped generating. Normalised across providers so
+ * downstream code (autonomous loops, tool executors, UI) can key off a single
+ * vocabulary. Added by S1-27 alongside the tool-serialization fix — without
+ * it there's no way to distinguish "stop because natural end" from "stop
+ * because the model requested a tool call".
+ *
+ * Provider mappings:
+ *   Anthropic:     end_turn → "stop", tool_use → "tool_calls",
+ *                   max_tokens → "max_tokens", stop_sequence → "stop"
+ *   OpenAI/compat: stop → "stop", tool_calls/function_call → "tool_calls",
+ *                   length → "max_tokens", content_filter → "content_filter"
+ *   Codex:         similar to OpenAI
+ *   Ollama:        stop → "stop"; tool_calls inferred from response
+ */
+export type StopReason = "stop" | "tool_calls" | "max_tokens" | "content_filter" | "error";
+
 export interface StreamChunk {
   readonly type: "text" | "tool_use" | "thinking" | "done" | "error";
   readonly content: string;
@@ -51,6 +68,17 @@ export interface StreamChunk {
    * (used by Ollama adapters that emit <think>…</think> segments inline).
    */
   readonly thinking?: string;
+  /**
+   * Normalised reason the model stopped generating. Present on "done" chunks;
+   * "error" chunks set it to "error". See StopReason for the vocabulary.
+   */
+  readonly stopReason?: StopReason;
+  /**
+   * Opaque tool call identifier from the provider (OpenAI's call_id / Anthropic's
+   * tool_use id). Needed so tool-result messages can reference the originating
+   * call when the model makes multiple parallel tool calls in one turn.
+   */
+  readonly toolCallId?: string;
 }
 
 export interface ProviderAdapter {

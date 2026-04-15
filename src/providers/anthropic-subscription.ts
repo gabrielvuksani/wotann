@@ -174,6 +174,11 @@ export function createAnthropicSubscriptionAdapter(): ProviderAdapter {
     const model = options.model ?? "claude-sonnet-4-6";
     try {
       const { query: sdkQuery } = await import("@anthropic-ai/claude-agent-sdk");
+      // S2-31: The SDK drives its own tool execution loop, so we don't pass
+      // `tools` the way the raw Anthropic adapter does. Still surface the fact
+      // that the user wants tools by hinting through `allowedTools`.
+      const allowedTools = options.tools?.map((t) => t.name) ?? undefined;
+
       const q = sdkQuery({
         prompt: options.prompt,
         options: {
@@ -183,10 +188,13 @@ export function createAnthropicSubscriptionAdapter(): ProviderAdapter {
           maxTurns: 10,
           systemPrompt: options.systemPrompt,
           persistSession: false,
+          ...(allowedTools ? { allowedTools } : {}),
         },
       });
 
       let totalTokens = 0;
+      let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
+
       for await (const message of q) {
         if (message.type === "assistant") {
           const betaMsg = message.message;
@@ -198,6 +206,31 @@ export function createAnthropicSubscriptionAdapter(): ProviderAdapter {
                 model: betaMsg.model,
                 provider: "anthropic",
               };
+            } else if (block.type === "tool_use") {
+              // S1-25: Surface tool_use blocks from the SDK so downstream
+              // consumers (autonomous loop, hooks, UI) can see them. Previously
+              // tool calls from the subscription path were silently dropped —
+              // they came out as opaque assistant messages.
+              const toolBlock = block as unknown as {
+                id?: string;
+                name?: string;
+                input?: unknown;
+              };
+              const input =
+                toolBlock.input && typeof toolBlock.input === "object"
+                  ? (toolBlock.input as Record<string, unknown>)
+                  : {};
+              yield {
+                type: "tool_use",
+                content: JSON.stringify(input),
+                toolName: toolBlock.name ?? "",
+                toolCallId: toolBlock.id,
+                toolInput: input,
+                model: betaMsg.model,
+                provider: "anthropic",
+                stopReason: "tool_calls",
+              };
+              stopReason = "tool_calls";
             } else if (block.type === "thinking") {
               const thinking =
                 "thinking" in block
@@ -212,12 +245,19 @@ export function createAnthropicSubscriptionAdapter(): ProviderAdapter {
             }
           }
           if (betaMsg.usage) totalTokens = betaMsg.usage.input_tokens + betaMsg.usage.output_tokens;
+
+          const rawStop = (betaMsg as unknown as { stop_reason?: string }).stop_reason;
+          if (rawStop === "tool_use") stopReason = "tool_calls";
+          else if (rawStop === "max_tokens") stopReason = "max_tokens";
+          else if (rawStop === "end_turn" || rawStop === "stop_sequence") stopReason = "stop";
         } else if (message.type === "stream_event") {
           const event = message.event;
           if (event.type === "content_block_delta" && "delta" in event) {
-            const delta = event.delta as { type: string; text?: string };
+            const delta = event.delta as { type: string; text?: string; thinking?: string };
             if (delta.type === "text_delta" && delta.text) {
               yield { type: "text", content: delta.text, provider: "anthropic" };
+            } else if (delta.type === "thinking_delta" && delta.thinking) {
+              yield { type: "thinking", content: delta.thinking, provider: "anthropic" };
             }
           }
         } else if (message.type === "result") {
@@ -227,6 +267,7 @@ export function createAnthropicSubscriptionAdapter(): ProviderAdapter {
               content: message.result ?? "",
               provider: "anthropic",
               tokensUsed: totalTokens,
+              stopReason,
             };
           } else {
             yield {

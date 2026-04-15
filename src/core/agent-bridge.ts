@@ -14,7 +14,7 @@ import type { ProviderAdapter, StreamChunk, UnifiedQueryOptions } from "../provi
 import { ModelRouter } from "../providers/model-router.js";
 import { RateLimitManager } from "../providers/rate-limiter.js";
 import { buildFallbackChain, resolveNextProvider } from "../providers/fallback-chain.js";
-import { augmentQuery } from "../providers/capability-augmenter.js";
+import { augmentQuery, parseToolCallFromText } from "../providers/capability-augmenter.js";
 import { AccountPool } from "../providers/account-pool.js";
 
 export interface AgentBridgeConfig {
@@ -83,6 +83,19 @@ export class AgentBridge {
       maxTokens: options.maxTokens,
       temperature: options.temperature,
       stream: true,
+      // S1-1: forward tools into the adapter layer. Without this, every
+      // adapter sees `tools: undefined` and either strips tool calls from
+      // the request body or emulates them via XML in the system prompt but
+      // never parses the response — breaking the entire capability-
+      // equalisation thesis for every non-Ollama provider.
+      tools: options.tools?.map(
+        (t) =>
+          ({
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema,
+          }) as const,
+      ),
     };
 
     // Walk the fallback chain until one succeeds
@@ -128,12 +141,71 @@ export class AgentBridge {
           let lastErrorMessage: string | null = null;
           let hitRateLimit = false;
 
+          // S1-2: When an adapter lacks native tool calling, capability-augmenter
+          // injects tool XML into the system prompt. The model responds in text
+          // containing <tool_use>...</tool_use>. We accumulate text across
+          // chunks so a partial XML block spanning multiple deltas can still be
+          // parsed into a structured tool_use chunk.
+          const canEmulateTools =
+            !adapter.capabilities.supportsToolCalling &&
+            Boolean(options.tools && options.tools.length > 0);
+          let emulatedTextBuffer = "";
+          let emulatedToolEmitted = false;
+
           for await (const chunk of adapter.query(adapterOptions)) {
             if (chunk.type === "text") gotContent = true;
             if (chunk.type === "error") lastErrorMessage = chunk.content;
 
-            // Annotate the chunk with the actual provider used
-            yield { ...chunk, provider: entry.provider };
+            // For adapters with native tool calling, pass chunks through as-is.
+            if (!canEmulateTools) {
+              yield { ...chunk, provider: entry.provider };
+            } else if (chunk.type === "text") {
+              emulatedTextBuffer += chunk.content;
+              if (!emulatedToolEmitted) {
+                const parsed = parseToolCallFromText(emulatedTextBuffer);
+                if (parsed) {
+                  // Synthesize a structured tool_use chunk. Suppress the raw
+                  // XML text so downstream consumers don't see it twice.
+                  emulatedToolEmitted = true;
+                  yield {
+                    type: "tool_use",
+                    content: JSON.stringify(parsed.args),
+                    toolName: parsed.name,
+                    toolInput: parsed.args as Record<string, unknown>,
+                    provider: entry.provider,
+                    stopReason: "tool_calls",
+                  };
+                } else {
+                  yield { ...chunk, provider: entry.provider };
+                }
+              }
+              // If we already emitted the tool_use chunk, swallow any trailing
+              // text fragments from the same XML block.
+            } else if (chunk.type === "done") {
+              // Re-run the parser on the final buffer in case the tool XML
+              // only became complete on the last delta (rare but possible).
+              if (!emulatedToolEmitted) {
+                const parsed = parseToolCallFromText(emulatedTextBuffer);
+                if (parsed) {
+                  emulatedToolEmitted = true;
+                  yield {
+                    type: "tool_use",
+                    content: JSON.stringify(parsed.args),
+                    toolName: parsed.name,
+                    toolInput: parsed.args as Record<string, unknown>,
+                    provider: entry.provider,
+                    stopReason: "tool_calls",
+                  };
+                }
+              }
+              yield {
+                ...chunk,
+                provider: entry.provider,
+                stopReason: chunk.stopReason ?? (emulatedToolEmitted ? "tool_calls" : "stop"),
+              };
+            } else {
+              yield { ...chunk, provider: entry.provider };
+            }
 
             if (chunk.type === "error" && isRateLimitError(chunk.content)) {
               hitRateLimit = true;

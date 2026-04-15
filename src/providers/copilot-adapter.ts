@@ -15,7 +15,12 @@
  * model catalog for the user's subscription tier.
  */
 
-import type { ProviderAdapter, UnifiedQueryOptions, StreamChunk, ProviderCapabilities } from "./types.js";
+import type {
+  ProviderAdapter,
+  UnifiedQueryOptions,
+  StreamChunk,
+  ProviderCapabilities,
+} from "./types.js";
 
 interface CopilotTokenResponse {
   readonly token: string;
@@ -41,9 +46,22 @@ interface CopilotModelsResponse {
   readonly models?: readonly CopilotModel[];
 }
 
+interface ChatCompletionToolCallDelta {
+  readonly index?: number;
+  readonly id?: string;
+  readonly type?: string;
+  readonly function?: {
+    readonly name?: string;
+    readonly arguments?: string;
+  };
+}
+
 interface ChatCompletionChunk {
   readonly choices?: readonly {
-    readonly delta?: { readonly content?: string };
+    readonly delta?: {
+      readonly content?: string;
+      readonly tool_calls?: readonly ChatCompletionToolCallDelta[];
+    };
     readonly finish_reason?: string | null;
   }[];
   readonly usage?: { readonly total_tokens?: number };
@@ -86,8 +104,8 @@ async function getCopilotToken(ghToken: string): Promise<CachedCopilotAuth | nul
       const response = await fetch(endpoint, {
         method: "GET",
         headers: {
-          "Authorization": `Bearer ${ghToken}`,
-          "Accept": "application/json",
+          Authorization: `Bearer ${ghToken}`,
+          Accept: "application/json",
           "User-Agent": "wotann-cli/0.1.0",
           "Editor-Version": "WOTANN/0.1.0",
         },
@@ -100,9 +118,7 @@ async function getCopilotToken(ghToken: string): Promise<CachedCopilotAuth | nul
         // Use the dynamic endpoint from the token exchange response.
         // The proxy-ep endpoint is typically the preferred one (handles routing).
         const proxyEp = data.endpoints?.["proxy-ep"] ?? data.endpoints?.api;
-        const baseUrl = proxyEp
-          ? proxyEp.replace(/\/$/, "")
-          : "https://api.githubcopilot.com";
+        const baseUrl = proxyEp ? proxyEp.replace(/\/$/, "") : "https://api.githubcopilot.com";
 
         cachedCopilotToken = {
           token: data.token,
@@ -134,8 +150,8 @@ async function fetchCopilotModels(auth: CachedCopilotAuth): Promise<readonly str
     const response = await fetch(`${auth.baseUrl}/models`, {
       method: "GET",
       headers: {
-        "Authorization": `Bearer ${auth.token}`,
-        "Accept": "application/json",
+        Authorization: `Bearer ${auth.token}`,
+        Accept: "application/json",
         "User-Agent": "wotann-cli/0.1.0",
         "Copilot-Integration-Id": "wotann-cli",
       },
@@ -220,7 +236,8 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
     if (!auth) {
       yield {
         type: "error",
-        content: "GitHub Copilot token exchange failed. Ensure GH_TOKEN has Copilot access.\n" +
+        content:
+          "GitHub Copilot token exchange failed. Ensure GH_TOKEN has Copilot access.\n" +
           "Check: https://github.com/settings/copilot\n" +
           "Fix: export GH_TOKEN=$(gh auth token)",
         provider: "copilot",
@@ -238,12 +255,26 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
     }
     messages.push({ role: "user", content: options.prompt });
 
+    // S1-5: Copilot uses the OpenAI Chat Completions wire format, so tool
+    // schemas look identical to S1-4. Also S1-26: ask for usage on final chunk.
+    const copilotTools =
+      options.tools && options.tools.length > 0
+        ? options.tools.map((t) => ({
+            type: "function" as const,
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.inputSchema as Record<string, unknown>,
+            },
+          }))
+        : undefined;
+
     try {
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${auth.token}`,
+          Authorization: `Bearer ${auth.token}`,
           "X-GitHub-Api-Version": "2025-04-01",
           "Copilot-Integration-Id": "wotann-cli",
           "Editor-Version": "WOTANN/0.1.0",
@@ -254,6 +285,8 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
           max_tokens: options.maxTokens ?? 4096,
           temperature: options.temperature ?? 0.7,
           stream: true,
+          stream_options: { include_usage: true },
+          ...(copilotTools ? { tools: copilotTools, tool_choice: "auto" } : {}),
         }),
       });
 
@@ -272,16 +305,31 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
           return;
         }
 
-        yield { type: "error", content: `Copilot error (${response.status}): ${errorText.slice(0, 300)}`, model, provider: "copilot" };
+        yield {
+          type: "error",
+          content: `Copilot error (${response.status}): ${errorText.slice(0, 300)}`,
+          model,
+          provider: "copilot",
+        };
         return;
       }
 
       const reader = response.body?.getReader();
-      if (!reader) { yield { type: "error", content: "No response body", model, provider: "copilot" }; return; }
+      if (!reader) {
+        yield { type: "error", content: "No response body", model, provider: "copilot" };
+        return;
+      }
 
       const decoder = new TextDecoder();
       let buffer = "";
       let totalTokens = 0;
+      let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
+
+      // S1-24: accumulate tool-call fragments (same pattern as OpenAI-compat).
+      const toolCallState = new Map<
+        number,
+        { id: string; name: string; args: string; emitted: boolean }
+      >();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -297,16 +345,84 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
           if (data === "[DONE]") continue;
           try {
             const chunk = JSON.parse(data) as ChatCompletionChunk;
-            const content = chunk.choices?.[0]?.delta?.content;
+            const delta = chunk.choices?.[0]?.delta;
+            const content = delta?.content;
             if (content) yield { type: "text", content, model, provider: "copilot" };
+
+            if (delta?.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const idx = tc.index ?? 0;
+                const existing = toolCallState.get(idx) ?? {
+                  id: "",
+                  name: "",
+                  args: "",
+                  emitted: false,
+                };
+                if (tc.id) existing.id = tc.id;
+                if (tc.function?.name) existing.name = tc.function.name;
+                if (tc.function?.arguments) existing.args += tc.function.arguments;
+                toolCallState.set(idx, existing);
+              }
+            }
+
+            const finish = chunk.choices?.[0]?.finish_reason;
+            if (finish === "tool_calls" || finish === "function_call") stopReason = "tool_calls";
+            else if (finish === "length") stopReason = "max_tokens";
+            else if (finish === "content_filter") stopReason = "content_filter";
+            else if (finish === "stop") stopReason = "stop";
+
             if (chunk.usage?.total_tokens) totalTokens = chunk.usage.total_tokens;
-          } catch { /* skip malformed */ }
+          } catch {
+            /* skip malformed */
+          }
         }
       }
 
-      yield { type: "done", content: "", model, provider: "copilot", tokensUsed: totalTokens };
+      // Emit any accumulated tool calls.
+      for (const [, state] of toolCallState) {
+        if (state.emitted || !state.name) continue;
+        let parsedArgs: Record<string, unknown> = {};
+        try {
+          parsedArgs = state.args ? (JSON.parse(state.args) as Record<string, unknown>) : {};
+        } catch {
+          yield {
+            type: "error",
+            content: `Copilot: malformed tool arguments for ${state.name}`,
+            model,
+            provider: "copilot",
+          };
+          state.emitted = true;
+          continue;
+        }
+        yield {
+          type: "tool_use",
+          content: state.args,
+          toolName: state.name,
+          toolCallId: state.id,
+          toolInput: parsedArgs,
+          model,
+          provider: "copilot",
+          stopReason: "tool_calls",
+        };
+        state.emitted = true;
+        stopReason = "tool_calls";
+      }
+
+      yield {
+        type: "done",
+        content: "",
+        model,
+        provider: "copilot",
+        tokensUsed: totalTokens,
+        stopReason,
+      };
     } catch (error) {
-      yield { type: "error", content: `Copilot error: ${error instanceof Error ? error.message : "unknown"}`, model, provider: "copilot" };
+      yield {
+        type: "error",
+        content: `Copilot error: ${error instanceof Error ? error.message : "unknown"}`,
+        model,
+        provider: "copilot",
+      };
     }
   }
 
@@ -321,5 +437,13 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
     return auth !== null;
   }
 
-  return { id: "copilot", name: "copilot", transport: "chat_completions", capabilities, query, listModels, isAvailable };
+  return {
+    id: "copilot",
+    name: "copilot",
+    transport: "chat_completions",
+    capabilities,
+    query,
+    listModels,
+    isAvailable,
+  };
 }

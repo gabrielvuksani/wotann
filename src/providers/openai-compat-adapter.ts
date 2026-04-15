@@ -24,12 +24,24 @@ interface OpenAICompatConfig {
   readonly headers?: Record<string, string>;
 }
 
+interface ChatCompletionToolCallDelta {
+  readonly index?: number;
+  readonly id?: string;
+  readonly type?: string;
+  readonly function?: {
+    readonly name?: string;
+    readonly arguments?: string;
+  };
+}
+
 interface ChatCompletionChunk {
   readonly choices?: readonly {
     readonly delta?: {
       readonly content?: string;
       readonly role?: string;
-      readonly tool_calls?: readonly unknown[];
+      readonly tool_calls?: readonly ChatCompletionToolCallDelta[];
+      readonly reasoning?: string;
+      readonly reasoning_content?: string;
     };
     readonly finish_reason?: string | null;
   }[];
@@ -38,6 +50,23 @@ interface ChatCompletionChunk {
     readonly completion_tokens?: number;
     readonly total_tokens?: number;
   };
+}
+
+function mapOpenAIFinishReason(
+  reason: string | null | undefined,
+): "stop" | "tool_calls" | "max_tokens" | "content_filter" {
+  switch (reason) {
+    case "tool_calls":
+    case "function_call":
+      return "tool_calls";
+    case "length":
+      return "max_tokens";
+    case "content_filter":
+      return "content_filter";
+    case "stop":
+    default:
+      return "stop";
+  }
 }
 
 export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderAdapter {
@@ -58,17 +87,19 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
           .map((msg) =>
             msg.role === "tool"
               ? {
-                role: "user" as const,
-                content: [{
-                  type: "tool_result" as const,
-                  tool_use_id: msg.toolCallId,
-                  content: msg.content,
-                }],
-              }
+                  role: "user" as const,
+                  content: [
+                    {
+                      type: "tool_result" as const,
+                      tool_use_id: msg.toolCallId,
+                      content: msg.content,
+                    },
+                  ],
+                }
               : {
-                role: msg.role === "assistant" ? "assistant" as const : "user" as const,
-                content: msg.content,
-              },
+                  role: msg.role === "assistant" ? ("assistant" as const) : ("user" as const),
+                  content: msg.content,
+                },
           ),
       );
 
@@ -85,12 +116,29 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
 
     messages.push({ role: "user", content: options.prompt });
 
-    const body = {
+    // S1-4: OpenAI-compatible tool schema — { type: "function", function: {...} }
+    const openAITools =
+      options.tools && options.tools.length > 0
+        ? options.tools.map((t) => ({
+            type: "function" as const,
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.inputSchema as Record<string, unknown>,
+            },
+          }))
+        : undefined;
+
+    const body: Record<string, unknown> = {
       model,
       messages,
       max_tokens: options.maxTokens ?? 4096,
       temperature: options.temperature ?? 0.7,
       stream: true,
+      // S1-26: Ask the server to include token usage in the final stream chunk.
+      // Without this, OpenAI-compat and Copilot always report tokensUsed=0.
+      stream_options: { include_usage: true },
+      ...(openAITools ? { tools: openAITools, tool_choice: "auto" } : {}),
     };
 
     try {
@@ -98,7 +146,7 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${authToken}`,
+          Authorization: `Bearer ${authToken}`,
           ...config.headers,
         },
         body: JSON.stringify(body),
@@ -124,6 +172,16 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
       const decoder = new TextDecoder();
       let buffer = "";
       let totalTokens = 0;
+      let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
+
+      // S1-22: accumulate tool-call fragments across chunks keyed by index.
+      // OpenAI/compat streams tool_calls as a sparse array where each chunk
+      // carries partial fields — name on one chunk, arguments JSON spread
+      // across many. We reassemble before emitting a structured tool_use.
+      const toolCallState = new Map<
+        number,
+        { id: string; name: string; args: string; emitted: boolean }
+      >();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -141,7 +199,8 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
 
           try {
             const chunk = JSON.parse(data) as ChatCompletionChunk;
-            const content = chunk.choices?.[0]?.delta?.content;
+            const delta = chunk.choices?.[0]?.delta;
+            const content = delta?.content;
             if (content) {
               yield {
                 type: "text",
@@ -150,6 +209,42 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
                 provider: config.provider,
               };
             }
+
+            // Reasoning / thinking content — some OpenAI-compat providers
+            // (DeepSeek, Gemini 3 via compat) surface CoT under `reasoning`
+            // or `reasoning_content`. Forward as thinking chunks.
+            const thinking = delta?.reasoning ?? delta?.reasoning_content;
+            if (thinking) {
+              yield {
+                type: "thinking",
+                content: thinking,
+                model,
+                provider: config.provider,
+              };
+            }
+
+            // Tool call fragments
+            if (delta?.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const idx = tc.index ?? 0;
+                const existing = toolCallState.get(idx) ?? {
+                  id: "",
+                  name: "",
+                  args: "",
+                  emitted: false,
+                };
+                if (tc.id) existing.id = tc.id;
+                if (tc.function?.name) existing.name = tc.function.name;
+                if (tc.function?.arguments) existing.args += tc.function.arguments;
+                toolCallState.set(idx, existing);
+              }
+            }
+
+            const finish = chunk.choices?.[0]?.finish_reason;
+            if (finish) {
+              stopReason = mapOpenAIFinishReason(finish);
+            }
+
             if (chunk.usage?.total_tokens) {
               totalTokens = chunk.usage.total_tokens;
             }
@@ -159,12 +254,44 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
         }
       }
 
+      // Emit accumulated tool calls after the stream completes.
+      for (const [, state] of toolCallState) {
+        if (state.emitted) continue;
+        if (!state.name) continue;
+        let parsedArgs: Record<string, unknown> = {};
+        try {
+          parsedArgs = state.args ? (JSON.parse(state.args) as Record<string, unknown>) : {};
+        } catch {
+          yield {
+            type: "error",
+            content: `${config.provider}: malformed tool arguments for ${state.name}`,
+            model,
+            provider: config.provider,
+          };
+          state.emitted = true;
+          continue;
+        }
+        yield {
+          type: "tool_use",
+          content: state.args,
+          toolName: state.name,
+          toolCallId: state.id,
+          toolInput: parsedArgs,
+          model,
+          provider: config.provider,
+          stopReason: "tool_calls",
+        };
+        state.emitted = true;
+        stopReason = "tool_calls";
+      }
+
       yield {
         type: "done",
         content: "",
         model,
         provider: config.provider,
         tokensUsed: totalTokens,
+        stopReason,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -187,7 +314,7 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
       const timeout = setTimeout(() => controller.abort(), 5000);
       const response = await fetch(`${config.baseUrl}/models`, {
         headers: {
-          "Authorization": `Bearer ${config.apiKey}`,
+          Authorization: `Bearer ${config.apiKey}`,
           ...config.headers,
         },
         signal: controller.signal,
