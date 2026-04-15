@@ -3,7 +3,13 @@
  * extracted from WotannRuntime.query() for single-responsibility.
  */
 
-import type { ProviderName, WotannQueryOptions, AgentMessage, ToolDefinition, SessionState } from "./types.js";
+import type {
+  ProviderName,
+  WotannQueryOptions,
+  AgentMessage,
+  ToolDefinition,
+  SessionState,
+} from "./types.js";
 import type { StreamChunk } from "../providers/types.js";
 import type { HookEngine } from "../hooks/engine.js";
 import type { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
@@ -138,14 +144,13 @@ export interface QueryPipelineCallbacks {
 function extractTrackedFilePath(toolInput?: Record<string, unknown>): string | null {
   if (!toolInput) return null;
 
-  const candidate = toolInput["file_path"] ??
+  const candidate =
+    toolInput["file_path"] ??
     toolInput["path"] ??
     toolInput["target_file"] ??
     toolInput["targetPath"];
 
-  return typeof candidate === "string" && candidate.length > 0
-    ? candidate
-    : null;
+  return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
 }
 
 // ── QueryPipeline ──────────────────────────────────────────
@@ -164,7 +169,10 @@ export class QueryPipeline {
     callbacks: QueryPipelineCallbacks,
   ): AsyncGenerator<StreamChunk, QueryPipelineStateUpdate> {
     const stateSnapshot = (): QueryPipelineStateUpdate => ({
-      session, recentErrors, isFirstTurn, currentEpisodeId,
+      session,
+      recentErrors,
+      isFirstTurn,
+      currentEpisodeId,
     });
 
     // Working copies of mutable state — will be returned at the end
@@ -251,7 +259,7 @@ export class QueryPipeline {
         previousErrors: [...recentErrors],
         previousAttempts: 0,
         availableFiles: [],
-        recentToolResults: this.ctx.traceAnalyzer.getRecentEntries(3).map(e => e.content),
+        recentToolResults: this.ctx.traceAnalyzer.getRecentEntries(3).map((e) => e.content),
         language: "typescript",
       });
       // ── Step 5.5: Proactive memory & episodic recording ──
@@ -260,9 +268,11 @@ export class QueryPipeline {
         data: { task: options.prompt },
       });
 
-      const proactiveContext = proactiveHints.length > 0
-        ? "\n\n[Proactive Context]\n" + proactiveHints.map(h => `- ${h.content} (source: ${h.source})`).join("\n")
-        : "";
+      const proactiveContext =
+        proactiveHints.length > 0
+          ? "\n\n[Proactive Context]\n" +
+            proactiveHints.map((h) => `- ${h.content} (source: ${h.source})`).join("\n")
+          : "";
 
       if (!currentEpisodeId) {
         currentEpisodeId = this.ctx.episodicMemory.startEpisode(
@@ -274,18 +284,14 @@ export class QueryPipeline {
       this.ctx.episodicMemory.recordEvent("plan", options.prompt.slice(0, 200));
 
       // ── Step 6: Reasoning sandwich (asymmetric budget) ──
-      const reasoning = this.ctx.reasoningSandwich.getAdjustment(
-        options.prompt, isFirstTurn,
-      );
+      const reasoning = this.ctx.reasoningSandwich.getAdjustment(options.prompt, isFirstTurn);
       isFirstTurn = false;
       this.ctx.contextIntelligence.adaptToProvider(
         options.provider ?? session.provider,
         options.model ?? session.model,
       );
 
-      let conversationContext = options.context
-        ? [...options.context]
-        : [...session.messages];
+      let conversationContext = options.context ? [...options.context] : [...session.messages];
 
       const skillActivation = buildSkillActivationPrompt(
         this.ctx.skillRegistry,
@@ -352,10 +358,7 @@ export class QueryPipeline {
         }
       }
 
-      const overrideDirective = buildOverrideDirective(
-        options.prompt,
-        conversationContext,
-      );
+      const overrideDirective = buildOverrideDirective(options.prompt, conversationContext);
       const qmdPrompt = formatQMDContext(
         await this.ctx.qmdContext.getRelevantContext(options.prompt, 6),
       );
@@ -372,12 +375,13 @@ export class QueryPipeline {
       const budgetPrompt = buildContextBudgetPrompt(this.ctx.contextIntelligence);
       const activeReminders = this.ctx.contextIntelligence.getActiveReminders();
       const guardrailsOff = this.ctx.modeCycler.shouldClearSafetyFlags();
-      const providerForSecurityMode = options.provider ?? callbacks.resolveSecurityResearchProvider();
+      const providerForSecurityMode =
+        options.provider ?? callbacks.resolveSecurityResearchProvider();
       const securityPrompt = guardrailsOff
         ? buildSecurityResearchPrompt(
-          providerForSecurityMode ?? session.provider,
-          getDefaultGuardrailsConfig(),
-        )
+            providerForSecurityMode ?? session.provider,
+            getDefaultGuardrailsConfig(),
+          )
         : "";
 
       const fullSystemPrompt = [
@@ -391,13 +395,14 @@ export class QueryPipeline {
         ...activeReminders,
         reasoning.promptInjection,
         ...overrideDirective.systemPromptFragments,
-      ].filter(Boolean).join("\n\n");
+      ]
+        .filter(Boolean)
+        .join("\n\n");
 
       // ── Step 6.5: PII redaction ──
       const piiResult = this.ctx.piiRedactor.redact(amplified.amplified);
-      const sanitizedPrompt = piiResult.totalRedacted > 0
-        ? piiResult.redactedText
-        : amplified.amplified;
+      const sanitizedPrompt =
+        piiResult.totalRedacted > 0 ? piiResult.redactedText : amplified.amplified;
 
       // ── Step 7: Query with amplified prompt ──
       const queryOptions: WotannQueryOptions = {
@@ -413,7 +418,7 @@ export class QueryPipeline {
         model: queryOptions.model ?? session.model,
         provider: queryOptions.provider ?? session.provider,
         systemPrompt: queryOptions.systemPrompt,
-        messages: conversationContext.map(m => ({
+        messages: conversationContext.map((m) => ({
           role: m.role,
           content: m.content,
         })),
@@ -484,7 +489,9 @@ export class QueryPipeline {
 
         const attemptQueryOptions: WotannQueryOptions = {
           ...queryOptions,
-          systemPrompt: [queryOptions.systemPrompt, ...retrySystemMessages].filter(Boolean).join("\n\n"),
+          systemPrompt: [queryOptions.systemPrompt, ...retrySystemMessages]
+            .filter(Boolean)
+            .join("\n\n"),
         };
 
         for await (const chunk of this.ctx.infra.bridge.query(attemptQueryOptions)) {
@@ -493,8 +500,39 @@ export class QueryPipeline {
 
           if (chunk.type === "tool_use") {
             const toolName = chunk.toolName?.toLowerCase() ?? "";
+
+            // PreToolUse hook firing (mirrors runtime.ts's main query loop).
+            // This sibling pipeline is used when the runtime opts into the
+            // extracted query path; keep PreToolUse wired here too so
+            // hooks registered for PreToolUse actually run regardless of
+            // which execution path the runtime picks.
+            if (this.config.enableHooks !== false) {
+              const preResult = await this.ctx.hookEngine.fire({
+                event: "PreToolUse",
+                toolName: chunk.toolName,
+                toolInput: chunk.toolInput as Record<string, unknown> | undefined,
+                content:
+                  typeof chunk.toolInput === "object"
+                    ? JSON.stringify(chunk.toolInput ?? {})
+                    : String(chunk.toolInput ?? ""),
+                sessionId: session.id,
+                timestamp: Date.now(),
+              });
+              if (preResult.action === "block") {
+                const hookLabel = preResult.hookName ?? "PreToolUse";
+                yield {
+                  type: "error",
+                  content: `[Hook ${hookLabel}] ${preResult.message ?? "Tool call blocked"}`,
+                  provider: chunk.provider ?? responseProvider,
+                  model: chunk.model ?? responseModel,
+                };
+                break;
+              }
+            }
+
             if (toolName === "write" || toolName === "edit") {
-              const filePath = extractTrackedFilePath(chunk.toolInput) ?? chunk.toolName ?? "unknown";
+              const filePath =
+                extractTrackedFilePath(chunk.toolInput) ?? chunk.toolName ?? "unknown";
 
               // File freezer check: block edits to frozen files
               const freezeCheck = this.ctx.fileFreezer.check(filePath);
@@ -611,7 +649,7 @@ export class QueryPipeline {
       if (!secretScanResult.clean) {
         yield {
           type: "error",
-          content: `[SecretScanner] Potential secret detected in response: ${secretScanResult.findings.map(f => f.pattern).join(", ")}. Review before sharing.`,
+          content: `[SecretScanner] Potential secret detected in response: ${secretScanResult.findings.map((f) => f.pattern).join(", ")}. Review before sharing.`,
           provider: responseProvider,
           model: responseModel,
         };
@@ -619,38 +657,41 @@ export class QueryPipeline {
 
       const validation = this.ctx.responseValidator.validate(fullContent, options.prompt, {
         previousResponses: session.messages
-          .filter(m => m.role === "assistant")
-          .map(m => m.content)
+          .filter((m) => m.role === "assistant")
+          .map((m) => m.content)
           .slice(-3),
         availableContext: state.systemPrompt,
         strictTypes: true,
       });
-      if (validation.issues.some(i => i.severity === "error")) {
+      if (validation.issues.some((i) => i.severity === "error")) {
         yield {
           type: "error",
-          content: `[ResponseValidator] ${validation.issues.filter(i => i.severity === "error").map(i => i.message).join("; ")}`,
+          content: `[ResponseValidator] ${validation.issues
+            .filter((i) => i.severity === "error")
+            .map((i) => i.message)
+            .join("; ")}`,
           provider: responseProvider,
           model: responseModel,
         };
       }
 
-      this.ctx.sessionRecorder.recordResponse(
-        fullContent.slice(0, 2000),
-        totalTokens,
-        0,
-      );
+      this.ctx.sessionRecorder.recordResponse(fullContent.slice(0, 2000), totalTokens, 0);
 
-      await this.ctx.pluginLifecycle.fire("post_llm_call", {
-        content: fullContent,
-        provider: responseProvider,
-        model: responseModel,
-      }, {
-        sessionId: session.id,
-        provider: responseProvider,
-        model: responseModel,
-        mode: this.ctx.modeCycler.getModeName(),
-        timestamp: Date.now(),
-      });
+      await this.ctx.pluginLifecycle.fire(
+        "post_llm_call",
+        {
+          content: fullContent,
+          provider: responseProvider,
+          model: responseModel,
+        },
+        {
+          sessionId: session.id,
+          provider: responseProvider,
+          model: responseModel,
+          mode: this.ctx.modeCycler.getModeName(),
+          timestamp: Date.now(),
+        },
+      );
 
       this.ctx.crossSessionLearner.recordAction({
         type: "llm_response",
@@ -673,13 +714,16 @@ export class QueryPipeline {
       }
       const queryDuration = Date.now() - queryStart;
       callbacks.refreshContextTelemetry({
-        conversationContext: [...session.messages, {
-          role: "assistant",
-          content: fullContent,
-          provider: responseProvider,
-          model: responseModel,
-          tokensUsed: totalTokens,
-        }],
+        conversationContext: [
+          ...session.messages,
+          {
+            role: "assistant",
+            content: fullContent,
+            provider: responseProvider,
+            model: responseModel,
+            tokensUsed: totalTokens,
+          },
+        ],
         systemParts: [fullSystemPrompt],
         tools: options.tools,
       });
@@ -693,11 +737,13 @@ export class QueryPipeline {
       });
 
       const hasErrorIndicators =
-        /\b(error|exception|traceback|stack trace|failed|failure|cannot|unable to)\b/i.test(fullContent) &&
+        /\b(error|exception|traceback|stack trace|failed|failure|cannot|unable to)\b/i.test(
+          fullContent,
+        ) &&
         (/at .+:\d+:\d+/.test(fullContent) ||
-         /Error:/.test(fullContent) ||
-         /exit code [1-9]/.test(fullContent.toLowerCase()) ||
-         /FAIL|FAILED|ERR!/i.test(fullContent));
+          /Error:/.test(fullContent) ||
+          /exit code [1-9]/.test(fullContent.toLowerCase()) ||
+          /FAIL|FAILED|ERR!/i.test(fullContent));
       if (hasErrorIndicators) {
         recentErrors = [...recentErrors, fullContent.slice(0, 300)];
         if (recentErrors.length > 5) {
@@ -733,10 +779,7 @@ export class QueryPipeline {
         );
 
         if (this.config.enableSemanticSearch !== false) {
-          this.ctx.semanticIndex.addDocument(
-            `response-${Date.now()}`,
-            fullContent.slice(0, 1000),
-          );
+          this.ctx.semanticIndex.addDocument(`response-${Date.now()}`, fullContent.slice(0, 1000));
         }
 
         this.ctx.vectorStore.addDocument(`response-${Date.now()}`, fullContent.slice(0, 1000));
@@ -754,7 +797,12 @@ export class QueryPipeline {
         provider: responseProvider,
         model: responseModel,
       };
-      const costEntry = this.ctx.costTracker.record(responseProvider, responseModel, totalTokens, 0);
+      const costEntry = this.ctx.costTracker.record(
+        responseProvider,
+        responseModel,
+        totalTokens,
+        0,
+      );
       this.ctx.infra.router?.recordCost(costEntry.cost);
       this.ctx.infra.router?.recordRepoOutcome({
         provider: responseProvider,

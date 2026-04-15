@@ -1830,6 +1830,47 @@ export class WotannRuntime {
           if (chunk.type === "tool_use") {
             const toolName = chunk.toolName?.toLowerCase() ?? "";
 
+            // PreToolUse hook firing — the Opus adversarial audit on
+            // 2026-04-15 found that prior WOTANN versions never fired
+            // PreToolUse anywhere in the runtime, so 16+ registered
+            // PreToolUse hooks (DestructiveGuard, ReadBeforeEdit,
+            // TDDEnforcement, SecretScanner, LoopDetection, ConfigProtection,
+            // PromptInjectionGuard, ArchivePreflightGuard, MCPAutoApproval,
+            // PreToolCostLimiter, CorrectionCapture, …) were dead code.
+            // Every "Guards are guarantees" promise in CLAUDE.md failed.
+            //
+            // We fire PreToolUse here — the moment a tool_use chunk comes
+            // off the model stream but BEFORE the harness forwards it to
+            // the client for execution. A blocking result aborts the
+            // tool call with an error chunk so the model gets feedback
+            // and can recover on its next turn.
+            if (this.config.enableHooks !== false) {
+              const preResult = await this.hookEngine.fire({
+                event: "PreToolUse",
+                toolName: chunk.toolName,
+                toolInput: chunk.toolInput as Record<string, unknown> | undefined,
+                // content fallback lets hooks like DestructiveGuard regex
+                // over a stringified view of the input when the hook's
+                // match logic lives in `content`.
+                content:
+                  typeof chunk.toolInput === "object"
+                    ? JSON.stringify(chunk.toolInput ?? {})
+                    : String(chunk.toolInput ?? ""),
+                sessionId: this.session.id,
+                timestamp: Date.now(),
+              });
+              if (preResult.action === "block") {
+                const hookLabel = preResult.hookName ?? "PreToolUse";
+                yield {
+                  type: "error" as const,
+                  content: `[Hook ${hookLabel}] ${preResult.message ?? "Tool call blocked"}`,
+                  provider: chunk.provider ?? responseProvider,
+                  model: chunk.model ?? responseModel,
+                };
+                break;
+              }
+            }
+
             // ForgeCode: MD5 doom loop fingerprinting for tool calls
             const forgeCheck = this.forgeDoomLoop.record(
               chunk.toolName ?? "unknown",
