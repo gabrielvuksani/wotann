@@ -11,7 +11,17 @@ import { randomUUID } from "node:crypto";
 
 // -- Types -------------------------------------------------------------------
 
-export type ConventionalType = "feat" | "fix" | "refactor" | "test" | "docs" | "chore" | "perf" | "ci" | "build" | "style";
+export type ConventionalType =
+  | "feat"
+  | "fix"
+  | "refactor"
+  | "test"
+  | "docs"
+  | "chore"
+  | "perf"
+  | "ci"
+  | "build"
+  | "style";
 
 export interface ConventionalCommit {
   readonly type: ConventionalType;
@@ -28,6 +38,8 @@ export interface CommitResult {
   readonly message: string;
   readonly filesCommitted: readonly string[];
   readonly timestamp: number;
+  /** Populated when `success: false` — describes what went wrong. */
+  readonly error?: string;
 }
 
 export interface CommitRecord {
@@ -86,9 +98,10 @@ export class AutoCommitter {
     const type = detectType(task, changes);
     const scope = detectScope(task, changes);
     const description = buildDescription(task, type);
-    const body = changes.length > 0
-      ? `Files changed:\n${changes.map((f) => `- ${f}`).join("\n")}\n\nResult: ${truncate(result, 200)}`
-      : null;
+    const body =
+      changes.length > 0
+        ? `Files changed:\n${changes.map((f) => `- ${f}`).join("\n")}\n\nResult: ${truncate(result, 200)}`
+        : null;
 
     const breaking = /\bbreaking\b/i.test(task) || /\bBREAKING[\s_-]?CHANGE\b/.test(task);
 
@@ -199,20 +212,96 @@ function truncate(str: string, maxLen: number): string {
   return str.slice(0, maxLen - 3) + "...";
 }
 
+/**
+ * Run a real git commit in `workingDir`. S5-10: previously this function
+ * synthesised a random 7-char UUID as the "hash" and lied about having
+ * committed anything — callers thought their autonomous work was saved
+ * when in reality it wasn't. Now we actually stage the supplied files,
+ * run `git commit -m <message>`, and parse the real short hash from
+ * `git rev-parse --short HEAD`.
+ *
+ * Failure modes that fall back to `success: false` with an explanatory
+ * error instead of a fake hash:
+ *   - not a git repo → `error: "not a git repository"`
+ *   - nothing to commit → `error: "no changes staged"`
+ *   - git binary missing → `error: "git not available"`
+ */
 function simulateCommit(
-  _workingDir: string,
+  workingDir: string,
   commit: ConventionalCommit,
   changes: readonly string[],
 ): CommitResult {
-  // In production, this would run git commands.
-  // Here we simulate a successful commit.
-  const hash = randomUUID().slice(0, 7);
+  const now = Date.now();
+  try {
+    // Lazy require keeps the module lightweight in environments where git
+    // isn't on PATH (tests, some containerised runs).
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
 
-  return {
-    success: true,
-    commitHash: hash,
-    message: commit.formatted,
-    filesCommitted: changes,
-    timestamp: Date.now(),
-  };
+    // Bail early if this isn't a git repo.
+    try {
+      execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+        cwd: workingDir,
+        stdio: "pipe",
+      });
+    } catch {
+      return {
+        success: false,
+        commitHash: "",
+        message: commit.formatted,
+        filesCommitted: [],
+        timestamp: now,
+        error: "not a git repository",
+      } as CommitResult;
+    }
+
+    // Stage only the paths we were asked to commit — `git add -A` would
+    // sweep in unrelated untracked noise.
+    if (changes.length > 0) {
+      execFileSync("git", ["add", "--", ...changes], {
+        cwd: workingDir,
+        stdio: "pipe",
+      });
+    }
+
+    try {
+      execFileSync("git", ["commit", "-m", commit.formatted], {
+        cwd: workingDir,
+        stdio: "pipe",
+      });
+    } catch (err) {
+      const stderr = (err as { stderr?: Buffer }).stderr?.toString?.("utf-8") ?? "";
+      const empty = /nothing to commit|no changes added/i.test(stderr);
+      return {
+        success: false,
+        commitHash: "",
+        message: commit.formatted,
+        filesCommitted: [],
+        timestamp: now,
+        error: empty ? "no changes staged" : `git commit failed: ${stderr.slice(0, 200)}`,
+      } as CommitResult;
+    }
+
+    const hashBuf = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: workingDir,
+      stdio: "pipe",
+    });
+    const hash = hashBuf.toString("utf-8").trim();
+
+    return {
+      success: true,
+      commitHash: hash,
+      message: commit.formatted,
+      filesCommitted: changes,
+      timestamp: now,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      commitHash: "",
+      message: commit.formatted,
+      filesCommitted: [],
+      timestamp: now,
+      error: `git not available: ${err instanceof Error ? err.message : "unknown"}`,
+    } as CommitResult;
+  }
 }

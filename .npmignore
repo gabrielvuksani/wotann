@@ -1,0 +1,59 @@
+# S4-5 — trim the published npm tarball.
+#
+# Without this, `npm pack` pulls in source maps, research docs, and
+# workspace-local state, doubling the download size and exposing
+# implementation notes meant to stay in the git repo only.
+#
+# The `files` array in package.json is the primary allowlist (dist/,
+# skills/, install.sh). This list is a belt-and-braces cleanup for the
+# edge cases where allowlisting alone doesn't strip everything.
+
+# Source maps — double the tarball, useful only for local debugging
+**/*.js.map
+**/*.d.ts.map
+
+# iOS + desktop-app sources — shipped as separate platform artifacts
+ios/
+desktop-app/
+
+# Research, audit, and strategy docs — git-only
+docs/
+*.md
+!README.md
+!LICENSE
+
+# Development config the consumer doesn't need
+.eslintignore
+.eslintrc.json
+eslint.config.js
+.prettierrc
+.prettierignore
+biome.json
+biome.jsonc
+tsconfig.json
+vitest.config.ts
+
+# Runtime + telemetry directories — should never land in a package
+.wotann/
+.nexus/
+.nexus-archive/
+.superpowers/
+.github/
+.codex-home/
+
+# Test suite
+tests/
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+
+# OS/editor artefacts
+.DS_Store
+**/.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Source that's already in dist/ — avoid shipping raw TS
+src/

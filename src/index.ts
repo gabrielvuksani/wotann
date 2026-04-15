@@ -159,17 +159,37 @@ program
       };
 
       console.log(chalk.bold("\nWOTANN Pairing\n"));
-      console.log(
-        chalk.dim(
-          "  Use the desktop app QR if you want to scan, or connect from iOS with the host and port below.",
-        ),
-      );
+
+      // S4-8: render an ASCII QR in the terminal so iOS users can scan
+      // directly from the CLI instead of needing the desktop app. Falls
+      // back to printing the raw deep-link URL when the optional
+      // `qrcode-terminal` peer dep isn't available — keeps the TUI path
+      // dependency-light.
+      try {
+        // String-variable import keeps TypeScript from demanding the
+        // type declarations for the optional peer dep. We cast to the
+        // minimal shape we actually use.
+        const modName = "qrcode-terminal";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mod = (await import(modName)) as any;
+        const generate = mod?.default?.generate ?? mod?.generate;
+        if (typeof generate === "function") {
+          generate(pairing.qrData, { small: true });
+        } else {
+          console.log(pairing.qrData);
+        }
+      } catch {
+        console.log(
+          chalk.dim("  (install `qrcode-terminal` to render an inline QR; raw URL shown instead)"),
+        );
+        console.log(pairing.qrData);
+      }
+
+      console.log();
       console.log(chalk.dim(`  Host:     ${pairing.host ?? "unknown"}`));
       console.log(chalk.dim(`  Port:     ${pairing.port ?? 3849}`));
       console.log(chalk.dim(`  PIN:      ${pairing.pin}`));
       console.log(chalk.dim(`  Expires:  ${pairing.expiresAt}`));
-      console.log();
-      console.log(pairing.qrData);
       console.log();
     } finally {
       ipcClient.disconnect();
@@ -962,7 +982,8 @@ daemonCmd
 daemonCmd
   .command("start")
   .description("Start the background daemon")
-  .action(async () => {
+  .option("-v, --verbose", "Stream daemon log output to the terminal for the startup window")
+  .action(async (opts: { verbose?: boolean }) => {
     const { existsSync, mkdirSync, readFileSync } = await import("node:fs");
     const { pidPath } = getDaemonPaths(process.cwd());
     const wotannDir = join(process.cwd(), ".wotann");
@@ -978,6 +999,24 @@ daemonCmd
 
     const entryPath = fileURLToPath(import.meta.url);
     const child = spawnDaemonWorker(entryPath, process.cwd());
+
+    // S5-13: --verbose attaches the terminal to the daemon's stdio so the
+    // user can watch boot logs without tailing the file. We detach on
+    // SIGINT so Ctrl+C doesn't kill the daemon; stopping still goes
+    // through `wotann daemon stop`.
+    if (opts.verbose) {
+      console.log(
+        chalk.dim("— daemon stdout/stderr (press Ctrl+C to detach, daemon keeps running) —"),
+      );
+      child.stdout?.on("data", (chunk: Buffer) => process.stdout.write(chunk));
+      child.stderr?.on("data", (chunk: Buffer) => process.stderr.write(chunk));
+      process.on("SIGINT", () => {
+        child.stdout?.removeAllListeners("data");
+        child.stderr?.removeAllListeners("data");
+        process.exit(0);
+      });
+    }
+
     const ready = await waitForDaemonReady(pidPath, 6_000);
 
     if (!ready) {

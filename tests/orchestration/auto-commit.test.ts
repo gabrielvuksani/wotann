@@ -1,11 +1,45 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AutoCommitter } from "../../src/orchestration/auto-commit.js";
+
+/**
+ * S5-10 test helper: create a throwaway git repo with one committed file
+ * and one modified file. AutoCommitter now actually invokes git, so tests
+ * need a real repo instead of the fake `/project` path the stub accepted.
+ */
+function makeRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "wotann-autocommit-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "test@wotann"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "Wotann Test"], { cwd: dir });
+  writeFileSync(join(dir, "initial.ts"), "export const x = 1;\n");
+  execFileSync("git", ["add", "initial.ts"], { cwd: dir });
+  execFileSync("git", ["commit", "-q", "-m", "initial"], { cwd: dir });
+  return dir;
+}
 
 describe("AutoCommitter", () => {
   let committer: AutoCommitter;
+  const repos: string[] = [];
 
   beforeEach(() => {
     committer = new AutoCommitter("test-session");
+  });
+
+  afterEach(() => {
+    while (repos.length > 0) {
+      const dir = repos.pop();
+      if (dir) {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+        } catch {
+          /* best effort */
+        }
+      }
+    }
   });
 
   describe("generateCommitMessage", () => {
@@ -108,23 +142,26 @@ describe("AutoCommitter", () => {
   });
 
   describe("commitIfVerified", () => {
-    it("commits when tests pass", () => {
-      const result = committer.commitIfVerified(
-        "/project",
-        "Fix auth bug",
-        ["src/auth.ts"],
-        true,
-      );
+    it("commits when tests pass (real git workspace)", () => {
+      const repo = makeRepo();
+      repos.push(repo);
+      // Stage a modified file so there's something to commit.
+      writeFileSync(join(repo, "src.ts"), "export const y = 2;\n");
+
+      const result = committer.commitIfVerified(repo, "Fix auth bug", ["src.ts"], true);
 
       expect(result).not.toBeNull();
       expect(result!.success).toBe(true);
       expect(result!.commitHash).not.toBeNull();
-      expect(result!.filesCommitted).toContain("src/auth.ts");
+      expect(result!.commitHash!.length).toBeGreaterThan(0);
+      expect(result!.filesCommitted).toContain("src.ts");
     });
 
     it("returns null when tests fail", () => {
+      const repo = makeRepo();
+      repos.push(repo);
       const result = committer.commitIfVerified(
-        "/project",
+        repo,
         "Broken implementation",
         ["src/broken.ts"],
         false,
@@ -134,21 +171,41 @@ describe("AutoCommitter", () => {
     });
 
     it("records the commit in session history", () => {
-      committer.commitIfVerified("/project", "Task 1", ["a.ts"], true);
-      committer.commitIfVerified("/project", "Task 2", ["b.ts"], true);
+      const repo = makeRepo();
+      repos.push(repo);
+      writeFileSync(join(repo, "a.ts"), "export const a = 1;\n");
+      committer.commitIfVerified(repo, "Task 1", ["a.ts"], true);
+      writeFileSync(join(repo, "b.ts"), "export const b = 2;\n");
+      committer.commitIfVerified(repo, "Task 2", ["b.ts"], true);
 
       const history = committer.getSessionCommits();
       expect(history).toHaveLength(2);
       expect(history[0]?.task).toBe("Task 1");
       expect(history[1]?.task).toBe("Task 2");
     });
+
+    it("returns an honest error when the workspace isn't a git repo (S5-10)", () => {
+      const nonRepo = mkdtempSync(join(tmpdir(), "wotann-notgit-"));
+      repos.push(nonRepo);
+      const result = committer.commitIfVerified(nonRepo, "Nope", ["x.ts"], true);
+      // commitIfVerified still persists the attempt, but the CommitResult
+      // now carries success: false and an error describing why instead
+      // of lying with a random hash.
+      expect(result).not.toBeNull();
+      expect(result!.success).toBe(false);
+      expect(result!.error).toMatch(/not a git repository/);
+    });
   });
 
   describe("getSessionCommits", () => {
     it("filters by session ID", () => {
+      const repo = makeRepo();
+      repos.push(repo);
+      writeFileSync(join(repo, "a.ts"), "export const a = 1;\n");
+      committer.commitIfVerified(repo, "Task A", ["a.ts"], true);
+      writeFileSync(join(repo, "b.ts"), "export const b = 2;\n");
       const other = new AutoCommitter("other-session");
-      committer.commitIfVerified("/p", "Task A", ["a.ts"], true);
-      other.commitIfVerified("/p", "Task B", ["b.ts"], true);
+      other.commitIfVerified(repo, "Task B", ["b.ts"], true);
 
       expect(committer.getSessionCommits()).toHaveLength(1);
       expect(other.getSessionCommits()).toHaveLength(1);
@@ -161,8 +218,12 @@ describe("AutoCommitter", () => {
 
   describe("getAllRecords / getSessionId", () => {
     it("returns all records across sessions", () => {
-      committer.commitIfVerified("/p", "Task 1", ["a.ts"], true);
-      committer.commitIfVerified("/p", "Task 2", ["b.ts"], true);
+      const repo = makeRepo();
+      repos.push(repo);
+      writeFileSync(join(repo, "a.ts"), "export const a = 1;\n");
+      committer.commitIfVerified(repo, "Task 1", ["a.ts"], true);
+      writeFileSync(join(repo, "b.ts"), "export const b = 2;\n");
+      committer.commitIfVerified(repo, "Task 2", ["b.ts"], true);
 
       expect(committer.getAllRecords()).toHaveLength(2);
     });
