@@ -56,9 +56,20 @@ export const destructiveGuard: HookHandler = {
   profile: "minimal",
   handler(payload: HookPayload): HookResult {
     if (payload.toolName !== "Bash") return { action: "allow" };
+    // Opt-in escape: the prior commit's block message advertised this env
+    // var but never actually read it, so the "override" was documentation-
+    // only. Now the env var really does allow the command through while
+    // still emitting a warning that surfaces in the hook warnings list.
+    const overrideActive = process.env["WOTANN_ALLOW_DESTRUCTIVE"] === "1";
     const command = payload.content ?? JSON.stringify(payload.toolInput);
     for (const pattern of DESTRUCTIVE_PATTERNS) {
       if (pattern.test(command)) {
+        if (overrideActive) {
+          return {
+            action: "warn",
+            message: `Destructive pattern allowed via WOTANN_ALLOW_DESTRUCTIVE=1: ${pattern.source}`,
+          };
+        }
         // S2-14: upgrade from warn → block. The audit flagged this as
         // the #1 fake guarantee — "rm -rf /" used to sail through with
         // only a log message. Destructive commands now actually halt

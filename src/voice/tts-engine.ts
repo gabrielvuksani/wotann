@@ -431,10 +431,16 @@ export class TTSEngine {
     if (platform() !== "darwin") return false;
 
     try {
-      const voice = utterance.voice && utterance.voice !== "default" ? utterance.voice : "Samantha";
+      const rawVoice =
+        utterance.voice && utterance.voice !== "default" ? utterance.voice : "Samantha";
+      // Reject voice names that start with `-`. `say` would interpret
+      // `-o /path` / `-f /path` as flags and write audio to disk or read
+      // from a file — argv-level injection adjacent to the piper shell
+      // fix. LLM-supplied utterance.voice values can't weaponise `say`.
+      const voice = rawVoice.startsWith("-") ? "Samantha" : rawVoice;
       const rate = Math.round((utterance.rate ?? 1.0) * 175);
 
-      execFileSync("say", ["-v", voice, "-r", String(rate), utterance.text], {
+      execFileSync("say", ["-v", voice, "-r", String(rate), "--", utterance.text], {
         timeout: 60_000,
         stdio: "pipe",
       });

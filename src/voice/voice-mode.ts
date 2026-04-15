@@ -553,10 +553,18 @@ export class VoiceMode {
     if (platform() !== "darwin") return false;
 
     try {
-      const voice = options.voice ?? this.config.ttsVoice ?? "Samantha";
+      const rawVoice = options.voice ?? this.config.ttsVoice ?? "Samantha";
+      // Reject voice names that start with `-` — `say` would interpret them
+      // as flags (e.g. `-o /tmp/pwn.aiff` writes audio to disk instead of
+      // speaking). Same class of argv-injection as shell quoting but at the
+      // execFile level. Fall back to the safe default when the caller — or
+      // more typically an LLM-controlled voice setting — supplies a
+      // flag-like string. Defensive reset rather than throwing so TTS never
+      // silently fails on a malformed config.
+      const voice = rawVoice.startsWith("-") ? "Samantha" : rawVoice;
       const rate = Math.round((options.speed ?? this.config.ttsSpeed ?? 1.0) * 175);
 
-      execFileSync("say", ["-v", voice, "-r", String(rate), options.text], {
+      execFileSync("say", ["-v", voice, "-r", String(rate), "--", options.text], {
         timeout: 30_000,
         stdio: "pipe",
       });

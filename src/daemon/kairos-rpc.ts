@@ -8,7 +8,14 @@
  * This handler routes incoming RPC calls to the WotannRuntime methods.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  chmodSync,
+  realpathSync,
+} from "node:fs";
 import { join, dirname, resolve as resolvePath } from "node:path";
 import { homedir } from "node:os";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
@@ -3178,6 +3185,17 @@ export class KairosRPCHandler {
       // arbitrary bytes. Now every edit path must resolve inside the
       // active workspace (runtime.getWorkingDir() / process.cwd()).
       const workspaceRoot = resolvePath(this.runtime?.getWorkingDir() ?? process.cwd());
+      // Reject degenerate workspace roots where every absolute path would
+      // pass the prefix check — `/` and `""` both let an attacker write
+      // anywhere on the filesystem. This should never happen in practice
+      // (runtime.getWorkingDir defaults to process.cwd) but defence-in-
+      // depth matters for a daemon the desktop app trusts blindly.
+      if (workspaceRoot === "/" || workspaceRoot === "") {
+        return {
+          ok: false,
+          error: "Refusing composer.apply with degenerate workspace root",
+        };
+      }
       let applied = 0;
       const failures: Array<{ path: string; error: string }> = [];
       for (const edit of edits) {
@@ -3199,8 +3217,35 @@ export class KairosRPCHandler {
             });
             continue;
           }
-          if (!existsSync(dirname(resolved))) {
-            mkdirSync(dirname(resolved), { recursive: true });
+          // Symlink-traversal defence: `path.resolve` is purely lexical, so
+          // if the attacker pre-created `$WORKSPACE/innocent.txt` as a
+          // symlink to `/etc/passwd`, writeFileSync would follow it and
+          // clobber the target. Compute realpath on the parent directory
+          // (which must already exist if we're about to write to it) and
+          // re-check that the REAL path still lives inside the workspace.
+          // The parent is what matters — writeFileSync on a symlinked file
+          // itself follows through, so checking the parent of an existing
+          // symlink and the parent of a new file both give us the real
+          // target directory.
+          const parentDir = dirname(resolved);
+          if (existsSync(parentDir)) {
+            const realParent = realpathSync(parentDir);
+            const realRootWithSep = realpathSync(workspaceRoot).endsWith("/")
+              ? realpathSync(workspaceRoot)
+              : `${realpathSync(workspaceRoot)}/`;
+            if (
+              realParent !== realpathSync(workspaceRoot) &&
+              !realParent.startsWith(realRootWithSep)
+            ) {
+              failures.push({
+                path: edit.path,
+                error: `symlinked parent escapes workspace: ${realParent}`,
+              });
+              continue;
+            }
+          }
+          if (!existsSync(parentDir)) {
+            mkdirSync(parentDir, { recursive: true });
           }
           writeFileSync(resolved, edit.newContent, "utf-8");
           applied += 1;

@@ -164,12 +164,23 @@ function isPrivateHost(hostname: string): boolean {
     /^192\.168\./, // Private Class C
     /^169\.254\./, // Link-local / AWS metadata
     /^0\./, // Current network
-    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // Shared address space
-    /^localhost$/i, // Localhost hostname
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // Shared address space (CGNAT)
+    /^192\.0\.0\./, // IETF Protocol Assignments (RFC 6890)
+    /^192\.0\.2\./, // TEST-NET-1 (RFC 5737) — not routable
+    /^198\.(1[89])\./, // Benchmarking (198.18.0.0/15, RFC 2544)
+    /^198\.51\.100\./, // TEST-NET-2 (RFC 5737)
+    /^203\.0\.113\./, // TEST-NET-3 (RFC 5737)
+    /^22[4-9]\./, // Multicast 224.0.0.0/4 (first half)
+    /^23\d\./, // Multicast 224.0.0.0/4 (second half, 230-239)
+    /^24\d\./, // Reserved 240.0.0.0/4 (240-249)
+    /^25[0-5]\./, // Reserved 240.0.0.0/4 (250-255) + 255.255.255.255 broadcast
+    /^localhost\.?$/i, // Localhost hostname (trailing-dot tolerant)
     /^\[?::1\]?$/, // IPv6 loopback
-    /^\[?fc/i, // IPv6 unique local
-    /^\[?fd/i, // IPv6 unique local
-    /^\[?fe80/i, // IPv6 link-local
+    /^\[?::$/, // IPv6 unspecified
+    /^\[?fc[0-9a-f]{0,2}:/i, // IPv6 unique local (fc00::/7 — prefix must be boundary-safe)
+    /^\[?fd[0-9a-f]{0,2}:/i, // IPv6 unique local (fd00::/8)
+    /^\[?fe80:/i, // IPv6 link-local
+    /^\[?ff[0-9a-f]{2}:/i, // IPv6 multicast
   ];
 
   return privatePatterns.some((p) => p.test(hostname));
@@ -216,7 +227,19 @@ async function assertPublicResolvable(hostname: string): Promise<void> {
   // real DNS call would either hit the network (flaky) or fail with
   // ENOTFOUND for mock hostnames like `api.example.com`. The URL-string
   // check in validateUrl's isPrivateHost is still in effect.
-  if (process.env["WOTANN_TEST_MODE"] || process.env["VITEST"]) {
+  //
+  // Why the extra `NODE_ENV === "test"` gate: adversarial audit (opus,
+  // 2026-04-15) found that a single stray `WOTANN_TEST_MODE=1` leaked into
+  // a production environment would disable the entire DNS-rebinding defence
+  // and allow fetches to `169.254.169.254/latest/meta-data/` (AWS instance
+  // metadata). Now both flags must be set simultaneously — NODE_ENV=test
+  // cannot accidentally leak in production because node sets it to
+  // "production" by default on most platforms and test runners override it.
+  const nodeEnv = process.env["NODE_ENV"];
+  const inTest =
+    (process.env["WOTANN_TEST_MODE"] || process.env["VITEST"]) &&
+    (nodeEnv === "test" || process.env["VITEST"]);
+  if (inTest) {
     return;
   }
 
