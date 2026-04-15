@@ -39,6 +39,15 @@ export interface HookResult {
   readonly message?: string;
   readonly modifiedContent?: string;
   readonly hookName?: string;
+  /**
+   * Optional context to prepend to the agent's next user prompt. Used by
+   * MemoryRecovery on SessionStart to thread recovered WAL content back
+   * into the model's context instead of just logging a recovery message.
+   * Populated by hooks; consumed by the runtime.
+   */
+  readonly contextPrefix?: string;
+  /** Aggregated warnings surfaced by sync-path hooks (replaces silent swallowing). */
+  readonly warnings?: readonly string[];
 }
 
 interface HookStats {
@@ -114,9 +123,7 @@ export class HookEngine {
     if (this.paused) return { action: "allow" };
 
     const handlers = this.hooks.get(payload.event) ?? [];
-    const activeHandlers = handlers.filter((h) =>
-      this.isHookActiveInProfile(h.profile),
-    );
+    const activeHandlers = handlers.filter((h) => this.isHookActiveInProfile(h.profile));
 
     const warnings: string[] = [];
 
@@ -130,7 +137,14 @@ export class HookEngine {
         const result = await Promise.race([
           Promise.resolve(handler.handler(payload)),
           new Promise<HookResult>((resolve) =>
-            setTimeout(() => resolve({ action: "warn", message: `Hook ${handler.name} timed out after ${timeout}ms` }), timeout),
+            setTimeout(
+              () =>
+                resolve({
+                  action: "warn",
+                  message: `Hook ${handler.name} timed out after ${timeout}ms`,
+                }),
+              timeout,
+            ),
           ),
         ]);
 
@@ -154,7 +168,9 @@ export class HookEngine {
       } catch (error) {
         if (stats) stats.errors++;
         // Hook errors should never crash the agent — log and continue
-        warnings.push(`Hook ${handler.name} error: ${error instanceof Error ? error.message : "unknown"}`);
+        warnings.push(
+          `Hook ${handler.name} error: ${error instanceof Error ? error.message : "unknown"}`,
+        );
       }
     }
 
@@ -167,28 +183,66 @@ export class HookEngine {
 
   /**
    * Fire hooks synchronously (for performance-critical paths).
-   * Only runs sync handlers — skips async ones.
+   * Only runs sync handlers — skips async ones but records a warning so
+   * callers see which hooks were bypassed instead of silent omission.
+   *
+   * Opus audit (2026-04-15): prior implementation silently swallowed all
+   * errors and warnings — hooks could fail completely without any signal.
+   * Now errors surface as aggregated warnings, warn results propagate,
+   * and `contextPrefix` from any hook is concatenated and returned so
+   * runtime can thread recovered content into the next prompt.
    */
   fireSync(payload: HookPayload): HookResult {
     if (this.paused) return { action: "allow" };
 
     const handlers = this.hooks.get(payload.event) ?? [];
-    const activeHandlers = handlers.filter((h) =>
-      this.isHookActiveInProfile(h.profile),
-    );
+    const activeHandlers = handlers.filter((h) => this.isHookActiveInProfile(h.profile));
+
+    const warnings: string[] = [];
+    let contextPrefix: string | undefined;
 
     for (const handler of activeHandlers) {
+      const stats = this.stats.get(handler.name);
+      if (stats) stats.fires++;
       try {
         const result = handler.handler(payload);
-        // Only handle sync results (non-Promise)
-        if (result && typeof result === "object" && !("then" in result)) {
-          if (result.action === "block") return { ...result, hookName: handler.name };
+        if (result && typeof result === "object" && "then" in result) {
+          warnings.push(`Hook ${handler.name} is async and was skipped on the sync path`);
+          continue;
         }
-      } catch {
-        // Swallow errors in sync path
+        const syncResult = result as HookResult;
+        if (syncResult.contextPrefix) {
+          contextPrefix = contextPrefix
+            ? `${contextPrefix}\n\n${syncResult.contextPrefix}`
+            : syncResult.contextPrefix;
+        }
+        if (syncResult.action === "block") {
+          if (stats) stats.blocks++;
+          return {
+            ...syncResult,
+            hookName: handler.name,
+            warnings: warnings.length ? warnings : undefined,
+            contextPrefix,
+          };
+        }
+        if (syncResult.action === "warn") {
+          if (stats) stats.warnings++;
+          if (syncResult.message) warnings.push(syncResult.message);
+        }
+      } catch (error) {
+        if (stats) stats.errors++;
+        warnings.push(
+          `Hook ${handler.name} error: ${error instanceof Error ? error.message : "unknown"}`,
+        );
       }
     }
 
+    if (warnings.length > 0) {
+      return { action: "warn", message: warnings.join("; "), warnings, contextPrefix };
+    }
+    if (contextPrefix) {
+      return { action: "allow", contextPrefix };
+    }
     return { action: "allow" };
   }
 

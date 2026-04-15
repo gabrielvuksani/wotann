@@ -23,7 +23,7 @@ import {
   type ProviderInfrastructure,
 } from "../providers/registry.js";
 import { HookEngine } from "../hooks/engine.js";
-import { registerBuiltinHooks } from "../hooks/built-in.js";
+import { registerBuiltinHooks, clearReadTrackingForSession } from "../hooks/built-in.js";
 import { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
 import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pipeline.js";
 import { assembleSystemPromptParts } from "../prompt/engine.js";
@@ -1090,13 +1090,23 @@ export class WotannRuntime {
       "runtime",
       this.session.id,
     );
-    this.hookEngine.fireSync({
+    const sessionStartResult = this.hookEngine.fireSync({
       event: "SessionStart",
       sessionId: this.session.id,
       content: `Session started in ${this.config.workingDir}`,
       timestamp: Date.now(),
     });
+    // MemoryRecovery (and any future SessionStart hook) can return a
+    // contextPrefix carrying recovered WAL content. Capture it here; the
+    // first call to query() prepends it to the user prompt and clears
+    // the buffer. Closes the "MemoryRecovery is cosmetic" finding.
+    if (sessionStartResult.contextPrefix) {
+      this.pendingContextPrefix = sessionStartResult.contextPrefix;
+    }
   }
+
+  /** Pending context to prepend to the next query()'s user prompt. */
+  private pendingContextPrefix: string | null = null;
 
   /**
    * Query the agent with full harness intelligence applied.
@@ -1180,6 +1190,19 @@ export class WotannRuntime {
     const enhanceResult = this.autoEnhancer.process(options.prompt);
     if (enhanceResult.wasEnhanced) {
       options = { ...options, prompt: enhanceResult.enhanced };
+    }
+
+    // MemoryRecovery context injection — if SessionStart's MemoryRecovery
+    // hook captured a contextPrefix from the WAL, prepend it to the very
+    // first user prompt of the session and clear the buffer. Closes the
+    // "MemoryRecovery is cosmetic" Opus audit finding by actually
+    // threading recovered content into the model's context.
+    if (this.pendingContextPrefix) {
+      options = {
+        ...options,
+        prompt: `${this.pendingContextPrefix}${options.prompt}`,
+      };
+      this.pendingContextPrefix = null;
     }
 
     // WallClockBudget: inject time pressure prompt when approaching budget limit
@@ -3829,18 +3852,36 @@ export class WotannRuntime {
 
   close(): void {
     const summary = formatSessionStats(this.session);
-    this.hookEngine.fireSync({
+    // Stop hook fires first. We HONOR a block result by logging it
+    // prominently to stderr — close() can't refuse (the user already
+    // decided to terminate), but the strict-profile CompletionVerifier's
+    // "no evidence" block now surfaces visibly instead of being silently
+    // discarded as the Opus audit found.
+    const stopResult = this.hookEngine.fireSync({
       event: "Stop",
       sessionId: this.session.id,
       content: summary,
       timestamp: Date.now(),
     });
+    if (stopResult.action === "block") {
+      const hookLabel = stopResult.hookName ?? "Stop hook";
+      console.error(
+        `[WOTANN] ${hookLabel} blocked Stop but close() proceeded: ${stopResult.message ?? "no message"}`,
+      );
+    }
+    if (stopResult.warnings && stopResult.warnings.length > 0) {
+      for (const w of stopResult.warnings) console.warn(`[WOTANN Stop] ${w}`);
+    }
     this.hookEngine.fireSync({
       event: "SessionEnd",
       sessionId: this.session.id,
       content: summary,
       timestamp: Date.now(),
     });
+
+    // Release per-session ReadBeforeEdit tracking so the Map doesn't grow
+    // unbounded across long-running daemon lifetimes.
+    clearReadTrackingForSession(this.session.id);
 
     // Stop session recorder and extract learnings
     this.sessionRecorder.stop();

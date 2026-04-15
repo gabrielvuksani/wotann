@@ -40,14 +40,38 @@ export const secretScanner: HookHandler = {
 // ── Destructive Guard (minimal) ─────────────────────────────
 
 const DESTRUCTIVE_PATTERNS: readonly RegExp[] = [
-  /\brm\s+-rf\b/,
-  /\bgit\s+push\s+--force\b/,
-  /\bgit\s+reset\s+--hard\b/,
+  // File removal — all recursive variants, with or without -f
+  /\brm\s+-[a-z]*r[a-z]*\b/, // rm -r, rm -rf, rm -rfi, rm -fr, etc.
+  /\bsudo\s+rm\b/,
+  // Content wipes that aren't full deletions
+  /\btruncate\s+-s\s*0\b/,
+  /\bshred\b/,
+  /\bdd\s+if=/, // common format-zero-drive pattern (dd if=/dev/zero of=…)
+  /\s>\s*\/(etc|boot|dev|sys|proc|bin|sbin|lib|var)\b/, // shell redirect clobbering system paths
+  /\s>\s*~\/\.(ssh|aws|kube|config\/gcloud|docker)\b/, // shell redirect clobbering user creds
+  // Git history-rewriting patterns
+  /\bgit\s+push\s+-[a-z]*f[a-z]*\b/, // push -f, push --force, push -fu, etc.
+  /\bgit\s+push\s+--force/,
+  /\bgit\s+reset\s+--(hard|mixed)\b/,
+  /\bgit\s+clean\s+-[a-z]*[fd][a-z]*\b/, // clean -fd, -xdf, etc.
+  /\bgit\s+branch\s+-D\b/,
+  /\bgit\s+checkout\s+\.\b/,
+  /\bgit\s+restore\s+\.\b/,
+  // Database
   /\bDROP\s+TABLE\b/i,
   /\bDROP\s+DATABASE\b/i,
-  /\bgit\s+branch\s+-D\b/,
+  /\bDROP\s+SCHEMA\b/i,
+  /\bTRUNCATE\s+TABLE\b/i,
+  /\bDELETE\s+FROM\s+\w+\s*(?:;|$)/i, // DELETE FROM without WHERE
+  // Orchestration
   /\bkubectl\s+delete\b/,
-  /\bsudo\s+rm\b/,
+  /\bdocker\s+(system|image|volume)\s+prune\s+-[a-z]*a[a-z]*\b/, // docker system prune -af
+  /\bdocker\s+rm\s+-[a-z]*f[a-z]*\b/, // docker rm -f
+  /\bhelm\s+(delete|uninstall)\s+--purge\b/,
+  // System
+  /\bmkfs\.[a-z0-9]+\b/, // filesystem format
+  /\bformat\s+[a-z]:/i, // windows format
+  /\bdiskutil\s+erase\w+\b/i,
 ];
 
 export const destructiveGuard: HookHandler = {
@@ -298,9 +322,19 @@ export const memoryRecovery: HookHandler = {
       }
       const raw = readFileSync(markerPath, "utf-8");
       const marker = JSON.parse(raw) as { timestamp?: string; tailContent?: string };
+      const tail = marker.tailContent ?? "";
+      const when = marker.timestamp ?? "unknown time";
+      // Thread the recovered content back into the agent's next prompt
+      // via HookResult.contextPrefix. Runtime captures this on
+      // SessionStart and prepends to the first user prompt — closes the
+      // "MemoryRecovery is cosmetic" gap from the Opus audit.
+      const contextPrefix = tail
+        ? `[Memory recovered from prior session at ${when}]\n${tail}\n\n---\n\n`
+        : undefined;
       return {
         action: "allow",
-        message: `Memory recovery: loaded WAL marker from ${marker.timestamp ?? "unknown time"} (${(marker.tailContent ?? "").length} chars)`,
+        message: `Memory recovery: loaded WAL marker from ${when} (${tail.length} chars)${contextPrefix ? " — injecting into next turn" : ""}`,
+        contextPrefix,
       };
     } catch (err) {
       return {
@@ -400,20 +434,56 @@ export const correctionCapture: HookHandler = {
 };
 
 // ── Read-Before-Edit Guard (standard) — must read a file before editing ──
+//
+// Opus audit (2026-04-15) found the tracking was a module-global `Set<string>`
+// — Read calls from session A would allow Edits in session B, and the set
+// grew unbounded across the daemon's lifetime. Now the tracking is keyed by
+// sessionId so each session starts fresh, and each session's set is bounded
+// by a MAX_TRACKED constant to prevent runaway growth on long-running
+// daemons. Evicted entries cause a re-Read requirement — acceptable
+// safety-over-performance tradeoff.
 
-const recentlyReadFiles = new Set<string>();
+const readTrackingBySession = new Map<string, Set<string>>();
+const MAX_TRACKED_READS_PER_SESSION = 512;
+
+function trackRead(sessionId: string, filePath: string): void {
+  let set = readTrackingBySession.get(sessionId);
+  if (!set) {
+    set = new Set();
+    readTrackingBySession.set(sessionId, set);
+  }
+  // Bound per-session set. Simple FIFO eviction: if over cap, clear oldest
+  // half. The agent simply re-Reads if the file gets evicted, which is a
+  // correct safety behavior.
+  if (set.size >= MAX_TRACKED_READS_PER_SESSION) {
+    const keep = Array.from(set).slice(-Math.floor(MAX_TRACKED_READS_PER_SESSION / 2));
+    set.clear();
+    for (const k of keep) set.add(k);
+  }
+  set.add(filePath);
+}
+
+function hasReadInSession(sessionId: string, filePath: string): boolean {
+  return readTrackingBySession.get(sessionId)?.has(filePath) ?? false;
+}
+
+/** Release the per-session tracking set when a session ends — prevents map growth. */
+export function clearReadTrackingForSession(sessionId: string): void {
+  readTrackingBySession.delete(sessionId);
+}
 
 export const readBeforeEditGuard: HookHandler = {
   name: "ReadBeforeEdit",
   event: "PreToolUse",
   profile: "standard",
   handler(payload: HookPayload): HookResult {
+    const sessionId = payload.sessionId ?? "global";
     if (payload.toolName === "Read" && payload.filePath) {
-      recentlyReadFiles.add(payload.filePath);
+      trackRead(sessionId, payload.filePath);
       return { action: "allow" };
     }
     if (payload.toolName === "Edit" && payload.filePath) {
-      if (!recentlyReadFiles.has(payload.filePath)) {
+      if (!hasReadInSession(sessionId, payload.filePath)) {
         // S2-14: upgrade from warn → block. The Edit tool's own
         // precondition is "must have Read the file in this conversation";
         // previously this hook merely warned so the edit proceeded
@@ -430,6 +500,45 @@ export const readBeforeEditGuard: HookHandler = {
 };
 
 // ── Completion Verifier (strict) — blocks stop without evidence ──
+//
+// Opus audit (2026-04-15) found the prior regex was trivially gameable:
+// the literal word "pass" or a "✓" anywhere in the final message bypassed
+// the check. That made strict-profile Stop verification decorative.
+// The new evidence bar requires EITHER:
+//   (a) a structured JSON block `{"verified": {"tests": ..., "typecheck": ..., "lint": ...}}`
+//       that claims at least one verification step actually ran, OR
+//   (b) explicit terminal-output markers that are hard to forge casually —
+//       a test summary line AND a passing status marker AND a count.
+
+const STRUCTURED_EVIDENCE_REGEX =
+  /"verified"\s*:\s*\{[^}]*"(?:tests|typecheck|lint)"\s*:\s*(?:true|\d+)/i;
+// A test summary needs (Vitest/Jest/Mocha/pytest/go-test pattern):
+// - "passed" / "pass" token (case-insensitive, word-boundary)
+// - AND a count of tests OR a "0 failed" marker
+const TEST_SUMMARY_EVIDENCE = [
+  /\b(\d+)\s+(?:tests?|passed|passing)\b/i, // "50 tests", "50 passed", "3 passing"
+  /\b(?:passed|passing|ok|success|green)\b/i,
+];
+const TYPECHECK_EVIDENCE = [
+  /\btsc\b|\btypecheck\b|\btype[- ]check\b/i,
+  /\b0\s+errors?\b|\bclean\b|\bno\s+errors?\b/i,
+];
+const BUILD_EVIDENCE = [
+  /\b(?:build|compile|bundle)\b/i,
+  /\b(?:success|succeeded|passed|complete)\b/i,
+];
+const LINT_EVIDENCE = [
+  /\b(?:lint|eslint|prettier|biome)\b/i,
+  /\b(?:clean|0\s+(?:issues|warnings)|no\s+warnings?)\b/i,
+];
+
+function hasStructuredEvidence(content: string): boolean {
+  return STRUCTURED_EVIDENCE_REGEX.test(content);
+}
+
+function hasPairedEvidence(content: string, pair: readonly RegExp[]): boolean {
+  return pair.every((regex) => regex.test(content));
+}
 
 export const completionVerifier: HookHandler = {
   name: "CompletionVerifier",
@@ -437,20 +546,28 @@ export const completionVerifier: HookHandler = {
   profile: "strict",
   handler(payload: HookPayload): HookResult {
     const content = payload.content ?? "";
-    // Check if the stop message references test output, build success, or verification
-    const hasEvidence = /\b(pass|✓|success|verified|all.*tests|build.*success|0 errors)\b/i.test(
-      content,
-    );
-    if (!hasEvidence && content.length > 0) {
-      // S2-14: upgrade from warn → block on the strict profile. The hook
-      // is only installed when the user explicitly chooses strict mode,
-      // so blocking here matches user intent: "don't let me ship without
-      // evidence." Override by running verification and re-invoking Stop.
+    if (content.length === 0) return { action: "allow" };
+
+    if (hasStructuredEvidence(content)) return { action: "allow" };
+
+    // At least one verification category must have BOTH the tool keyword
+    // AND a success indicator — this is the "paired evidence" bar. A
+    // single "pass" or "✓" no longer bypasses.
+    const categoryPassed =
+      hasPairedEvidence(content, TEST_SUMMARY_EVIDENCE) ||
+      hasPairedEvidence(content, TYPECHECK_EVIDENCE) ||
+      hasPairedEvidence(content, BUILD_EVIDENCE) ||
+      hasPairedEvidence(content, LINT_EVIDENCE);
+
+    if (!categoryPassed) {
       return {
         action: "block",
         message:
           "Stop blocked: no evidence of verification in the final message. " +
-          "Run tests/typecheck/lint and include their output before stopping.",
+          'Include a test summary ("N passed"), typecheck output ("0 errors"), build result, ' +
+          'or lint status. Single words like "pass" or "✓" are not sufficient — pair them ' +
+          "with a tool name (tsc/tests/lint/build) and a count or clean marker. " +
+          'Override: include a JSON block like `{"verified": {"tests": true}}`.',
       };
     }
     return { action: "allow" };
