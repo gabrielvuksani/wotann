@@ -336,21 +336,59 @@ pub fn get_status(state: State<AppState>) -> RuntimeStatus {
     }
 }
 
-/// Send a message — attempts IPC to KAIROS daemon first, falls back to local response.
-/// When KAIROS is running, the prompt reaches a real AI provider.
+/// Forward a JSON-RPC request to the KAIROS daemon (S1-7).
+///
+/// Every desktop component that needs to call a daemon RPC method does so via
+/// `commands.sendMessage(JSON.stringify({method, params}))`. Historically this
+/// handler was a deprecated stub that returned only a fake message ID — the
+/// RPC payload reached nobody. That single deprecated stub broke ~1,700 LOC of
+/// frontend code (@ references, ghost-text autocomplete, workflows, multi-file
+/// composer, TrustView, SymbolOutline, intelligence dashboard, etc.).
+///
+/// The new behaviour:
+///   1. Parse `prompt` as JSON `{ method, params }` — if the payload isn't
+///      valid JSON-RPC we treat the raw string as a fallback message ID so
+///      old call sites that stored ad-hoc strings continue to compile.
+///   2. Open a UDS connection to `~/.wotann/kairos.sock` via `ipc_client`.
+///   3. Forward the call and return the daemon's `result` as a JSON string
+///      (the caller already wraps this in JSON.parse).
+///
+/// Streaming responses are still handled by `send_message_streaming`. This
+/// command is the synchronous single-response path.
 #[tauri::command]
 pub async fn send_message(
     _app: AppHandle,
-    _prompt: String,
+    prompt: String,
     message_id: Option<String>,
     _state: State<'_, AppState>,
 ) -> Result<String, String> {
-    // DEPRECATED: Use send_message_streaming instead.
-    // This command is kept for backward compatibility but does NOT emit stream events.
-    // All streaming is handled by send_message_streaming.
-    eprintln!("[WARN] send_message (non-streaming) called — use send_message_streaming instead");
-    let message_id = message_id.unwrap_or_else(|| format!("msg-{}", chrono_ts()));
-    Ok(message_id)
+    // If the prompt isn't a JSON-RPC envelope, preserve the legacy back-compat
+    // behaviour of returning a synthesized message ID. Nothing in the current
+    // codebase depends on this, but defence-in-depth.
+    let parsed: serde_json::Value = match serde_json::from_str(&prompt) {
+        Ok(v) => v,
+        Err(_) => {
+            let id = message_id.unwrap_or_else(|| format!("msg-{}", chrono_ts()));
+            return Ok(id);
+        }
+    };
+
+    let method = parsed
+        .get("method")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "send_message: missing 'method' field in JSON-RPC payload".to_string())?
+        .to_string();
+    let params = parsed
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+    let client = ipc_client::try_kairos()
+        .map_err(|e| format!("KAIROS daemon unavailable: {e}. Start it with: wotann daemon start"))?;
+
+    let result = client.call(&method, params)?;
+    serde_json::to_string(&result)
+        .map_err(|e| format!("send_message: failed to serialize daemon response: {e}"))
 }
 
 /// Legacy send_message body — kept for reference but not called
