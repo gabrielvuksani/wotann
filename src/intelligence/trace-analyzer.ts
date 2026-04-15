@@ -70,14 +70,46 @@ export interface ImprovementProposal {
   readonly autoApplicable: boolean;
 }
 
+/**
+ * Optional cap on the in-memory trace buffer (S1-14).
+ *
+ * Default: UNBOUNDED. The analyzer keeps every trace entry so the agent has
+ * the full picture — that's "most power possible" by default. Daemon
+ * operators who want an explicit ceiling (e.g., long-running CI workers)
+ * can set `WOTANN_TRACE_MAX` to any positive integer. Callers can also
+ * pass `maxEntries` to the constructor directly for programmatic control.
+ *
+ * The old implementation hardcoded a 10k FIFO cap with no opt-out — that
+ * silently dropped trace data on long sessions even when the host had
+ * plenty of RAM.
+ */
+function resolveMaxEntries(): number | null {
+  const raw = process.env["WOTANN_TRACE_MAX"];
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
+
 export class TraceAnalyzer {
   private entries: TraceEntry[] = [];
+  private readonly maxEntries: number | null;
+
+  constructor(options?: { maxEntries?: number | null }) {
+    // Explicit `null` = unbounded, explicit number = cap, undefined = env or unbounded.
+    this.maxEntries = options?.maxEntries !== undefined ? options.maxEntries : resolveMaxEntries();
+  }
 
   /**
-   * Record a trace entry during execution.
+   * Record a trace entry during execution. Unbounded by default; if the
+   * caller opted into a cap via WOTANN_TRACE_MAX or the constructor, evict
+   * the oldest ~10% of entries at a time (FIFO, amortised cheap).
    */
   record(entry: TraceEntry): void {
     this.entries.push(entry);
+    if (this.maxEntries !== null && this.entries.length > this.maxEntries) {
+      const dropCount = Math.max(1, Math.floor(this.maxEntries * 0.1));
+      this.entries.splice(0, dropCount);
+    }
   }
 
   /**
@@ -174,7 +206,7 @@ export class TraceAnalyzer {
       patterns.push({
         type: "over-planning",
         severity: "info",
-        description: `${Math.round(thinkingTokens / totalTokens * 100)}% of tokens spent on thinking`,
+        description: `${Math.round((thinkingTokens / totalTokens) * 100)}% of tokens spent on thinking`,
         occurrences: 1,
         tokensCost: thinkingTokens - Math.round(totalTokens * 0.2),
       });
@@ -200,7 +232,12 @@ export class TraceAnalyzer {
       }
       if (entry.type === "tool_call" && entry.toolName === "Bash") {
         const cmd = String(entry.toolArgs?.["command"] ?? "");
-        if (cmd.includes("tsc") || cmd.includes("vitest") || cmd.includes("jest") || cmd.includes("test")) {
+        if (
+          cmd.includes("tsc") ||
+          cmd.includes("vitest") ||
+          cmd.includes("jest") ||
+          cmd.includes("test")
+        ) {
           hasVerificationAfterWrite = true;
         }
       }
@@ -208,7 +245,9 @@ export class TraceAnalyzer {
 
     // Tool misuse: Bash used where Read/Grep would be better
     const bashReads = this.entries.filter(
-      (e) => e.type === "tool_call" && e.toolName === "Bash" &&
+      (e) =>
+        e.type === "tool_call" &&
+        e.toolName === "Bash" &&
         /\b(cat|head|tail|less|more)\b/.test(String(e.toolArgs?.["command"] ?? "")),
     );
     if (bashReads.length > 0) {
@@ -229,7 +268,7 @@ export class TraceAnalyzer {
       patterns.push({
         type: "successful-pattern",
         severity: "info",
-        description: `${Math.round(successfulTools.length / Math.max(1, this.entries.length) * 100)}% of tool calls succeeded`,
+        description: `${Math.round((successfulTools.length / Math.max(1, this.entries.length)) * 100)}% of tool calls succeeded`,
         occurrences: successfulTools.length,
         tokensCost: 0,
       });
@@ -254,7 +293,8 @@ export class TraceAnalyzer {
     let text = 0;
     for (const entry of this.entries) {
       if (entry.type === "thinking") thinking += entry.tokensUsed;
-      else if (entry.type === "tool_call" || entry.type === "tool_result") toolCalls += entry.tokensUsed;
+      else if (entry.type === "tool_call" || entry.type === "tool_result")
+        toolCalls += entry.tokensUsed;
       else text += entry.tokensUsed;
     }
     return { thinking, toolCalls, text };
@@ -266,7 +306,9 @@ export class TraceAnalyzer {
     return Math.max(0, Math.min(1, 1 - wastedTokens / totalTokens));
   }
 
-  private generateImprovements(patterns: readonly DetectedPattern[]): readonly ImprovementProposal[] {
+  private generateImprovements(
+    patterns: readonly DetectedPattern[],
+  ): readonly ImprovementProposal[] {
     const proposals: ImprovementProposal[] = [];
 
     for (const pattern of patterns) {
@@ -282,7 +324,8 @@ export class TraceAnalyzer {
         case "under-verification":
           proposals.push({
             area: "middleware",
-            description: "Enable forced verification middleware to auto-run tests after code changes",
+            description:
+              "Enable forced verification middleware to auto-run tests after code changes",
             expectedImpact: "high",
             autoApplicable: true,
           });

@@ -90,11 +90,21 @@ export class AuditTrail {
     `);
 
     stmt.run(
-      entry.id, entry.sessionId, entry.timestamp, entry.tool,
-      entry.agentId ?? null, entry.model ?? null, entry.provider ?? null,
-      entry.riskLevel, entry.input ?? null, entry.output ?? null,
-      entry.tokensUsed ?? null, entry.costUsd ?? null, entry.durationMs ?? null,
-      entry.success ? 1 : 0, contentHash,
+      entry.id,
+      entry.sessionId,
+      entry.timestamp,
+      entry.tool,
+      entry.agentId ?? null,
+      entry.model ?? null,
+      entry.provider ?? null,
+      entry.riskLevel,
+      entry.input ?? null,
+      entry.output ?? null,
+      entry.tokensUsed ?? null,
+      entry.costUsd ?? null,
+      entry.durationMs ?? null,
+      entry.success ? 1 : 0,
+      contentHash,
     );
   }
 
@@ -129,20 +139,41 @@ export class AuditTrail {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = filters.limit ?? 100;
 
-    const rows = this.db.prepare(
-      `SELECT * FROM audit_trail ${where} ORDER BY timestamp DESC LIMIT ?`
-    ).all(...params, limit) as Array<Record<string, unknown>>;
+    const rows = this.db
+      .prepare(`SELECT * FROM audit_trail ${where} ORDER BY timestamp DESC LIMIT ?`)
+      .all(...params, limit) as Array<Record<string, unknown>>;
 
     return rows.map((row) => this.rowToEntry(row));
   }
 
   getCount(): number {
-    const row = this.db.prepare("SELECT COUNT(*) as count FROM audit_trail").get() as { count: number };
+    const row = this.db.prepare("SELECT COUNT(*) as count FROM audit_trail").get() as {
+      count: number;
+    };
     return row.count;
   }
 
+  /**
+   * Delete audit entries older than the given retention window (S1-14).
+   *
+   * Default: 30 days. The audit_trail is append-only and logs every tool
+   * call; without retention the table grows unboundedly and a 30-day
+   * daemon session can produce 43k+ rows (~100 MB SQLite + 300-500 MB RSS).
+   *
+   * Returns the number of rows removed. Idempotent — safe to call on a
+   * regular cron interval.
+   */
+  pruneOlderThan(days: number = 30): number {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const stmt = this.db.prepare("DELETE FROM audit_trail WHERE timestamp < ?");
+    const info = stmt.run(cutoff);
+    return Number(info.changes);
+  }
+
   verifyIntegrity(entryId: string): boolean {
-    const row = this.db.prepare("SELECT * FROM audit_trail WHERE id = ?").get(entryId) as Record<string, unknown> | undefined;
+    const row = this.db.prepare("SELECT * FROM audit_trail WHERE id = ?").get(entryId) as
+      | Record<string, unknown>
+      | undefined;
     if (!row) return false;
     const entry = this.rowToEntry(row);
     const expectedHash = this.computeHash(entry);

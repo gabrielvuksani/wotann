@@ -4171,35 +4171,44 @@ export class KairosRPCHandler {
       }
     });
 
-    // ── Security key exchange (ECDH, X25519) ──────────────────
+    // ── Security key exchange (ECDH P-256 + HKDF-SHA256) ──────────
+    //
+    // S1-13: Standardized on P-256 + raw-format + HKDF-SHA256 + salt
+    // "wotann-v1" to match iOS CryptoKit's ECDHManager and the companion
+    // server at companion-server.ts:1205. Previously this handler used
+    // X25519 with a non-HKDF SHA-256 derivation, producing AES keys that
+    // could never decrypt messages the iOS side encrypted. Three
+    // different curves+derivations meant every pairing was broken.
     this.handlers.set("security.keyExchange", async (params) => {
       const { publicKey, sessionId } = params as { publicKey?: string; sessionId?: string };
       if (!publicKey) return { error: "publicKey required" };
       try {
-        const { generateKeyPairSync, diffieHellman, createPublicKey, createHash } =
-          await import("node:crypto");
-        const { publicKey: serverPub, privateKey: serverPriv } = generateKeyPairSync("x25519");
-        const clientPubKey = createPublicKey({
-          key: Buffer.from(publicKey, "base64"),
-          format: "der",
-          type: "spki",
-        });
-        const shared = diffieHellman({ privateKey: serverPriv, publicKey: clientPubKey });
-        // HKDF-style derivation with session salt
+        // iOS sends its public key as base64 of the raw SEC 1 uncompressed
+        // representation (65 bytes with 0x04 prefix). Buffer.from handles
+        // the base64 decode; createECDH accepts raw format directly.
+        const clientPubRaw = Buffer.from(publicKey, "base64");
+
+        const ecdh = createECDH("prime256v1");
+        ecdh.generateKeys();
+        const serverPubRaw = ecdh.getPublicKey(); // 65-byte uncompressed SEC 1
+        const shared = ecdh.computeSecret(clientPubRaw);
+
+        // HKDF-SHA256(salt="wotann-v1", ikm=shared, info="", len=32)
+        const salt = Buffer.from("wotann-v1", "utf8");
+        const derivedKey = Buffer.from(hkdfSync("sha256", shared, salt, Buffer.alloc(0), 32));
+
         const sid = sessionId ?? `session-${Date.now()}`;
-        const derivedKey = createHash("sha256").update(shared).update(sid).digest();
         this.ecdhSessions.set(sid, { sessionId: sid, derivedKey, createdAt: Date.now() });
-        // Prune sessions older than 24h to bound memory
+        // Prune sessions older than 24h to bound memory.
         const now = Date.now();
         for (const [k, s] of this.ecdhSessions) {
           if (now - s.createdAt > 24 * 60 * 60 * 1000) this.ecdhSessions.delete(k);
         }
-        const serverPubB64 = serverPub.export({ format: "der", type: "spki" }).toString("base64");
         return {
-          serverPublicKey: serverPubB64,
+          serverPublicKey: serverPubRaw.toString("base64"),
           sessionId: sid,
           keyFingerprint: derivedKey.subarray(0, 8).toString("hex"),
-          algorithm: "x25519-sha256",
+          algorithm: "ECDH-P256-HKDF-SHA256",
           timestamp: Date.now(),
         };
       } catch (err) {

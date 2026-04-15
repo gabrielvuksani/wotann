@@ -356,13 +356,25 @@ export class MemoryStore {
     this.migrateAddColumn("memory_entries", "topic", "TEXT NOT NULL DEFAULT ''");
     this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_memory_domain ON memory_entries(domain)`).run();
     this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_memory_topic ON memory_entries(topic)`).run();
-    this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_memory_domain_topic ON memory_entries(domain, topic)`).run();
+    this.db
+      .prepare(
+        `CREATE INDEX IF NOT EXISTS idx_memory_domain_topic ON memory_entries(domain, topic)`,
+      )
+      .run();
 
     // ── Temporal Validity Migration (MemPalace R2) ──
     // Add valid_from/valid_to to knowledge_edges for bi-temporal fact queries.
-    this.migrateAddColumn("knowledge_edges", "valid_from", "TEXT NOT NULL DEFAULT (datetime('now'))");
+    this.migrateAddColumn(
+      "knowledge_edges",
+      "valid_from",
+      "TEXT NOT NULL DEFAULT (datetime('now'))",
+    );
     this.migrateAddColumn("knowledge_edges", "valid_to", "TEXT");
-    this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_kg_edges_temporal ON knowledge_edges(valid_from, valid_to)`).run();
+    this.db
+      .prepare(
+        `CREATE INDEX IF NOT EXISTS idx_kg_edges_temporal ON knowledge_edges(valid_from, valid_to)`,
+      )
+      .run();
   }
 
   /** @internal Migration helper — ONLY called with hardcoded literals. */
@@ -386,25 +398,41 @@ export class MemoryStore {
   // ── Layer 1: Auto-Capture ──────────────────────────────────
 
   captureEvent(eventType: string, content: string, toolName?: string, sessionId?: string): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO auto_capture (event_type, tool_name, content, session_id) VALUES (?, ?, ?, ?)
-    `).run(eventType, toolName ?? null, content.slice(0, 2000), sessionId ?? null);
+    `,
+      )
+      .run(eventType, toolName ?? null, content.slice(0, 2000), sessionId ?? null);
   }
 
   getRecentCaptures(sessionId: string, limit: number = 20): readonly Record<string, unknown>[] {
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT * FROM auto_capture WHERE session_id = ? ORDER BY created_at DESC LIMIT ?
-    `).all(sessionId, limit) as Record<string, unknown>[];
+    `,
+      )
+      .all(sessionId, limit) as Record<string, unknown>[];
   }
 
   getAutoCaptureEntries(limit: number = 50, sessionId?: string): readonly AutoCaptureEntry[] {
     const rows = sessionId
-      ? this.db.prepare(`
+      ? this.db
+          .prepare(
+            `
         SELECT * FROM auto_capture WHERE session_id = ? ORDER BY created_at DESC LIMIT ?
-      `).all(sessionId, limit)
-      : this.db.prepare(`
+      `,
+          )
+          .all(sessionId, limit)
+      : this.db
+          .prepare(
+            `
         SELECT * FROM auto_capture ORDER BY created_at DESC LIMIT ?
-      `).all(limit);
+      `,
+          )
+          .all(limit);
 
     return (rows as Record<string, unknown>[]).map((row) => ({
       id: Number(row["id"] ?? 0),
@@ -423,33 +451,57 @@ export class MemoryStore {
   /** Store a raw verbatim chunk, optionally linked to a structured memory entry. */
   storeVerbatim(
     rawContent: string,
-    options?: { readonly entryId?: string; readonly contentType?: string; readonly sessionId?: string; readonly domain?: string; readonly topic?: string },
+    options?: {
+      readonly entryId?: string;
+      readonly contentType?: string;
+      readonly sessionId?: string;
+      readonly domain?: string;
+      readonly topic?: string;
+    },
   ): string {
     const id = randomUUID();
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO verbatim_drawers (id, entry_id, raw_content, content_type, session_id, domain, topic)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      options?.entryId ?? null,
-      rawContent,
-      options?.contentType ?? "conversation",
-      options?.sessionId ?? null,
-      options?.domain ?? "",
-      options?.topic ?? "",
-    );
+    `,
+      )
+      .run(
+        id,
+        options?.entryId ?? null,
+        rawContent,
+        options?.contentType ?? "conversation",
+        options?.sessionId ?? null,
+        options?.domain ?? "",
+        options?.topic ?? "",
+      );
     return id;
   }
 
   /** Search verbatim drawers via FTS5. Returns raw content with match scores. */
-  searchVerbatim(query: string, limit: number = 10): readonly { id: string; rawContent: string; entryId: string | null; score: number; domain: string; topic: string }[] {
-    const rows = this.db.prepare(`
+  searchVerbatim(
+    query: string,
+    limit: number = 10,
+  ): readonly {
+    id: string;
+    rawContent: string;
+    entryId: string | null;
+    score: number;
+    domain: string;
+    topic: string;
+  }[] {
+    const rows = this.db
+      .prepare(
+        `
       SELECT vd.*, rank AS score
       FROM verbatim_fts
       JOIN verbatim_drawers vd ON vd.rowid = verbatim_fts.rowid
       WHERE verbatim_fts MATCH ?
       ORDER BY rank LIMIT ?
-    `).all(query, limit) as Record<string, unknown>[];
+    `,
+      )
+      .all(query, limit) as Record<string, unknown>[];
 
     return rows.map((r) => ({
       id: r["id"] as string,
@@ -462,10 +514,16 @@ export class MemoryStore {
   }
 
   /** Get the raw verbatim content linked to a structured memory entry. */
-  getVerbatimForEntry(entryId: string): readonly { id: string; rawContent: string; contentType: string }[] {
-    const rows = this.db.prepare(`
+  getVerbatimForEntry(
+    entryId: string,
+  ): readonly { id: string; rawContent: string; contentType: string }[] {
+    const rows = this.db
+      .prepare(
+        `
       SELECT id, raw_content, content_type FROM verbatim_drawers WHERE entry_id = ? ORDER BY created_at DESC
-    `).all(entryId) as Record<string, unknown>[];
+    `,
+      )
+      .all(entryId) as Record<string, unknown>[];
 
     return rows.map((r) => ({
       id: r["id"] as string,
@@ -476,73 +534,124 @@ export class MemoryStore {
 
   /** Count of verbatim entries. */
   getVerbatimCount(): number {
-    return (this.db.prepare(`SELECT COUNT(*) as count FROM verbatim_drawers`).get() as { count: number }).count;
+    return (
+      this.db.prepare(`SELECT COUNT(*) as count FROM verbatim_drawers`).get() as { count: number }
+    ).count;
   }
 
   // ── Layer 2: Core Blocks CRUD ──────────────────────────────
 
   insert(entry: Omit<MemoryEntry, "createdAt" | "updatedAt">): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, domain, topic)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      entry.id, entry.layer, entry.blockType, entry.key, entry.value,
-      entry.sessionId ?? null, entry.verified ? 1 : 0,
-      entry.confidence ?? 1.0, entry.tags ?? "",
-      entry.domain ?? "", entry.topic ?? "",
-    );
+    `,
+      )
+      .run(
+        entry.id,
+        entry.layer,
+        entry.blockType,
+        entry.key,
+        entry.value,
+        entry.sessionId ?? null,
+        entry.verified ? 1 : 0,
+        entry.confidence ?? 1.0,
+        entry.tags ?? "",
+        entry.domain ?? "",
+        entry.topic ?? "",
+      );
   }
 
   replace(id: string, key: string, value: string): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE memory_entries SET key = ?, value = ?, updated_at = datetime('now') WHERE id = ?
-    `).run(key, value, id);
+    `,
+      )
+      .run(key, value, id);
   }
 
   archive(id: string): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE memory_entries SET archived = 1, updated_at = datetime('now') WHERE id = ?
-    `).run(id);
+    `,
+      )
+      .run(id);
   }
 
   getById(id: string): MemoryEntry | null {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT * FROM memory_entries WHERE id = ? AND archived = 0
-    `).get(id) as Record<string, unknown> | undefined;
+    `,
+      )
+      .get(id) as Record<string, unknown> | undefined;
     if (row) {
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE memory_entries SET access_count = access_count + 1, last_accessed = datetime('now') WHERE id = ?
-      `).run(id);
+      `,
+        )
+        .run(id);
     }
     return row ? this.rowToEntry(row) : null;
   }
 
   getByLayer(layer: MemoryLayer): readonly MemoryEntry[] {
-    return (this.db.prepare(`
+    return (
+      this.db
+        .prepare(
+          `
       SELECT * FROM memory_entries WHERE layer = ? AND archived = 0 ORDER BY updated_at DESC
-    `).all(layer) as Record<string, unknown>[]).map((r) => this.rowToEntry(r));
+    `,
+        )
+        .all(layer) as Record<string, unknown>[]
+    ).map((r) => this.rowToEntry(r));
   }
 
   getByBlock(blockType: MemoryBlockType): readonly MemoryEntry[] {
-    return (this.db.prepare(`
+    return (
+      this.db
+        .prepare(
+          `
       SELECT * FROM memory_entries WHERE block_type = ? AND archived = 0 ORDER BY updated_at DESC
-    `).all(blockType) as Record<string, unknown>[]).map((r) => this.rowToEntry(r));
+    `,
+        )
+        .all(blockType) as Record<string, unknown>[]
+    ).map((r) => this.rowToEntry(r));
   }
 
   // ── Layer 3: Working Memory ────────────────────────────────
 
   setWorkingMemory(sessionId: string, key: string, value: string, importance: number = 0.5): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT OR REPLACE INTO working_memory (id, session_id, key, value, importance) VALUES (?, ?, ?, ?, ?)
-    `).run(randomUUID(), sessionId, key, value, importance);
+    `,
+      )
+      .run(randomUUID(), sessionId, key, value, importance);
   }
 
-  getWorkingMemory(sessionId: string): readonly { key: string; value: string; importance: number }[] {
-    return this.db.prepare(`
+  getWorkingMemory(
+    sessionId: string,
+  ): readonly { key: string; value: string; importance: number }[] {
+    return this.db
+      .prepare(
+        `
       SELECT key, value, importance FROM working_memory
       WHERE session_id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))
       ORDER BY importance DESC
-    `).all(sessionId) as { key: string; value: string; importance: number }[];
+    `,
+      )
+      .all(sessionId) as { key: string; value: string; importance: number }[];
   }
 
   clearWorkingMemory(sessionId: string): void {
@@ -551,19 +660,37 @@ export class MemoryStore {
 
   // ── Layer 4: Knowledge Graph ───────────────────────────────
 
-  addKnowledgeNode(entity: string, entityType: string, properties?: Record<string, string>): string {
+  addKnowledgeNode(
+    entity: string,
+    entityType: string,
+    properties?: Record<string, string>,
+  ): string {
     const id = randomUUID();
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO knowledge_nodes (id, entity, entity_type, properties) VALUES (?, ?, ?, ?)
-    `).run(id, entity, entityType, JSON.stringify(properties ?? {}));
+    `,
+      )
+      .run(id, entity, entityType, JSON.stringify(properties ?? {}));
     return id;
   }
 
-  addKnowledgeEdge(sourceId: string, targetId: string, relation: string, weight: number = 1.0, validFrom?: string): string {
+  addKnowledgeEdge(
+    sourceId: string,
+    targetId: string,
+    relation: string,
+    weight: number = 1.0,
+    validFrom?: string,
+  ): string {
     const id = randomUUID();
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO knowledge_edges (id, source_id, target_id, relation, weight, valid_from) VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, sourceId, targetId, relation, weight, validFrom ?? new Date().toISOString());
+    `,
+      )
+      .run(id, sourceId, targetId, relation, weight, validFrom ?? new Date().toISOString());
     return id;
   }
 
@@ -572,9 +699,13 @@ export class MemoryStore {
    * The edge remains for historical queries but is excluded from active queries.
    */
   invalidateKnowledgeEdge(edgeId: string, endedAt?: string): boolean {
-    const result = this.db.prepare(`
+    const result = this.db
+      .prepare(
+        `
       UPDATE knowledge_edges SET valid_to = ? WHERE id = ? AND valid_to IS NULL
-    `).run(endedAt ?? new Date().toISOString(), edgeId);
+    `,
+      )
+      .run(endedAt ?? new Date().toISOString(), edgeId);
     return result.changes > 0;
   }
 
@@ -582,12 +713,28 @@ export class MemoryStore {
    * Get knowledge edges that were active at a specific point in time.
    * A relationship is active if valid_from <= date AND (valid_to IS NULL OR valid_to > date).
    */
-  getActiveEdgesAt(date: string): readonly { id: string; sourceId: string; targetId: string; relation: string; weight: number; validFrom: string; validTo: string | null }[] {
-    return (this.db.prepare(`
+  getActiveEdgesAt(
+    date: string,
+  ): readonly {
+    id: string;
+    sourceId: string;
+    targetId: string;
+    relation: string;
+    weight: number;
+    validFrom: string;
+    validTo: string | null;
+  }[] {
+    return (
+      this.db
+        .prepare(
+          `
       SELECT id, source_id, target_id, relation, weight, valid_from, valid_to
       FROM knowledge_edges
       WHERE valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)
-    `).all(date, date) as Record<string, unknown>[]).map((r) => ({
+    `,
+        )
+        .all(date, date) as Record<string, unknown>[]
+    ).map((r) => ({
       id: r["id"] as string,
       sourceId: r["source_id"] as string,
       targetId: r["target_id"] as string,
@@ -599,9 +746,13 @@ export class MemoryStore {
   }
 
   getRelatedEntities(entity: string, maxDepth: number = 2): readonly KnowledgeNode[] {
-    const startNodes = this.db.prepare(`
+    const startNodes = this.db
+      .prepare(
+        `
       SELECT * FROM knowledge_nodes WHERE entity = ? AND (valid_to IS NULL OR valid_to > datetime('now'))
-    `).all(entity) as Record<string, unknown>[];
+    `,
+      )
+      .all(entity) as Record<string, unknown>[];
 
     if (startNodes.length === 0) return [];
 
@@ -614,21 +765,30 @@ export class MemoryStore {
       for (const nodeId of frontier) {
         if (visited.has(nodeId)) continue;
         visited.add(nodeId);
-        const node = this.db.prepare(`SELECT * FROM knowledge_nodes WHERE id = ?`).get(nodeId) as Record<string, unknown> | undefined;
+        const node = this.db.prepare(`SELECT * FROM knowledge_nodes WHERE id = ?`).get(nodeId) as
+          | Record<string, unknown>
+          | undefined;
         if (node) {
           result.push({
             id: node["id"] as string,
             entity: node["entity"] as string,
             entityType: node["entity_type"] as string,
-            properties: JSON.parse((node["properties"] as string) || "{}") as Record<string, string>,
+            properties: JSON.parse((node["properties"] as string) || "{}") as Record<
+              string,
+              string
+            >,
             validFrom: node["valid_from"] as string,
             validTo: node["valid_to"] as string | undefined,
           });
         }
-        const edges = this.db.prepare(`
+        const edges = this.db
+          .prepare(
+            `
           SELECT target_id AS connected FROM knowledge_edges WHERE source_id = ? AND (valid_to IS NULL OR valid_to > datetime('now'))
           UNION SELECT source_id AS connected FROM knowledge_edges WHERE target_id = ? AND (valid_to IS NULL OR valid_to > datetime('now'))
-        `).all(nodeId, nodeId) as { connected: string }[];
+        `,
+          )
+          .all(nodeId, nodeId) as { connected: string }[];
         for (const e of edges) {
           if (!visited.has(e.connected)) nextFrontier.push(e.connected);
         }
@@ -639,14 +799,21 @@ export class MemoryStore {
   }
 
   getKnowledgeGraphSize(): { nodes: number; edges: number } {
-    const nodes = (this.db.prepare(`SELECT COUNT(*) as c FROM knowledge_nodes`).get() as { c: number }).c;
-    const edges = (this.db.prepare(`SELECT COUNT(*) as c FROM knowledge_edges`).get() as { c: number }).c;
+    const nodes = (
+      this.db.prepare(`SELECT COUNT(*) as c FROM knowledge_nodes`).get() as { c: number }
+    ).c;
+    const edges = (
+      this.db.prepare(`SELECT COUNT(*) as c FROM knowledge_edges`).get() as { c: number }
+    ).c;
     return { nodes, edges };
   }
 
   // ── Layer 6: Skeptical Recall ──────────────────────────────
 
-  skepticalSearch(query: string, limit: number = 10): readonly (MemorySearchResult & { needsVerification: boolean })[] {
+  skepticalSearch(
+    query: string,
+    limit: number = 10,
+  ): readonly (MemorySearchResult & { needsVerification: boolean })[] {
     const results = this.search(query, limit);
     return results.map((r) => {
       let ageDays = 0;
@@ -655,9 +822,12 @@ export class MemoryStore {
         if (!isNaN(updatedTime)) {
           ageDays = (Date.now() - updatedTime) / (1000 * 60 * 60 * 24);
         }
-      } catch { /* default to 0 days age */ }
+      } catch {
+        /* default to 0 days age */
+      }
       const temporalDecay = Math.max(0.3, 1.0 - ageDays * 0.01);
-      const confidence = (r.entry.confidence ?? 1.0) * temporalDecay * (r.entry.verified ? 1.0 : 0.7);
+      const confidence =
+        (r.entry.confidence ?? 1.0) * temporalDecay * (r.entry.verified ? 1.0 : 0.7);
       return { ...r, needsVerification: confidence < 0.6 || !r.entry.verified };
     });
   }
@@ -665,35 +835,55 @@ export class MemoryStore {
   // ── Layer 7: Team Memory ───────────────────────────────────
 
   setTeamMemory(agentId: string, key: string, value: string): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO team_memory (id, agent_id, key, value) VALUES (?, ?, ?, ?)
-    `).run(randomUUID(), agentId, key, value);
+    `,
+      )
+      .run(randomUUID(), agentId, key, value);
   }
 
   getTeamMemory(agentId?: string): readonly { agent_id: string; key: string; value: string }[] {
     if (agentId) {
-      return this.db.prepare(`
+      return this.db
+        .prepare(
+          `
         SELECT agent_id, key, value FROM team_memory WHERE agent_id = ? AND shared = 1 ORDER BY updated_at DESC
-      `).all(agentId) as { agent_id: string; key: string; value: string }[];
+      `,
+        )
+        .all(agentId) as { agent_id: string; key: string; value: string }[];
     }
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT agent_id, key, value FROM team_memory WHERE shared = 1 ORDER BY updated_at DESC LIMIT 100
-    `).all() as { agent_id: string; key: string; value: string }[];
+    `,
+      )
+      .all() as { agent_id: string; key: string; value: string }[];
   }
 
   getTeamMemoryRecords(agentId?: string): readonly TeamMemoryRecord[] {
     const rows = agentId
-      ? this.db.prepare(`
+      ? this.db
+          .prepare(
+            `
         SELECT id, agent_id, key, value, shared, created_at, updated_at
         FROM team_memory
         WHERE agent_id = ?
         ORDER BY updated_at DESC
-      `).all(agentId)
-      : this.db.prepare(`
+      `,
+          )
+          .all(agentId)
+      : this.db
+          .prepare(
+            `
         SELECT id, agent_id, key, value, shared, created_at, updated_at
         FROM team_memory
         ORDER BY updated_at DESC
-      `).all();
+      `,
+          )
+          .all();
 
     return (rows as Record<string, unknown>[]).map((row) => ({
       id: row["id"] as string,
@@ -720,57 +910,66 @@ export class MemoryStore {
     const conflicts: string[] = [];
 
     for (const entry of snapshot.entries) {
-      const existing = this.db.prepare(`
+      const existing = this.db
+        .prepare(
+          `
         SELECT id, value, updated_at
         FROM team_memory
         WHERE agent_id = ? AND key = ?
         ORDER BY updated_at DESC
         LIMIT 1
-      `).get(entry.agentId, entry.key) as {
-        id: string;
-        value: string;
-        updated_at: string;
-      } | undefined;
+      `,
+        )
+        .get(entry.agentId, entry.key) as
+        | {
+            id: string;
+            value: string;
+            updated_at: string;
+          }
+        | undefined;
 
       if (!existing) {
-        this.db.prepare(`
+        this.db
+          .prepare(
+            `
           INSERT INTO team_memory (id, agent_id, key, value, shared, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          entry.id,
-          entry.agentId,
-          entry.key,
-          entry.value,
-          entry.shared ? 1 : 0,
-          entry.createdAt,
-          entry.updatedAt,
-        );
+        `,
+          )
+          .run(
+            entry.id,
+            entry.agentId,
+            entry.key,
+            entry.value,
+            entry.shared ? 1 : 0,
+            entry.createdAt,
+            entry.updatedAt,
+          );
         inserted++;
         continue;
       }
 
       const incomingTs = Date.parse(entry.updatedAt);
       const existingTs = Date.parse(existing.updated_at);
-      const incomingIsNewer = !Number.isNaN(incomingTs) && !Number.isNaN(existingTs)
-        ? incomingTs > existingTs
-        : entry.updatedAt > existing.updated_at;
+      const incomingIsNewer =
+        !Number.isNaN(incomingTs) && !Number.isNaN(existingTs)
+          ? incomingTs > existingTs
+          : entry.updatedAt > existing.updated_at;
 
       if (existing.value !== entry.value) {
         conflicts.push(`${entry.agentId}:${entry.key}`);
       }
 
       if (incomingIsNewer) {
-        this.db.prepare(`
+        this.db
+          .prepare(
+            `
           UPDATE team_memory
           SET value = ?, shared = ?, updated_at = ?, created_at = ?
           WHERE id = ?
-        `).run(
-          entry.value,
-          entry.shared ? 1 : 0,
-          entry.updatedAt,
-          entry.createdAt,
-          existing.id,
-        );
+        `,
+          )
+          .run(entry.value, entry.shared ? 1 : 0, entry.updatedAt, entry.createdAt, existing.id);
         updated++;
       } else {
         skipped++;
@@ -785,7 +984,10 @@ export class MemoryStore {
     };
   }
 
-  syncTeamMemoryFile(snapshotPath: string, agentId?: string): TeamMemorySyncResult & { exported: number } {
+  syncTeamMemoryFile(
+    snapshotPath: string,
+    agentId?: string,
+  ): TeamMemorySyncResult & { exported: number } {
     let syncResult: TeamMemorySyncResult = {
       inserted: 0,
       updated: 0,
@@ -812,11 +1014,10 @@ export class MemoryStore {
     const exportedSnapshot = this.exportTeamMemorySnapshot(agentId);
     // SECURITY (B6): atomic write + lock so concurrent daemon processes don't
     // write a half-serialized JSON blob to the snapshot file.
-    writeFileAtomicSyncBestEffort(
-      snapshotPath,
-      JSON.stringify(exportedSnapshot, null, 2),
-      { encoding: "utf-8", mode: 0o600 },
-    );
+    writeFileAtomicSyncBestEffort(snapshotPath, JSON.stringify(exportedSnapshot, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
 
     return {
       ...syncResult,
@@ -828,9 +1029,13 @@ export class MemoryStore {
 
   getProactiveContext(sessionId: string, currentFile?: string): readonly MemoryEntry[] {
     const suggestions: MemoryEntry[] = [];
-    const recent = this.db.prepare(`
+    const recent = this.db
+      .prepare(
+        `
       SELECT * FROM memory_entries WHERE session_id = ? AND archived = 0 ORDER BY last_accessed DESC LIMIT 5
-    `).all(sessionId) as Record<string, unknown>[];
+    `,
+      )
+      .all(sessionId) as Record<string, unknown>[];
     for (const r of recent) suggestions.push(this.rowToEntry(r));
 
     if (currentFile) {
@@ -925,21 +1130,27 @@ export class MemoryStore {
 
   /** Get all unique domains in the memory store. */
   getDomains(): readonly string[] {
-    const rows = this.db.prepare(
-      `SELECT DISTINCT domain FROM memory_entries WHERE archived = 0 AND domain != '' ORDER BY domain`,
-    ).all() as { domain: string }[];
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT domain FROM memory_entries WHERE archived = 0 AND domain != '' ORDER BY domain`,
+      )
+      .all() as { domain: string }[];
     return rows.map((r) => r.domain);
   }
 
   /** Get all unique topics within a domain (or all topics if no domain specified). */
   getTopics(domain?: string): readonly string[] {
     const rows = domain
-      ? this.db.prepare(
-          `SELECT DISTINCT topic FROM memory_entries WHERE archived = 0 AND domain = ? AND topic != '' ORDER BY topic`,
-        ).all(domain) as { topic: string }[]
-      : this.db.prepare(
-          `SELECT DISTINCT topic FROM memory_entries WHERE archived = 0 AND topic != '' ORDER BY topic`,
-        ).all() as { topic: string }[];
+      ? (this.db
+          .prepare(
+            `SELECT DISTINCT topic FROM memory_entries WHERE archived = 0 AND domain = ? AND topic != '' ORDER BY topic`,
+          )
+          .all(domain) as { topic: string }[])
+      : (this.db
+          .prepare(
+            `SELECT DISTINCT topic FROM memory_entries WHERE archived = 0 AND topic != '' ORDER BY topic`,
+          )
+          .all() as { topic: string }[]);
     return rows.map((r) => r.topic);
   }
 
@@ -955,49 +1166,121 @@ export class MemoryStore {
         } else {
           return false;
         }
-      } catch { try { unlinkSync(lockPath); } catch { /* ignore */ } }
+      } catch {
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          /* ignore */
+        }
+      }
     }
     try {
       writeFileSync(lockPath, JSON.stringify({ lockId, timestamp: Date.now() }), { flag: "wx" });
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   releaseConsolidationLock(): void {
     const lockPath = join(this.dbPath, "..", "consolidation.lock");
-    try { unlinkSync(lockPath); } catch { /* ignore */ }
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      /* ignore */
+    }
   }
 
   // ── Decision Log ───────────────────────────────────────────
 
   logDecision(decision: {
-    id: string; decision: string; rationale: string;
-    alternatives?: string; constraints?: string; stakeholders?: string; sessionId?: string;
+    id: string;
+    decision: string;
+    rationale: string;
+    alternatives?: string;
+    constraints?: string;
+    stakeholders?: string;
+    sessionId?: string;
   }): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO decision_log (id, decision, rationale, alternatives, constraints, stakeholders, session_id)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(decision.id, decision.decision, decision.rationale,
-      decision.alternatives ?? null, decision.constraints ?? null,
-      decision.stakeholders ?? null, decision.sessionId ?? null);
+    `,
+      )
+      .run(
+        decision.id,
+        decision.decision,
+        decision.rationale,
+        decision.alternatives ?? null,
+        decision.constraints ?? null,
+        decision.stakeholders ?? null,
+        decision.sessionId ?? null,
+      );
   }
 
   getDecisions(limit: number = 20): readonly Record<string, unknown>[] {
-    return this.db.prepare(`SELECT * FROM decision_log ORDER BY created_at DESC LIMIT ?`).all(limit) as Record<string, unknown>[];
+    return this.db
+      .prepare(`SELECT * FROM decision_log ORDER BY created_at DESC LIMIT ?`)
+      .all(limit) as Record<string, unknown>[];
   }
 
   // ── Memory Tools (6 agent-callable tools per spec) ─────────
 
-  memoryReplace(block: MemoryBlockType, key: string, value: string, domain?: string, topic?: string): void {
-    const existing = this.db.prepare(`
+  memoryReplace(
+    block: MemoryBlockType,
+    key: string,
+    value: string,
+    domain?: string,
+    topic?: string,
+  ): void {
+    const existing = this.db
+      .prepare(
+        `
       SELECT id FROM memory_entries WHERE block_type = ? AND key = ? AND archived = 0
-    `).get(block, key) as { id: string } | undefined;
-    if (existing) { this.replace(existing.id, key, value); }
-    else { this.insert({ id: randomUUID(), layer: "core_blocks", blockType: block, key, value, verified: false, freshnessScore: 1.0, confidenceLevel: 0.8, verificationStatus: "unverified", domain: domain ?? "", topic: topic ?? "" }); }
+    `,
+      )
+      .get(block, key) as { id: string } | undefined;
+    if (existing) {
+      this.replace(existing.id, key, value);
+    } else {
+      this.insert({
+        id: randomUUID(),
+        layer: "core_blocks",
+        blockType: block,
+        key,
+        value,
+        verified: false,
+        freshnessScore: 1.0,
+        confidenceLevel: 0.8,
+        verificationStatus: "unverified",
+        domain: domain ?? "",
+        topic: topic ?? "",
+      });
+    }
   }
 
-  memoryInsert(block: MemoryBlockType, key: string, value: string, domain?: string, topic?: string): void {
-    this.insert({ id: randomUUID(), layer: "core_blocks", blockType: block, key, value, verified: false, freshnessScore: 1.0, confidenceLevel: 0.8, verificationStatus: "unverified", domain: domain ?? "", topic: topic ?? "" });
+  memoryInsert(
+    block: MemoryBlockType,
+    key: string,
+    value: string,
+    domain?: string,
+    topic?: string,
+  ): void {
+    this.insert({
+      id: randomUUID(),
+      layer: "core_blocks",
+      blockType: block,
+      key,
+      value,
+      verified: false,
+      freshnessScore: 1.0,
+      confidenceLevel: 0.8,
+      verificationStatus: "unverified",
+      domain: domain ?? "",
+      topic: topic ?? "",
+    });
   }
 
   memoryRethink(entryId: string, newValue: string): MemoryEntry | null {
@@ -1009,7 +1292,13 @@ export class MemoryStore {
 
   memorySearch(
     query: string,
-    optionsOrLayers?: readonly MemoryLayer[] | { readonly layers?: readonly MemoryLayer[]; readonly domain?: string; readonly topic?: string },
+    optionsOrLayers?:
+      | readonly MemoryLayer[]
+      | {
+          readonly layers?: readonly MemoryLayer[];
+          readonly domain?: string;
+          readonly topic?: string;
+        },
   ): readonly MemorySearchResult[] {
     // Backward compat: accept both old (layers array) and new (options object) signatures
     if (Array.isArray(optionsOrLayers)) {
@@ -1017,11 +1306,21 @@ export class MemoryStore {
       const results = this.searchPartitioned(query, { limit: 50 });
       return optionsOrLayers.length === 0
         ? results
-        : results.filter((r) => (optionsOrLayers as readonly MemoryLayer[]).includes(r.entry.layer));
+        : results.filter((r) =>
+            (optionsOrLayers as readonly MemoryLayer[]).includes(r.entry.layer),
+          );
     }
     // New API: memorySearch(query, { layers?, domain?, topic? })
-    const opts = (optionsOrLayers ?? {}) as { readonly layers?: readonly MemoryLayer[]; readonly domain?: string; readonly topic?: string };
-    const results = this.searchPartitioned(query, { domain: opts.domain, topic: opts.topic, limit: 50 });
+    const opts = (optionsOrLayers ?? {}) as {
+      readonly layers?: readonly MemoryLayer[];
+      readonly domain?: string;
+      readonly topic?: string;
+    };
+    const results = this.searchPartitioned(query, {
+      domain: opts.domain,
+      topic: opts.topic,
+      limit: 50,
+    });
     if (!opts.layers || opts.layers.length === 0) return results;
     return results.filter((r) => opts.layers!.includes(r.entry.layer));
   }
@@ -1036,7 +1335,11 @@ export class MemoryStore {
   memoryVerify(entryId: string): MemoryEntry | null {
     const entry = this.getById(entryId);
     if (entry) {
-      this.db.prepare(`UPDATE memory_entries SET verified = 1, updated_at = datetime('now') WHERE id = ?`).run(entryId);
+      this.db
+        .prepare(
+          `UPDATE memory_entries SET verified = 1, updated_at = datetime('now') WHERE id = ?`,
+        )
+        .run(entryId);
       return { ...entry, verified: true };
     }
     return null;
@@ -1045,13 +1348,21 @@ export class MemoryStore {
   // ── Stats ──────────────────────────────────────────────────
 
   getEntryCount(): number {
-    return (this.db.prepare(`SELECT COUNT(*) as count FROM memory_entries WHERE archived = 0`).get() as { count: number }).count;
+    return (
+      this.db.prepare(`SELECT COUNT(*) as count FROM memory_entries WHERE archived = 0`).get() as {
+        count: number;
+      }
+    ).count;
   }
 
   getLayerStats(): Record<string, number> {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT layer, COUNT(*) as count FROM memory_entries WHERE archived = 0 GROUP BY layer
-    `).all() as { layer: string; count: number }[];
+    `,
+      )
+      .all() as { layer: string; count: number }[];
     const stats: Record<string, number> = {};
     for (const r of rows) stats[r.layer] = r.count;
     return stats;
@@ -1077,7 +1388,8 @@ export class MemoryStore {
       freshnessScore: (row["freshness_score"] as number | undefined) ?? 1.0,
       confidenceLevel: (row["confidence_level"] as number | undefined) ?? 0.5,
       lastVerifiedAt: row["last_verified_at"] as string | undefined,
-      verificationStatus: (row["verification_status"] as VerificationStatus | undefined) ?? "unverified",
+      verificationStatus:
+        (row["verification_status"] as VerificationStatus | undefined) ?? "unverified",
       domain: (row["domain"] as string | undefined) ?? "",
       topic: (row["topic"] as string | undefined) ?? "",
     };
@@ -1090,10 +1402,14 @@ export class MemoryStore {
    * Uses trigram-based local embeddings by default (zero API calls).
    */
   storeEmbedding(entryId: string, embedding: Float32Array, model: string = "local-trigram"): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT OR REPLACE INTO memory_vectors (entry_id, embedding, model, dimensions)
       VALUES (?, ?, ?, ?)
-    `).run(entryId, Buffer.from(embedding.buffer), model, embedding.length);
+    `,
+      )
+      .run(entryId, Buffer.from(embedding.buffer), model, embedding.length);
   }
 
   /**
@@ -1174,21 +1490,32 @@ export class MemoryStore {
       for (const d of domainFilter) params.push(d);
     }
 
-    const rows = this.db.prepare(sqlParts.join(" ")).all(...params) as Array<{ entry_id: string; embedding: Buffer; dimensions: number }>;
+    const rows = this.db.prepare(sqlParts.join(" ")).all(...params) as Array<{
+      entry_id: string;
+      embedding: Buffer;
+      dimensions: number;
+    }>;
 
     const scored = rows.map((row) => {
-      const embedding = new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.dimensions);
+      const embedding = new Float32Array(
+        row.embedding.buffer,
+        row.embedding.byteOffset,
+        row.dimensions,
+      );
       const similarity = this.cosineSimilarity(queryEmbedding, embedding);
       return { entryId: row.entry_id, similarity };
     });
 
     scored.sort((a, b) => b.similarity - a.similarity);
 
-    return scored.slice(0, limit).map((s) => ({
-      entryId: s.entryId,
-      similarity: s.similarity,
-      entry: this.getById(s.entryId)!,
-    })).filter((r) => r.entry !== null);
+    return scored
+      .slice(0, limit)
+      .map((s) => ({
+        entryId: s.entryId,
+        similarity: s.similarity,
+        entry: this.getById(s.entryId)!,
+      }))
+      .filter((r) => r.entry !== null);
   }
 
   // ── Reciprocal Rank Fusion Search ──────────────────────────
@@ -1302,7 +1629,9 @@ export class MemoryStore {
       if (!isNaN(updatedTime)) {
         ageDays = (Date.now() - updatedTime) / (1000 * 60 * 60 * 24);
       }
-    } catch { /* default to 0 */ }
+    } catch {
+      /* default to 0 */
+    }
     const decay = Math.max(0.2, 1.0 - ageDays * 0.01);
 
     // Verified memories decay 3x slower
@@ -1375,17 +1704,32 @@ export class MemoryStore {
 
   // ── Provenance Logging ─────────────────────────────────────
 
-  logProvenance(entryId: string, action: string, oldValue: string | null, newValue: string | null, actor?: string, reason?: string): void {
-    this.db.prepare(`
+  logProvenance(
+    entryId: string,
+    action: string,
+    oldValue: string | null,
+    newValue: string | null,
+    actor?: string,
+    reason?: string,
+  ): void {
+    this.db
+      .prepare(
+        `
       INSERT INTO memory_provenance_log (id, entry_id, action, old_value, new_value, actor, reason)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(randomUUID(), entryId, action, oldValue, newValue, actor ?? null, reason ?? null);
+    `,
+      )
+      .run(randomUUID(), entryId, action, oldValue, newValue, actor ?? null, reason ?? null);
   }
 
   getProvenance(entryId: string): readonly Record<string, unknown>[] {
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT * FROM memory_provenance_log WHERE entry_id = ? ORDER BY created_at DESC
-    `).all(entryId) as Record<string, unknown>[];
+    `,
+      )
+      .all(entryId) as Record<string, unknown>[];
   }
 
   // ── Insert with Provenance ─────────────────────────────────
@@ -1399,15 +1743,26 @@ export class MemoryStore {
     const contradictions = this.detectContradictions(entry.key, entry.value);
 
     // Insert the entry with source metadata
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, source_type, source_file)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      entry.id, entry.layer, entry.blockType, entry.key, entry.value,
-      entry.sessionId ?? null, entry.verified ? 1 : 0,
-      entry.confidence ?? 1.0, entry.tags ?? "",
-      sourceType, sourceFile ?? null,
-    );
+    `,
+      )
+      .run(
+        entry.id,
+        entry.layer,
+        entry.blockType,
+        entry.key,
+        entry.value,
+        entry.sessionId ?? null,
+        entry.verified ? 1 : 0,
+        entry.confidence ?? 1.0,
+        entry.tags ?? "",
+        sourceType,
+        sourceFile ?? null,
+      );
 
     // Generate and store local embedding
     const embedding = this.generateLocalEmbedding(`${entry.key} ${entry.value}`);
@@ -1438,7 +1793,9 @@ export class MemoryStore {
       if (!isNaN(updatedTime)) {
         ageDays = Math.max(0, (Date.now() - updatedTime) / (1000 * 60 * 60 * 24));
       }
-    } catch { /* default to 0 */ }
+    } catch {
+      /* default to 0 */
+    }
 
     const halfLife = entry.verified ? HALF_LIFE_DAYS_VERIFIED : HALF_LIFE_DAYS_UNVERIFIED;
     // Exponential decay: score = e^(-lambda * t), where lambda = ln(2) / half_life
@@ -1480,11 +1837,12 @@ export class MemoryStore {
         // File exists -- read it to check if content is still relevant
         try {
           const fileContent = readFileSync(fullPath, "utf-8");
-          const keyWords = entry.key.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+          const keyWords = entry.key
+            .toLowerCase()
+            .split(/\s+/)
+            .filter((w) => w.length > 3);
           const relevantWords = keyWords.filter((w) => fileContent.toLowerCase().includes(w));
-          const relevanceRatio = keyWords.length > 0
-            ? relevantWords.length / keyWords.length
-            : 0.5;
+          const relevanceRatio = keyWords.length > 0 ? relevantWords.length / keyWords.length : 0.5;
 
           if (relevanceRatio > 0.5) {
             newStatus = "verified";
@@ -1525,7 +1883,9 @@ export class MemoryStore {
 
     // Persist the updated verification state
     const now = new Date().toISOString();
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE memory_entries
       SET freshness_score = ?,
           confidence_level = ?,
@@ -1533,7 +1893,9 @@ export class MemoryStore {
           verification_status = ?,
           updated_at = datetime('now')
       WHERE id = ?
-    `).run(freshness, confidence, now, newStatus, entryId);
+    `,
+      )
+      .run(freshness, confidence, now, newStatus, entryId);
 
     // Log provenance for the verification
     this.logProvenance(
@@ -1560,9 +1922,13 @@ export class MemoryStore {
    * Returns the number of entries updated.
    */
   refreshAllFreshnessScores(): number {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT id, updated_at, verified, confidence FROM memory_entries WHERE archived = 0
-    `).all() as Array<Record<string, unknown>>;
+    `,
+      )
+      .all() as Array<Record<string, unknown>>;
 
     let updated = 0;
     for (const row of rows) {
@@ -1572,9 +1938,13 @@ export class MemoryStore {
 
       // Only update if the score has changed meaningfully
       if (Math.abs(freshness - currentFreshness) > 0.01) {
-        this.db.prepare(`
+        this.db
+          .prepare(
+            `
           UPDATE memory_entries SET freshness_score = ? WHERE id = ?
-        `).run(freshness, row["id"] as string);
+        `,
+          )
+          .run(freshness, row["id"] as string);
         updated++;
       }
     }
@@ -1586,17 +1956,39 @@ export class MemoryStore {
    * Get entries that need verification (stale or unverified with low freshness).
    */
   getEntriesNeedingVerification(limit: number = 20): readonly MemoryEntry[] {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT * FROM memory_entries
       WHERE archived = 0
         AND (verification_status IN ('stale', 'unverified', 'conflicting')
              OR freshness_score < 0.5)
       ORDER BY freshness_score ASC
       LIMIT ?
-    `).all(limit) as Array<Record<string, unknown>>;
+    `,
+      )
+      .all(limit) as Array<Record<string, unknown>>;
 
     return rows.map((r) => this.rowToEntry(r));
   }
 
-  close(): void { this.db.close(); }
+  /**
+   * Delete auto_capture entries older than the retention window (S1-14).
+   *
+   * auto_capture logs every tool call's input/output — identical growth
+   * profile to the audit trail. Pair a call to this with
+   * AuditTrail.pruneOlderThan() on a daemon cron to keep
+   * `~/.wotann/memory.db` bounded.
+   *
+   * Returns the number of rows removed. Idempotent.
+   */
+  pruneAutoCaptures(days: number = 30): number {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const info = this.db.prepare("DELETE FROM auto_capture WHERE created_at < ?").run(cutoff);
+    return Number(info.changes);
+  }
+
+  close(): void {
+    this.db.close();
+  }
 }

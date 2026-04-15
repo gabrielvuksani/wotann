@@ -19,6 +19,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createECDH,
+  hkdfSync,
 } from "node:crypto";
 
 // ── Types ──────────────────────────────────────────────
@@ -112,13 +113,33 @@ export class SecureAuthManager {
   }
 
   /**
-   * Derive a shared secret from our private key and their public key
-   * using ECDH on prime256v1. Returns the hex-encoded shared secret.
+   * Derive a shared AES-256 key from our private key and their public key
+   * using ECDH on prime256v1 + HKDF-SHA256 with salt "wotann-v1" (S1-13).
+   *
+   * The 32-byte HKDF output exactly matches what iOS CryptoKit and the
+   * companion-server ECDH handler derive, so messages encrypted on any
+   * surface decrypt on any other. Previously this returned the raw hex
+   * shared-secret bytes which (a) were 64 hex chars (32 bytes) and looked
+   * like an AES key but (b) had no HKDF whitening so different surfaces'
+   * keys diverged. Callers wanting the raw secret can use
+   * `deriveRawSharedSecret`; the default path goes through HKDF.
    */
   deriveSharedSecret(ourPrivateKey: string, theirPublicKey: string): string {
+    const shared = this.deriveRawSharedSecret(ourPrivateKey, theirPublicKey);
+    const salt = Buffer.from("wotann-v1", "utf8");
+    const aesKey = Buffer.from(hkdfSync("sha256", shared, salt, Buffer.alloc(0), 32));
+    return aesKey.toString("hex");
+  }
+
+  /**
+   * Raw ECDH shared secret (no HKDF) — kept for legacy callers that need
+   * the unwhitened shared bytes, for example to compute a fingerprint on
+   * both sides for out-of-band verification.
+   */
+  deriveRawSharedSecret(ourPrivateKey: string, theirPublicKey: string): Buffer {
     const ecdh = createECDH("prime256v1");
     ecdh.setPrivateKey(ourPrivateKey, "hex");
-    return ecdh.computeSecret(theirPublicKey, "hex", "hex");
+    return ecdh.computeSecret(theirPublicKey, "hex");
   }
 
   /**

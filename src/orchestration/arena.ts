@@ -50,7 +50,10 @@ export interface ArenaQueryExecutorResult {
   readonly model?: string;
 }
 
-export type ArenaQueryExecutor = (provider: ProviderName, prompt: string) => Promise<ArenaQueryExecutorResult>;
+export type ArenaQueryExecutor = (
+  provider: ProviderName,
+  prompt: string,
+) => Promise<ArenaQueryExecutorResult>;
 
 // ── Arena Runner ───────────────────────────────────────────
 
@@ -102,24 +105,51 @@ export async function runArenaContest(
 
 // ── Leaderboard ────────────────────────────────────────────
 
+/**
+ * Optional cap on the arena results buffer (S1-14).
+ *
+ * Default: UNBOUNDED — we keep every contest so the leaderboard has the
+ * full historical picture. Each ArenaResult can be tens of KB (full model
+ * responses), so power-users on memory-constrained hosts can opt in to a
+ * FIFO cap via `WOTANN_ARENA_MAX` env var or the `maxResults` constructor
+ * option. Setting null = unbounded (explicit).
+ */
+function resolveArenaMax(): number | null {
+  const raw = process.env["WOTANN_ARENA_MAX"];
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
+
 export class ArenaLeaderboard {
   private readonly results: ArenaResult[] = [];
+  private readonly maxResults: number | null;
+
+  constructor(options?: { maxResults?: number | null }) {
+    this.maxResults = options?.maxResults !== undefined ? options.maxResults : resolveArenaMax();
+  }
 
   recordResult(result: ArenaResult): void {
     this.results.push(result);
+    if (this.maxResults !== null && this.results.length > this.maxResults) {
+      this.results.shift();
+    }
   }
 
   getLeaderboard(): readonly ArenaLeaderboardEntry[] {
-    const stats = new Map<string, {
-      provider: ProviderName;
-      model: string;
-      wins: number;
-      losses: number;
-      draws: number;
-      totalDuration: number;
-      totalTokens: number;
-      count: number;
-    }>();
+    const stats = new Map<
+      string,
+      {
+        provider: ProviderName;
+        model: string;
+        wins: number;
+        losses: number;
+        draws: number;
+        totalDuration: number;
+        totalTokens: number;
+        count: number;
+      }
+    >();
 
     for (const result of this.results) {
       for (const contestant of result.contestants) {
@@ -127,8 +157,12 @@ export class ArenaLeaderboard {
         const existing = stats.get(key) ?? {
           provider: contestant.provider,
           model: contestant.model,
-          wins: 0, losses: 0, draws: 0,
-          totalDuration: 0, totalTokens: 0, count: 0,
+          wins: 0,
+          losses: 0,
+          draws: 0,
+          totalDuration: 0,
+          totalTokens: 0,
+          count: 0,
         };
 
         existing.count++;
