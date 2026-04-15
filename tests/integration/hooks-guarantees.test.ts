@@ -21,14 +21,14 @@ describe("Integration: Hook-as-Guarantee System", () => {
       });
       expect(secretResult.action).toBe("block");
 
-      // Destructive guard warns — the engine continues after warns, final action is allow
+      // S2-14: Destructive guard now BLOCKS (upgraded from warn in Sprint 2).
+      // The engine therefore resolves to "block" for rm -rf.
       const destructiveResult = await engine.fire({
         event: "PreToolUse",
         toolName: "Bash",
         content: "rm -rf /important",
       });
-      // warn does not block execution, engine resolves to allow
-      expect(["allow", "warn"]).toContain(destructiveResult.action);
+      expect(destructiveResult.action).toBe("block");
 
       // Standard hooks like correction capture should NOT fire in minimal
       const correctionResult = await engine.fire({
@@ -90,6 +90,14 @@ describe("Integration: Hook-as-Guarantee System", () => {
     it("config protection warns when modifying tsconfig", async () => {
       const engine = new HookEngine("standard");
       registerBuiltinHooks(engine);
+
+      // First Read the file so the upgraded-to-block ReadBeforeEdit guard
+      // (S2-14) allows the subsequent Edit to reach configProtection.
+      await engine.fire({
+        event: "PreToolUse",
+        toolName: "Read",
+        filePath: "/project/tsconfig.json",
+      });
 
       const result = await engine.fire({
         event: "PreToolUse",

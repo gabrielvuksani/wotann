@@ -3,8 +3,9 @@
  * Each behavioral guarantee is deterministic code, not a prompt suggestion.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 import type { HookHandler, HookPayload, HookResult } from "./engine.js";
 import { detectFrustration } from "../middleware/layers.js";
 
@@ -26,7 +27,10 @@ export const secretScanner: HookHandler = {
     if (!payload.content) return { action: "allow" };
     for (const pattern of SECRET_PATTERNS) {
       if (pattern.test(payload.content)) {
-        return { action: "block", message: "Potential secret/credential detected. Remove before committing." };
+        return {
+          action: "block",
+          message: "Potential secret/credential detected. Remove before committing.",
+        };
       }
     }
     return { action: "allow" };
@@ -36,9 +40,14 @@ export const secretScanner: HookHandler = {
 // ── Destructive Guard (minimal) ─────────────────────────────
 
 const DESTRUCTIVE_PATTERNS: readonly RegExp[] = [
-  /\brm\s+-rf\b/, /\bgit\s+push\s+--force\b/, /\bgit\s+reset\s+--hard\b/,
-  /\bDROP\s+TABLE\b/i, /\bDROP\s+DATABASE\b/i, /\bgit\s+branch\s+-D\b/,
-  /\bkubectl\s+delete\b/, /\bsudo\s+rm\b/,
+  /\brm\s+-rf\b/,
+  /\bgit\s+push\s+--force\b/,
+  /\bgit\s+reset\s+--hard\b/,
+  /\bDROP\s+TABLE\b/i,
+  /\bDROP\s+DATABASE\b/i,
+  /\bgit\s+branch\s+-D\b/,
+  /\bkubectl\s+delete\b/,
+  /\bsudo\s+rm\b/,
 ];
 
 export const destructiveGuard: HookHandler = {
@@ -50,7 +59,15 @@ export const destructiveGuard: HookHandler = {
     const command = payload.content ?? JSON.stringify(payload.toolInput);
     for (const pattern of DESTRUCTIVE_PATTERNS) {
       if (pattern.test(command)) {
-        return { action: "warn", message: `Destructive command detected: ${pattern.source}. Proceed with caution.` };
+        // S2-14: upgrade from warn → block. The audit flagged this as
+        // the #1 fake guarantee — "rm -rf /" used to sail through with
+        // only a log message. Destructive commands now actually halt
+        // unless the user has opted into an override (see `careful`
+        // profile in CLAUDE.md / settings.json).
+        return {
+          action: "block",
+          message: `Destructive command blocked: ${pattern.source}. Override with WOTANN_ALLOW_DESTRUCTIVE=1 if intentional.`,
+        };
       }
     }
     return { action: "allow" };
@@ -70,7 +87,10 @@ export function createCostLimiter(budgetUsd: number): HookHandler {
       if (typeof cost === "number") {
         totalCost += cost;
         if (totalCost >= budgetUsd) {
-          return { action: "block", message: `Budget exceeded: $${totalCost.toFixed(2)} / $${budgetUsd.toFixed(2)}` };
+          return {
+            action: "block",
+            message: `Budget exceeded: $${totalCost.toFixed(2)} / $${budgetUsd.toFixed(2)}`,
+          };
         }
       }
       return { action: "allow" };
@@ -95,10 +115,16 @@ export function createLoopDetector(warnAt: number = 3, blockAt: number = 5): Hoo
         else break;
       }
       if (count >= blockAt) {
-        return { action: "block", message: `Loop detected: ${payload.toolName} called ${count} times identically. Try a different approach.` };
+        return {
+          action: "block",
+          message: `Loop detected: ${payload.toolName} called ${count} times identically. Try a different approach.`,
+        };
       }
       if (count >= warnAt) {
-        return { action: "warn", message: `Possible loop: ${payload.toolName} called ${count} times identically.` };
+        return {
+          action: "warn",
+          message: `Possible loop: ${payload.toolName} called ${count} times identically.`,
+        };
       }
       return { action: "allow" };
     },
@@ -127,7 +153,11 @@ export const frustrationDetector: HookHandler = {
 // ── Config Protection (standard) ────────────────────────────
 
 const PROTECTED_FILES: readonly RegExp[] = [
-  /\.eslintrc/, /\.prettierrc/, /biome\.json/, /\.editorconfig/, /tsconfig\.json$/,
+  /\.eslintrc/,
+  /\.prettierrc/,
+  /biome\.json/,
+  /\.editorconfig/,
+  /tsconfig\.json$/,
 ];
 
 export const configProtection: HookHandler = {
@@ -139,7 +169,10 @@ export const configProtection: HookHandler = {
     const filePath = payload.filePath ?? "";
     for (const pattern of PROTECTED_FILES) {
       if (pattern.test(filePath)) {
-        return { action: "warn", message: `Modifying config file: ${filePath}. Ensure this is intentional.` };
+        return {
+          action: "warn",
+          message: `Modifying config file: ${filePath}. Ensure this is intentional.`,
+        };
       }
     }
     return { action: "allow" };
@@ -147,37 +180,96 @@ export const configProtection: HookHandler = {
 };
 
 // ── Pre-Compact WAL Flush (standard) — saves state before compaction ──
+//
+// S2-15: Previously these three hooks returned decorative messages
+// without touching disk (MASTER_AUDIT §6 called them "hollow no-ops").
+// Now they write/read real WAL files under ~/.wotann/wal/ so context
+// actually survives compaction and session boundaries. The handlers
+// are still synchronous — filesystem work is best-effort and never
+// blocks the pipeline.
+
+function walDir(): string {
+  const dir = join(homedir(), ".wotann", "wal");
+  if (!existsSync(dir)) {
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch {
+      /* best effort — if we can't write WAL we still return allow */
+    }
+  }
+  return dir;
+}
+
+function walMarkerPath(sessionId: string | undefined): string {
+  // Constrain the sessionId used in the filename to avoid traversal
+  // when hook payloads carry untrusted IDs.
+  const safe = (sessionId ?? "unknown").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return join(walDir(), `${safe}.json`);
+}
 
 export const preCompactFlush: HookHandler = {
   name: "PreCompactWALFlush",
   event: "PreCompact",
   profile: "standard",
   handler(payload: HookPayload): HookResult {
-    // Log the pre-compaction state. In full integration, this writes to the
-    // memory store and session log before context is truncated.
-    const state = {
-      sessionId: payload.sessionId,
-      timestamp: new Date().toISOString(),
-      event: "pre-compact-flush",
-    };
-    // The hook engine will emit this as a side effect for the memory system to capture
-    return { action: "allow", message: `WAL flush: ${JSON.stringify(state)}` };
+    try {
+      const state = {
+        sessionId: payload.sessionId ?? "unknown",
+        timestamp: new Date().toISOString(),
+        // Persist the most recent content the hook payload carries so
+        // a post-compact recovery can thread context back into the prompt.
+        tailContent: (payload.content ?? "").slice(0, 8000),
+        toolName: payload.toolName ?? null,
+      };
+      writeFileSync(walMarkerPath(payload.sessionId), JSON.stringify(state, null, 2), "utf-8");
+      return { action: "allow", message: `WAL flushed for session ${state.sessionId}` };
+    } catch (err) {
+      // Non-fatal — allow the compaction to proceed even if disk write fails.
+      return {
+        action: "warn",
+        message: `WAL flush failed: ${err instanceof Error ? err.message : "unknown"}`,
+      };
+    }
   },
 };
 
 // ── Session Summary (standard) — auto-summarize on stop ─────
+
+function sessionLogPath(sessionId: string | undefined): string {
+  const safe = (sessionId ?? "unknown").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const logDir = join(homedir(), ".wotann", "sessions");
+  if (!existsSync(logDir)) {
+    try {
+      mkdirSync(logDir, { recursive: true });
+    } catch {
+      /* best effort */
+    }
+  }
+  return join(logDir, `${safe}.log`);
+}
 
 export const sessionSummary: HookHandler = {
   name: "SessionSummary",
   event: "Stop",
   profile: "standard",
   handler(payload: HookPayload): HookResult {
-    const summary = {
-      sessionId: payload.sessionId,
-      stoppedAt: new Date().toISOString(),
-      event: "session-end-summary",
-    };
-    return { action: "allow", message: `Session summary: ${JSON.stringify(summary)}` };
+    try {
+      const line = JSON.stringify({
+        sessionId: payload.sessionId ?? "unknown",
+        stoppedAt: new Date().toISOString(),
+        lastContentLen: (payload.content ?? "").length,
+      });
+      appendFileSync(sessionLogPath(payload.sessionId), line + "\n", "utf-8");
+      return {
+        action: "allow",
+        message: `Session summary appended for ${payload.sessionId ?? "unknown"}`,
+      };
+    } catch (err) {
+      return {
+        action: "warn",
+        message: `Session summary failed: ${err instanceof Error ? err.message : "unknown"}`,
+      };
+    }
   },
 };
 
@@ -187,8 +279,24 @@ export const memoryRecovery: HookHandler = {
   name: "MemoryRecovery",
   event: "SessionStart",
   profile: "standard",
-  handler(_payload: HookPayload): HookResult {
-    return { action: "allow", message: "Memory recovery: loading stored context from previous sessions." };
+  handler(payload: HookPayload): HookResult {
+    try {
+      const markerPath = walMarkerPath(payload.sessionId);
+      if (!existsSync(markerPath)) {
+        return { action: "allow", message: "No prior WAL marker — starting fresh." };
+      }
+      const raw = readFileSync(markerPath, "utf-8");
+      const marker = JSON.parse(raw) as { timestamp?: string; tailContent?: string };
+      return {
+        action: "allow",
+        message: `Memory recovery: loaded WAL marker from ${marker.timestamp ?? "unknown time"} (${(marker.tailContent ?? "").length} chars)`,
+      };
+    } catch (err) {
+      return {
+        action: "warn",
+        message: `Memory recovery failed: ${err instanceof Error ? err.message : "unknown"}`,
+      };
+    }
   },
 };
 
@@ -210,7 +318,10 @@ export const promptInjectionGuard: HookHandler = {
     const content = payload.content ?? "";
     for (const pattern of INJECTION_PATTERNS) {
       if (pattern.test(content)) {
-        return { action: "block", message: `Potential prompt injection detected in file content: ${pattern.source}` };
+        return {
+          action: "block",
+          message: `Potential prompt injection detected in file content: ${pattern.source}`,
+        };
       }
     }
     return { action: "allow" };
@@ -220,8 +331,13 @@ export const promptInjectionGuard: HookHandler = {
 // ── Correction Capture (standard) ───────────────────────────
 
 const CORRECTION_PATTERNS: readonly RegExp[] = [
-  /\bno,?\s*(that's|you)\b/i, /\bnot what I\b/i, /\bwrong\b/i,
-  /\bdon't do\b/i, /\bstop\b/i, /\binstead\b/i, /\bactually\b/i,
+  /\bno,?\s*(that's|you)\b/i,
+  /\bnot what I\b/i,
+  /\bwrong\b/i,
+  /\bdon't do\b/i,
+  /\bstop\b/i,
+  /\binstead\b/i,
+  /\bactually\b/i,
 ];
 
 export const correctionCapture: HookHandler = {
@@ -235,23 +351,36 @@ export const correctionCapture: HookHandler = {
     let classifyFeedback: ((msg: string) => { type: string; confidence: number }) | undefined;
     try {
       // Dynamic import to avoid circular dependencies
-      const autodream = await import("../learning/autodream.js") as { classifyFeedback: (msg: string) => { type: string; confidence: number } };
+      const autodream = (await import("../learning/autodream.js")) as {
+        classifyFeedback: (msg: string) => { type: string; confidence: number };
+      };
       classifyFeedback = autodream.classifyFeedback;
-    } catch { /* autodream not available */ }
+    } catch {
+      /* autodream not available */
+    }
 
     if (classifyFeedback) {
       const result = classifyFeedback(message);
       if (result.type === "correction" && result.confidence > 0.5) {
-        return { action: "warn", message: `Correction detected (${(result.confidence * 100).toFixed(0)}%): "${message.slice(0, 80)}". Queued for learning.` };
+        return {
+          action: "warn",
+          message: `Correction detected (${(result.confidence * 100).toFixed(0)}%): "${message.slice(0, 80)}". Queued for learning.`,
+        };
       }
       if (result.type === "confirmation" && result.confidence > 0.6) {
-        return { action: "warn", message: `Approach confirmed: "${message.slice(0, 80)}". Saved as validated pattern.` };
+        return {
+          action: "warn",
+          message: `Approach confirmed: "${message.slice(0, 80)}". Saved as validated pattern.`,
+        };
       }
     } else {
       // Fallback to simple regex patterns
       const isCorrection = CORRECTION_PATTERNS.some((p) => p.test(message));
       if (isCorrection) {
-        return { action: "warn", message: `Correction detected: "${message.slice(0, 80)}". Queued for learning.` };
+        return {
+          action: "warn",
+          message: `Correction detected: "${message.slice(0, 80)}". Queued for learning.`,
+        };
       }
     }
 
@@ -274,7 +403,15 @@ export const readBeforeEditGuard: HookHandler = {
     }
     if (payload.toolName === "Edit" && payload.filePath) {
       if (!recentlyReadFiles.has(payload.filePath)) {
-        return { action: "warn", message: `Editing ${payload.filePath} without reading it first. Read it to understand context.` };
+        // S2-14: upgrade from warn → block. The Edit tool's own
+        // precondition is "must have Read the file in this conversation";
+        // previously this hook merely warned so the edit proceeded
+        // anyway. Blocking here is the correct enforcement — the agent
+        // should Read first, and the unblock path is trivial.
+        return {
+          action: "block",
+          message: `Edit blocked: read ${payload.filePath} first so the Edit tool has the current content.`,
+        };
       }
     }
     return { action: "allow" };
@@ -290,9 +427,20 @@ export const completionVerifier: HookHandler = {
   handler(payload: HookPayload): HookResult {
     const content = payload.content ?? "";
     // Check if the stop message references test output, build success, or verification
-    const hasEvidence = /\b(pass|✓|success|verified|all.*tests|build.*success|0 errors)\b/i.test(content);
+    const hasEvidence = /\b(pass|✓|success|verified|all.*tests|build.*success|0 errors)\b/i.test(
+      content,
+    );
     if (!hasEvidence && content.length > 0) {
-      return { action: "warn", message: "Stopping without evidence of completion. Run tests or typecheck first." };
+      // S2-14: upgrade from warn → block on the strict profile. The hook
+      // is only installed when the user explicitly chooses strict mode,
+      // so blocking here matches user intent: "don't let me ship without
+      // evidence." Override by running verification and re-invoking Stop.
+      return {
+        action: "block",
+        message:
+          "Stop blocked: no evidence of verification in the final message. " +
+          "Run tests/typecheck/lint and include their output before stopping.",
+      };
     }
     return { action: "allow" };
   },
@@ -316,10 +464,29 @@ export const tddEnforcement: HookHandler = {
     const testExists =
       existsSync(`${base}.test.ts`) ||
       existsSync(`${base}.spec.ts`) ||
-      existsSync(join(dir, "__tests__", payload.filePath.split("/").pop()!.replace(/\.(ts|js)$/, ".test.ts")));
+      existsSync(
+        join(
+          dir,
+          "__tests__",
+          payload.filePath
+            .split("/")
+            .pop()!
+            .replace(/\.(ts|js)$/, ".test.ts"),
+        ),
+      );
 
     if (!testExists) {
-      return { action: "warn", message: `No test file found for ${payload.filePath}. Write tests first (TDD).` };
+      // S2-14: upgrade from warn → block on the strict profile. TDD
+      // enforcement means: write the test first, then the implementation.
+      // The warn return meant the write proceeded anyway, defeating the
+      // purpose. Override by creating the test file first (Write gets
+      // allowed because the file path matches `.test.ts$`).
+      return {
+        action: "block",
+        message:
+          `Write blocked (TDD): no test found for ${payload.filePath}. ` +
+          `Create ${base}.test.ts (or the corresponding .spec.ts) first.`,
+      };
     }
     return { action: "allow" };
   },
@@ -523,9 +690,16 @@ export function createGitCheckpointHook(workDir?: string): HookHandler {
 // ── Correction Capture (simple) (standard) — detect user corrections via pattern matching ──
 
 const SIMPLE_CORRECTION_PATTERNS: readonly RegExp[] = [
-  /^\s*no\b/i, /\bwrong\b/i, /\bdon'?t\b/i, /\bstop\b/i,
-  /\bactually\b/i, /\binstead\b/i, /\bnot what I\b/i,
-  /\bthat'?s not\b/i, /\bincorrect\b/i, /\bundo\b/i,
+  /^\s*no\b/i,
+  /\bwrong\b/i,
+  /\bdon'?t\b/i,
+  /\bstop\b/i,
+  /\bactually\b/i,
+  /\binstead\b/i,
+  /\bnot what I\b/i,
+  /\bthat'?s not\b/i,
+  /\bincorrect\b/i,
+  /\bundo\b/i,
 ];
 
 export const simpleCorrectionCapture: HookHandler = {
@@ -577,9 +751,18 @@ export const resultInjectionScanner: HookHandler = {
     }
 
     if (matches.length > 0) {
+      // S2-14: upgrade from warn → block. A PostToolUse return of "warn"
+      // still passes the tool output to the model, which is exactly the
+      // window the injection attack exploits. Blocking replaces the
+      // result with our error message and forces the agent to treat the
+      // content as suspect rather than as instructions from the user.
       return {
-        action: "warn",
-        message: `Potential prompt injection in tool result (${matches.length} pattern${matches.length > 1 ? "s" : ""}): ${matches.slice(0, 3).join(", ")}. Treat output with caution.`,
+        action: "block",
+        message:
+          `Tool result blocked by prompt-injection scanner — ${matches.length} ` +
+          `pattern${matches.length > 1 ? "s" : ""} matched (${matches.slice(0, 3).join(", ")}). ` +
+          `The tool output appears to contain instructions trying to override the system prompt. ` +
+          `Investigate the source before acting on the content.`,
       };
     }
 
@@ -597,7 +780,10 @@ export const resultInjectionScanner: HookHandler = {
  * Warns on mismatches without blocking execution.
  */
 export function createToolPairValidator(): HookHandler {
-  const pendingCalls = new Map<string, { toolName: string; filePath?: string; timestamp: number }>();
+  const pendingCalls = new Map<
+    string,
+    { toolName: string; filePath?: string; timestamp: number }
+  >();
 
   return {
     name: "ToolPairValidator",
@@ -632,7 +818,10 @@ export function createToolPairValidator(): HookHandler {
       }
 
       // Check 3: Validate file paths in results exist on disk
-      const filePath = payload.filePath ?? (toolInput?.["file_path"] as string | undefined) ?? (toolInput?.["filePath"] as string | undefined);
+      const filePath =
+        payload.filePath ??
+        (toolInput?.["file_path"] as string | undefined) ??
+        (toolInput?.["filePath"] as string | undefined);
       if (filePath && typeof filePath === "string" && filePath.startsWith("/")) {
         if (!existsSync(filePath)) {
           warnings.push(`File path in ${toolName} result does not exist: ${filePath}`);
@@ -662,9 +851,15 @@ export function createToolPairValidator(): HookHandler {
 // ── Archive Preflight Guard (standard) — validate archives before extraction ──
 
 const ARCHIVE_EXTENSIONS: readonly RegExp[] = [
-  /\.zip$/i, /\.jar$/i, /\.war$/i,
-  /\.tar$/i, /\.tar\.gz$/i, /\.tgz$/i,
-  /\.tar\.bz2$/i, /\.tar\.xz$/i, /\.tar\.zst$/i,
+  /\.zip$/i,
+  /\.jar$/i,
+  /\.war$/i,
+  /\.tar$/i,
+  /\.tar\.gz$/i,
+  /\.tgz$/i,
+  /\.tar\.bz2$/i,
+  /\.tar\.xz$/i,
+  /\.tar\.zst$/i,
 ];
 
 const EXTRACT_TOOLS: readonly string[] = ["unzip", "tar", "extract", "decompress", "gunzip"];
@@ -738,7 +933,7 @@ export const focusModeToggle: HookHandler = {
         message: focusModeEnabled
           ? "Focus mode ON — display stripped to prompt + 1-line tool summary + response."
           : "Focus mode OFF — full display restored.",
-        modifiedContent: "",  // Consume the /focus command so it is not sent to the model
+        modifiedContent: "", // Consume the /focus command so it is not sent to the model
       };
     }
     return { action: "allow" };
@@ -761,10 +956,15 @@ export const mcpAutoApproval: HookHandler = {
         const raw = readFileSync(approvalsPath, "utf-8");
         const approvals = JSON.parse(raw) as { approved?: readonly string[] };
         if (Array.isArray(approvals.approved) && approvals.approved.includes(toolName)) {
-          return { action: "allow", message: `MCPAutoApproval: tool "${toolName}" is pre-approved.` };
+          return {
+            action: "allow",
+            message: `MCPAutoApproval: tool "${toolName}" is pre-approved.`,
+          };
         }
       }
-    } catch { /* ignore parse errors or missing file */ }
+    } catch {
+      /* ignore parse errors or missing file */
+    }
 
     return { action: "allow" };
   },

@@ -87,22 +87,22 @@ describe("Hook Engine", () => {
   });
 
   describe("Destructive Guard", () => {
-    it("warns on rm -rf", async () => {
+    it("blocks rm -rf (S2-14: upgraded from warn → block)", async () => {
       const result = await destructiveGuard.handler({
         event: "PreToolUse",
         toolName: "Bash",
         content: "rm -rf /tmp/old-build",
       });
-      expect(result.action).toBe("warn");
+      expect(result.action).toBe("block");
     });
 
-    it("warns on force push", async () => {
+    it("blocks force push (S2-14: upgraded from warn → block)", async () => {
       const result = await destructiveGuard.handler({
         event: "PreToolUse",
         toolName: "Bash",
         content: "git push --force origin main",
       });
-      expect(result.action).toBe("warn");
+      expect(result.action).toBe("block");
     });
 
     it("allows safe commands", async () => {
