@@ -76,7 +76,7 @@ export class IRCAdapter implements ChannelAdapter {
       sock.on("data", (data: string) => this.onData(data));
       sock.on("close", () => this.onClose());
       sock.on("error", (err) => {
-        // eslint-disable-next-line no-console
+         
         console.error(`[irc] socket error: ${err.message}`);
         resolve(false);
       });

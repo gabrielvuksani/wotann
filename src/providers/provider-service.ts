@@ -1200,7 +1200,7 @@ export class ProviderService extends EventEmitter {
           process.env[primaryEnvKey] = params.token;
         } catch (err) {
           // Non-fatal — credential is stored in credentials.json regardless.
-          // eslint-disable-next-line no-console
+           
           console.warn(
             `[providers] providers.env write failed: ${err instanceof Error ? err.message : String(err)}`,
           );

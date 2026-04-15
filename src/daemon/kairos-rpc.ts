@@ -334,7 +334,7 @@ export async function verifyCodexJWTSignature(
 
   try {
     const { createPublicKey, createVerify } = await import("node:crypto");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const pubKey = createPublicKey({ key: key as any, format: "jwk" });
     const signingInput = `${parts[0]}.${parts[1]}`;
     const signature = Buffer.from(parts[2]!, "base64url");
@@ -710,7 +710,7 @@ export class KairosRPCHandler {
 
     // Fallback: route through available providers directly (bypassing uninitialized runtime)
     // Smart routing: detect provider from model name
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     const _isOllamaModel =
       [
         "gemma",

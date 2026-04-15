@@ -170,7 +170,7 @@ program
         // type declarations for the optional peer dep. We cast to the
         // minimal shape we actually use.
         const modName = "qrcode-terminal";
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const mod = (await import(modName)) as any;
         const generate = mod?.default?.generate ?? mod?.generate;
         if (typeof generate === "function") {

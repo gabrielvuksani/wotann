@@ -679,13 +679,13 @@ export class CompanionServer {
           if (err.code === "EADDRINUSE") {
             if (attemptsLeft > 0) {
               const nextPort = port + 1;
-              // eslint-disable-next-line no-console
+               
               console.error(`[companion-server] port ${port} in use; retrying on ${nextPort}`);
               (this.config as { port: number }).port = nextPort;
               tryListen(nextPort, attemptsLeft - 1);
             } else {
               this.running = false;
-              // eslint-disable-next-line no-console
+               
               console.error(
                 `[companion-server] could not bind any port in range ${this.config.port}..${port}. ` +
                   `Is another WOTANN daemon running? Set WOTANN_COMPANION_PORT to override.`,

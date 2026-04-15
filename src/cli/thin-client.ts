@@ -320,7 +320,7 @@ export async function launchOrFallback(options: ThinClientOptions = {}): Promise
     await runThinTUI(options);
     return true;
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.error("[thin-client] fell back to full runtime:", err);
     return false;
   }

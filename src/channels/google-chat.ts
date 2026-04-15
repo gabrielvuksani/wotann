@@ -36,7 +36,7 @@ export class GoogleChatAdapter implements ChannelAdapter {
 
   async connect(): Promise<boolean> {
     if (!this.config.webhookUrl && !this.config.serviceAccountKey) {
-      // eslint-disable-next-line no-console
+       
       console.warn("[google-chat] No webhookUrl or serviceAccountKey configured");
       return false;
     }

@@ -204,7 +204,7 @@ export async function ensureAllSidecars(): Promise<readonly DownloadResult[]> {
     } catch (err) {
       // Don't block daemon — log and continue. Downstream code that actually
       // tries to use the sidecar will surface a clearer error to the user.
-      // eslint-disable-next-line no-console
+       
       console.warn(`[sidecar] ${name} (${triple}) unavailable: ${(err as Error).message}`);
     }
   }

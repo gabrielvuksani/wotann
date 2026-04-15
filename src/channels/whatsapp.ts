@@ -64,7 +64,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     ev.on("creds.update", saveCreds);
 
     // Handle connection updates
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ev.on("connection.update", ((update: any) => {
       if (update.connection === "close") {
         const statusCode = update.lastDisconnect?.error?.output?.statusCode;
@@ -85,7 +85,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }) as (...args: unknown[]) => void);
 
     // Handle incoming messages
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     ev.on("messages.upsert", ((event: any) => {
       for (const msg of event.messages ?? []) {
         if (msg.key?.fromMe) continue;
