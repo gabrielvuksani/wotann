@@ -2815,17 +2815,25 @@ export class KairosRPCHandler {
 
       // Per-turn executor: drives a single worker step through the runtime's
       // normal query pipeline (so middleware, memory, and provider fallback
-      // all still apply).
+      // all still apply). Cost tracking is real — we take a before/after
+      // snapshot of the runtime's CostTracker and surface the delta so the
+      // executor's budget gate (maxCostUsd) actually fires. Previously
+      // hardcoded to 0, which meant an autonomous loop could burn arbitrary
+      // money without the budget ever tripping.
+      const costTracker = runtime.getCostTracker();
       const runTurn = async (
         prompt: string,
       ): Promise<{ output: string; costUsd: number; tokensUsed: number }> => {
+        const costBefore = costTracker.getTotalCost();
         let output = "";
         let tokensUsed = 0;
         for await (const chunk of runtime.query({ prompt })) {
           if (chunk.type === "text") output += chunk.content ?? "";
           if (typeof chunk.tokensUsed === "number") tokensUsed = chunk.tokensUsed;
         }
-        return { output, costUsd: 0, tokensUsed };
+        const costAfter = costTracker.getTotalCost();
+        const costUsd = Math.max(0, costAfter - costBefore);
+        return { output, costUsd, tokensUsed };
       };
 
       // Adapter: AutonomousExecutor wants a verifier returning the classic

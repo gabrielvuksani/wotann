@@ -29,7 +29,7 @@ A unified AI agent harness that **amplifies every model with the same intelligen
 | **Capabilities by model** | Tool-calling, vision, thinking gated by what your model supports | Capability augmentation injects all three for any model — even a 3B local Gemma |
 | **Free tier** | An afterthought | First-class: Ollama + Groq + Gemini 2.5 Flash free tier give the full experience |
 | **Memory** | Short-lived prompt context | 8-layer SQLite + FTS5 + vector + graph-RAG + episodic + temporal, with provenance |
-| **Surfaces** | One UI | CLI + TUI + Desktop (Tauri) + iOS + Watch + CarPlay + 15 messaging channels |
+| **Surfaces** | One UI | CLI + TUI + Desktop (Tauri) + iOS + Watch + CarPlay + 14 messaging channels |
 | **Autonomy** | Vibes | Proof bundles (tests + typecheck + diff + screenshots) attached to every completion |
 | **Lock-in** | Total | Switch from Claude → Gemini → Gemma mid-session without losing context, tools, or capabilities |
 
@@ -109,7 +109,7 @@ Runs Ralph mode (verify-fix loop) + self-healing (provider fallback) + 8-strateg
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Surfaces                                                            │
-│  CLI · TUI · Desktop (Tauri) · iOS · Watch · CarPlay · 15 channels  │
+│  CLI · TUI · Desktop (Tauri) · iOS · Watch · CarPlay · 14 channels  │
 └──────────────────┬───────────────────────────┬──────────────────────┘
                    │                           │
                    ▼                           ▼
@@ -122,7 +122,7 @@ Runs Ralph mode (verify-fix loop) + self-healing (provider fallback) + 8-strateg
 ┌─────────────────────────────────────────────────────────────────────┐
 │  WotannRuntime (composition root)                                   │
 │  ┌─────────────┐ ┌─────────────┐ ┌────────────┐ ┌────────────────┐ │
-│  │ 26-layer    │ │ 42 intel    │ │ 29 orch    │ │ 19-event hooks │ │
+│  │ 20+ layer   │ │ 21 intel    │ │ 10 orch    │ │ 19-event hooks │ │
 │  │ middleware  │ │ modules     │ │ patterns   │ │ + DoomLoop     │ │
 │  └─────────────┘ └─────────────┘ └────────────┘ └────────────────┘ │
 │  ┌─────────────┐ ┌─────────────┐ ┌────────────┐ ┌────────────────┐ │
@@ -141,15 +141,15 @@ Runs Ralph mode (verify-fix loop) + self-healing (provider fallback) + 8-strateg
 src/
 ├── core/             Composition root (WotannRuntime), agent bridge, types
 ├── providers/        17 adapters · router · rate limiter · format translator
-├── middleware/       26-layer pipeline + TTSR streaming
-├── intelligence/     42 modules (accuracy boost, ambient awareness, codebase health, ...)
-├── orchestration/    29 patterns (coordinator, waves, PWR, Ralph, self-healing, council)
+├── middleware/       20+ layers (2 always-on, 16 conditional) + TTSR streaming
+├── intelligence/     21 modules that meaningfully affect model behavior (plus ~20 data/analytics modules)
+├── orchestration/    10 genuine multi-step patterns (coordinator, waves, PWR, Ralph, self-healing, council, ...)
 ├── memory/           SQLite + FTS5 · 8 layers · vector · graph-RAG · episodic
 ├── context/          5 compaction strategies · Ollama KV cache compression (turboquant-wasm v0.3.0 integration on the v0.3.0 roadmap)
 ├── prompt/           Engine · 18 prompt modules · instruction provenance (E8)
 ├── hooks/            19 events · 17+ guards · DoomLoop · benchmark engineering
 ├── computer-use/     4-layer perception + action stack (text-mediated for any model)
-├── channels/         15 adapters + DM pairing + node registry
+├── channels/         14 adapters + DM pairing + node registry
 ├── voice/            Push-to-talk · STT/TTS · WhisperKit · Edge TTS · faster-whisper
 ├── learning/         autoDream · instincts · skill-forge · pattern-crystallizer
 ├── identity/         Persona system · soul/identity loading · Norse mythology
