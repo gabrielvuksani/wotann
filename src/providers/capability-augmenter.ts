@@ -18,6 +18,7 @@
 
 import type { ProviderCapabilities, UnifiedQueryOptions, ToolSchema } from "./types.js";
 import { parseToolCall } from "./tool-parsers/index.js";
+import { describeImageForPrompt } from "../utils/vision-ocr.js";
 
 // ── Tool Calling Augmentation ──────────────────────────────
 
@@ -145,13 +146,27 @@ export function augmentVision(
     return options;
   }
 
-  // Replace image references with text-mediated descriptions
-  const augmentedPrompt = options.prompt
-    .replace(/\[image:[^\]]+\]/g, "[Image provided — see text description below]")
-    .replace(
-      /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g,
-      "[Base64 image — text description provided]",
-    );
+  // S3-7: real OCR via macOS Vision / Tesseract instead of a fake
+  // "see text description below" marker. Each image reference in the
+  // prompt is replaced with a real `[Image OCR via <backend>: <text>]`
+  // block; on platforms where neither backend is available, the fallback
+  // is honest ("[OCR unavailable]") not fabricated.
+  //
+  // Lazy require keeps node:child_process out of the static import
+  // graph for callers that only construct queries without images.
+  let augmentedPrompt = options.prompt;
+  // [image:/path/to/file.png] markers — replaced with real OCR text
+  // description (or honest unavailable marker when no backend installed).
+  augmentedPrompt = augmentedPrompt.replace(/\[image:([^\]]+)\]/g, (_match, path: string) => {
+    return describeImageForPrompt(path.trim());
+  });
+  // data:image/...;base64,... data URLs — same OCR pipeline.
+  augmentedPrompt = augmentedPrompt.replace(
+    /(data:image\/[^;]+;base64,[A-Za-z0-9+/=]+)/g,
+    (_match, dataUrl: string) => {
+      return describeImageForPrompt(dataUrl);
+    },
+  );
 
   const visionNote = [
     "",

@@ -93,8 +93,13 @@ describe("Capability Augmenter", () => {
     it("replaces image references for non-vision models", () => {
       const options: UnifiedQueryOptions = { prompt: "What's in [image:photo.jpg]?" };
       const result = augmentVision(options, MINIMAL_CAPS);
-      expect(result.prompt).toContain("text description");
+      // S3-7: vision OCR replaces the placeholder with either real
+      // OCR text or an honest "[OCR ...]" marker. Either way the
+      // original [image:...] is consumed and the system note about
+      // text descriptions is appended to systemPrompt.
       expect(result.prompt).not.toContain("[image:photo.jpg]");
+      expect(result.prompt).toMatch(/\[(OCR|Image)/);
+      expect(result.systemPrompt).toContain("text descriptions");
     });
 
     it("does nothing when no images referenced", () => {
@@ -113,7 +118,9 @@ describe("Capability Augmenter", () => {
       const result = augmentQuery(options, MINIMAL_CAPS);
       expect(result.systemPrompt).toContain("Available Tools");
       expect(result.systemPrompt).toContain("think through this step by step");
-      expect(result.prompt).toContain("text description");
+      // S3-7: vision OCR consumes the [image:...] marker.
+      expect(result.prompt).not.toContain("[image:test.png]");
+      expect(result.prompt).toMatch(/\[(OCR|Image)/);
     });
 
     it("passes through unchanged for full-capability models", () => {

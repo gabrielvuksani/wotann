@@ -154,8 +154,11 @@ describe("Capability Augmenter (Extended)", () => {
     // Thinking augmentation
     expect(augmented.systemPrompt).toContain("step by step");
 
-    // Vision augmentation
-    expect(augmented.prompt).toContain("text description");
+    // Vision augmentation — S3-7 OCR replaces marker with real OCR
+    // text (or honest unavailable fallback). Either way the original
+    // [image:...] is consumed and the OCR/Image marker appears.
+    expect(augmented.prompt).not.toContain("[image:test.png]");
+    expect(augmented.prompt).toMatch(/\[(OCR|Image)/);
   });
 
   it("preserves options unchanged for full-capability provider", () => {
