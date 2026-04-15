@@ -117,10 +117,7 @@ export function detectTruncatedThinking(response: string): PrefillResult {
  * The prefix is injected as an assistant prefill so the model seamlessly
  * resumes its reasoning chain without restarting.
  */
-export function buildContinuationPrompt(
-  original: string,
-  thinkingPrefix: string,
-): string {
+export function buildContinuationPrompt(original: string, thinkingPrefix: string): string {
   const trimmed = thinkingPrefix.trimEnd();
 
   return [
@@ -144,7 +141,7 @@ function looksAbruptlyEnded(text: string): boolean {
 
   const lastChar = trimmed[trimmed.length - 1]!;
   // Ends with a letter, comma, or opening bracket — likely mid-sentence
-  if (/[a-zA-Z,(\[{]/.test(lastChar)) return true;
+  if (/[a-zA-Z,([{]/.test(lastChar)) return true;
   // Ends with a hyphen (mid-word)
   if (lastChar === "-") return true;
 

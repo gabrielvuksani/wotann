@@ -175,7 +175,6 @@ export function parseDeepSeek(text: string): ParsedToolCall | null {
   // outside the JSON fence. Pipes can be either unicode (U+FF5C) or ASCII
   // and the separator glyph can be either ▁ (U+2581) or underscore.
   const sepMatch = text.match(
-    // eslint-disable-next-line no-useless-escape
     /<[｜|]tool[▁_]call[▁_]begin[｜|]>\s*function\s*<[｜|]tool[▁_]sep[｜|]>\s*([^\n`]+?)\s*\n+\s*```(?:json)?\s*([\s\S]*?)\s*```\s*<[｜|]tool[▁_]call[▁_]end[｜|]>/,
   );
   if (sepMatch) {

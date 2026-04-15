@@ -254,7 +254,7 @@ function parseRankings(
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     // Match "1. Response A — reasoning" or "1. Response A: reasoning"
-    const match = line.match(/\d+\.\s*Response\s+([A-E])\s*[—:\-]\s*(.*)/i);
+    const match = line.match(/\d+\.\s*Response\s+([A-E])\s*[—:-]\s*(.*)/i);
     if (match) {
       const label = `Response ${match[1]!.toUpperCase()}`;
       const member = members.find((m) => m.label === label);

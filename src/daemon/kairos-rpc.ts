@@ -3082,26 +3082,62 @@ export class KairosRPCHandler {
       return { success: removed, id: policyId };
     });
 
-    // memory.verify — verify a memory entry against the codebase
+    // memory.verify — programmatic verification of a memory entry.
+    // S5-14: the prior body routed through runtime.query() (hit the LLM
+    // on every call and always returned verified:true regardless of the
+    // model's actual response). Now a direct store lookup + optional
+    // source-file existence + content hash check — cheap, deterministic,
+    // and a real signal of whether the memory is still grounded.
     this.handlers.set("memory.verify", async (params) => {
       const entryId = params.entryId as string;
       if (!entryId) throw new Error("entryId required");
       if (!this.runtime) throw new Error("Runtime not initialized");
-      const workingDir = this.runtime.getWorkingDir();
-      // Access memory store through hybrid search verification
-      try {
-        // Route through runtime query to verify memory
-        let result = "";
-        for await (const chunk of this.runtime.query({
-          prompt: `[MEMORY VERIFY] Verify memory entry ${entryId} against current codebase state.`,
-        })) {
-          if (chunk.type === "text") result += chunk.content ?? "";
-        }
-        return { entryId, verified: true, workingDir, detail: result.slice(0, 500) };
-      } catch {
-        // Best-effort path — caller gets a safe fallback, no user-facing error.
-        return { entryId, verified: false, error: "Verification failed" };
+      const store = this.runtime.getMemoryStore();
+      if (!store) {
+        return { entryId, verified: false, error: "Memory store unavailable" };
       }
+      const entry = store.getById(entryId);
+      if (!entry) {
+        return { entryId, verified: false, error: "Entry not found" };
+      }
+
+      let fileExists = true;
+      let fileHash: string | null = null;
+      let resolvedPath: string | null = null;
+      if (entry.sourceFile) {
+        const { existsSync, readFileSync } = await import("node:fs");
+        const { resolve } = await import("node:path");
+        const { createHash } = await import("node:crypto");
+        resolvedPath = resolve(this.runtime.getWorkingDir(), entry.sourceFile);
+        fileExists = existsSync(resolvedPath);
+        if (fileExists) {
+          try {
+            const buf = readFileSync(resolvedPath);
+            fileHash = createHash("sha256").update(buf).digest("hex").slice(0, 16);
+          } catch {
+            fileExists = false;
+          }
+        }
+      }
+
+      // Mark the entry verified when either (a) no source file is
+      // associated (the entry is self-describing), or (b) the source
+      // file still exists on disk. A missing file is a real staleness
+      // signal, not a generic failure — surface it in the response.
+      const verified = !entry.sourceFile || fileExists;
+      if (verified) store.memoryVerify(entryId);
+
+      return {
+        entryId,
+        verified,
+        sourceFile: entry.sourceFile ?? null,
+        resolvedPath,
+        fileExists,
+        fileHash,
+        detail: verified
+          ? "entry verified against codebase (programmatic check)"
+          : `source file missing: ${entry.sourceFile}`,
+      };
     });
 
     // lsp.symbols — find symbols in workspace

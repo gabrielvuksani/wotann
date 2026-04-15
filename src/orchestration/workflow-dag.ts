@@ -42,7 +42,13 @@ import { join } from "node:path";
 // ── Types ────────────────────────────────────────────────
 
 export type NodeType = "agent" | "loop" | "approval" | "parallel" | "shell";
-export type NodeStatus = "pending" | "running" | "completed" | "failed" | "skipped" | "awaiting_approval";
+export type NodeStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped"
+  | "awaiting_approval";
 
 export interface WorkflowNode {
   readonly id: string;
@@ -90,30 +96,96 @@ export const BUILTIN_WORKFLOWS: readonly Workflow[] = [
     name: "idea-to-pr",
     description: "Transform an idea into a complete pull request",
     nodes: [
-      { id: "plan", type: "agent", prompt: "Create a detailed implementation plan for: {{input}}", depends: [] },
-      { id: "implement", type: "agent", prompt: "Implement the plan from the previous step", depends: ["plan"] },
-      { id: "verify", type: "loop", prompt: "Run tests and typecheck. Fix any failures.", depends: ["implement"], maxIterations: 5, exitCondition: "all tests pass and typecheck is clean" },
-      { id: "review", type: "approval", prompt: "Review the implementation before creating PR", depends: ["verify"] },
-      { id: "pr", type: "agent", prompt: "Create a pull request with a clear title and description", depends: ["review"] },
+      {
+        id: "plan",
+        type: "agent",
+        prompt: "Create a detailed implementation plan for: {{input}}",
+        depends: [],
+      },
+      {
+        id: "implement",
+        type: "agent",
+        prompt: "Implement the plan from the previous step",
+        depends: ["plan"],
+      },
+      {
+        id: "verify",
+        type: "loop",
+        prompt: "Run tests and typecheck. Fix any failures.",
+        depends: ["implement"],
+        maxIterations: 5,
+        exitCondition: "all tests pass and typecheck is clean",
+      },
+      {
+        id: "review",
+        type: "approval",
+        prompt: "Review the implementation before creating PR",
+        depends: ["verify"],
+      },
+      {
+        id: "pr",
+        type: "agent",
+        prompt: "Create a pull request with a clear title and description",
+        depends: ["review"],
+      },
     ],
   },
   {
     name: "fix-issue",
     description: "Investigate and fix a reported issue",
     nodes: [
-      { id: "investigate", type: "agent", prompt: "Investigate the issue: {{input}}. Find the root cause.", depends: [] },
-      { id: "fix", type: "agent", prompt: "Implement the fix based on the investigation", depends: ["investigate"] },
-      { id: "test", type: "loop", prompt: "Run tests to verify the fix. Fix any regressions.", depends: ["fix"], maxIterations: 3, exitCondition: "all tests pass" },
-      { id: "commit", type: "agent", prompt: "Commit the fix with a descriptive conventional commit message", depends: ["test"] },
+      {
+        id: "investigate",
+        type: "agent",
+        prompt: "Investigate the issue: {{input}}. Find the root cause.",
+        depends: [],
+      },
+      {
+        id: "fix",
+        type: "agent",
+        prompt: "Implement the fix based on the investigation",
+        depends: ["investigate"],
+      },
+      {
+        id: "test",
+        type: "loop",
+        prompt: "Run tests to verify the fix. Fix any regressions.",
+        depends: ["fix"],
+        maxIterations: 3,
+        exitCondition: "all tests pass",
+      },
+      {
+        id: "commit",
+        type: "agent",
+        prompt: "Commit the fix with a descriptive conventional commit message",
+        depends: ["test"],
+      },
     ],
   },
   {
     name: "refactor",
     description: "Refactor code with safety verification",
     nodes: [
-      { id: "analyze", type: "agent", prompt: "Analyze the code to refactor: {{input}}. Identify risks.", depends: [] },
-      { id: "refactor", type: "agent", prompt: "Perform the refactoring based on the analysis", depends: ["analyze"] },
-      { id: "verify", type: "loop", prompt: "Verify no regressions: run tests, typecheck, lint.", depends: ["refactor"], maxIterations: 5, exitCondition: "zero failures" },
+      {
+        id: "analyze",
+        type: "agent",
+        prompt: "Analyze the code to refactor: {{input}}. Identify risks.",
+        depends: [],
+      },
+      {
+        id: "refactor",
+        type: "agent",
+        prompt: "Perform the refactoring based on the analysis",
+        depends: ["analyze"],
+      },
+      {
+        id: "verify",
+        type: "loop",
+        prompt: "Verify no regressions: run tests, typecheck, lint.",
+        depends: ["refactor"],
+        maxIterations: 5,
+        exitCondition: "zero failures",
+      },
       { id: "review", type: "approval", prompt: "Review refactored code", depends: ["verify"] },
     ],
   },
@@ -121,10 +193,30 @@ export const BUILTIN_WORKFLOWS: readonly Workflow[] = [
     name: "code-review",
     description: "Multi-perspective code review",
     nodes: [
-      { id: "security", type: "agent", prompt: "Review for security vulnerabilities: {{input}}", depends: [] },
-      { id: "performance", type: "agent", prompt: "Review for performance issues: {{input}}", depends: [] },
-      { id: "quality", type: "agent", prompt: "Review for code quality and maintainability: {{input}}", depends: [] },
-      { id: "synthesize", type: "agent", prompt: "Synthesize all review findings into a prioritized report", depends: ["security", "performance", "quality"] },
+      {
+        id: "security",
+        type: "agent",
+        prompt: "Review for security vulnerabilities: {{input}}",
+        depends: [],
+      },
+      {
+        id: "performance",
+        type: "agent",
+        prompt: "Review for performance issues: {{input}}",
+        depends: [],
+      },
+      {
+        id: "quality",
+        type: "agent",
+        prompt: "Review for code quality and maintainability: {{input}}",
+        depends: [],
+      },
+      {
+        id: "synthesize",
+        type: "agent",
+        prompt: "Synthesize all review findings into a prioritized report",
+        depends: ["security", "performance", "quality"],
+      },
     ],
   },
 ];
@@ -149,7 +241,9 @@ export class WorkflowDAGEngine {
   }
 
   /** Set the approval callback (returns true if approved). */
-  setApprovalHandler(fn: (runId: string, nodeId: string, prompt: string) => Promise<boolean>): void {
+  setApprovalHandler(
+    fn: (runId: string, nodeId: string, prompt: string) => Promise<boolean>,
+  ): void {
     this.onApprovalNeeded = fn;
   }
 
@@ -184,7 +278,9 @@ export class WorkflowDAGEngine {
             if (w) workflows.push(w);
           }
         }
-      } catch { /* directory not readable */ }
+      } catch {
+        /* directory not readable */
+      }
     }
     return workflows;
   }
@@ -230,7 +326,11 @@ export class WorkflowDAGEngine {
   rejectNode(runId: string, nodeId: string): void {
     const run = this.runs.get(runId);
     if (!run) return;
-    this.updateNodeState(runId, nodeId, { status: "failed", error: "Rejected by user", completedAt: Date.now() });
+    this.updateNodeState(runId, nodeId, {
+      status: "failed",
+      error: "Rejected by user",
+      completedAt: Date.now(),
+    });
     this.runs.set(runId, { ...run, status: "failed" });
   }
 
@@ -310,7 +410,10 @@ export class WorkflowDAGEngine {
     this.updateNodeState(runId, node.id, { status: "running", startedAt: Date.now() });
 
     if (!this.executeAgent) {
-      this.updateNodeState(runId, node.id, { status: "failed", error: "No agent executor configured" });
+      this.updateNodeState(runId, node.id, {
+        status: "failed",
+        error: "No agent executor configured",
+      });
       return;
     }
 
@@ -333,14 +436,20 @@ export class WorkflowDAGEngine {
       const output = await this.executeAgent(prompt, context);
 
       // Check if exit condition is met (agent responds with completion indicators)
-      const isDone = output.toLowerCase().includes("all tests pass") ||
+      const isDone =
+        output.toLowerCase().includes("all tests pass") ||
         output.toLowerCase().includes("exit condition met") ||
         output.toLowerCase().includes("no failures") ||
         output.toLowerCase().includes("clean") ||
         (node.exitCondition && output.toLowerCase().includes(node.exitCondition.toLowerCase()));
 
       if (isDone) {
-        this.updateNodeState(runId, node.id, { status: "completed", output, completedAt: Date.now(), iterations });
+        this.updateNodeState(runId, node.id, {
+          status: "completed",
+          output,
+          completedAt: Date.now(),
+          iterations,
+        });
         return;
       }
     }
@@ -353,7 +462,11 @@ export class WorkflowDAGEngine {
     });
   }
 
-  private async executeApprovalNode(runId: string, node: WorkflowNode, prompt: string): Promise<void> {
+  private async executeApprovalNode(
+    runId: string,
+    node: WorkflowNode,
+    prompt: string,
+  ): Promise<void> {
     this.updateNodeState(runId, node.id, { status: "awaiting_approval", startedAt: Date.now() });
 
     if (this.onApprovalNeeded) {
@@ -361,7 +474,11 @@ export class WorkflowDAGEngine {
       if (approved) {
         this.updateNodeState(runId, node.id, { status: "completed", completedAt: Date.now() });
       } else {
-        this.updateNodeState(runId, node.id, { status: "failed", error: "Rejected", completedAt: Date.now() });
+        this.updateNodeState(runId, node.id, {
+          status: "failed",
+          error: "Rejected",
+          completedAt: Date.now(),
+        });
       }
     }
   }
@@ -370,7 +487,10 @@ export class WorkflowDAGEngine {
     this.updateNodeState(runId, node.id, { status: "running", startedAt: Date.now() });
 
     if (!this.executeShell || !node.shellCommand) {
-      this.updateNodeState(runId, node.id, { status: "failed", error: "No shell executor or command" });
+      this.updateNodeState(runId, node.id, {
+        status: "failed",
+        error: "No shell executor or command",
+      });
       return;
     }
 
@@ -428,12 +548,28 @@ export class WorkflowDAGEngine {
       let name = "";
       let description = "";
       const nodes: WorkflowNode[] = [];
-      let currentNode: { id?: string; type?: string; prompt?: string; depends?: string[]; maxIterations?: number; exitCondition?: string; shellCommand?: string } | null = null;
+      let currentNode: {
+        id?: string;
+        type?: string;
+        prompt?: string;
+        depends?: string[];
+        maxIterations?: number;
+        exitCondition?: string;
+        shellCommand?: string;
+      } | null = null;
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (trimmed.startsWith("name:")) name = trimmed.slice(5).trim().replace(/^["']|["']$/g, "");
-        if (trimmed.startsWith("description:")) description = trimmed.slice(12).trim().replace(/^["']|["']$/g, "");
+        if (trimmed.startsWith("name:"))
+          name = trimmed
+            .slice(5)
+            .trim()
+            .replace(/^["']|["']$/g, "");
+        if (trimmed.startsWith("description:"))
+          description = trimmed
+            .slice(12)
+            .trim()
+            .replace(/^["']|["']$/g, "");
 
         if (trimmed.startsWith("- id:")) {
           if (currentNode?.id) {
@@ -451,14 +587,27 @@ export class WorkflowDAGEngine {
         }
         if (currentNode) {
           if (trimmed.startsWith("type:")) currentNode.type = trimmed.slice(5).trim();
-          if (trimmed.startsWith("prompt:")) currentNode.prompt = trimmed.slice(7).trim().replace(/^["']|["']$/g, "");
-          if (trimmed.startsWith("maxIterations:")) currentNode.maxIterations = parseInt(trimmed.slice(14).trim(), 10);
-          if (trimmed.startsWith("exitCondition:")) currentNode.exitCondition = trimmed.slice(14).trim().replace(/^["']|["']$/g, "");
-          if (trimmed.startsWith("command:")) currentNode.shellCommand = trimmed.slice(8).trim().replace(/^["']|["']$/g, "");
+          if (trimmed.startsWith("prompt:"))
+            currentNode.prompt = trimmed
+              .slice(7)
+              .trim()
+              .replace(/^["']|["']$/g, "");
+          if (trimmed.startsWith("maxIterations:"))
+            currentNode.maxIterations = parseInt(trimmed.slice(14).trim(), 10);
+          if (trimmed.startsWith("exitCondition:"))
+            currentNode.exitCondition = trimmed
+              .slice(14)
+              .trim()
+              .replace(/^["']|["']$/g, "");
+          if (trimmed.startsWith("command:"))
+            currentNode.shellCommand = trimmed
+              .slice(8)
+              .trim()
+              .replace(/^["']|["']$/g, "");
           if (trimmed.startsWith("depends:")) {
             const depsStr = trimmed.slice(8).trim();
             currentNode.depends = depsStr
-              .replace(/[\[\]]/g, "")
+              .replace(/[[\]]/g, "")
               .split(",")
               .map((d) => d.trim())
               .filter(Boolean);

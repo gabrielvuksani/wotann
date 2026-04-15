@@ -33,7 +33,9 @@ interface ProviderCredentials {
  * Discover all available models across configured providers.
  * Queries each provider API in parallel, returns unified model list.
  */
-export async function discoverModels(creds: ProviderCredentials): Promise<readonly DiscoveredModel[]> {
+export async function discoverModels(
+  creds: ProviderCredentials,
+): Promise<readonly DiscoveredModel[]> {
   const promises: Promise<readonly DiscoveredModel[]>[] = [];
 
   if (creds.ollamaHost || isOllamaRunning()) {
@@ -71,7 +73,12 @@ async function discoverOllamaModels(host: string): Promise<readonly DiscoveredMo
   try {
     const resp = await fetch(`${host}/api/tags`, { signal: AbortSignal.timeout(5000) });
     if (!resp.ok) return [];
-    const data = await resp.json() as { models?: Array<{ name: string; details?: { parameter_size?: string; family?: string; quantization_level?: string } }> };
+    const data = (await resp.json()) as {
+      models?: Array<{
+        name: string;
+        details?: { parameter_size?: string; family?: string; quantization_level?: string };
+      }>;
+    };
     return (data.models ?? []).map((m) => ({
       id: m.name,
       name: m.name.split(":")[0] ?? m.name,
@@ -95,12 +102,10 @@ function guessOllamaContext(paramSize?: string): number {
 }
 
 function isOllamaRunning(): boolean {
-  try {
-    // Synchronous check not available with fetch — will be caught by timeout
-    return true; // Optimistic — the actual fetch will fail if not running
-  } catch {
-    return false;
-  }
+  // Synchronous check not available with fetch; this is an optimistic
+  // pre-flight — the actual async fetch call downstream handles the
+  // connect failure via its own timeout and error path.
+  return true;
 }
 
 // ── Anthropic ─────────────────────────────────────────
@@ -115,7 +120,7 @@ async function discoverAnthropicModels(apiKey: string): Promise<readonly Discove
       signal: AbortSignal.timeout(10000),
     });
     if (!resp.ok) return [];
-    const data = await resp.json() as {
+    const data = (await resp.json()) as {
       data?: Array<{
         id: string;
         display_name?: string;
@@ -155,13 +160,18 @@ async function discoverOpenAIModels(apiKey: string): Promise<readonly Discovered
       signal: AbortSignal.timeout(10000),
     });
     if (!resp.ok) return [];
-    const data = await resp.json() as { data?: Array<{ id: string; owned_by?: string }> };
+    const data = (await resp.json()) as { data?: Array<{ id: string; owned_by?: string }> };
     // Filter to chat-capable models (skip embeddings, tts, whisper, dall-e)
     const chatModels = (data.data ?? []).filter((m) => {
       const id = m.id.toLowerCase();
-      return (id.includes("gpt") || id.includes("o1") || id.includes("o3") || id.includes("o4"))
-        && !id.includes("embedding") && !id.includes("tts") && !id.includes("whisper")
-        && !id.includes("dall-e") && !id.includes("realtime");
+      return (
+        (id.includes("gpt") || id.includes("o1") || id.includes("o3") || id.includes("o4")) &&
+        !id.includes("embedding") &&
+        !id.includes("tts") &&
+        !id.includes("whisper") &&
+        !id.includes("dall-e") &&
+        !id.includes("realtime")
+      );
     });
     return chatModels.map((m) => ({
       id: m.id,
@@ -180,12 +190,15 @@ async function discoverGeminiModels(apiKey: string): Promise<readonly Discovered
   try {
     // SECURITY (B2): pass the API key via the `x-goog-api-key` header instead
     // of the query string, so it does not show up in server access logs.
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=50`, {
-      headers: { "x-goog-api-key": apiKey },
-      signal: AbortSignal.timeout(10000),
-    });
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=50`,
+      {
+        headers: { "x-goog-api-key": apiKey },
+        signal: AbortSignal.timeout(10000),
+      },
+    );
     if (!resp.ok) return [];
-    const data = await resp.json() as {
+    const data = (await resp.json()) as {
       models?: Array<{
         name: string;
         displayName?: string;
@@ -222,7 +235,7 @@ async function discoverGitHubModels(token: string): Promise<readonly DiscoveredM
       signal: AbortSignal.timeout(10000),
     });
     if (!resp.ok) return [];
-    const data = await resp.json() as Array<{
+    const data = (await resp.json()) as Array<{
       id: string;
       name?: string;
       publisher?: string;
@@ -253,7 +266,7 @@ async function discoverGroqModels(apiKey: string): Promise<readonly DiscoveredMo
       signal: AbortSignal.timeout(10000),
     });
     if (!resp.ok) return [];
-    const data = await resp.json() as { data?: Array<{ id: string; owned_by?: string }> };
+    const data = (await resp.json()) as { data?: Array<{ id: string; owned_by?: string }> };
     return (data.data ?? []).map((m) => ({
       id: m.id,
       name: m.id,

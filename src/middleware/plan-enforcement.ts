@@ -29,20 +29,22 @@ import type { Middleware, MiddlewareContext, AgentResult } from "./types.js";
 
 /** Tools that are always allowed even without a plan (read-only / research). */
 const ALWAYS_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
-  "Read", "Glob", "Grep", "LSP",
-  "WebSearch", "WebFetch",
-  "TaskCreate", "TodoWrite", "todo_write",
+  "Read",
+  "Glob",
+  "Grep",
+  "LSP",
+  "WebSearch",
+  "WebFetch",
+  "TaskCreate",
+  "TodoWrite",
+  "todo_write",
 ]);
 
 /** Tools that create plans when called. */
-const PLANNING_TOOLS: ReadonlySet<string> = new Set([
-  "TaskCreate", "TodoWrite", "todo_write",
-]);
+const PLANNING_TOOLS: ReadonlySet<string> = new Set(["TaskCreate", "TodoWrite", "todo_write"]);
 
 /** Tools that are modifying and require a plan first. */
-const MODIFYING_TOOLS: ReadonlySet<string> = new Set([
-  "Write", "Edit", "Bash", "ComputerUse",
-]);
+const MODIFYING_TOOLS: ReadonlySet<string> = new Set(["Write", "Edit", "Bash", "ComputerUse"]);
 
 // -- Inline Plan Detection ---------------------------------------------
 
@@ -54,7 +56,7 @@ const PLAN_CONTENT_PATTERNS: readonly RegExp[] = [
   // Explicit plan headers
   /^#+\s*(?:Plan|Implementation Plan|Steps|Approach|Strategy)\b/im,
   // Numbered list with 3+ items (a real plan, not just options)
-  /^\s*(?:1[\.)]\s+.+\n\s*2[\.)]\s+.+\n\s*3[\.)]\s+.+)/m,
+  /^\s*(?:1[.)]\s+.+\n\s*2[.)]\s+.+\n\s*3[.)]\s+.+)/m,
   // Step-by-step markers
   /\bstep\s+1\b.*\bstep\s+2\b.*\bstep\s+3\b/is,
   // Phase markers
@@ -144,10 +146,7 @@ export class PlanEnforcementMiddleware {
    * Check if a tool call should be allowed.
    * Returns null if allowed, or a block message if not.
    */
-  checkToolCall(
-    toolName: string,
-    complexity?: "low" | "medium" | "high",
-  ): string | null {
+  checkToolCall(toolName: string, complexity?: "low" | "medium" | "high"): string | null {
     // If not enforcing, allow everything
     if (!this.enforcing) return null;
 
@@ -252,9 +251,7 @@ export class PlanEnforcementMiddleware {
  * into the pipeline. Runs at order 20 (early in the extended pipeline)
  * to gate tool calls before they execute.
  */
-export function createPlanEnforcementMiddleware(
-  instance: PlanEnforcementMiddleware,
-): Middleware {
+export function createPlanEnforcementMiddleware(instance: PlanEnforcementMiddleware): Middleware {
   return {
     name: "PlanEnforcement",
     order: 20,

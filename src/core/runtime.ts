@@ -3153,6 +3153,9 @@ export class WotannRuntime {
   getShadowGit(): ShadowGit {
     return this.shadowGit;
   }
+  getMemoryStore(): MemoryStore | null {
+    return this.memoryStore;
+  }
   getCanvasEditor(): CanvasEditor {
     return this.canvasEditor;
   }

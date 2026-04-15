@@ -49,10 +49,30 @@ type TypeScriptModule = typeof import("typescript");
 type TSLanguageService = import("typescript").LanguageService;
 type TSSourceFile = import("typescript").SourceFile;
 
-const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+const TYPESCRIPT_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mts",
+  ".cts",
+  ".mjs",
+  ".cjs",
+]);
 const SUPPORTED_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs",
-  ".py", ".go", ".rs", ".java", ".cs",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mts",
+  ".cts",
+  ".mjs",
+  ".cjs",
+  ".py",
+  ".go",
+  ".rs",
+  ".java",
+  ".cs",
 ]);
 
 const IGNORED_DIRECTORIES = new Set([
@@ -68,51 +88,66 @@ const IGNORED_DIRECTORIES = new Set([
 ]);
 
 const DEFINITION_PATTERNS: ReadonlyMap<string, readonly RegExp[]> = new Map([
-  [".ts", [
-    /^\s*export\s+(?:async\s+)?function\s+([A-Za-z_]\w*)/m,
-    /^\s*(?:async\s+)?function\s+([A-Za-z_]\w*)/m,
-    /^\s*export\s+class\s+([A-Za-z_]\w*)/m,
-    /^\s*class\s+([A-Za-z_]\w*)/m,
-    /^\s*export\s+interface\s+([A-Za-z_]\w*)/m,
-    /^\s*interface\s+([A-Za-z_]\w*)/m,
-    /^\s*export\s+type\s+([A-Za-z_]\w*)/m,
-    /^\s*type\s+([A-Za-z_]\w*)/m,
-    /^\s*export\s+(?:const|let|var)\s+([A-Za-z_]\w*)/m,
-    /^\s*(?:const|let|var)\s+([A-Za-z_]\w*)/m,
-    /^\s*export\s+enum\s+([A-Za-z_]\w*)/m,
-    /^\s*enum\s+([A-Za-z_]\w*)/m,
-  ]],
+  [
+    ".ts",
+    [
+      /^\s*export\s+(?:async\s+)?function\s+([A-Za-z_]\w*)/m,
+      /^\s*(?:async\s+)?function\s+([A-Za-z_]\w*)/m,
+      /^\s*export\s+class\s+([A-Za-z_]\w*)/m,
+      /^\s*class\s+([A-Za-z_]\w*)/m,
+      /^\s*export\s+interface\s+([A-Za-z_]\w*)/m,
+      /^\s*interface\s+([A-Za-z_]\w*)/m,
+      /^\s*export\s+type\s+([A-Za-z_]\w*)/m,
+      /^\s*type\s+([A-Za-z_]\w*)/m,
+      /^\s*export\s+(?:const|let|var)\s+([A-Za-z_]\w*)/m,
+      /^\s*(?:const|let|var)\s+([A-Za-z_]\w*)/m,
+      /^\s*export\s+enum\s+([A-Za-z_]\w*)/m,
+      /^\s*enum\s+([A-Za-z_]\w*)/m,
+    ],
+  ],
   [".tsx", []],
-  [".js", [
-    /^\s*(?:async\s+)?function\s+([A-Za-z_]\w*)/m,
-    /^\s*class\s+([A-Za-z_]\w*)/m,
-    /^\s*(?:const|let|var)\s+([A-Za-z_]\w*)\s*=\s*(?:async\s*)?\(/m,
-  ]],
+  [
+    ".js",
+    [
+      /^\s*(?:async\s+)?function\s+([A-Za-z_]\w*)/m,
+      /^\s*class\s+([A-Za-z_]\w*)/m,
+      /^\s*(?:const|let|var)\s+([A-Za-z_]\w*)\s*=\s*(?:async\s*)?\(/m,
+    ],
+  ],
   [".jsx", []],
-  [".py", [
-    /^\s*def\s+([A-Za-z_]\w*)\s*\(/m,
-    /^\s*class\s+([A-Za-z_]\w*)\s*[:(]/m,
-  ]],
-  [".go", [
-    /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_]\w*)\s*\(/m,
-    /^\s*type\s+([A-Za-z_]\w*)\s+(?:struct|interface)/m,
-    /^\s*var\s+([A-Za-z_]\w*)\b/m,
-    /^\s*const\s+([A-Za-z_]\w*)\b/m,
-  ]],
-  [".rs", [
-    /^\s*fn\s+([A-Za-z_]\w*)\s*\(/m,
-    /^\s*struct\s+([A-Za-z_]\w*)\b/m,
-    /^\s*enum\s+([A-Za-z_]\w*)\b/m,
-    /^\s*trait\s+([A-Za-z_]\w*)\b/m,
-  ]],
-  [".java", [
-    /^\s*(?:public\s+|private\s+|protected\s+)?(?:abstract\s+|final\s+)?(?:class|interface|enum|record)\s+([A-Za-z_]\w*)\b/m,
-    /^\s*(?:public\s+|private\s+|protected\s+)?(?:static\s+)?[\w<>\[\]]+\s+([A-Za-z_]\w*)\s*\(/m,
-  ]],
-  [".cs", [
-    /^\s*(?:public|private|protected|internal)?\s*(?:sealed\s+|abstract\s+|static\s+)?(?:class|interface|enum|struct|record)\s+([A-Za-z_]\w*)\b/m,
-    /^\s*(?:public|private|protected|internal)?\s*(?:static\s+)?[\w<>\[\],]+\s+([A-Za-z_]\w*)\s*\(/m,
-  ]],
+  [".py", [/^\s*def\s+([A-Za-z_]\w*)\s*\(/m, /^\s*class\s+([A-Za-z_]\w*)\s*[:(]/m]],
+  [
+    ".go",
+    [
+      /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_]\w*)\s*\(/m,
+      /^\s*type\s+([A-Za-z_]\w*)\s+(?:struct|interface)/m,
+      /^\s*var\s+([A-Za-z_]\w*)\b/m,
+      /^\s*const\s+([A-Za-z_]\w*)\b/m,
+    ],
+  ],
+  [
+    ".rs",
+    [
+      /^\s*fn\s+([A-Za-z_]\w*)\s*\(/m,
+      /^\s*struct\s+([A-Za-z_]\w*)\b/m,
+      /^\s*enum\s+([A-Za-z_]\w*)\b/m,
+      /^\s*trait\s+([A-Za-z_]\w*)\b/m,
+    ],
+  ],
+  [
+    ".java",
+    [
+      /^\s*(?:public\s+|private\s+|protected\s+)?(?:abstract\s+|final\s+)?(?:class|interface|enum|record)\s+([A-Za-z_]\w*)\b/m,
+      /^\s*(?:public\s+|private\s+|protected\s+)?(?:static\s+)?[\w<>[\]]+\s+([A-Za-z_]\w*)\s*\(/m,
+    ],
+  ],
+  [
+    ".cs",
+    [
+      /^\s*(?:public|private|protected|internal)?\s*(?:sealed\s+|abstract\s+|static\s+)?(?:class|interface|enum|struct|record)\s+([A-Za-z_]\w*)\b/m,
+      /^\s*(?:public|private|protected|internal)?\s*(?:static\s+)?[\w<>[\],]+\s+([A-Za-z_]\w*)\s*\(/m,
+    ],
+  ],
 ]);
 
 function regexesForExtension(ext: string): readonly RegExp[] {
@@ -131,7 +166,12 @@ interface LSPServerConfig {
 }
 
 const KNOWN_SERVERS: readonly LSPServerConfig[] = [
-  { language: "typescript", command: "typescript-language-server", args: ["--stdio"], extensions: [".ts", ".tsx", ".js", ".jsx"] },
+  {
+    language: "typescript",
+    command: "typescript-language-server",
+    args: ["--stdio"],
+    extensions: [".ts", ".tsx", ".js", ".jsx"],
+  },
   { language: "python", command: "pyright-langserver", args: ["--stdio"], extensions: [".py"] },
   { language: "go", command: "gopls", args: ["serve"], extensions: [".go"] },
   { language: "rust", command: "rust-analyzer", args: [], extensions: [".rs"] },
@@ -293,14 +333,16 @@ export class SymbolOperations {
       const program = service.getProgram();
       if (!program) return [];
 
-      return references.map((reference) => {
-        const sourceFile = program.getSourceFile(reference.fileName);
-        if (!sourceFile) return null;
-        return {
-          uri: pathToFileURL(reference.fileName).toString(),
-          range: textSpanToRangeTs(sourceFile, reference.textSpan),
-        } satisfies LSPLocation;
-      }).filter((reference): reference is LSPLocation => reference !== null);
+      return references
+        .map((reference) => {
+          const sourceFile = program.getSourceFile(reference.fileName);
+          if (!sourceFile) return null;
+          return {
+            uri: pathToFileURL(reference.fileName).toString(),
+            range: textSpanToRangeTs(sourceFile, reference.textSpan),
+          } satisfies LSPLocation;
+        })
+        .filter((reference): reference is LSPLocation => reference !== null);
     });
 
     if (viaTypeScript && viaTypeScript.length > 0) {
@@ -323,7 +365,9 @@ export class SymbolOperations {
       const content = safeRead(filePath);
       if (content === null) return null;
       const offset = positionToOffset(content, position);
-      const renameInfo = service.getRenameInfo(filePath, offset, { allowRenameOfImportPath: false });
+      const renameInfo = service.getRenameInfo(filePath, offset, {
+        allowRenameOfImportPath: false,
+      });
       if (!renameInfo.canRename) return null;
 
       const locations = service.findRenameLocations(filePath, offset, false, false, true) ?? [];
@@ -380,9 +424,7 @@ export class SymbolOperations {
 
       const signature = ts.displayPartsToString(quickInfo.displayParts);
       const documentation = ts.displayPartsToString(quickInfo.documentation).trim();
-      return documentation.length > 0
-        ? `${signature}\n\n${documentation}`
-        : signature;
+      return documentation.length > 0 ? `${signature}\n\n${documentation}` : signature;
     });
 
     if (viaTypeScript && viaTypeScript.trim().length > 0) {
@@ -408,7 +450,10 @@ export class SymbolOperations {
       const visit = (node: import("typescript").Node, containerName?: string) => {
         const name = getTsNodeName(node, ts);
         if (name) {
-          const range = textSpanToRangeTs(sourceFile, { start: node.getStart(sourceFile), length: node.getWidth(sourceFile) });
+          const range = textSpanToRangeTs(sourceFile, {
+            start: node.getStart(sourceFile),
+            length: node.getWidth(sourceFile),
+          });
           symbols.push({
             name,
             kind: ts.SyntaxKind[node.kind] ?? "Unknown",
@@ -443,7 +488,9 @@ export class SymbolOperations {
       return null;
     }
 
-    const files = walkWorkspaceFiles(this.workspaceRoot).filter((file) => TYPESCRIPT_EXTENSIONS.has(extname(file)));
+    const files = walkWorkspaceFiles(this.workspaceRoot).filter((file) =>
+      TYPESCRIPT_EXTENSIONS.has(extname(file)),
+    );
     if (files.length === 0) return null;
 
     const compilerOptions: import("typescript").CompilerOptions = {
@@ -513,7 +560,14 @@ export class SymbolOperations {
       if (content === null) continue;
 
       for (const pattern of regexesForExtension(ext)) {
-        const matches = [...content.matchAll(new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`))];
+        const matches = [
+          ...content.matchAll(
+            new RegExp(
+              pattern.source,
+              pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`,
+            ),
+          ),
+        ];
         for (const match of matches) {
           if ((match[1] ?? "") !== name || typeof match.index !== "number") continue;
           results.push({
@@ -556,10 +610,10 @@ export class SymbolOperations {
     if (content === null) return "";
     const line = content.split("\n")[position.line] ?? "";
 
-    const typed = line.match(/:\s*([A-Za-z_][\w<>\[\]\|, ]*)/);
+    const typed = line.match(/:\s*([A-Za-z_][\w<>[\]|, ]*)/);
     if (typed?.[1]) return typed[1].trim();
 
-    const returnType = line.match(/->\s*([A-Za-z_][\w<>\[\]\|, ]*)/);
+    const returnType = line.match(/->\s*([A-Za-z_][\w<>[\]|, ]*)/);
     if (returnType?.[1]) return returnType[1].trim();
 
     if (/=\s*["'`]/.test(line)) return "string";
@@ -580,7 +634,12 @@ export class SymbolOperations {
     const symbols: SymbolInfo[] = [];
 
     for (const pattern of regexesForExtension(ext)) {
-      for (const match of content.matchAll(new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`))) {
+      for (const match of content.matchAll(
+        new RegExp(
+          pattern.source,
+          pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`,
+        ),
+      )) {
         const name = match[1];
         if (typeof name !== "string" || typeof match.index !== "number") continue;
         symbols.push({
@@ -683,14 +742,21 @@ function offsetToPosition(content: string, offset: number): LSPPosition {
   return { line, character };
 }
 
-function rangeFromOffsetLength(content: string, start: number, length: number): LSPLocation["range"] {
+function rangeFromOffsetLength(
+  content: string,
+  start: number,
+  length: number,
+): LSPLocation["range"] {
   return {
     start: offsetToPosition(content, start),
     end: offsetToPosition(content, start + length),
   };
 }
 
-function textSpanToRangeTs(sourceFile: TSSourceFile, textSpan: { start: number; length: number }): LSPLocation["range"] {
+function textSpanToRangeTs(
+  sourceFile: TSSourceFile,
+  textSpan: { start: number; length: number },
+): LSPLocation["range"] {
   const start = sourceFile.getLineAndCharacterOfPosition(textSpan.start);
   const end = sourceFile.getLineAndCharacterOfPosition(textSpan.start + textSpan.length);
 
@@ -810,6 +876,11 @@ function inferFallbackKind(patternSource: string): string {
   if (patternSource.includes("interface")) return "interface";
   if (patternSource.includes("enum")) return "enum";
   if (patternSource.includes("type")) return "type";
-  if (patternSource.includes("func") || patternSource.includes("def") || patternSource.includes("function")) return "function";
+  if (
+    patternSource.includes("func") ||
+    patternSource.includes("def") ||
+    patternSource.includes("function")
+  )
+    return "function";
   return "symbol";
 }

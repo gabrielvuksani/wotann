@@ -183,12 +183,12 @@ export function redactLine(line: string): string {
   // Collapse home directory to ~
   out = out.replaceAll(homedir(), "~");
   // Bearer tokens / x-api-key headers
-  out = out.replace(/Bearer\s+[A-Za-z0-9._\-]+/g, "Bearer <redacted>");
-  out = out.replace(/x-api-key:\s*[A-Za-z0-9._\-]+/gi, "x-api-key: <redacted>");
-  out = out.replace(/x-goog-api-key:\s*[A-Za-z0-9._\-]+/gi, "x-goog-api-key: <redacted>");
+  out = out.replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer <redacted>");
+  out = out.replace(/x-api-key:\s*[A-Za-z0-9._-]+/gi, "x-api-key: <redacted>");
+  out = out.replace(/x-goog-api-key:\s*[A-Za-z0-9._-]+/gi, "x-goog-api-key: <redacted>");
   // API key / token assignments
   out = out.replace(
-    /(API_KEY|TOKEN|SECRET)[=:]\s*["']?[A-Za-z0-9._\-]{16,}["']?/gi,
+    /(API_KEY|TOKEN|SECRET)[=:]\s*["']?[A-Za-z0-9._-]{16,}["']?/gi,
     "$1=<redacted>",
   );
   // JWTs (header.payload.signature)
@@ -198,7 +198,7 @@ export function redactLine(line: string): string {
   out = out.replace(/\bghp_[A-Za-z0-9]{20,}\b/g, "<github-pat>");
   out = out.replace(/\bgithub_pat_[A-Za-z0-9_]{30,}\b/g, "<github-pat>");
   // Email → placeholder
-  out = out.replace(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g, "<user@example.com>");
+  out = out.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "<user@example.com>");
   return out;
 }
 

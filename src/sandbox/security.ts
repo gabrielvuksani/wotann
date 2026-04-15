@@ -187,8 +187,8 @@ const DESTRUCTIVE_PATTERNS: readonly RegExp[] = [
   // Piping to shell (code execution risk)
   /\bcurl\b.*\|\s*(ba)?sh\b/,
   // Fork bomb patterns (from deer-flow research)
-  /\S+\(\)\s*\{[^}]*\|\s*\S+\s*&/,          // :(){ :|:& };:
-  /\bwhile\s+true.*&\s*done/,                 // while true; do bash & done
+  /\S+\(\)\s*\{[^}]*\|\s*\S+\s*&/, // :(){ :|:& };:
+  /\bwhile\s+true.*&\s*done/, // while true; do bash & done
   // Dynamic linker hijack (from deer-flow research)
   /\b(LD_PRELOAD|LD_LIBRARY_PATH)\s*=/,
   // Base64 decode piped to shell execution (from deer-flow research)
@@ -215,7 +215,11 @@ export function analyzeBashSecurity(command: string): readonly SecurityIssue[] {
 
   // IFS manipulation
   if (/\bIFS\s*=/.test(command)) {
-    issues.push({ type: "ifs-manipulation", severity: "high", message: "IFS variable manipulation detected" });
+    issues.push({
+      type: "ifs-manipulation",
+      severity: "high",
+      message: "IFS variable manipulation detected",
+    });
   }
 
   // Null byte injection
@@ -223,24 +227,44 @@ export function analyzeBashSecurity(command: string): readonly SecurityIssue[] {
     issues.push({ type: "null-byte", severity: "high", message: "Null byte injection attempt" });
   }
 
-  // Zero-width space injection
+  // Zero-width space injection. ESLint's no-misleading-character-class
+  // fires on ZWJ (U+200D) because it's used to join emoji; here we want
+  // it as a standalone marker, which is exactly the security-relevant
+  // intent, so disable the rule on this line.
+  // eslint-disable-next-line no-misleading-character-class
   if (/[\u200B\u200C\u200D\uFEFF]/.test(command)) {
-    issues.push({ type: "zero-width", severity: "high", message: "Zero-width character detected in command" });
+    issues.push({
+      type: "zero-width",
+      severity: "high",
+      message: "Zero-width character detected in command",
+    });
   }
 
   // Command substitution in user-controlled strings
   if (/\$\(.*\)/.test(command) || /`.*`/.test(command)) {
-    issues.push({ type: "command-substitution", severity: "medium", message: "Command substitution detected — verify input is safe" });
+    issues.push({
+      type: "command-substitution",
+      severity: "medium",
+      message: "Command substitution detected — verify input is safe",
+    });
   }
 
   // Pipe to eval/sh/bash
   if (/\|\s*(eval|sh|bash)\b/.test(command)) {
-    issues.push({ type: "pipe-to-shell", severity: "high", message: "Piping output to shell execution" });
+    issues.push({
+      type: "pipe-to-shell",
+      severity: "high",
+      message: "Piping output to shell execution",
+    });
   }
 
   // Environment variable exfiltration
   if (/\benv\b|\bprintenv\b|\bexport\b.*SECRET|TOKEN|KEY|PASSWORD/i.test(command)) {
-    issues.push({ type: "env-exfiltration", severity: "medium", message: "Possible environment variable exfiltration" });
+    issues.push({
+      type: "env-exfiltration",
+      severity: "medium",
+      message: "Possible environment variable exfiltration",
+    });
   }
 
   return issues;
@@ -285,11 +309,17 @@ export function sanitizeEnvForSubagent(
   env: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
   const sensitiveKeys = [
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-    "AWS_SECRET_ACCESS_KEY", "AZURE_OPENAI_API_KEY",
-    "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY",
-    "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN",
-    "DISCORD_BOT_TOKEN", "TELEGRAM_BOT_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "AWS_SECRET_ACCESS_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "DEEPGRAM_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "SLACK_BOT_TOKEN",
+    "SLACK_APP_TOKEN",
+    "DISCORD_BOT_TOKEN",
+    "TELEGRAM_BOT_TOKEN",
   ];
 
   const sanitized = { ...env };
@@ -306,10 +336,7 @@ export function sanitizeEnvForSubagent(
 /**
  * Decide whether to allow, prompt, or block based on permission mode and risk.
  */
-export function resolvePermission(
-  mode: PermissionMode,
-  risk: RiskLevel,
-): PermissionDecision {
+export function resolvePermission(mode: PermissionMode, risk: RiskLevel): PermissionDecision {
   const matrix: Record<PermissionMode, Record<RiskLevel, PermissionDecision>> = {
     default: { low: "allow", medium: "deny", high: "deny" },
     acceptEdits: { low: "allow", medium: "allow", high: "deny" },

@@ -35,7 +35,7 @@ export interface ErrorPattern {
  */
 const NORMALIZATION_RULES: readonly RegExp[] = [
   // Strip absolute file paths (preserve basename)
-  /(?:\/[\w.\-]+)+\/([\w.\-]+)/g,
+  /(?:\/[\w.-]+)+\/([\w.-]+)/g,
   // Strip UUIDs (BEFORE line numbers to avoid partial digit matches)
   /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
   // Strip timestamps (ISO, Unix) — before line numbers to avoid partial matches
@@ -252,10 +252,7 @@ function tokenize(text: string): readonly string[] {
     .filter((t) => t.length > 2);
 }
 
-function computeTokenOverlap(
-  tokensA: readonly string[],
-  tokensB: readonly string[],
-): number {
+function computeTokenOverlap(tokensA: readonly string[], tokensB: readonly string[]): number {
   if (tokensA.length === 0 || tokensB.length === 0) return 0;
 
   const setB = new Set(tokensB);

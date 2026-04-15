@@ -35,7 +35,7 @@ export const uploadsMiddleware: Middleware = {
   order: 3,
   before(ctx: MiddlewareContext): MiddlewareContext {
     // Parse @file references in user message and inject file contents
-    const fileRefPattern = /@([\w./\-]+)/g;
+    const fileRefPattern = /@([\w./-]+)/g;
     let enrichedMessage = ctx.userMessage;
     const matches = ctx.userMessage.matchAll(fileRefPattern);
     const injectedFiles: string[] = [];

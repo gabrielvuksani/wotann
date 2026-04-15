@@ -19,19 +19,51 @@ export interface FakeToolDefinition {
 // ── Polymorphic Name Components ─────────────────────────────
 
 const NAME_PREFIXES: readonly string[] = [
-  "internal", "system", "harness", "runtime", "core",
-  "meta", "infra", "platform", "framework", "engine",
+  "internal",
+  "system",
+  "harness",
+  "runtime",
+  "core",
+  "meta",
+  "infra",
+  "platform",
+  "framework",
+  "engine",
 ];
 
 const NAME_ACTIONS: readonly string[] = [
-  "diagnostic", "verify", "heartbeat", "prefetch", "invalidate",
-  "sync", "calibrate", "audit", "reconcile", "probe",
-  "validate", "checkpoint", "snapshot", "compress", "rebalance",
+  "diagnostic",
+  "verify",
+  "heartbeat",
+  "prefetch",
+  "invalidate",
+  "sync",
+  "calibrate",
+  "audit",
+  "reconcile",
+  "probe",
+  "validate",
+  "checkpoint",
+  "snapshot",
+  "compress",
+  "rebalance",
 ];
 
 const NAME_SUFFIXES: readonly string[] = [
-  "v2", "v3", "v4", "beta", "internal", "signal", "hint", "check",
-  "pulse", "scan", "gate", "hook", "tracker", "monitor",
+  "v2",
+  "v3",
+  "v4",
+  "beta",
+  "internal",
+  "signal",
+  "hint",
+  "check",
+  "pulse",
+  "scan",
+  "gate",
+  "hook",
+  "tracker",
+  "monitor",
 ];
 
 const DESCRIPTION_TEMPLATES: readonly string[] = [
@@ -46,27 +78,52 @@ const DESCRIPTION_TEMPLATES: readonly string[] = [
 ];
 
 const DESCRIPTION_ACTIONS: readonly string[] = [
-  "diagnostic check", "compliance verification", "telemetry report",
-  "cache revalidation", "context prefetch", "health check",
-  "performance calibration", "integrity audit", "state reconciliation",
-  "security probe", "configuration validation", "resource checkpoint",
+  "diagnostic check",
+  "compliance verification",
+  "telemetry report",
+  "cache revalidation",
+  "context prefetch",
+  "health check",
+  "performance calibration",
+  "integrity audit",
+  "state reconciliation",
+  "security probe",
+  "configuration validation",
+  "resource checkpoint",
 ];
 
 const DESCRIPTION_TARGETS: readonly string[] = [
-  "subsystems", "components", "middleware", "providers",
-  "execution engine", "memory store", "context manager",
-  "orchestration layer", "sandbox environment", "hook engine",
+  "subsystems",
+  "components",
+  "middleware",
+  "providers",
+  "execution engine",
+  "memory store",
+  "context manager",
+  "orchestration layer",
+  "sandbox environment",
+  "hook engine",
 ];
 
 const SCHEMA_PROPERTY_NAMES: readonly string[] = [
-  "subsystem", "component", "metric", "policy_id", "cache_key",
-  "target", "scope", "level", "threshold", "operation_id",
-  "trace_id", "checkpoint", "partition", "namespace", "priority",
+  "subsystem",
+  "component",
+  "metric",
+  "policy_id",
+  "cache_key",
+  "target",
+  "scope",
+  "level",
+  "threshold",
+  "operation_id",
+  "trace_id",
+  "checkpoint",
+  "partition",
+  "namespace",
+  "priority",
 ];
 
-const SCHEMA_PROPERTY_TYPES: readonly string[] = [
-  "string", "number", "boolean",
-];
+const SCHEMA_PROPERTY_TYPES: readonly string[] = ["string", "number", "boolean"];
 
 /**
  * Generate polymorphic fake tools with randomized names, descriptions,
@@ -116,9 +173,12 @@ function generateRandomToolName(): string {
   // Randomly choose between formats
   const format = Math.floor(Math.random() * 3);
   switch (format) {
-    case 0: return `${prefix}_${action}_${suffix}`;
-    case 1: return `${prefix}_${action}`;
-    default: return `${action}_${suffix}`;
+    case 0:
+      return `${prefix}_${action}_${suffix}`;
+    case 1:
+      return `${prefix}_${action}`;
+    default:
+      return `${action}_${suffix}`;
   }
 }
 
@@ -127,9 +187,7 @@ function generateRandomDescription(): string {
   const action = pickRandom(DESCRIPTION_ACTIONS);
   const target = pickRandom(DESCRIPTION_TARGETS);
 
-  return template
-    .replace("{action}", action)
-    .replace("{target}", target);
+  return template.replace("{action}", action).replace("{target}", target);
 }
 
 function generateRandomSchema(): Record<string, unknown> {
@@ -178,7 +236,11 @@ const ZWC_MAP: Record<string, string> = {
  * Insertion point strategies for watermark placement.
  * Multiple points make stripping harder.
  */
-type InsertionStrategy = "after-first-sentence" | "mid-paragraph" | "before-last-sentence" | "after-newline";
+type InsertionStrategy =
+  | "after-first-sentence"
+  | "mid-paragraph"
+  | "before-last-sentence"
+  | "after-newline";
 
 const INSERTION_STRATEGIES: readonly InsertionStrategy[] = [
   "after-first-sentence",
@@ -196,7 +258,10 @@ export function embedWatermark(text: string, watermarkId: string): string {
   const encoded = encodeWatermark(watermarkId);
 
   // Split the encoded watermark into fragments for multi-point insertion
-  const fragmentCount = Math.min(INSERTION_STRATEGIES.length, Math.max(1, Math.floor(encoded.length / 4)));
+  const fragmentCount = Math.min(
+    INSERTION_STRATEGIES.length,
+    Math.max(1, Math.floor(encoded.length / 4)),
+  );
   const fragments = splitIntoFragments(encoded, fragmentCount);
   const insertionPoints = findInsertionPoints(text, fragmentCount);
 
@@ -217,6 +282,10 @@ export function embedWatermark(text: string, watermarkId: string): string {
  * sequences and decoding them.
  */
 export function extractWatermark(text: string): string | null {
+  // ESLint no-misleading-character-class fires on ZWJ (U+200D) because
+  // it's an emoji joiner — but for watermark detection we want the
+  // single-codepoint semantic, which is the security-relevant intent.
+  // eslint-disable-next-line no-misleading-character-class
   const zwcPattern = /[\u200B\u200C\u200D\uFEFF]+/g;
   const matches: string[] = [];
   let found = zwcPattern.exec(text);
@@ -236,6 +305,7 @@ export function extractWatermark(text: string): string | null {
  * Check if a text contains any zero-width watermarks.
  */
 export function hasWatermark(text: string): boolean {
+  // eslint-disable-next-line no-misleading-character-class
   return /[\u200B\u200C\u200D\uFEFF]/.test(text);
 }
 
@@ -244,6 +314,7 @@ export function hasWatermark(text: string): boolean {
  * Useful for detecting partial stripping attempts.
  */
 export function countWatermarkFragments(text: string): number {
+  // eslint-disable-next-line no-misleading-character-class
   const zwcPattern = /[\u200B\u200C\u200D\uFEFF]+/g;
   let count = 0;
   while (zwcPattern.exec(text) !== null) {
@@ -259,7 +330,10 @@ function encodeWatermark(watermarkId: string): string {
     .split("")
     .map((char) => {
       const code = char.charCodeAt(0).toString(4); // Base-4 encoding
-      return code.split("").map((d) => ZWC_MAP[d] ?? "").join("");
+      return code
+        .split("")
+        .map((d) => ZWC_MAP[d] ?? "")
+        .join("");
     })
     .join("");
 }
@@ -271,7 +345,10 @@ function decodeWatermark(encoded: string): string | null {
   }
 
   try {
-    const digits = encoded.split("").map((c) => reverseMap[c] ?? "").join("");
+    const digits = encoded
+      .split("")
+      .map((c) => reverseMap[c] ?? "")
+      .join("");
 
     // Decode base-4 back to characters
     const chars: string[] = [];
