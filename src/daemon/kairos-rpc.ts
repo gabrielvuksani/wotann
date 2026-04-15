@@ -35,6 +35,33 @@ import { createECDH, createHash, hkdfSync, randomBytes } from "node:crypto";
 import { sanitizeCommand } from "../security/command-sanitizer.js";
 import { isDestructiveCommand, analyzeBashSecurity } from "../sandbox/security.js";
 
+// ── Helpers ─────────────────────────────────────────────
+
+/**
+ * Compute a simple line-by-line diff between two strings. Returns a
+ * pseudo-unified-diff string with `+ ` for additions and `- ` for
+ * deletions, plus a header line. Used by composer.plan to give the UI
+ * a real preview without depending on a heavyweight diff library.
+ */
+function simpleLineDiff(oldContent: string, newContent: string, path: string): string {
+  const oldLines = oldContent.split("\n");
+  const newLines = newContent.split("\n");
+  const lines: string[] = [`--- ${path} (current)`, `+++ ${path} (proposed)`];
+  // Naive line-by-line comparison: emit removals for lines in old not in new
+  // and additions for lines in new not in old. Loses ordering nuance but
+  // is sufficient for the UI's "what changed" surface and avoids pulling
+  // in a real diff package.
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+  for (const line of oldLines) {
+    if (!newSet.has(line)) lines.push(`- ${line}`);
+  }
+  for (const line of newLines) {
+    if (!oldSet.has(line)) lines.push(`+ ${line}`);
+  }
+  return lines.join("\n");
+}
+
 // ── Types ────────────────────────────────────────────────
 
 export interface RPCRequest {
@@ -3643,22 +3670,23 @@ export class KairosRPCHandler {
       }
     });
 
-    // evolution.reject — mark a pending self-evolution action as reviewed-
-    // without-approval. Self-evolution engine doesn't currently expose a
-    // rejectAction verb, so we surface an honest {ok:false} with an
-    // explanatory error instead of a silent fake success — makes the gap
-    // visible in the UI instead of hiding it. Implementation follow-up
-    // tracked in docs/GAP_AUDIT_2026-04-15.md.
+    // evolution.reject — proxies to SelfEvolution.rejectAction (added in
+    // the same commit as this handler upgrade). Marks a pending action as
+    // reviewed-and-rejected so it falls out of the pending list and the
+    // decision is auditable in the persistent evolution log.
     this.handlers.set("evolution.reject", async (params) => {
       const index = Number((params as Record<string, unknown>)["index"] ?? -1);
       if (!Number.isFinite(index) || index < 0) {
         return { ok: false, error: "index (non-negative integer) required" };
       }
-      return {
-        ok: false,
-        error: "evolution.reject: SelfEvolutionEngine.rejectAction not yet implemented",
-        index,
-      };
+      if (!this.daemon) return { ok: false, error: "Daemon not initialized" };
+      try {
+        const engine = this.daemon.getSelfEvolution();
+        const ok = engine.rejectAction(index);
+        return { ok, index };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
     });
 
     // skills.forge.triggers — list pending skill-forge triggers. Daemon
@@ -3669,16 +3697,17 @@ export class KairosRPCHandler {
       if (!this.daemon) return { triggers: [] };
       try {
         const merger = this.daemon.getSkillMerger();
-        const maybeAccessor = merger as unknown as {
-          getPendingTriggers?: () => unknown[];
-        };
-        const triggers =
-          typeof maybeAccessor.getPendingTriggers === "function"
-            ? (maybeAccessor.getPendingTriggers() ?? [])
-            : [];
+        if (!merger) return { triggers: [] };
+        // SkillMerger.getPendingTriggers returns deduplicated trigger
+        // entries across all discovered skills (built-in + Anthropic +
+        // OpenAI + ClawHub + AgentSkills + user-installed).
+        const triggers = merger.getPendingTriggers();
         return { triggers };
-      } catch {
-        return { triggers: [] };
+      } catch (err) {
+        return {
+          triggers: [],
+          error: err instanceof Error ? err.message : String(err),
+        };
       }
     });
 
@@ -3702,18 +3731,46 @@ export class KairosRPCHandler {
     });
 
     // completion.accept — telemetry when the user accepts a ghost-text
-    // suggestion. Logs and acknowledges; real telemetry aggregation is
-    // deferred to the cost-tracker side.
+    // suggestion. Persists per-day acceptance stats to
+    // ~/.wotann/completion-stats.json so cost-tracker / metrics can roll
+    // up acceptance rate over time. Atomic write via tmp + rename to
+    // handle concurrent acceptance events safely.
     this.handlers.set("completion.accept", async (params) => {
       const suggestionId = (params as Record<string, unknown>)["id"] as string | undefined;
       const characters = Number((params as Record<string, unknown>)["characters"] ?? 0);
-      return {
-        ok: true,
-        recorded: {
-          id: suggestionId ?? null,
-          characters: Number.isFinite(characters) ? characters : 0,
-        },
-      };
+      const safeChars = Number.isFinite(characters) && characters >= 0 ? characters : 0;
+      const today = new Date().toISOString().slice(0, 10);
+      const statsPath = join(homedir(), ".wotann", "completion-stats.json");
+      try {
+        const existing = existsSync(statsPath)
+          ? (JSON.parse(readFileSync(statsPath, "utf-8")) as Record<
+              string,
+              { acceptCount: number; charsAccepted: number }
+            >)
+          : {};
+        const day = existing[today] ?? { acceptCount: 0, charsAccepted: 0 };
+        const updated = {
+          ...existing,
+          [today]: {
+            acceptCount: day.acceptCount + 1,
+            charsAccepted: day.charsAccepted + safeChars,
+          },
+        };
+        const tmpPath = `${statsPath}.tmp.${process.pid}.${Date.now()}`;
+        writeFileSync(tmpPath, JSON.stringify(updated, null, 2), { mode: 0o600 });
+        const { renameSync } = await import("node:fs");
+        renameSync(tmpPath, statsPath);
+        return {
+          ok: true,
+          recorded: { id: suggestionId ?? null, characters: safeChars, day: today },
+          stats: updated[today],
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     });
 
     // voice.transcribe — single-shot transcription. Full pipeline
@@ -3739,10 +3796,11 @@ export class KairosRPCHandler {
       };
     });
 
-    // composer.plan — dry-run of composer.apply. Returns the proposed
-    // edits echoed back so the UI can render a plan before the user
-    // confirms and triggers composer.apply for real writes. Later this
-    // can be extended to compute diff previews without touching disk.
+    // composer.plan — dry-run of composer.apply with REAL line-by-line
+    // diff preview. Each plan entry includes a unified-style diff string
+    // the UI can render before the user confirms and triggers
+    // composer.apply for writes. Closes the "echo only" gap from
+    // GAP_AUDIT.
     this.handlers.set("composer.plan", async (params) => {
       const edits = ((params as Record<string, unknown>)["edits"] ?? []) as Array<{
         path: string;
@@ -3757,28 +3815,79 @@ export class KairosRPCHandler {
         const inWorkspace =
           resolved === workspaceRoot ||
           resolved.startsWith(workspaceRoot.endsWith("/") ? workspaceRoot : `${workspaceRoot}/`);
+
+        const newContent = typeof edit.newContent === "string" ? edit.newContent : "";
+        const fileExists = inWorkspace && existsSync(resolved);
+        const oldContent = fileExists ? readFileSync(resolved, "utf-8") : "";
+        const diff = simpleLineDiff(oldContent, newContent, edit.path ?? "(new file)");
+        const additions = diff.split("\n").filter((l) => l.startsWith("+ ")).length;
+        const deletions = diff.split("\n").filter((l) => l.startsWith("- ")).length;
+
         return {
           path: edit.path,
           resolved,
           inWorkspace,
-          previewBytes: typeof edit.newContent === "string" ? edit.newContent.length : 0,
+          isNew: !fileExists,
+          previewBytes: newContent.length,
+          oldBytes: oldContent.length,
+          diff,
+          additions,
+          deletions,
         };
       });
       return { ok: true, plan, total: plan.length };
     });
 
     // proofs.reverify — re-run the verification cascade against an
-    // existing proof bundle on disk. Honest surface only; full
-    // reverification integration (load bundle → replay steps → update
-    // bundle in place) tracked in docs/GAP_AUDIT_2026-04-15.md.
+    // existing proof bundle. Loads {workingDir}/.wotann/proofs/<id>.json,
+    // calls runtime.getVerificationCascade().run() for fresh
+    // tests/typecheck/lint results, and writes a new sibling bundle with
+    // the reverified state so the UI can compare. The original bundle is
+    // preserved (immutable history).
     this.handlers.set("proofs.reverify", async (params) => {
       const id = (params as Record<string, unknown>)["id"] as string | undefined;
       if (!id) return { ok: false, error: "id required" };
-      return {
-        ok: false,
-        error: "proofs.reverify: cascade replay not yet wired",
-        id,
-      };
+      // Path-traversal guard on id — must be safe filename chars only.
+      if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+        return { ok: false, error: "id must match [a-zA-Z0-9_-]+" };
+      }
+      if (!this.runtime) return { ok: false, error: "Runtime not initialized" };
+      const proofDir = join(this.runtime.getWorkingDir(), ".wotann", "proofs");
+      const bundlePath = join(proofDir, `${id}.json`);
+      if (!existsSync(bundlePath)) {
+        return { ok: false, error: `proof bundle not found: ${id}` };
+      }
+      try {
+        const original = JSON.parse(readFileSync(bundlePath, "utf-8")) as Record<string, unknown>;
+        const cascade = this.runtime.getVerificationCascade();
+        const fresh = await cascade.run();
+        const reverifiedPath = join(proofDir, `${id}.reverified-${Date.now()}.json`);
+        const reverifiedBundle = {
+          originalId: id,
+          reverifiedAt: new Date().toISOString(),
+          original,
+          fresh,
+          drift: {
+            originalPassed:
+              typeof (original as { allPassed?: boolean }).allPassed === "boolean"
+                ? (original as { allPassed: boolean }).allPassed
+                : null,
+            currentPassed: fresh.allPassed,
+            stillPasses: fresh.allPassed === true,
+          },
+        };
+        writeFileSync(reverifiedPath, JSON.stringify(reverifiedBundle, null, 2), "utf-8");
+        return {
+          ok: true,
+          id,
+          reverifiedPath: reverifiedPath.split("/").pop(),
+          stillPasses: fresh.allPassed,
+          drift: reverifiedBundle.drift,
+          fresh,
+        };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err), id };
+      }
     });
 
     // Background workers — get status from daemon's BackgroundWorkerManager

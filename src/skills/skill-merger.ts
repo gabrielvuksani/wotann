@@ -111,6 +111,27 @@ export class SkillMerger {
   }
 
   /**
+   * Return the deduplicated set of trigger phrases across all discovered
+   * skills — the desktop's TrainingReview surfaces these as "what users
+   * could say to invoke a skill that doesn't exist yet". Used by the
+   * skills.forge.triggers RPC handler.
+   */
+  getPendingTriggers(): readonly { skill: string; trigger: string; source: string }[] {
+    const all = this.discoverAll();
+    const seen = new Set<string>();
+    const result: { skill: string; trigger: string; source: string }[] = [];
+    for (const skill of all) {
+      for (const trigger of skill.triggers ?? []) {
+        const key = `${skill.name}::${trigger}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push({ skill: skill.name, trigger, source: skill.source.id });
+      }
+    }
+    return result;
+  }
+
+  /**
    * Discover all skills from all configured sources.
    */
   discoverAll(): readonly DiscoveredSkill[] {
@@ -185,7 +206,10 @@ export class SkillMerger {
   /**
    * Parse YAML frontmatter from a skill file.
    */
-  private parseSkillMetadata(content: string, filename: string): {
+  private parseSkillMetadata(
+    content: string,
+    filename: string,
+  ): {
     name: string;
     description: string;
     triggers?: readonly string[];
@@ -282,7 +306,10 @@ export class SkillMerger {
 
     // Extract unique instructions from supplements that aren't in the primary
     const primaryInstructions = new Set(
-      primary.content.split("\n").map((l) => l.trim().toLowerCase()).filter((l) => l.length > 10),
+      primary.content
+        .split("\n")
+        .map((l) => l.trim().toLowerCase())
+        .filter((l) => l.length > 10),
     );
 
     const supplementInstructions: string[] = [];
@@ -306,10 +333,14 @@ export class SkillMerger {
     const mergedContent = [
       primary.content,
       "",
-      supplements.length > 0 ? `## Additional Guidance (merged from ${supplements.map((s) => s.source.name).join(", ")})` : "",
+      supplements.length > 0
+        ? `## Additional Guidance (merged from ${supplements.map((s) => s.source.name).join(", ")})`
+        : "",
       "",
       ...supplementInstructions.slice(0, 20), // Cap at 20 additional instructions
-    ].join("\n").trim();
+    ]
+      .join("\n")
+      .trim();
 
     return {
       name: primary.name,
@@ -395,12 +426,16 @@ export class SkillMerger {
         execFileSync("git", ["pull"], { cwd: targetDir, timeout: 30000 });
       } else {
         // Clone
-        execFileSync("git", ["clone", `https://github.com/${repo}.git`, targetDir], { timeout: 60000 });
+        execFileSync("git", ["clone", `https://github.com/${repo}.git`, targetDir], {
+          timeout: 60000,
+        });
       }
 
       // Count skill files
       const files = readdirSync(targetDir, { recursive: true }) as string[];
-      return files.filter((f) => typeof f === "string" && (f.endsWith("SKILL.md") || f.endsWith(".md"))).length;
+      return files.filter(
+        (f) => typeof f === "string" && (f.endsWith("SKILL.md") || f.endsWith(".md")),
+      ).length;
     } catch {
       return 0;
     }

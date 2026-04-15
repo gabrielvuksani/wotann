@@ -20,19 +20,27 @@ import { homedir } from "node:os";
 
 export interface SelfEvolutionConfig {
   readonly wotannDir: string;
-  readonly autoUpdateUser: boolean;    // Auto-update USER.md from corrections
-  readonly autoUpdateMemory: boolean;  // Auto-update MEMORY.md index
-  readonly autoCreateSkills: boolean;  // Auto-generate skills from patterns
-  readonly requireApproval: boolean;   // Require user approval for IDENTITY/SOUL changes
+  readonly autoUpdateUser: boolean; // Auto-update USER.md from corrections
+  readonly autoUpdateMemory: boolean; // Auto-update MEMORY.md index
+  readonly autoCreateSkills: boolean; // Auto-generate skills from patterns
+  readonly requireApproval: boolean; // Require user approval for IDENTITY/SOUL changes
 }
 
 export interface EvolutionAction {
-  readonly type: "update-user" | "update-identity" | "update-soul" | "update-memory" | "create-skill" | "update-instinct";
+  readonly type:
+    | "update-user"
+    | "update-identity"
+    | "update-soul"
+    | "update-memory"
+    | "create-skill"
+    | "update-instinct";
   readonly file: string;
   readonly description: string;
   readonly content: string;
   readonly timestamp: number;
   readonly approved: boolean;
+  /** True when the action was reviewed and rejected (vs reviewed-and-approved). */
+  readonly rejected?: boolean;
 }
 
 // ── Self-Evolution Engine ────────────────────────────────
@@ -57,7 +65,10 @@ export class SelfEvolutionEngine {
    * Update USER.md with learned preferences from the UserModel.
    * Called after sessions where corrections or preferences were recorded.
    */
-  updateUserProfile(preferences: Record<string, string>, corrections: Array<{ before: string; after: string }>): void {
+  updateUserProfile(
+    preferences: Record<string, string>,
+    corrections: Array<{ before: string; after: string }>,
+  ): void {
     if (!this.config.autoUpdateUser) return;
 
     const userPath = join(this.config.wotannDir, "USER.md");
@@ -74,7 +85,8 @@ export class SelfEvolutionEngine {
 
     if (corrections.length > 0) {
       content += "## Corrections Learned\n";
-      for (const correction of corrections.slice(-20)) { // Keep last 20
+      for (const correction of corrections.slice(-20)) {
+        // Keep last 20
         content += `- "${correction.before}" → "${correction.after}"\n`;
       }
       content += "\n";
@@ -125,7 +137,11 @@ export class SelfEvolutionEngine {
    * Propose an update to IDENTITY.md or SOUL.md.
    * These are critical files — changes are logged but require approval.
    */
-  proposeIdentityUpdate(section: "identity" | "soul", reason: string, proposedContent: string): EvolutionAction {
+  proposeIdentityUpdate(
+    section: "identity" | "soul",
+    reason: string,
+    proposedContent: string,
+  ): EvolutionAction {
     const file = section === "identity" ? "IDENTITY.md" : "SOUL.md";
     const filePath = join(this.config.wotannDir, file);
 
@@ -212,6 +228,43 @@ export class SelfEvolutionEngine {
     writeFileSync(action.file, action.content);
     // Create new action with approved = true (immutable update)
     this.actionLog[index] = { ...action, approved: true };
+    return true;
+  }
+
+  /**
+   * Reject a pending action — removes it from the pending list without
+   * applying. The action stays in the immutable actionLog as approved=true
+   * to mirror the "reviewed and decided not to apply" semantic, with a
+   * distinct rejected:true marker so consumers can distinguish from
+   * actually-applied actions.
+   *
+   * Returns true on success, false if the index is invalid or the action
+   * was already approved (can't reject an already-applied change).
+   */
+  rejectAction(index: number): boolean {
+    const action = this.actionLog[index];
+    if (!action || action.approved) return false;
+
+    // Mark as approved (clears it from pending) AND rejected (records the
+    // decision). Immutable update — no in-place mutation.
+    this.actionLog[index] = {
+      ...action,
+      approved: true,
+      rejected: true,
+    };
+
+    // Append rejection event to the persistent log so the decision is
+    // auditable across daemon restarts.
+    const logPath = join(this.config.wotannDir, "evolution-log.jsonl");
+    try {
+      const { appendFileSync } = require("node:fs") as typeof import("node:fs");
+      appendFileSync(
+        logPath,
+        JSON.stringify({ ...this.actionLog[index], event: "rejected" }) + "\n",
+      );
+    } catch {
+      // Log not critical
+    }
     return true;
   }
 
