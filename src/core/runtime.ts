@@ -519,7 +519,21 @@ export class WotannRuntime {
     this.config = config;
 
     // Initialize hook engine
-    this.hookEngine = new HookEngine(config.hookProfile ?? "standard");
+    // Hook profile resolution: explicit config overrides everything,
+    // then WOTANN_HOOK_PROFILE env var, then "standard" default.
+    // Closes the "no env var, no CLI flag, no runtime switch" gap from
+    // the architectural-thinking section of GAP_AUDIT.
+    const envProfile = process.env["WOTANN_HOOK_PROFILE"];
+    const validProfiles: ReadonlyArray<"minimal" | "standard" | "strict"> = [
+      "minimal",
+      "standard",
+      "strict",
+    ];
+    const profileFromEnv =
+      envProfile && validProfiles.includes(envProfile as "minimal" | "standard" | "strict")
+        ? (envProfile as "minimal" | "standard" | "strict")
+        : undefined;
+    this.hookEngine = new HookEngine(config.hookProfile ?? profileFromEnv ?? "standard");
     registerBuiltinHooks(this.hookEngine);
 
     // Initialize doom loop detector

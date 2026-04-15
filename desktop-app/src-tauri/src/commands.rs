@@ -391,9 +391,12 @@ pub async fn send_message(
         .map_err(|e| format!("send_message: failed to serialize daemon response: {e}"))
 }
 
-/// Legacy send_message body — kept for reference but not called
-#[allow(dead_code, unreachable_code, unused_variables)]
-async fn _send_message_legacy(
+// Legacy send_message body removed — the real send_message above now
+// forwards to the daemon via UDS, so the legacy reference impl is no
+// longer informative. Kept only the comment so future readers know what
+// was here. Original removed for codebase cleanup (commit a683faf+).
+#[allow(dead_code)]
+async fn _removed_send_message_legacy(
     app: AppHandle,
     prompt: String,
     message_id: Option<String>,

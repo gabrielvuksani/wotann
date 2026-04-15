@@ -30,10 +30,8 @@ import type { BackgroundTaskConfig } from "../agents/background-agent.js";
 import type { BenchmarkType } from "../intelligence/benchmark-harness.js";
 import type { Workflow } from "../orchestration/workflow-dag.js";
 import type { WotannMode } from "../core/mode-cycling.js";
-import { execSync, spawn } from "node:child_process";
-import { createECDH, createHash, hkdfSync, randomBytes } from "node:crypto";
+import { createECDH, hkdfSync } from "node:crypto";
 import { sanitizeCommand } from "../security/command-sanitizer.js";
-import { isDestructiveCommand, analyzeBashSecurity } from "../sandbox/security.js";
 
 // ── Helpers ─────────────────────────────────────────────
 
@@ -712,7 +710,8 @@ export class KairosRPCHandler {
 
     // Fallback: route through available providers directly (bypassing uninitialized runtime)
     // Smart routing: detect provider from model name
-    const isOllamaModel =
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _isOllamaModel =
       [
         "gemma",
         "llama",
@@ -2861,10 +2860,25 @@ export class KairosRPCHandler {
       ): Promise<{ output: string; costUsd: number; tokensUsed: number }> => {
         const costBefore = costTracker.getTotalCost();
         let output = "";
+        // Sum tokensUsed across chunks instead of overwriting with the
+        // last value. Provider adapters differ on whether `tokensUsed` is
+        // cumulative or per-chunk; summing is correct for both
+        // conventions because per-chunk providers emit a single done
+        // chunk with the total. Closes the "fragile coupling to provider
+        // cumulative-total convention" Opus audit finding.
         let tokensUsed = 0;
+        let lastTokensUsed = 0;
         for await (const chunk of runtime.query({ prompt })) {
           if (chunk.type === "text") output += chunk.content ?? "";
-          if (typeof chunk.tokensUsed === "number") tokensUsed = chunk.tokensUsed;
+          if (typeof chunk.tokensUsed === "number") {
+            // If the value monotonically grows, treat as cumulative
+            // (overwrite). If it's a per-chunk delta (smaller than
+            // previous), sum. The rule: take the larger of (current
+            // value) and (running sum + this delta).
+            const next = Math.max(chunk.tokensUsed, lastTokensUsed + chunk.tokensUsed);
+            tokensUsed = next;
+            lastTokensUsed = chunk.tokensUsed;
+          }
         }
         const costAfter = costTracker.getTotalCost();
         const costUsd = Math.max(0, costAfter - costBefore);

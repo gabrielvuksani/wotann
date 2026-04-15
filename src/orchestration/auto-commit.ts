@@ -246,12 +246,12 @@ function simulateCommit(
     } catch {
       return {
         success: false,
-        commitHash: "",
+        commitHash: null,
         message: commit.formatted,
         filesCommitted: [],
         timestamp: now,
         error: "not a git repository",
-      } as CommitResult;
+      };
     }
 
     // Stage only the paths we were asked to commit — `git add -A` would
@@ -273,12 +273,12 @@ function simulateCommit(
       const empty = /nothing to commit|no changes added/i.test(stderr);
       return {
         success: false,
-        commitHash: "",
+        commitHash: null,
         message: commit.formatted,
         filesCommitted: [],
         timestamp: now,
         error: empty ? "no changes staged" : `git commit failed: ${stderr.slice(0, 200)}`,
-      } as CommitResult;
+      };
     }
 
     const hashBuf = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
