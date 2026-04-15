@@ -1,3 +1,8 @@
+---
+name: batch-processing
+description: Apply the same operation across many files in parallel with rollback on failure. Use for search-and-replace, migrations, formatting, type additions, and other repetitive multi-file edits.
+---
+
 # Batch File Processing
 
 Use when: applying the same operation to multiple files simultaneously.

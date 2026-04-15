@@ -9,8 +9,28 @@
  * For non-Anthropic providers, the custom AgentBridge in agent-bridge.ts is used.
  */
 
-import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
+// SDK is a peerDependency (S0-6): loaded lazily so `npm install wotann` works
+// for users who never touch Anthropic. Callers see a clean "error" chunk if the
+// package isn't installed.
 import type { StreamChunk } from "../providers/types.js";
+
+type SDKQueryFn = typeof import("@anthropic-ai/claude-agent-sdk").query;
+
+let cachedSDKQuery: SDKQueryFn | null = null;
+let cachedSDKError: string | null = null;
+
+async function loadSDKQuery(): Promise<SDKQueryFn | null> {
+  if (cachedSDKQuery) return cachedSDKQuery;
+  if (cachedSDKError) return null;
+  try {
+    const mod = await import("@anthropic-ai/claude-agent-sdk");
+    cachedSDKQuery = mod.query;
+    return cachedSDKQuery;
+  } catch (err) {
+    cachedSDKError = err instanceof Error ? err.message : "SDK not installed";
+    return null;
+  }
+}
 
 export interface ClaudeSDKQueryOptions {
   readonly prompt: string;
@@ -31,6 +51,17 @@ export async function* queryViaClaudeSDK(
   options: ClaudeSDKQueryOptions,
 ): AsyncGenerator<StreamChunk> {
   const startTime = Date.now();
+  void startTime;
+
+  const sdkQuery = await loadSDKQuery();
+  if (!sdkQuery) {
+    yield {
+      type: "error",
+      content: "Claude Agent SDK is not installed. Run: npm install @anthropic-ai/claude-agent-sdk",
+      provider: "anthropic",
+    };
+    return;
+  }
 
   try {
     const q = sdkQuery({
@@ -142,11 +173,6 @@ export async function* queryViaClaudeSDK(
  * Check if the Claude Agent SDK is available and authenticated.
  */
 export async function isClaudeSDKAvailable(): Promise<boolean> {
-  try {
-    // The SDK requires Claude Code to be installed and authenticated
-    const { query: q } = await import("@anthropic-ai/claude-agent-sdk");
-    return typeof q === "function";
-  } catch {
-    return false;
-  }
+  const q = await loadSDKQuery();
+  return typeof q === "function";
 }

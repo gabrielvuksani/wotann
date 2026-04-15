@@ -1,3 +1,8 @@
+---
+name: cost-intelligence
+description: Monitor and optimize AI API costs across providers. Use when tracking per-query/session/provider cost, enforcing budget alerts, or routing to cost-efficient models.
+---
+
 # Cost Intelligence — Real-Time Budget Management
 
 Use when: monitoring and optimizing AI API costs across multiple providers.

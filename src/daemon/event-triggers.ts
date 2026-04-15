@@ -16,7 +16,7 @@ import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { matchesCronSchedule } from "./kairos.js";
+import { matchesCronSchedule } from "./cron-utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -28,17 +28,17 @@ export type TriggerAction = "spawn_agent" | "run_command";
 export interface TriggerConfig {
   readonly name: string;
   readonly source: TriggerSource;
-  readonly event?: string;       // for github: "pull_request.opened"
-  readonly schedule?: string;    // for cron: "0 8 * * *"
-  readonly watch?: string;       // for filesystem: "src/**/*.ts"
+  readonly event?: string; // for github: "pull_request.opened"
+  readonly schedule?: string; // for cron: "0 8 * * *"
+  readonly watch?: string; // for filesystem: "src/**/*.ts"
   readonly action: TriggerAction;
-  readonly agent?: string;       // agent name from roster
-  readonly command?: string;     // shell command
+  readonly agent?: string; // agent name from roster
+  readonly command?: string; // shell command
   readonly enabled?: boolean;
 }
 
 export interface GithubEvent {
-  readonly type: string;       // "pull_request.opened", "push", etc.
+  readonly type: string; // "pull_request.opened", "push", etc.
   readonly repo: string;
   readonly sender: string;
   readonly payload: Record<string, unknown>;
@@ -97,14 +97,22 @@ function parseTriggersYaml(content: string): readonly TriggerConfig[] {
 
     if (!current) continue;
 
-    if (line.startsWith("source:")) current = { ...current, source: extractValue(line, "source") as TriggerSource };
-    else if (line.startsWith("event:")) current = { ...current, event: extractValue(line, "event") };
-    else if (line.startsWith("schedule:")) current = { ...current, schedule: extractQuotedValue(line, "schedule") };
-    else if (line.startsWith("watch:")) current = { ...current, watch: extractQuotedValue(line, "watch") };
-    else if (line.startsWith("action:")) current = { ...current, action: extractValue(line, "action") as TriggerAction };
-    else if (line.startsWith("agent:")) current = { ...current, agent: extractValue(line, "agent") };
-    else if (line.startsWith("command:")) current = { ...current, command: extractQuotedValue(line, "command") };
-    else if (line.startsWith("enabled:")) current = { ...current, enabled: extractValue(line, "enabled") !== "false" };
+    if (line.startsWith("source:"))
+      current = { ...current, source: extractValue(line, "source") as TriggerSource };
+    else if (line.startsWith("event:"))
+      current = { ...current, event: extractValue(line, "event") };
+    else if (line.startsWith("schedule:"))
+      current = { ...current, schedule: extractQuotedValue(line, "schedule") };
+    else if (line.startsWith("watch:"))
+      current = { ...current, watch: extractQuotedValue(line, "watch") };
+    else if (line.startsWith("action:"))
+      current = { ...current, action: extractValue(line, "action") as TriggerAction };
+    else if (line.startsWith("agent:"))
+      current = { ...current, agent: extractValue(line, "agent") };
+    else if (line.startsWith("command:"))
+      current = { ...current, command: extractQuotedValue(line, "command") };
+    else if (line.startsWith("enabled:"))
+      current = { ...current, enabled: extractValue(line, "enabled") !== "false" };
   }
 
   if (current?.name) {
@@ -117,13 +125,19 @@ function parseTriggersYaml(content: string): readonly TriggerConfig[] {
 function extractValue(line: string, key: string): string {
   const colonIndex = line.indexOf(`${key}:`);
   if (colonIndex < 0) return "";
-  return line.slice(colonIndex + key.length + 1).trim().replace(/^["']|["']$/g, "");
+  return line
+    .slice(colonIndex + key.length + 1)
+    .trim()
+    .replace(/^["']|["']$/g, "");
 }
 
 function extractQuotedValue(line: string, key: string): string {
   const colonIndex = line.indexOf(`${key}:`);
   if (colonIndex < 0) return "";
-  return line.slice(colonIndex + key.length + 1).trim().replace(/^["']|["']$/g, "");
+  return line
+    .slice(colonIndex + key.length + 1)
+    .trim()
+    .replace(/^["']|["']$/g, "");
 }
 
 function finalizeTrigger(partial: Partial<TriggerConfig>): TriggerConfig {
@@ -238,7 +252,7 @@ export class EventTriggerSystem {
 
       // Resolve the directory to watch (use parent dir for glob patterns)
       const dirToWatch = watchPath.includes("*")
-        ? watchPath.split("*")[0]?.replace(/[/\\]+$/, "") ?? workspaceDir
+        ? (watchPath.split("*")[0]?.replace(/[/\\]+$/, "") ?? workspaceDir)
         : watchPath;
 
       if (!existsSync(dirToWatch)) continue;
@@ -375,7 +389,9 @@ export class EventTriggerSystem {
       cwd: process.cwd(),
     });
 
-    return stderr ? `stdout: ${stdout.slice(0, 500)}\nstderr: ${stderr.slice(0, 500)}` : stdout.slice(0, 1000);
+    return stderr
+      ? `stdout: ${stdout.slice(0, 500)}\nstderr: ${stderr.slice(0, 500)}`
+      : stdout.slice(0, 1000);
   }
 
   private recordResult(result: TriggerResult): void {

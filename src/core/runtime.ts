@@ -210,7 +210,7 @@ import {
   type ReplayBudget,
   type ReplayResult,
 } from "../context/context-replay.js";
-import { TurboQuantEngine } from "../context/turboquant.js";
+import { TurboQuantEngine } from "../context/ollama-kv-compression.js";
 import { VirtualContextManager } from "../context/virtual-context.js";
 
 // Intelligence

@@ -58,7 +58,6 @@
   "author": "WOTANN Project",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.90",
     "@anthropic-ai/sdk": "^0.82.0",
     "better-sqlite3": "^12.8.0",
     "chalk": "^5.6.2",
@@ -68,6 +67,14 @@
     "ws": "^8.18.0",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.90"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -85,6 +92,6 @@
     "vitest": "^4.1.2"
   },
   "overrides": {
-    "picomatch": "3.0.1"
+    "picomatch": "3.0.2"
   }
 }

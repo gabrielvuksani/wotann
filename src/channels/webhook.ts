@@ -4,7 +4,7 @@
  * Zero external dependencies — uses Node.js native HTTP server.
  */
 
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { ChannelAdapter, ChannelMessage, ChannelType } from "./gateway.js";
 
@@ -98,10 +98,14 @@ export class WebhookAdapter implements ChannelAdapter {
       return;
     }
 
-    // Validate secret if configured
+    // Validate secret if configured (timing-safe comparison to prevent timing attacks)
     if (this.webhookConfig.secret) {
       const authHeader = req.headers["authorization"] ?? "";
-      if (authHeader !== `Bearer ${this.webhookConfig.secret}`) {
+      const expected = `Bearer ${this.webhookConfig.secret}`;
+      const authBuf = Buffer.from(authHeader);
+      const expectedBuf = Buffer.from(expected);
+      const ok = authBuf.length === expectedBuf.length && timingSafeEqual(authBuf, expectedBuf);
+      if (!ok) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized" }));
         return;

@@ -1,3 +1,8 @@
+---
+name: benchmark-engineering
+description: Run evaluations against SWE-bench, Terminal-Bench, Tau-bench, or custom eval sets. Use when tuning prompts for benchmark performance or tracking quality metrics across releases.
+---
+
 # Benchmark Engineering
 
 Use when: running evaluations, tuning prompts for benchmark performance,

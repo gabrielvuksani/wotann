@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   TurboQuantEngine,
   COMPRESSION_PROFILES,
-} from "../../src/context/turboquant.js";
-import type { TurboQuantConfig, VirtualMessage } from "../../src/context/turboquant.js";
+} from "../../src/context/ollama-kv-compression.js";
+import type { TurboQuantConfig, VirtualMessage } from "../../src/context/ollama-kv-compression.js";
 
 describe("TurboQuant Engine", () => {
   describe("estimateEffectiveContext", () => {

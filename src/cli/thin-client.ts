@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { createConnection } from "node:net";
 import type { Socket } from "node:net";
 
-const IPC_SOCKET_PATH = join(homedir(), ".wotann", "daemon.sock");
+const IPC_SOCKET_PATH = join(homedir(), ".wotann", "kairos.sock");
 
 export interface ThinClientOptions {
   readonly socketPath?: string;

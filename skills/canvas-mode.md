@@ -1,3 +1,8 @@
+---
+name: canvas-mode
+description: Real-time collaborative editing with split-screen working copy, original reference, and chat. Use when the user wants to co-edit code or documents with live diff visibility.
+---
+
 # Canvas Mode — Real-Time Collaborative Editing
 
 Use when: the user wants to collaboratively edit a document or code file with

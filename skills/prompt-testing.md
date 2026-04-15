@@ -1,3 +1,8 @@
+---
+name: prompt-testing
+description: Regression-test prompt changes against golden baselines before shipping. Use when modifying system prompts, skill files, or persona configurations to avoid behavior regressions.
+---
+
 # Prompt Regression Testing
 
 Use when: modifying system prompts, skill files, or persona configurations

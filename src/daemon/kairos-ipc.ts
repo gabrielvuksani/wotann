@@ -122,7 +122,7 @@ export function isIPCRequestAuthorized(
   raw: string,
   tokenPath: string = SESSION_TOKEN_PATH,
 ): boolean {
-  if (process.env["WOTANN_AUTH_BYPASS"] === "1") return true;
+  if (process.env["WOTANN_AUTH_BYPASS"] === "1" && process.env["NODE_ENV"] === "test") return true;
 
   let method = "";
   try {

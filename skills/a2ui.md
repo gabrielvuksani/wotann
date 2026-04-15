@@ -1,3 +1,8 @@
+---
+name: a2ui
+description: Build interactive UI panels, dashboards, and control surfaces that adapt to agent context and workflow state. Use when designing agent-driven user interfaces with state-aware components.
+---
+
 # A2UI — Adaptive Agent User Interface
 
 Use when: building interactive UI panels, dashboards, or control surfaces that adapt

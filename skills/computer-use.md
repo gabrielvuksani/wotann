@@ -1,3 +1,8 @@
+---
+name: computer-use
+description: Automate GUI interactions, visually verify UI changes, and perform tasks requiring real eyes-and-hands on the screen. Use for browser automation, desktop control, and visual verification flows.
+---
+
 # Computer Use — Full Desktop Control
 
 Use when: automating GUI interactions, visual verification of UI changes,

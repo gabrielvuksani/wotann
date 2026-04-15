@@ -125,49 +125,13 @@ export interface ChannelGatewayStartOptions {
 export type HeartbeatScheduleKind = "on-wake" | "periodic" | "nightly";
 
 // ── Cron Schedule Matching ──────────────────────────────────
+// Implementation now lives in ./cron-utils.ts to break a fragile circular
+// value import between this file and ./event-triggers.ts (S0-14).
+// The re-export keeps back-compat for existing callers/tests that import
+// `matchesCronSchedule` from "./kairos".
 
-/**
- * Parse a simple crontab field: number, *, or *\/step
- */
-function matchCronField(field: string, value: number, max: number): boolean {
-  if (field === "*") return true;
-  if (value > max) return false;
-  if (field.includes("/")) {
-    const step = parseInt(field.split("/")[1] ?? "1", 10);
-    return step > 0 && value % step === 0;
-  }
-  if (field.includes(",")) {
-    return field.split(",").some((v) => parseInt(v, 10) === value);
-  }
-  if (field.includes("-")) {
-    const [min, maxVal] = field.split("-").map((v) => parseInt(v, 10));
-    return min !== undefined && maxVal !== undefined && value >= min && value <= maxVal;
-  }
-  return parseInt(field, 10) === value;
-}
-
-/**
- * Check if a cron schedule matches the current time.
- * Format: "minute hour day-of-month month day-of-week"
- */
-export function matchesCronSchedule(schedule: string, now: Date): boolean {
-  const parts = schedule.trim().split(/\s+/);
-  if (parts.length < 5) return false;
-
-  const minute = now.getMinutes();
-  const hour = now.getHours();
-  const dayOfMonth = now.getDate();
-  const month = now.getMonth() + 1;
-  const dayOfWeek = now.getDay();
-
-  return (
-    matchCronField(parts[0]!, minute, 59) &&
-    matchCronField(parts[1]!, hour, 23) &&
-    matchCronField(parts[2]!, dayOfMonth, 31) &&
-    matchCronField(parts[3]!, month, 12) &&
-    matchCronField(parts[4]!, dayOfWeek, 6)
-  );
-}
+import { matchesCronSchedule, matchCronField } from "./cron-utils.js";
+export { matchesCronSchedule, matchCronField };
 
 // ── Daemon Implementation ───────────────────────────────────
 

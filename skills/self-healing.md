@@ -1,3 +1,8 @@
+---
+name: self-healing
+description: Autonomous diagnosis and repair of build, test, and runtime errors. Use when an agent hits a failure it must recover from without human intervention (CI failures, flaky tests, dependency drift).
+---
+
 # Self-Healing Pipeline
 
 Use when: autonomous agent encounters build failures, test failures, or runtime errors

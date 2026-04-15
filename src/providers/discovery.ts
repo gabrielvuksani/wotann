@@ -84,12 +84,12 @@ export const GEMMA4_CAPABILITIES = {
   vision: true,
   audio: true,
   contextWindow: 128_000,
-  codingTier: 1,   // Tier 1 = best for coding
+  codingTier: 1, // Tier 1 = best for coding
   reasoningTier: 1,
   multimodal: true,
   license: "Apache-2.0",
   variants: {
-    "gemma4": { activeParams: "4.5B", ramQ4: "5GB", bestFor: "8GB+ Macs" },
+    gemma4: { activeParams: "4.5B", ramQ4: "5GB", bestFor: "8GB+ Macs" },
     "gemma4:e2b": { activeParams: "2.3B", ramQ4: "1.5GB", bestFor: "mobile/iPhone" },
     "gemma4:26b": { activeParams: "3.8B (MoE)", ramQ4: "18GB", bestFor: "32GB+ Macs" },
     "gemma4:31b": { activeParams: "31B", ramQ4: "20GB", bestFor: "64GB+ Macs" },
@@ -106,19 +106,35 @@ export function isGemma4(modelName: string): boolean {
  * Returns the recommended model identifier, variant, and a human-readable reason.
  */
 export function autoSelectLocalModel(): { model: string; variant: string; reason: string } {
-  const totalRAM = totalmem() / (1024 ** 3); // Convert bytes to GB
+  const totalRAM = totalmem() / 1024 ** 3; // Convert bytes to GB
   const rounded = Math.round(totalRAM);
 
   if (totalRAM >= 32) {
-    return { model: "gemma4:26b", variant: "26b", reason: `${rounded}GB RAM detected — using full 26B model` };
+    return {
+      model: "gemma4:26b",
+      variant: "26b",
+      reason: `${rounded}GB RAM detected — using full 26B model`,
+    };
   }
   if (totalRAM >= 16) {
-    return { model: "gemma4:e4b", variant: "e4b", reason: `${rounded}GB RAM — using efficient 4B model` };
+    return {
+      model: "gemma4:e4b",
+      variant: "e4b",
+      reason: `${rounded}GB RAM — using efficient 4B model`,
+    };
   }
   if (totalRAM >= 8) {
-    return { model: "gemma4:e4b", variant: "e4b", reason: `${rounded}GB RAM — using efficient 4B model (may be slow)` };
+    return {
+      model: "gemma4:e4b",
+      variant: "e4b",
+      reason: `${rounded}GB RAM — using efficient 4B model (may be slow)`,
+    };
   }
-  return { model: "gemma3:2b", variant: "2b", reason: `${rounded}GB RAM — using smallest available model` };
+  return {
+    model: "gemma3:2b",
+    variant: "2b",
+    reason: `${rounded}GB RAM — using smallest available model`,
+  };
 }
 
 export async function discoverOllamaModels(
@@ -142,6 +158,55 @@ export async function discoverOllamaModels(
   }
 }
 
+/**
+ * Check whether Ollama is reachable at the given base URL.
+ * Returns true when the /api/version endpoint responds.
+ */
+export async function isOllamaReachable(
+  baseUrl: string = "http://localhost:11434",
+): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`${baseUrl}/api/version`, { signal: controller.signal });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Auto-pull the default local model when Ollama is reachable but has no models
+ * installed (S0-12). Non-blocking: returns immediately once the pull is
+ * *initiated* so callers don't stall discovery. The chosen variant adapts to
+ * available system RAM via `autoSelectLocalModel()`.
+ *
+ * Side effect: kicks off a streaming POST to /api/pull.
+ */
+export async function autoPullDefaultLocalModel(
+  baseUrl: string = "http://localhost:11434",
+): Promise<{ initiated: boolean; model: string; reason: string }> {
+  const { model, reason } = autoSelectLocalModel();
+  try {
+    // Fire the pull request; don't await the full stream — Ollama will continue
+    // downloading in the background.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(`${baseUrl}/api/pull`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: model, stream: false }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return { initiated: res.ok || res.status === 202, model, reason };
+  } catch {
+    // AbortError is expected — the pull takes minutes, we just wanted to start it.
+    return { initiated: true, model, reason };
+  }
+}
+
 // ── Free Endpoint Discovery ─────────────────────────────────
 
 interface FreeEndpoint {
@@ -152,10 +217,25 @@ interface FreeEndpoint {
 }
 
 const FREE_ENDPOINTS: readonly FreeEndpoint[] = [
-  { name: "Cerebras", model: "llama-4-scout-17b-16e", baseUrl: "https://api.cerebras.ai/v1", rateLimit: "1M tokens/day" },
-  { name: "Groq", model: "llama-3.3-70b-versatile", baseUrl: "https://api.groq.com/openai/v1", rateLimit: "14.4K requests/day" },
+  {
+    name: "Cerebras",
+    model: "llama-4-scout-17b-16e",
+    baseUrl: "https://api.cerebras.ai/v1",
+    rateLimit: "1M tokens/day",
+  },
+  {
+    name: "Groq",
+    model: "llama-3.3-70b-versatile",
+    baseUrl: "https://api.groq.com/openai/v1",
+    rateLimit: "14.4K requests/day",
+  },
   // Google Gemini is now a dedicated provider (see "gemini" in discoverProviders)
-  { name: "OpenRouter Free", model: "meta-llama/llama-4-scout:free", baseUrl: "https://openrouter.ai/api/v1", rateLimit: "200 requests/day" },
+  {
+    name: "OpenRouter Free",
+    model: "meta-llama/llama-4-scout:free",
+    baseUrl: "https://openrouter.ai/api/v1",
+    rateLimit: "200 requests/day",
+  },
 ];
 
 async function discoverFreeEndpoints(): Promise<readonly FreeEndpoint[]> {
@@ -220,16 +300,23 @@ export async function discoverProviders(
   const anthropicOAuthPath = join(homedir(), ".wotann", "anthropic-oauth.json");
   if (!oauthToken && !claudeCliAvailable && existsSync(anthropicOAuthPath)) {
     try {
-      const saved = JSON.parse(readFileSync(anthropicOAuthPath, "utf-8")) as { access_token?: string };
+      const saved = JSON.parse(readFileSync(anthropicOAuthPath, "utf-8")) as {
+        access_token?: string;
+      };
       if (saved.access_token) savedAnthropicOAuth = saved.access_token;
-    } catch { /* ignore corrupt file */ }
+    } catch {
+      /* ignore corrupt file */
+    }
   }
 
   if (oauthToken || claudeCliAvailable || savedAnthropicOAuth) {
     providers.push({
-      provider: "anthropic", method: "oauth-token",
+      provider: "anthropic",
+      method: "oauth-token",
       token: oauthToken ?? savedAnthropicOAuth ?? "claude-cli-session",
-      billing: "subscription", label: "Claude Subscription", priority: 1,
+      billing: "subscription",
+      label: "Claude Subscription",
+      priority: 1,
       transport: "anthropic",
       models: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
     });
@@ -239,9 +326,13 @@ export async function discoverProviders(
   const anthropicKey = process.env["ANTHROPIC_API_KEY"];
   if (anthropicKey) {
     providers.push({
-      provider: "anthropic", method: "api-key", token: anthropicKey,
-      billing: "api-key", label: "Claude API",
-      priority: oauthToken ? 2 : 1, transport: "anthropic",
+      provider: "anthropic",
+      method: "api-key",
+      token: anthropicKey,
+      billing: "api-key",
+      label: "Claude API",
+      priority: oauthToken ? 2 : 1,
+      transport: "anthropic",
       models: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
     });
   }
@@ -250,8 +341,11 @@ export async function discoverProviders(
   const openaiKey = process.env["OPENAI_API_KEY"];
   if (openaiKey) {
     providers.push({
-      provider: "openai", method: "api-key", token: openaiKey,
-      billing: "api-key", transport: "chat_completions",
+      provider: "openai",
+      method: "api-key",
+      token: openaiKey,
+      billing: "api-key",
+      transport: "chat_completions",
       models: ["gpt-5.4", "gpt-5.3-codex", "gpt-4.1"],
     });
   }
@@ -263,15 +357,19 @@ export async function discoverProviders(
   const codexAuth = codexKey ?? readCodexAuth(codexAuthPath);
   if (codexAuth) {
     providers.push({
-      provider: "codex", method: "codex-jwt", token: codexAuth,
-      billing: "subscription", transport: "codex_responses",
+      provider: "codex",
+      method: "codex-jwt",
+      token: codexAuth,
+      billing: "subscription",
+      transport: "codex_responses",
       label: "ChatGPT Codex",
       models: ["codexplan", "codexspark"],
     });
   }
 
   // GITHUB COPILOT: PAT (env vars) or saved token from `wotann login copilot`
-  let ghToken = process.env["COPILOT_GITHUB_TOKEN"] ?? process.env["GH_TOKEN"] ?? process.env["GITHUB_TOKEN"];
+  let ghToken =
+    process.env["COPILOT_GITHUB_TOKEN"] ?? process.env["GH_TOKEN"] ?? process.env["GITHUB_TOKEN"];
   if (!ghToken) {
     // Check for saved token from wotann login
     const savedTokenPath = join(homedir(), ".wotann", "copilot-token.json");
@@ -279,55 +377,101 @@ export async function discoverProviders(
       try {
         const saved = JSON.parse(readFileSync(savedTokenPath, "utf-8")) as { token?: string };
         if (saved.token) ghToken = saved.token;
-      } catch { /* ignore corrupt file */ }
+      } catch {
+        /* ignore corrupt file */
+      }
     }
   }
   if (ghToken) {
     providers.push({
-      provider: "copilot", method: "github-pat", token: ghToken,
-      billing: "subscription", subscription: "copilot-pro",
+      provider: "copilot",
+      method: "github-pat",
+      token: ghToken,
+      billing: "subscription",
+      subscription: "copilot-pro",
       transport: "chat_completions",
       // Dynamic model list — the adapter fetches actual models from the API at runtime.
       // This static list covers GA models across Copilot Free/Pro/Pro+ tiers.
       models: [
-        "gpt-4.1", "gpt-4.1-mini", "gpt-5", "gpt-5.4", "o4-mini", "o3",
-        "claude-sonnet-4", "claude-sonnet-4.6", "claude-opus-4.6", "claude-haiku-4.5",
-        "gemini-2.5-pro", "gemini-2.5-flash", "grok-code-fast-1",
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-5",
+        "gpt-5.4",
+        "o4-mini",
+        "o3",
+        "claude-sonnet-4",
+        "claude-sonnet-4.6",
+        "claude-opus-4.6",
+        "claude-haiku-4.5",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "grok-code-fast-1",
       ],
     });
   }
 
   // OLLAMA: Local (free)
-  const ollamaUrl = process.env["OLLAMA_URL"] ?? process.env["OLLAMA_HOST"] ?? "http://localhost:11434";
+  const ollamaUrl =
+    process.env["OLLAMA_URL"] ?? process.env["OLLAMA_HOST"] ?? "http://localhost:11434";
   const ollamaModels = await discoverOllamaModels(ollamaUrl);
   if (ollamaModels.length > 0) {
     providers.push({
-      provider: "ollama", method: "local", token: ollamaUrl,
-      billing: "free", label: "Ollama Local",
+      provider: "ollama",
+      method: "local",
+      token: ollamaUrl,
+      billing: "free",
+      label: "Ollama Local",
       transport: "chat_completions",
       models: ollamaModels,
     });
+  } else if (
+    process.env["WOTANN_AUTO_PULL_GEMMA"] !== "0" &&
+    (await isOllamaReachable(ollamaUrl))
+  ) {
+    // S0-12: Ollama is running but has no models installed. Kick off a
+    // background pull of the recommended default (sized to host RAM) so the
+    // user's first query doesn't fail with "no models available". Opt out via
+    // WOTANN_AUTO_PULL_GEMMA=0 when running in restricted environments.
+    const pulled = await autoPullDefaultLocalModel(ollamaUrl);
+    if (pulled.initiated) {
+      providers.push({
+        provider: "ollama",
+        method: "local",
+        token: ollamaUrl,
+        billing: "free",
+        label: `Ollama Local (pulling ${pulled.model}…)`,
+        transport: "chat_completions",
+        models: [pulled.model],
+      });
+    }
   }
 
   // GOOGLE GEMINI: AI Studio API (generous free tier: 1.5M tokens/day for Flash)
   const geminiKey = process.env["GEMINI_API_KEY"] ?? process.env["GOOGLE_AI_API_KEY"];
   if (geminiKey) {
     providers.push({
-      provider: "gemini", method: "api-key", token: geminiKey,
-      billing: "free", label: "Google Gemini",
+      provider: "gemini",
+      method: "api-key",
+      token: geminiKey,
+      billing: "free",
+      label: "Google Gemini",
       transport: "chat_completions",
       models: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
     });
   }
 
   // HUGGINGFACE INFERENCE: open-model access via the router API
-  const huggingFaceKey = process.env["HF_TOKEN"] ??
+  const huggingFaceKey =
+    process.env["HF_TOKEN"] ??
     process.env["HUGGINGFACE_API_KEY"] ??
     process.env["HUGGING_FACE_HUB_TOKEN"];
   if (huggingFaceKey) {
     providers.push({
-      provider: "huggingface", method: "api-key", token: huggingFaceKey,
-      billing: "free", label: "HuggingFace Inference",
+      provider: "huggingface",
+      method: "api-key",
+      token: huggingFaceKey,
+      billing: "free",
+      label: "HuggingFace Inference",
       transport: "chat_completions",
       models: [
         "meta-llama/Llama-3.3-70B-Instruct",
@@ -341,8 +485,11 @@ export async function discoverProviders(
   const freeEndpoints = await discoverFreeEndpoints();
   if (freeEndpoints.length > 0) {
     providers.push({
-      provider: "free", method: "api-key", token: "",
-      billing: "free", label: "Free Endpoints",
+      provider: "free",
+      method: "api-key",
+      token: "",
+      billing: "free",
+      label: "Free Endpoints",
       transport: "chat_completions",
       models: freeEndpoints.map((e) => e.model),
     });
@@ -353,8 +500,11 @@ export async function discoverProviders(
   const azureEndpoint = process.env["AZURE_OPENAI_ENDPOINT"];
   if (azureKey && azureEndpoint) {
     providers.push({
-      provider: "azure", method: "api-key", token: azureKey,
-      billing: "api-key", label: "Azure OpenAI",
+      provider: "azure",
+      method: "api-key",
+      token: azureKey,
+      billing: "api-key",
+      label: "Azure OpenAI",
       transport: "chat_completions",
       models: ["gpt-4o", "gpt-4-turbo"],
     });
@@ -365,8 +515,11 @@ export async function discoverProviders(
   const bedrockAccess = process.env["AWS_ACCESS_KEY_ID"];
   if (bedrockRegion && bedrockAccess) {
     providers.push({
-      provider: "bedrock", method: "aws-iam", token: bedrockAccess,
-      billing: "api-key", label: "AWS Bedrock",
+      provider: "bedrock",
+      method: "aws-iam",
+      token: bedrockAccess,
+      billing: "api-key",
+      label: "AWS Bedrock",
       transport: "chat_completions",
       models: ["anthropic.claude-sonnet-4-6", "anthropic.claude-haiku-4-5"],
     });
@@ -377,8 +530,11 @@ export async function discoverProviders(
   const vertexCreds = process.env["GOOGLE_APPLICATION_CREDENTIALS"];
   if (vertexProject && vertexCreds) {
     providers.push({
-      provider: "vertex", method: "gcp-sa", token: vertexCreds,
-      billing: "api-key", label: "Google Vertex AI",
+      provider: "vertex",
+      method: "gcp-sa",
+      token: vertexCreds,
+      billing: "api-key",
+      label: "Google Vertex AI",
       transport: "chat_completions",
       models: ["claude-sonnet-4-6", "gemini-2.5-pro"],
     });
@@ -388,8 +544,11 @@ export async function discoverProviders(
   const mistralKey = process.env["MISTRAL_API_KEY"];
   if (mistralKey) {
     providers.push({
-      provider: "mistral", method: "api-key", token: mistralKey,
-      billing: "api-key", label: "Mistral AI",
+      provider: "mistral",
+      method: "api-key",
+      token: mistralKey,
+      billing: "api-key",
+      label: "Mistral AI",
       transport: "chat_completions",
       models: ["mistral-large-latest", "mistral-medium", "codestral-latest"],
     });
@@ -399,8 +558,11 @@ export async function discoverProviders(
   const deepseekKey = process.env["DEEPSEEK_API_KEY"];
   if (deepseekKey) {
     providers.push({
-      provider: "deepseek", method: "api-key", token: deepseekKey,
-      billing: "api-key", label: "DeepSeek",
+      provider: "deepseek",
+      method: "api-key",
+      token: deepseekKey,
+      billing: "api-key",
+      label: "DeepSeek",
       transport: "chat_completions",
       models: ["deepseek-chat", "deepseek-reasoner"],
     });
@@ -410,8 +572,11 @@ export async function discoverProviders(
   const perplexityKey = process.env["PERPLEXITY_API_KEY"];
   if (perplexityKey) {
     providers.push({
-      provider: "perplexity", method: "api-key", token: perplexityKey,
-      billing: "api-key", label: "Perplexity",
+      provider: "perplexity",
+      method: "api-key",
+      token: perplexityKey,
+      billing: "api-key",
+      label: "Perplexity",
       transport: "chat_completions",
       models: ["sonar", "sonar-pro", "sonar-reasoning-pro"],
     });
@@ -421,8 +586,11 @@ export async function discoverProviders(
   const xaiKey = process.env["XAI_API_KEY"];
   if (xaiKey) {
     providers.push({
-      provider: "xai", method: "api-key", token: xaiKey,
-      billing: "api-key", label: "xAI Grok",
+      provider: "xai",
+      method: "api-key",
+      token: xaiKey,
+      billing: "api-key",
+      label: "xAI Grok",
       transport: "chat_completions",
       models: ["grok-2", "grok-3", "grok-3-mini"],
     });
@@ -432,13 +600,13 @@ export async function discoverProviders(
   const togetherKey = process.env["TOGETHER_API_KEY"];
   if (togetherKey) {
     providers.push({
-      provider: "together", method: "api-key", token: togetherKey,
-      billing: "api-key", label: "Together AI",
+      provider: "together",
+      method: "api-key",
+      token: togetherKey,
+      billing: "api-key",
+      label: "Together AI",
       transport: "chat_completions",
-      models: [
-        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-        "Qwen/Qwen2.5-Coder-32B-Instruct",
-      ],
+      models: ["meta-llama/Llama-3.3-70B-Instruct-Turbo", "Qwen/Qwen2.5-Coder-32B-Instruct"],
     });
   }
 
@@ -446,8 +614,11 @@ export async function discoverProviders(
   const fireworksKey = process.env["FIREWORKS_API_KEY"];
   if (fireworksKey) {
     providers.push({
-      provider: "fireworks", method: "api-key", token: fireworksKey,
-      billing: "api-key", label: "Fireworks AI",
+      provider: "fireworks",
+      method: "api-key",
+      token: fireworksKey,
+      billing: "api-key",
+      label: "Fireworks AI",
       transport: "chat_completions",
       models: [
         "accounts/fireworks/models/llama-v3p3-70b-instruct",
@@ -460,8 +631,11 @@ export async function discoverProviders(
   const sambanovaKey = process.env["SAMBANOVA_API_KEY"];
   if (sambanovaKey) {
     providers.push({
-      provider: "sambanova", method: "api-key", token: sambanovaKey,
-      billing: "api-key", label: "SambaNova",
+      provider: "sambanova",
+      method: "api-key",
+      token: sambanovaKey,
+      billing: "api-key",
+      label: "SambaNova",
       transport: "chat_completions",
       models: ["Meta-Llama-3.3-70B-Instruct", "Qwen2.5-Coder-32B-Instruct"],
     });
@@ -472,7 +646,9 @@ export async function discoverProviders(
 
 // ── Status Formatting ───────────────────────────────────────
 
-export function formatProviderStatus(providers: readonly ProviderAuth[]): readonly ProviderStatus[] {
+export function formatProviderStatus(
+  providers: readonly ProviderAuth[],
+): readonly ProviderStatus[] {
   return providers.map((p) => ({
     provider: p.provider,
     available: true,
@@ -484,20 +660,32 @@ export function formatProviderStatus(providers: readonly ProviderAuth[]): readon
 }
 
 const ALL_PROVIDERS: readonly ProviderName[] = [
-  "anthropic", "openai", "codex", "copilot", "ollama",
-  "gemini", "huggingface", "free", "azure", "bedrock", "vertex",
-  "mistral", "deepseek", "perplexity", "xai", "together", "fireworks", "sambanova",
+  "anthropic",
+  "openai",
+  "codex",
+  "copilot",
+  "ollama",
+  "gemini",
+  "huggingface",
+  "free",
+  "azure",
+  "bedrock",
+  "vertex",
+  "mistral",
+  "deepseek",
+  "perplexity",
+  "xai",
+  "together",
+  "fireworks",
+  "sambanova",
 ];
 
-export function formatFullStatus(
-  detected: readonly ProviderAuth[],
-): readonly ProviderStatus[] {
+export function formatFullStatus(detected: readonly ProviderAuth[]): readonly ProviderStatus[] {
   const detectedNames = new Set(detected.map((p) => p.provider));
 
   const active = formatProviderStatus(detected);
-  const inactive: ProviderStatus[] = ALL_PROVIDERS
-    .filter((name) => !detectedNames.has(name))
-    .map((name) => ({
+  const inactive: ProviderStatus[] = ALL_PROVIDERS.filter((name) => !detectedNames.has(name)).map(
+    (name) => ({
       provider: name,
       available: false,
       authMethod: "api-key" as const,
@@ -505,7 +693,8 @@ export function formatFullStatus(
       models: [],
       label: name,
       error: "Not configured",
-    }));
+    }),
+  );
 
   return [...active, ...inactive];
 }
@@ -557,8 +746,17 @@ function extractVariantTag(model: string): string | null {
 
   // Known variant tags used by OpenRouter and other providers
   const KNOWN_TAGS = new Set([
-    "free", "extended", "fast", "beta", "nitro", "preview",
-    "thinking", "online", "latest", "turbo", "mini",
+    "free",
+    "extended",
+    "fast",
+    "beta",
+    "nitro",
+    "preview",
+    "thinking",
+    "online",
+    "latest",
+    "turbo",
+    "mini",
   ]);
 
   if (KNOWN_TAGS.has(tag.toLowerCase())) return tag;

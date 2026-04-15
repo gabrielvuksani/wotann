@@ -1,3 +1,8 @@
+---
+name: lsp-operations
+description: Semantic code operations via the Language Server Protocol — rename symbols, find references, go-to-definition, extract refactorings. Use when code edits benefit from type-aware, cross-file awareness instead of text matching.
+---
+
 # LSP-Aware Semantic Operations
 
 Use when: refactoring code, renaming symbols, finding references, understanding type hierarchies,

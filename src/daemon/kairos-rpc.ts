@@ -8,7 +8,7 @@
  * This handler routes incoming RPC calls to the WotannRuntime methods.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
@@ -1896,7 +1896,13 @@ export class KairosRPCHandler {
 
       // Return a new config object with the updated key (immutable pattern)
       const updated = { ...config, [key]: value };
-      writeFileSync(configPath, yamlStringify(updated), "utf-8");
+      // Write with 0o600 perms so API keys aren't world-readable.
+      writeFileSync(configPath, yamlStringify(updated), { encoding: "utf-8", mode: 0o600 });
+      try {
+        chmodSync(configPath, 0o600);
+      } catch {
+        // best-effort: on some FS (FAT/exfat) chmod is a no-op
+      }
       return { success: true, key, value };
     });
 

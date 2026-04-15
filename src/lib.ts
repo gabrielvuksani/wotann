@@ -368,7 +368,7 @@ export { InstinctSystem } from "./learning/instinct-system.js";
 export type { Instinct, DreamInstinct } from "./learning/types.js";
 
 // ── Infinite Context ────────────────────────────────────
-export { TurboQuantEngine, type TurboQuantConfig } from "./context/turboquant.js";
+export { TurboQuantEngine, type TurboQuantConfig } from "./context/ollama-kv-compression.js";
 export {
   VirtualContextManager,
   type ActiveContext,

@@ -34,14 +34,15 @@ export const identityPromptModule: PromptModuleEntry = {
     // Load SOUL.md for behavioral principles
     const soul = loadBootstrapFile("SOUL.md");
     if (soul) {
-      const valuesMatch = soul.match(/## Core Values\n([\s\S]*?)(?=\n## |$)/);
+      const valuesMatch = soul.match(/## (?:Core Values|What You Value)\n([\s\S]*?)(?=\n## |$)/);
       if (valuesMatch?.[1]) {
         lines.push("", "Behavioral principles:", valuesMatch[1].trim());
       }
     }
 
     // Capabilities summary
-    const surfaces = ctx.connectedSurfaces.length > 0 ? ctx.connectedSurfaces.join(", ") : "CLI, Desktop";
+    const surfaces =
+      ctx.connectedSurfaces.length > 0 ? ctx.connectedSurfaces.join(", ") : "CLI, Desktop";
     const skillCount = ctx.skillNames?.length ?? 65;
     lines.push(
       "",

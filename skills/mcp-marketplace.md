@@ -1,3 +1,8 @@
+---
+name: mcp-marketplace
+description: Discover, install, audit, and manage MCP (Model Context Protocol) servers from the community registry. Use when adding new tools or capabilities from external MCP sources.
+---
+
 # MCP Marketplace Discovery
 
 Use when: discovering, installing, auditing, or managing MCP (Model Context Protocol) servers
