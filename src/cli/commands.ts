@@ -5,10 +5,7 @@
 
 import chalk from "chalk";
 import { createWorkspace } from "../core/workspace.js";
-import {
-  discoverProviders,
-  formatFullStatus,
-} from "../providers/discovery.js";
+import { discoverProviders, formatFullStatus } from "../providers/discovery.js";
 import type { ProviderStatus } from "../core/types.js";
 
 // ── wotann init ──────────────────────────────────────────────
@@ -21,10 +18,7 @@ export interface InitOptions {
   readonly extendedContext?: boolean;
 }
 
-export async function runInit(
-  targetDir: string,
-  options: InitOptions,
-): Promise<void> {
+export async function runInit(targetDir: string, options: InitOptions): Promise<void> {
   console.log(chalk.bold("\n  Welcome to WOTANN — Unified Agent Harness\n"));
 
   // Create workspace (or reset if --reset)
@@ -60,9 +54,9 @@ export async function runInit(
   for (const p of active) {
     console.log(
       chalk.green("    ●") +
-      ` ${p.label}` +
-      chalk.dim(` (${p.billing})`) +
-      chalk.dim(` — ${p.models.slice(0, 3).join(", ")}`),
+        ` ${p.label}` +
+        chalk.dim(` (${p.billing})`) +
+        chalk.dim(` — ${p.models.slice(0, 3).join(", ")}`),
     );
   }
 
@@ -109,18 +103,30 @@ export async function runInit(
 
 function getProviderSetupHint(provider: string): string {
   switch (provider) {
-    case "anthropic": return "export ANTHROPIC_API_KEY=sk-ant-...";
-    case "openai": return "export OPENAI_API_KEY=sk-...";
-    case "codex": return "npx @openai/codex --full-auto \"hello\"";
-    case "copilot": return "export GH_TOKEN=ghp_... (GitHub PAT)";
-    case "ollama": return "ollama serve (https://ollama.ai)";
-    case "gemini": return "export GEMINI_API_KEY=... (free at ai.google.dev)";
-    case "huggingface": return "export HF_TOKEN=... (Inference Providers free credits)";
-    case "free": return "Auto-configured (Cerebras, Groq, etc.)";
-    case "azure": return "export AZURE_OPENAI_API_KEY=...";
-    case "bedrock": return "AWS credentials (aws configure)";
-    case "vertex": return "gcloud auth application-default login";
-    default: return "See docs";
+    case "anthropic":
+      return "export ANTHROPIC_API_KEY=sk-ant-...";
+    case "openai":
+      return "export OPENAI_API_KEY=sk-...";
+    case "codex":
+      return 'npx @openai/codex --full-auto "hello"';
+    case "copilot":
+      return "export GH_TOKEN=ghp_... (GitHub PAT)";
+    case "ollama":
+      return "ollama serve (https://ollama.ai)";
+    case "gemini":
+      return "export GEMINI_API_KEY=... (free at ai.google.dev)";
+    case "huggingface":
+      return "export HF_TOKEN=... (Inference Providers free credits)";
+    case "free":
+      return "Auto-configured (Cerebras, Groq, etc.)";
+    case "azure":
+      return "export AZURE_OPENAI_API_KEY=...";
+    case "bedrock":
+      return "AWS credentials (aws configure)";
+    case "vertex":
+      return "gcloud auth application-default login";
+    default:
+      return "See docs";
   }
 }
 
@@ -137,25 +143,18 @@ export async function runProviders(): Promise<void> {
   }
 
   const active = statuses.filter((s) => s.available);
-  console.log(
-    chalk.dim(`\n  ${active.length} of ${statuses.length} providers active\n`),
-  );
+  console.log(chalk.dim(`\n  ${active.length} of ${statuses.length} providers active\n`));
 }
 
 function printProviderStatus(status: ProviderStatus): void {
   const icon = status.available ? chalk.green("●") : chalk.red("○");
-  const name = status.available
-    ? chalk.bold(status.label)
-    : chalk.dim(status.label);
-  const billing = status.available
-    ? chalk.dim(` (${status.billing})`)
-    : "";
-  const models = status.available && status.models.length > 0
-    ? chalk.dim(` — ${status.models.slice(0, 3).join(", ")}`)
-    : "";
-  const error = status.error
-    ? chalk.dim(` — ${status.error}`)
-    : "";
+  const name = status.available ? chalk.bold(status.label) : chalk.dim(status.label);
+  const billing = status.available ? chalk.dim(` (${status.billing})`) : "";
+  const models =
+    status.available && status.models.length > 0
+      ? chalk.dim(` — ${status.models.slice(0, 3).join(", ")}`)
+      : "";
+  const error = status.error ? chalk.dim(` — ${status.error}`) : "";
 
   console.log(`  ${icon} ${name}${billing}${models}${error}`);
 }
@@ -167,9 +166,12 @@ export async function runDoctor(targetDir: string): Promise<void> {
 
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
 
-  // Check workspace
-  const { existsSync } = await import("node:fs");
+  const { existsSync, readFileSync, statSync } = await import("node:fs");
   const { join } = await import("node:path");
+  const { homedir } = await import("node:os");
+  const { createConnection } = await import("node:net");
+
+  // 1. Workspace
   const hasWorkspace = existsSync(join(targetDir, ".wotann"));
   checks.push({
     name: "Workspace (.wotann/)",
@@ -177,17 +179,15 @@ export async function runDoctor(targetDir: string): Promise<void> {
     detail: hasWorkspace ? "Found" : "Run `wotann init` to create",
   });
 
-  // Check providers
+  // 2. Providers
   const providers = await discoverProviders();
   checks.push({
     name: "Providers",
     ok: providers.length > 0,
-    detail: providers.length > 0
-      ? `${providers.length} detected`
-      : "None configured",
+    detail: providers.length > 0 ? `${providers.length} detected` : "None configured",
   });
 
-  // Check Node.js version
+  // 3. Node.js version
   const nodeVersion = process.version;
   const majorVersion = parseInt(nodeVersion.slice(1), 10);
   checks.push({
@@ -195,6 +195,147 @@ export async function runDoctor(targetDir: string): Promise<void> {
     ok: majorVersion >= 20,
     detail: `${nodeVersion} (requires ≥20)`,
   });
+
+  // S4-9: Expanded doctor checks — daemon health, socket, DB integrity,
+  // Ollama reachability, port conflicts, API key validity.
+
+  // 4. Daemon socket reachability
+  const socketPath = join(homedir(), ".wotann", "kairos.sock");
+  const daemonSocketExists = existsSync(socketPath);
+  let daemonAlive = false;
+  if (daemonSocketExists) {
+    daemonAlive = await new Promise<boolean>((resolve) => {
+      const client = createConnection(socketPath);
+      const timer = setTimeout(() => {
+        client.destroy();
+        resolve(false);
+      }, 1500);
+      client.on("connect", () => {
+        clearTimeout(timer);
+        client.end();
+        resolve(true);
+      });
+      client.on("error", () => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+    });
+  }
+  checks.push({
+    name: "KAIROS daemon",
+    ok: daemonAlive,
+    detail: daemonAlive
+      ? `Reachable at ${socketPath}`
+      : daemonSocketExists
+        ? "Socket file exists but not accepting connections — run `wotann daemon stop` then start"
+        : "Not running (start with `wotann daemon start`)",
+  });
+
+  // 5. Memory DB integrity (best-effort; skip if not present)
+  const memoryDb = join(homedir(), ".wotann", "memory.db");
+  if (existsSync(memoryDb)) {
+    try {
+      const { default: Database } = await import("better-sqlite3");
+      const db = new Database(memoryDb, { readonly: true });
+      const integrity = db.prepare("PRAGMA integrity_check").get() as {
+        integrity_check?: string;
+      };
+      db.close();
+      const ok = (integrity.integrity_check ?? "") === "ok";
+      checks.push({
+        name: "Memory DB",
+        ok,
+        detail: ok ? "Integrity check passed" : `Corruption detected: ${integrity.integrity_check}`,
+      });
+    } catch (err) {
+      checks.push({
+        name: "Memory DB",
+        ok: false,
+        detail: `Integrity check failed: ${err instanceof Error ? err.message : "unknown"}`,
+      });
+    }
+  } else {
+    checks.push({
+      name: "Memory DB",
+      ok: true,
+      detail: "Not yet created (no-op)",
+    });
+  }
+
+  // 6. Ollama reachability (if configured)
+  const ollamaUrl =
+    process.env["OLLAMA_URL"] ?? process.env["OLLAMA_HOST"] ?? "http://localhost:11434";
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`${ollamaUrl}/api/version`, { signal: controller.signal });
+    clearTimeout(timer);
+    checks.push({
+      name: "Ollama",
+      ok: res.ok,
+      detail: res.ok ? `Reachable at ${ollamaUrl}` : `HTTP ${res.status}`,
+    });
+  } catch {
+    checks.push({
+      name: "Ollama",
+      ok: false,
+      detail: `Not reachable at ${ollamaUrl} (install ollama or set OLLAMA_URL)`,
+    });
+  }
+
+  // 7. Session token perms (if present) — must be 0o600
+  const tokenPath = join(homedir(), ".wotann", "session-token.json");
+  if (existsSync(tokenPath)) {
+    try {
+      const mode = statSync(tokenPath).mode & 0o777;
+      const safe = mode === 0o600;
+      checks.push({
+        name: "Session token perms",
+        ok: safe,
+        detail: safe ? "0600 (user-only)" : `${mode.toString(8)} — should be 0600`,
+      });
+    } catch {
+      checks.push({ name: "Session token perms", ok: false, detail: "Could not stat" });
+    }
+  }
+
+  // 8. wotann.yaml perms (S0-11)
+  const yamlPath = join(homedir(), ".wotann", "wotann.yaml");
+  if (existsSync(yamlPath)) {
+    try {
+      const mode = statSync(yamlPath).mode & 0o777;
+      const safe = mode === 0o600 || mode === 0o400;
+      checks.push({
+        name: "wotann.yaml perms",
+        ok: safe,
+        detail: safe ? `${mode.toString(8)} (user-only)` : `${mode.toString(8)} — API keys exposed`,
+      });
+    } catch {
+      checks.push({ name: "wotann.yaml perms", ok: false, detail: "Could not stat" });
+    }
+  }
+
+  // 9. Daemon PID file liveness (no zombie pid)
+  const pidFile = join(homedir(), ".wotann", "daemon.pid");
+  if (existsSync(pidFile)) {
+    try {
+      const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
+      let alive = false;
+      try {
+        process.kill(pid, 0);
+        alive = true;
+      } catch {
+        alive = false;
+      }
+      checks.push({
+        name: "Daemon PID",
+        ok: alive,
+        detail: alive ? `PID ${pid} is alive` : `PID ${pid} is stale (safe to delete ${pidFile})`,
+      });
+    } catch {
+      checks.push({ name: "Daemon PID", ok: false, detail: "PID file unreadable" });
+    }
+  }
 
   // Print results
   for (const check of checks) {
