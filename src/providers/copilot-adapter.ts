@@ -21,6 +21,7 @@ import type {
   StreamChunk,
   ProviderCapabilities,
 } from "./types.js";
+import { anthropicToOpenAI } from "./format-translator.js";
 
 interface CopilotTokenResponse {
   readonly token: string;
@@ -61,6 +62,17 @@ interface ChatCompletionChunk {
     readonly delta?: {
       readonly content?: string;
       readonly tool_calls?: readonly ChatCompletionToolCallDelta[];
+      /**
+       * Reasoning deltas. Copilot proxies models that emit CoT
+       * (o3 / o4-mini / gpt-5.x / Claude Opus / Gemini 2.5 Pro) —
+       * depending on the upstream vendor the field name is either
+       * `reasoning` or `reasoning_content`. Forwarded as `thinking`
+       * chunks so the rest of the harness (reasoning-sandwich,
+       * capability-augmenter, UI) treats them identically to
+       * Anthropic's `thinking_delta`.
+       */
+      readonly reasoning?: string;
+      readonly reasoning_content?: string;
     };
     readonly finish_reason?: string | null;
   }[];
@@ -248,10 +260,47 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
     const model = options.model ?? "gpt-4.1";
     const url = `${auth.baseUrl}/chat/completions`;
 
-    const messages: Array<{ role: string; content: string }> = [];
+    // OpenAI Chat-Completions-compatible messages array. Previously this
+    // adapter flattened every message to `{role, content: string}` which
+    // broke multi-turn tool loops — OpenAI's schema requires
+    // `tool_call_id` + `name` on tool results and `tool_calls` on
+    // assistant turns. The Opus audit found that any conversation with a
+    // prior tool call would desync on the next turn. Now we route through
+    // the same anthropicToOpenAI translator the openai-compat adapter
+    // uses, preserving tool-call metadata across turns.
+    const messages: Array<Record<string, unknown>> = [];
     if (options.systemPrompt) messages.push({ role: "system", content: options.systemPrompt });
     if (options.messages) {
-      for (const msg of options.messages) messages.push({ role: msg.role, content: msg.content });
+      const translated = anthropicToOpenAI(
+        options.messages
+          .filter((msg) => msg.role !== "system")
+          .map((msg) =>
+            msg.role === "tool"
+              ? {
+                  role: "user" as const,
+                  content: [
+                    {
+                      type: "tool_result" as const,
+                      tool_use_id: msg.toolCallId,
+                      content: msg.content,
+                    },
+                  ],
+                }
+              : {
+                  role: msg.role === "assistant" ? ("assistant" as const) : ("user" as const),
+                  content: msg.content,
+                },
+          ),
+      );
+      for (const msg of translated) {
+        messages.push({
+          role: msg.role,
+          content: msg.content,
+          tool_calls: msg.tool_calls,
+          tool_call_id: msg.tool_call_id,
+          name: msg.name,
+        });
+      }
     }
     messages.push({ role: "user", content: options.prompt });
 
@@ -348,6 +397,15 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
             const delta = chunk.choices?.[0]?.delta;
             const content = delta?.content;
             if (content) yield { type: "text", content, model, provider: "copilot" };
+
+            // Reasoning / thinking — Copilot proxies models that emit CoT
+            // under either `reasoning` or `reasoning_content`. Forward them
+            // as `thinking` chunks so the rest of the harness handles them
+            // uniformly across providers.
+            const thinking = delta?.reasoning ?? delta?.reasoning_content;
+            if (thinking) {
+              yield { type: "thinking", content: thinking, model, provider: "copilot" };
+            }
 
             if (delta?.tool_calls) {
               for (const tc of delta.tool_calls) {

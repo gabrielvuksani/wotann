@@ -194,12 +194,43 @@ export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
             ? "gpt-5.1-codex"
             : inputModel;
 
-    // Build Responses API request body
+    // Build Responses API request body.
+    //
+    // Codex Responses API requires prior tool interactions to be round-
+    // tripped back as `function_call` and `function_call_output` items,
+    // NOT as plain messages. The Opus audit found the prior loop only
+    // wrote `{type: "message", role, content}` so the model lost all
+    // pending call_ids on the second turn and would either retry the
+    // call or desync entirely. Multi-turn tool loops on Codex were
+    // effectively broken.
+    //
+    // Now:
+    // - assistant messages with a toolCallId emit `function_call` items
+    //   carrying call_id + name + arguments (JSON-stringified content)
+    // - tool-role messages emit `function_call_output` items with the
+    //   matching call_id and the tool's output string
+    // - everything else keeps the current `{type: "message", ...}` shape
     const input: Array<Record<string, unknown>> = [];
 
-    // Convert messages to Responses API format
     if (options.messages) {
       for (const msg of options.messages) {
+        if (msg.role === "assistant" && msg.toolCallId) {
+          input.push({
+            type: "function_call",
+            call_id: msg.toolCallId,
+            name: msg.toolName ?? "unknown",
+            arguments: msg.content,
+          });
+          continue;
+        }
+        if (msg.role === "tool") {
+          input.push({
+            type: "function_call_output",
+            call_id: msg.toolCallId ?? "",
+            output: msg.content,
+          });
+          continue;
+        }
         input.push({
           type: "message",
           role: msg.role === "assistant" ? "assistant" : "user",
