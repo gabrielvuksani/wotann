@@ -124,9 +124,7 @@ const TASK_PATTERNS: readonly TaskPattern[] = [
   },
   {
     type: "conversation",
-    indicators: [
-      /\b(explain|tell\s+me|what\s+is|how\s+does|help\s+me\s+understand|chat|talk)\b/i,
-    ],
+    indicators: [/\b(explain|tell\s+me|what\s+is|how\s+does|help\s+me\s+understand|chat|talk)\b/i],
     antiIndicators: [],
     weight: 0.5,
   },
@@ -173,37 +171,50 @@ function assessComplexity(prompt: string, tokenCount: number): TaskComplexity {
 
 type ModelPreferenceList = readonly string[];
 
-/** Models ordered best-to-worst for each task type. */
+/**
+ * Models ordered best-to-worst for each task type.
+ *
+ * Model IDs match the canonical tier names used across the harness
+ * (see src/providers/model-defaults.ts). This list is matched against the
+ * `availableModels` set the caller provides — if the caller's set uses
+ * the same canonical IDs, `includes()` will hit, otherwise routing
+ * gracefully degrades to the last-resort fallback at the bottom of the
+ * function.
+ */
 const MODEL_PREFERENCES: ReadonlyMap<TaskType, ModelPreferenceList> = new Map([
-  ["code-generation", ["claude-opus-4", "claude-sonnet-4", "gpt-4", "gemini-pro", "local"]],
-  ["code-review", ["claude-opus-4", "claude-sonnet-4", "gpt-4", "gemini-pro"]],
-  ["debugging", ["claude-opus-4", "claude-sonnet-4", "gpt-4", "gemini-pro"]],
-  ["research", ["gemini-pro", "gpt-4", "claude-opus-4", "claude-sonnet-4"]],
-  ["creative-writing", ["claude-sonnet-4", "claude-opus-4", "gpt-4", "gemini-pro"]],
-  ["data-analysis", ["gpt-4", "claude-sonnet-4", "gemini-pro", "claude-opus-4"]],
-  ["conversation", ["claude-sonnet-4", "gpt-4", "gemini-pro", "local"]],
-  ["math-reasoning", ["claude-opus-4", "gpt-4", "claude-sonnet-4", "gemini-pro"]],
-  ["document-processing", ["gemini-pro", "claude-sonnet-4", "gpt-4", "local"]],
-  ["image-understanding", ["claude-sonnet-4", "gpt-4", "gemini-pro"]],
+  [
+    "code-generation",
+    ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-5.4", "gpt-5", "gemini-3.1-pro", "gemma4:e4b"],
+  ],
+  ["code-review", ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-5.4", "gemini-3.1-pro"]],
+  ["debugging", ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-5.4", "gemini-3.1-pro"]],
+  ["research", ["gemini-3.1-pro", "gpt-5.4", "claude-opus-4-6", "claude-sonnet-4-6"]],
+  ["creative-writing", ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-5.4", "gemini-3.1-pro"]],
+  ["data-analysis", ["gpt-5.4", "claude-sonnet-4-6", "gemini-3.1-pro", "claude-opus-4-6"]],
+  ["conversation", ["claude-sonnet-4-6", "gpt-5", "gemini-2.5-flash", "gemma4:e4b"]],
+  ["math-reasoning", ["claude-opus-4-6", "gpt-5.4", "claude-sonnet-4-6", "gemini-3.1-pro"]],
+  ["document-processing", ["gemini-3.1-pro", "claude-sonnet-4-6", "gpt-5", "gemma4:e4b"]],
+  ["image-understanding", ["claude-sonnet-4-6", "gpt-5", "gemini-3.1-pro"]],
 ]);
 
-/** Cheap models for trivial tasks -- cost optimization. */
-const TRIVIAL_MODELS: readonly string[] = ["haiku", "local", "claude-sonnet-4"];
+/** Cheap models for trivial tasks -- cost optimization. Sonnet, not Haiku. */
+const TRIVIAL_MODELS: readonly string[] = ["gemma4:e4b", "gemini-2.5-flash", "claude-sonnet-4-6"];
 
-// -- Cost estimates (USD per 1K tokens, rough averages) ----------------------
+// -- Cost estimates (USD per 1M tokens, rough averages) ---------------------
 
 const COST_PER_1K_TOKENS: ReadonlyMap<string, number> = new Map([
-  ["claude-opus-4", 0.075],
-  ["claude-sonnet-4", 0.015],
-  ["gpt-4", 0.03],
-  ["gemini-pro", 0.00125],
-  ["haiku", 0.001],
-  ["local", 0],
+  ["claude-opus-4-6", 0.015], // $15 / 1M input
+  ["claude-sonnet-4-6", 0.003], // $3 / 1M input
+  ["gpt-5.4", 0.01],
+  ["gpt-5", 0.003],
+  ["gemini-3.1-pro", 0.002],
+  ["gemini-2.5-flash", 0.00025],
+  ["gemma4:e4b", 0],
 ]);
 
 function estimateCost(model: string, tokens: number): number {
   const rate = COST_PER_1K_TOKENS.get(model) ?? 0.015;
-  return Math.round((rate * tokens / 1000) * 10000) / 10000;
+  return Math.round(((rate * tokens) / 1000) * 10000) / 10000;
 }
 
 // -- Implementation ----------------------------------------------------------
@@ -226,9 +237,7 @@ export class TaskSemanticRouter {
 
     // Normalize confidence to [0, 1]
     const totalScore = scores.reduce((sum, s) => sum + s.score, 0);
-    const confidence = totalScore > 0
-      ? Math.round((rawConfidence / totalScore) * 100) / 100
-      : 0.5;
+    const confidence = totalScore > 0 ? Math.round((rawConfidence / totalScore) * 100) / 100 : 0.5;
 
     const complexity = assessComplexity(prompt, estimatedTokens);
     const recommendedModel = this.selectModel(type, complexity, availableModels);
@@ -283,8 +292,10 @@ export class TaskSemanticRouter {
       if (model && available.includes(model)) return model;
     }
 
-    // Last resort: return the first available model
-    return available[0] ?? "claude-sonnet-4";
+    // Last resort: return the first available model. Falls to the
+    // Ollama-local neutral default when the caller's availability set is
+    // empty (no vendor bias at the tail of the chain).
+    return available[0] ?? "gemma4:e4b";
   }
 
   /**

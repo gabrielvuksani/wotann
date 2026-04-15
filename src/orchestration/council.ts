@@ -40,7 +40,12 @@ export interface CouncilResult {
   readonly query: string;
   readonly members: readonly CouncilMember[];
   readonly rankings: readonly PeerRanking[];
-  readonly aggregateRanking: readonly { memberId: string; label: string; averageRank: number; voteCount: number }[];
+  readonly aggregateRanking: readonly {
+    memberId: string;
+    label: string;
+    averageRank: number;
+    voteCount: number;
+  }[];
   readonly synthesis: string;
   readonly chairmanModel: string;
   readonly totalTokens: number;
@@ -176,10 +181,13 @@ export async function runCouncil(
   // ── Stage 3: Chairman Synthesis ──
   const chairman = cfg.chairmanProvider
     ? { provider: cfg.chairmanProvider, model: cfg.chairmanModel ?? "auto" }
-    : selected[0] ?? { provider: "anthropic" as ProviderName, model: "auto" };
+    : (selected[0] ?? { provider: "ollama" as ProviderName, model: "auto" });
 
   const rankingSummary = aggregateRanking
-    .map((r, i) => `${i + 1}. ${r.label} (avg rank: ${r.averageRank.toFixed(1)}, votes: ${r.voteCount})`)
+    .map(
+      (r, i) =>
+        `${i + 1}. ${r.label} (avg rank: ${r.averageRank.toFixed(1)}, votes: ${r.voteCount})`,
+    )
     .join("\n");
 
   const synthesisPrompt = [
@@ -194,7 +202,9 @@ export async function runCouncil(
     "",
     "Synthesize the BEST possible answer by combining the strongest elements from all responses.",
     "Correct any errors found during review. Your synthesis should be better than any individual response.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   let synthesis: string;
   let synthesisTokens = 0;
@@ -351,7 +361,8 @@ export class CouncilLeaderboard {
 
       const newParticipations = existing.councilParticipations + 1;
       const newAvgRank = ranking
-        ? (existing.averageRank * existing.councilParticipations + ranking.averageRank) / newParticipations
+        ? (existing.averageRank * existing.councilParticipations + ranking.averageRank) /
+          newParticipations
         : existing.averageRank;
 
       this.entries.set(key, {

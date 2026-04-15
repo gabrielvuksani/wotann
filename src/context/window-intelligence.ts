@@ -154,7 +154,7 @@ export class ContextWindowIntelligence {
   private capabilityNotes?: string;
   private extendedContextEnabled = false;
 
-  constructor(provider: string = "anthropic", model?: string) {
+  constructor(provider: string = "ollama", model?: string) {
     this.provider = provider;
     this.model = model;
     this.totalBudget = 200_000;
@@ -181,13 +181,20 @@ export class ContextWindowIntelligence {
     this.turnCount++;
     this.zones = this.zones.map((z) => {
       switch (z.name) {
-        case "system-prompt": return { ...z, currentTokens: usage.systemPromptTokens };
-        case "active-memory": return { ...z, currentTokens: usage.memoryTokens };
-        case "recent-conversation": return { ...z, currentTokens: usage.recentConversationTokens };
-        case "old-conversation": return { ...z, currentTokens: usage.oldConversationTokens };
-        case "tool-schemas": return { ...z, currentTokens: usage.toolSchemaTokens };
-        case "tool-results": return { ...z, currentTokens: usage.toolResultTokens };
-        default: return z;
+        case "system-prompt":
+          return { ...z, currentTokens: usage.systemPromptTokens };
+        case "active-memory":
+          return { ...z, currentTokens: usage.memoryTokens };
+        case "recent-conversation":
+          return { ...z, currentTokens: usage.recentConversationTokens };
+        case "old-conversation":
+          return { ...z, currentTokens: usage.oldConversationTokens };
+        case "tool-schemas":
+          return { ...z, currentTokens: usage.toolSchemaTokens };
+        case "tool-results":
+          return { ...z, currentTokens: usage.toolResultTokens };
+        default:
+          return z;
       }
     });
   }
@@ -281,7 +288,12 @@ export class ContextWindowIntelligence {
         const oldZone = this.findZone("old-conversation");
         const oldReclaimed = oldZone?.currentTokens ?? 0;
         this.updateZoneTokens("old-conversation", 0);
-        return this.recordCompaction(stage, reclaimed + oldReclaimed, 0, "Aggressively summarized conversation");
+        return this.recordCompaction(
+          stage,
+          reclaimed + oldReclaimed,
+          0,
+          "Aggressively summarized conversation",
+        );
       }
     }
   }
@@ -320,12 +332,13 @@ export class ContextWindowIntelligence {
     const tokensReclaimed = Math.max(0, tokensBefore - tokensAfter);
     const oldZone = this.findZone("old-conversation");
     if (oldZone) {
-      this.updateZoneTokens("old-conversation", Math.max(0, oldZone.currentTokens - tokensReclaimed));
+      this.updateZoneTokens(
+        "old-conversation",
+        Math.max(0, oldZone.currentTokens - tokensReclaimed),
+      );
     }
 
-    const summarized = system
-      ? [system, summaryMessage, ...recent]
-      : [summaryMessage, ...recent];
+    const summarized = system ? [system, summaryMessage, ...recent] : [summaryMessage, ...recent];
 
     return { summarized, tokensReclaimed };
   }
@@ -339,10 +352,7 @@ export class ContextWindowIntelligence {
    * - Drop the middle (usually verbose output)
    * - Preserve lines with error/warning/fail keywords
    */
-  truncateToolOutput(
-    output: string,
-    maxTokens: number = 500,
-  ): TruncatedToolOutput {
+  truncateToolOutput(output: string, maxTokens: number = 500): TruncatedToolOutput {
     const currentTokens = estimateTokenCount(output);
     if (currentTokens <= maxTokens) {
       return {
@@ -455,7 +465,12 @@ export class ContextWindowIntelligence {
   /**
    * Add a custom system reminder.
    */
-  addReminder(trigger: string, content: string, priority: number = 5, maxFrequencyMs: number = 300_000): void {
+  addReminder(
+    trigger: string,
+    content: string,
+    priority: number = 5,
+    maxFrequencyMs: number = 300_000,
+  ): void {
     this.reminders.push({
       trigger,
       content,
@@ -506,20 +521,49 @@ export class ContextWindowIntelligence {
   } {
     switch (taskType) {
       case "coding":
-        return { conversationPercent: 0.50, toolsPercent: 0.20, memoryPercent: 0.15, systemPercent: 0.15 };
+        return {
+          conversationPercent: 0.5,
+          toolsPercent: 0.2,
+          memoryPercent: 0.15,
+          systemPercent: 0.15,
+        };
       case "planning":
-        return { conversationPercent: 0.30, toolsPercent: 0.10, memoryPercent: 0.40, systemPercent: 0.20 };
+        return {
+          conversationPercent: 0.3,
+          toolsPercent: 0.1,
+          memoryPercent: 0.4,
+          systemPercent: 0.2,
+        };
       case "review":
-        return { conversationPercent: 0.60, toolsPercent: 0.15, memoryPercent: 0.10, systemPercent: 0.15 };
+        return {
+          conversationPercent: 0.6,
+          toolsPercent: 0.15,
+          memoryPercent: 0.1,
+          systemPercent: 0.15,
+        };
       case "debugging":
-        return { conversationPercent: 0.40, toolsPercent: 0.25, memoryPercent: 0.20, systemPercent: 0.15 };
+        return {
+          conversationPercent: 0.4,
+          toolsPercent: 0.25,
+          memoryPercent: 0.2,
+          systemPercent: 0.15,
+        };
       default:
-        return { conversationPercent: 0.45, toolsPercent: 0.20, memoryPercent: 0.20, systemPercent: 0.15 };
+        return {
+          conversationPercent: 0.45,
+          toolsPercent: 0.2,
+          memoryPercent: 0.2,
+          systemPercent: 0.15,
+        };
     }
   }
 
-  getTurnCount(): number { return this.turnCount; }
-  getTotalBudget(): number { return this.totalBudget; }
+  getTurnCount(): number {
+    return this.turnCount;
+  }
+  getTotalBudget(): number {
+    return this.totalBudget;
+  }
   getCapabilityProfile(): ContextCapabilityProfile {
     return {
       provider: this.provider,
@@ -548,8 +592,8 @@ export class ContextWindowIntelligence {
   private classifyPressure(usage: number): PressureLevel {
     if (usage >= 0.95) return "critical";
     if (usage >= 0.85) return "red";
-    if (usage >= 0.70) return "orange";
-    if (usage >= 0.50) return "yellow";
+    if (usage >= 0.7) return "orange";
+    if (usage >= 0.5) return "yellow";
     return "green";
   }
 
@@ -563,7 +607,12 @@ export class ContextWindowIntelligence {
     );
   }
 
-  private recordCompaction(stage: CompactionStage, tokensReclaimed: number, itemsRemoved: number, summary: string): CompactionResult {
+  private recordCompaction(
+    stage: CompactionStage,
+    tokensReclaimed: number,
+    itemsRemoved: number,
+    summary: string,
+  ): CompactionResult {
     const result: CompactionResult = { stage, tokensReclaimed, itemsRemoved, summary };
     this.compactionHistory.push(result);
     return result;
@@ -590,22 +639,26 @@ export class ContextWindowIntelligence {
     this.addReminder(
       "verification",
       "REMINDER: After making code changes, verify by running typecheck and tests before claiming completion.",
-      8, 600_000,
+      8,
+      600_000,
     );
     this.addReminder(
       "planning",
       "REMINDER: Plan before coding. Read all relevant files before making changes.",
-      7, 300_000,
+      7,
+      300_000,
     );
     this.addReminder(
       "long-session",
       "REMINDER: This is a long session. Check that your changes are consistent with earlier work.",
-      5, 900_000,
+      5,
+      900_000,
     );
     this.addReminder(
       "high-pressure",
       "REMINDER: Context usage is high. Focus on the most important remaining task.",
-      9, 120_000,
+      9,
+      120_000,
     );
   }
 

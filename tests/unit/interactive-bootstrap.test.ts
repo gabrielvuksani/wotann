@@ -40,7 +40,8 @@ describe("interactive bootstrap", () => {
 
       expect(interactive.providers.length).toBeGreaterThan(10);
       expect(interactive.providers.every((provider) => provider.available === false)).toBe(true);
-      expect(interactive.initialProvider).toBe("anthropic");
+      // No providers configured → neutral Ollama-local default (no vendor bias).
+      expect(interactive.initialProvider).toBe("ollama");
       expect(interactive.runtime.getCurrentMode()).toBe("plan");
       expect(interactive.runtime.getStatus().middlewareLayers).toBeGreaterThanOrEqual(25);
       expect(interactive.runtime.getStatus().hookCount).toBeGreaterThan(10);

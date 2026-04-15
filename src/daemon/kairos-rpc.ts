@@ -2039,8 +2039,8 @@ export class KairosRPCHandler {
       const config: BackgroundTaskConfig = {
         description: (params.description as string) ?? (params.task as string) ?? "",
         fileScope: params.fileScope as readonly string[] | undefined,
-        model: (params.model as string) ?? "claude-sonnet-4-20250514",
-        provider: (params.provider as string) ?? "anthropic",
+        model: (params.model as string) ?? "gemma4:e4b",
+        provider: (params.provider as string) ?? "ollama",
         maxCost: (params.maxCost as number) ?? 1.0,
         maxTurns: (params.maxTurns as number) ?? 50,
         workingDir: (params.workingDir as string) ?? process.cwd(),
@@ -3610,8 +3610,8 @@ export class KairosRPCHandler {
     // Cost prediction — wired to CostOracle
     this.handlers.set("cost.predict", async (params) => {
       const prompt = (params.prompt as string) ?? "";
-      const provider = (params.provider as string) ?? "anthropic";
-      const model = (params.model as string) ?? "claude-sonnet-4-6";
+      const provider = (params.provider as string) ?? "ollama";
+      const model = (params.model as string) ?? "gemma4:e4b";
       if (!this.daemon) return { predictions: [] };
       const oracle = this.daemon.getCostOracle();
       try {

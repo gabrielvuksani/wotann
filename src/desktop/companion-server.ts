@@ -1294,9 +1294,12 @@ export class CompanionServer {
             }
           : null,
 
-        // Active provider and model
-        provider: status?.activeProvider ?? "anthropic",
-        model: "claude-opus-4-6", // Model selection is per-request; default shown here
+        // Active provider. Falls through to Ollama local neutral default
+        // when nothing is configured (no vendor bias). Actual model selection
+        // is per-request at query time — this is just what the phone shows
+        // as the current-session attribution.
+        provider: status?.activeProvider ?? "ollama",
+        model: "gemma4:e4b",
         providers: status?.providers ?? [],
 
         // Desktop identity

@@ -2196,7 +2196,7 @@ program
               try {
                 const verifyResult = await runRuntimeQuery(runtime, {
                   prompt: `Review the following autonomous agent output. Reply with APPROVED if the work is correct and complete, or REJECTED with specific feedback:\n\n${output.slice(0, 4000)}`,
-                  model: "claude-haiku-3.5",
+                  model: "claude-sonnet-4-6",
                 });
                 const text = verifyResult.output ?? "";
                 const approved = /\bAPPROVED\b/i.test(text);

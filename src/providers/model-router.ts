@@ -5,10 +5,7 @@
 
 import type { ProviderName, RoutingDecision, TaskDescriptor, ModelTier } from "../core/types.js";
 import type { ProviderHealthScore } from "./types.js";
-import type {
-  RepoModelOutcome,
-  RepoModelPerformanceRecord,
-} from "./model-performance.js";
+import type { RepoModelOutcome, RepoModelPerformanceRecord } from "./model-performance.js";
 
 interface RouterConfig {
   readonly availableProviders: ReadonlySet<ProviderName>;
@@ -72,36 +69,78 @@ export class ModelRouter {
 
     // Utility tasks → free/local models (saves 40-60% on API costs)
     if (/^(format|convert|count|list|sort|parse|extract|base64|json|csv)\b/i.test(lower)) {
-      return { category: "utility", priority: "latency", requiresVision: false, requiresComputerUse: false, estimatedTokens };
+      return {
+        category: "utility",
+        priority: "latency",
+        requiresVision: false,
+        requiresComputerUse: false,
+        estimatedTokens,
+      };
     }
 
     // Classification tasks → fast/local
     if (/^(classify|categorize|label|tag|detect|which|is this)\b/i.test(lower)) {
-      return { category: "classify", priority: "latency", requiresVision: false, requiresComputerUse: false, estimatedTokens };
+      return {
+        category: "classify",
+        priority: "latency",
+        requiresVision: false,
+        requiresComputerUse: false,
+        estimatedTokens,
+      };
     }
 
     // Planning/architecture → deep frontier (Opus/GPT-5.4)
     if (/\b(plan|architect|design|strategy|refactor|migrate|redesign)\b/i.test(lower)) {
-      return { category: "plan", priority: "quality", requiresVision: false, requiresComputerUse: false, estimatedTokens };
+      return {
+        category: "plan",
+        priority: "quality",
+        requiresVision: false,
+        requiresComputerUse: false,
+        estimatedTokens,
+      };
     }
 
     // Code review → deep frontier
     if (/\b(review|audit|check|evaluate|assess|critique)\b/i.test(lower)) {
-      return { category: "review", priority: "quality", requiresVision: false, requiresComputerUse: false, estimatedTokens };
+      return {
+        category: "review",
+        priority: "quality",
+        requiresVision: false,
+        requiresComputerUse: false,
+        estimatedTokens,
+      };
     }
 
     // Computer use
     if (/\b(screenshot|click|browser|screen|desktop|open app|calendar)\b/i.test(lower)) {
-      return { category: "computer-use", priority: "balanced", requiresVision: true, requiresComputerUse: true, estimatedTokens };
+      return {
+        category: "computer-use",
+        priority: "balanced",
+        requiresVision: true,
+        requiresComputerUse: true,
+        estimatedTokens,
+      };
     }
 
     // Vision tasks
     if (/\b(image|photo|picture|looks like|visual)\b/i.test(lower)) {
-      return { category: "code", priority: "balanced", requiresVision: true, requiresComputerUse: false, estimatedTokens };
+      return {
+        category: "code",
+        priority: "balanced",
+        requiresVision: true,
+        requiresComputerUse: false,
+        estimatedTokens,
+      };
     }
 
     // Default: coding task
-    return { category: "code", priority: "balanced", requiresVision: false, requiresComputerUse: false, estimatedTokens };
+    return {
+      category: "code",
+      priority: "balanced",
+      requiresVision: false,
+      requiresComputerUse: false,
+      estimatedTokens,
+    };
   }
 
   route(task: TaskDescriptor): RoutingDecision {
@@ -200,11 +239,7 @@ export class ModelRouter {
       avgLatencyMs: success
         ? 0.3 * durationMs + 0.7 * existing.avgLatencyMs
         : existing.avgLatencyMs,
-      healthy: success
-        ? true
-        : newRequestCount >= 3
-          ? newErrorRate <= 0.7
-          : existing.healthy,
+      healthy: success ? true : newRequestCount >= 3 ? newErrorRate <= 0.7 : existing.healthy,
       errorRate: newErrorRate,
     };
 
@@ -235,14 +270,25 @@ export class ModelRouter {
       model: outcome.model,
       successes,
       failures,
-      avgLatencyMs: rollingAverage(existing?.avgLatencyMs ?? outcome.durationMs, outcome.durationMs, nextRuns),
-      avgCostUsd: rollingAverage(existing?.avgCostUsd ?? outcome.costUsd, outcome.costUsd, nextRuns),
+      avgLatencyMs: rollingAverage(
+        existing?.avgLatencyMs ?? outcome.durationMs,
+        outcome.durationMs,
+        nextRuns,
+      ),
+      avgCostUsd: rollingAverage(
+        existing?.avgCostUsd ?? outcome.costUsd,
+        outcome.costUsd,
+        nextRuns,
+      ),
       totalTokens: (existing?.totalTokens ?? 0) + outcome.tokensUsed,
       lastUsedAt: new Date().toISOString(),
     });
   }
 
-  getRepoPerformance(provider: ProviderName, model: string): RepoModelPerformanceRecord | undefined {
+  getRepoPerformance(
+    provider: ProviderName,
+    model: string,
+  ): RepoModelPerformanceRecord | undefined {
     return this.repoPerformance.get(`${provider}:${model}`);
   }
 
@@ -298,11 +344,13 @@ export class ModelRouter {
       };
     }
 
-    // Fallback: first available provider with any model
+    // Fallback: first available provider with any model. Falls to Ollama
+    // local as neutral no-vendor-bias default when the availability set is
+    // empty (can only happen pre-discovery).
     const firstAvailable = [...this.config.availableProviders][0];
     return {
       tier: 2,
-      provider: firstAvailable ?? "anthropic",
+      provider: firstAvailable ?? "ollama",
       model: "auto",
       cost: 0,
     };
@@ -326,7 +374,7 @@ export class ModelRouter {
   private scoreCandidate(candidate: ModelCandidate, index: number): number {
     const health = this.healthScores.get(candidate.provider);
     const repoRecord = this.repoPerformance.get(`${candidate.provider}:${candidate.model}`);
-    const requestPenalty = health ? health.errorRate * 25 + (health.avgLatencyMs / 5000) : 0;
+    const requestPenalty = health ? health.errorRate * 25 + health.avgLatencyMs / 5000 : 0;
 
     if (!repoRecord) {
       return index * 4 + 5 + requestPenalty;
@@ -337,9 +385,9 @@ export class ModelRouter {
     const repoPenalty =
       index * 4 +
       (1 - successRate) * 8 +
-      (repoRecord.avgLatencyMs / 5000) +
-      (repoRecord.avgCostUsd * 20) -
-      (successRate * 8) -
+      repoRecord.avgLatencyMs / 5000 +
+      repoRecord.avgCostUsd * 20 -
+      successRate * 8 -
       Math.min(4, runs / 2);
 
     return requestPenalty + repoPenalty;
@@ -348,5 +396,5 @@ export class ModelRouter {
 
 function rollingAverage(previous: number, nextValue: number, runCount: number): number {
   if (runCount <= 1) return nextValue;
-  return ((previous * (runCount - 1)) + nextValue) / runCount;
+  return (previous * (runCount - 1) + nextValue) / runCount;
 }

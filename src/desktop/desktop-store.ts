@@ -76,15 +76,13 @@ export type DesktopStore = DesktopStoreState & DesktopStoreActions;
 
 // -- Initial State Factory --------------------------------------------------
 
-export function createInitialState(
-  overrides: Partial<DesktopStoreState> = {},
-): DesktopStoreState {
+export function createInitialState(overrides: Partial<DesktopStoreState> = {}): DesktopStoreState {
   return {
     conversations: [],
     activeConversationId: null,
     isStreaming: false,
-    provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
+    provider: "ollama",
+    model: "gemma4:e4b",
     mode: "default",
     contextPercent: 0,
     sessionCost: 0,
@@ -103,7 +101,11 @@ export type StoreAction =
   | { readonly type: "SET_ACTIVE_CONVERSATION"; readonly id: string }
   | { readonly type: "ADD_CONVERSATION"; readonly conversation: ConversationSummary }
   | { readonly type: "REMOVE_CONVERSATION"; readonly id: string }
-  | { readonly type: "UPDATE_CONVERSATION"; readonly id: string; readonly updates: Partial<ConversationSummary> }
+  | {
+      readonly type: "UPDATE_CONVERSATION";
+      readonly id: string;
+      readonly updates: Partial<ConversationSummary>;
+    }
   | { readonly type: "SET_PROVIDER"; readonly provider: string; readonly model: string }
   | { readonly type: "SET_MODE"; readonly mode: string }
   | { readonly type: "UPDATE_COST"; readonly session: number; readonly today: number }
@@ -118,10 +120,7 @@ export type StoreAction =
  * Pure-function state reducer for all store actions.
  * Returns a new state object -- never mutates the input.
  */
-export function applyStoreAction(
-  state: DesktopStoreState,
-  action: StoreAction,
-): DesktopStoreState {
+export function applyStoreAction(state: DesktopStoreState, action: StoreAction): DesktopStoreState {
   switch (action.type) {
     case "SET_ACTIVE_CONVERSATION":
       return { ...state, activeConversationId: action.id };
@@ -135,9 +134,10 @@ export function applyStoreAction(
 
     case "REMOVE_CONVERSATION": {
       const filtered = state.conversations.filter((c) => c.id !== action.id);
-      const newActive = state.activeConversationId === action.id
-        ? (filtered[0]?.id ?? null)
-        : state.activeConversationId;
+      const newActive =
+        state.activeConversationId === action.id
+          ? (filtered[0]?.id ?? null)
+          : state.activeConversationId;
       return { ...state, conversations: filtered, activeConversationId: newActive };
     }
 

@@ -49,8 +49,8 @@ export class AgentBridge {
     this.router = config.router;
     this.rateLimiter = config.rateLimiter;
     this.accountPool = config.accountPool ?? null;
-    this.defaultModel = config.defaultModel ?? "claude-sonnet-4-6";
-    this.defaultProvider = config.defaultProvider ?? "anthropic";
+    this.defaultModel = config.defaultModel ?? "gemma4:e4b";
+    this.defaultProvider = config.defaultProvider ?? ("ollama" as ProviderName);
   }
 
   /**

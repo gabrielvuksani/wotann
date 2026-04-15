@@ -12,7 +12,10 @@ export interface InteractiveBootstrapOptions {
 
 export interface InteractiveBootstrapDependencies {
   readonly discoverProvidersFn?: () => Promise<readonly ProviderAuth[]>;
-  readonly createRuntimeFn?: (workingDir: string, initialMode?: WotannMode) => Promise<WotannRuntime>;
+  readonly createRuntimeFn?: (
+    workingDir: string,
+    initialMode?: WotannMode,
+  ) => Promise<WotannRuntime>;
 }
 
 export interface InteractiveBootstrapResult {
@@ -42,8 +45,8 @@ export async function bootstrapInteractiveSession(
 
   return {
     providers,
-    initialModel: options.model ?? activeProvider?.models[0] ?? "claude-sonnet-4-6",
-    initialProvider: (options.provider ?? activeProvider?.provider ?? "anthropic") as ProviderName,
+    initialModel: options.model ?? activeProvider?.models[0] ?? "gemma4:e4b",
+    initialProvider: (options.provider ?? activeProvider?.provider ?? "ollama") as ProviderName,
     runtime,
   };
 }
@@ -66,7 +69,5 @@ function normalizeMode(mode?: string): WotannMode | undefined {
     "exploit",
   ];
 
-  return supportedModes.includes(mode as WotannMode)
-    ? mode as WotannMode
-    : undefined;
+  return supportedModes.includes(mode as WotannMode) ? (mode as WotannMode) : undefined;
 }

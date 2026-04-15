@@ -124,7 +124,7 @@ export async function runArchitectEditor(
   });
   const architectOutput = architectResult.output;
   const architectTokens = architectResult.tokensUsed;
-  const architectProvider = architectResult.provider ?? config?.architectProvider ?? "anthropic";
+  const architectProvider = architectResult.provider ?? config?.architectProvider ?? "ollama";
 
   // ── Phase 2: Editor ──
   const editorPrompt = [
@@ -148,7 +148,7 @@ export async function runArchitectEditor(
   });
   const editorOutput = editorResult.output;
   const editorTokens = editorResult.tokensUsed;
-  const editorProvider = editorResult.provider ?? config?.editorProvider ?? "anthropic";
+  const editorProvider = editorResult.provider ?? config?.editorProvider ?? "ollama";
 
   return {
     architectOutput,
@@ -163,11 +163,15 @@ export async function runArchitectEditor(
 /**
  * Auto-select the best model pair based on available providers.
  */
-export function selectModelPair(
-  availableProviders: ReadonlySet<ProviderName>,
-): { architect: { provider: ProviderName; model: string }; editor: { provider: ProviderName; model: string } } | null {
+export function selectModelPair(availableProviders: ReadonlySet<ProviderName>): {
+  architect: { provider: ProviderName; model: string };
+  editor: { provider: ProviderName; model: string };
+} | null {
   for (const pair of MODEL_PAIRS) {
-    if (availableProviders.has(pair.architect.provider) && availableProviders.has(pair.editor.provider)) {
+    if (
+      availableProviders.has(pair.architect.provider) &&
+      availableProviders.has(pair.editor.provider)
+    ) {
       return { architect: pair.architect, editor: pair.editor };
     }
   }
