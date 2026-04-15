@@ -213,6 +213,11 @@ pub fn run() {
             // Command palette wiring: project scan + init
             commands::scan_project_hotspots,
             commands::initialize_project,
+            // Transport-audit fills: previously-missing Tauri commands
+            commands::open_folder_dialog,
+            commands::predict_cost,
+            commands::proofs_list,
+            commands::proofs_reverify,
         ])
         .setup(|app| {
             // Get the main window — graceful fallback if not yet available

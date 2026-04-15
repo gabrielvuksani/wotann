@@ -3396,3 +3396,73 @@ pub async fn file_exists(path: String) -> Result<bool, String> {
     };
     Ok(std::path::Path::new(&expanded).exists())
 }
+
+// ── Transport-audit fills: previously-missing Tauri commands ─────────────
+//
+// The Opus adversarial audit (2026-04-15) mapped every invoke(...) call
+// site in the React frontend against the registered Tauri commands in
+// lib.rs and found four names the frontend calls that had no matching
+// #[tauri::command] function. Each invocation failed with "command not
+// found" — ProjectList's folder picker, PromptInput's cost preview, and
+// the ProofViewer list/reverify actions all silently errored. These thin
+// proxies make the UI paths functional; the real work lives in the
+// daemon RPCs they forward to.
+
+/// Open a native folder-picker dialog and return the selected path.
+/// Wires ProjectList's "add folder" button (ProjectList.tsx:107).
+#[tauri::command]
+pub async fn open_folder_dialog(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    // The dialog plugin's `pick_folder` is blocking. Run it on a
+    // background thread so the Tauri runtime stays responsive.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |path| {
+        let result = path.and_then(|p| p.into_path().ok().and_then(|pb| pb.to_str().map(String::from)));
+        let _ = tx.send(result);
+    });
+    rx.await.map_err(|e| format!("open_folder_dialog: {e}"))
+}
+
+/// Predict query cost before sending — proxies to daemon `cost.predict` RPC.
+/// Wires PromptInput's cost preview (PromptInput.tsx:399).
+#[tauri::command]
+pub fn predict_cost(
+    prompt: String,
+    provider: Option<String>,
+    model: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let mut params = serde_json::Map::new();
+    params.insert("prompt".into(), serde_json::Value::String(prompt));
+    if let Some(p) = provider {
+        params.insert("provider".into(), serde_json::Value::String(p));
+    }
+    if let Some(m) = model {
+        params.insert("model".into(), serde_json::Value::String(m));
+    }
+    client
+        .call("cost.predict", serde_json::Value::Object(params))
+        .map_err(|e| e.to_string())
+}
+
+/// List completed proof bundles — proxies to daemon `proofs.list` RPC.
+/// Wires ProofViewer's list fetch (ProofViewer.tsx:81).
+#[tauri::command]
+pub fn proofs_list() -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call("proofs.list", serde_json::json!({}))
+        .map_err(|e| e.to_string())
+}
+
+/// Re-run the verification cascade against an existing proof bundle.
+/// Wires ProofViewer's reverify action (ProofViewer.tsx:109). The daemon-
+/// side handler is an honest stub for now (see docs/GAP_AUDIT); this thin
+/// proxy still lights up the UI path so the error surfaces in the app.
+#[tauri::command]
+pub fn proofs_reverify(id: String) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call("proofs.reverify", serde_json::json!({ "id": id }))
+        .map_err(|e| e.to_string())
+}
