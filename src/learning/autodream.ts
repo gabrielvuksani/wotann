@@ -29,16 +29,32 @@ export interface DreamResult {
 
 /**
  * Check if autoDream should run (three-gate trigger).
+ *
+ * S2-8: idle threshold lowered from 30 min → 10 min, and dream cool-off
+ * reduced from 4h → 2h. The stricter gates meant the learning stack
+ * essentially never fired on real user sessions (people rarely leave a
+ * TUI/desktop idle for 30 consecutive minutes while keeping it open).
+ * Lowering the gates lets the consolidation pipeline actually run and
+ * produce material for the next session.
+ *
+ * Override via env vars:
+ *   WOTANN_DREAM_IDLE_MIN  — idle minutes required
+ *   WOTANN_DREAM_COOLOFF_H — hours since last dream required
+ *   WOTANN_DREAM_MIN_OBS   — minimum new observations
  */
 export function shouldDream(gates: DreamTriggerGates): boolean {
-  // Gate 1: System is idle (>30 min since last interaction)
-  if (gates.idleMinutes < 30) return false;
+  const idleThreshold = Number(process.env["WOTANN_DREAM_IDLE_MIN"] ?? 10);
+  const cooloffHours = Number(process.env["WOTANN_DREAM_COOLOFF_H"] ?? 2);
+  const minObservations = Number(process.env["WOTANN_DREAM_MIN_OBS"] ?? 5);
+
+  // Gate 1: System is idle for long enough (default 10 min)
+  if (gates.idleMinutes < idleThreshold) return false;
 
   // Gate 2: Enough new observations to consolidate
-  if (gates.newObservations < 5) return false;
+  if (gates.newObservations < minObservations) return false;
 
-  // Gate 3: Haven't dreamed too recently
-  if (gates.lastDreamHoursAgo < 4) return false;
+  // Gate 3: Haven't dreamed too recently (default 2h)
+  if (gates.lastDreamHoursAgo < cooloffHours) return false;
 
   return true;
 }
@@ -46,9 +62,10 @@ export function shouldDream(gates: DreamTriggerGates): boolean {
 /**
  * Correction capture: detect corrections AND confirmations.
  */
-export function classifyFeedback(
-  message: string,
-): { type: "correction" | "confirmation" | "neutral"; confidence: number } {
+export function classifyFeedback(message: string): {
+  type: "correction" | "confirmation" | "neutral";
+  confidence: number;
+} {
   const correctionPatterns = [
     /\bno,?\s*(that's|you|it's)\b/i,
     /\bnot what I\b/i,
@@ -101,10 +118,7 @@ export function decayInstinct(instinct: Instinct, hoursSinceLastFire: number): I
 /**
  * Promote a correction to a gotcha entry.
  */
-export function correctionToGotcha(
-  correction: string,
-  context: string,
-): string {
+export function correctionToGotcha(correction: string, context: string): string {
   return [
     `## Gotcha: ${correction.slice(0, 80)}`,
     "",
@@ -131,11 +145,18 @@ export function phaseRecall(
   observations: readonly string[],
   corrections: readonly { message: string; context: string }[],
   confirmations: readonly { message: string; context: string }[],
-): { patterns: readonly string[]; corrections: readonly string[]; confirmations: readonly string[] } {
+): {
+  patterns: readonly string[];
+  corrections: readonly string[];
+  confirmations: readonly string[];
+} {
   // Extract unique patterns from observations
   const patternCandidates = new Map<string, number>();
   for (const obs of observations) {
-    const words = obs.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+    const words = obs
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 4);
     for (const word of words) {
       patternCandidates.set(word, (patternCandidates.get(word) ?? 0) + 1);
     }
@@ -341,7 +362,9 @@ export function runDreamPipelineWithPersistence(
   const result = runDreamPipeline(observations, corrections, confirmations, existingInstincts);
 
   const lessonsPath = join(wotannDir, "LESSONS.md");
-  const consolidated = phaseConsolidate(phaseAnalyze(phaseRecall(observations, corrections, confirmations)));
+  const consolidated = phaseConsolidate(
+    phaseAnalyze(phaseRecall(observations, corrections, confirmations)),
+  );
   const existingGotchas = loadGotchas(lessonsPath);
   const merged = persistGotchas(lessonsPath, consolidated.gotchas, existingGotchas);
   const newCount = merged.length - existingGotchas.length;

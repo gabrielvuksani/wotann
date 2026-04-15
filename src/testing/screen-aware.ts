@@ -29,7 +29,12 @@ export interface VisualTestCase {
 }
 
 export interface VisualAssertion {
-  readonly type: "element-visible" | "text-present" | "no-error" | "screenshot-diff" | "color-check";
+  readonly type:
+    | "element-visible"
+    | "text-present"
+    | "no-error"
+    | "screenshot-diff"
+    | "color-check";
   readonly value: string;
   readonly tolerance?: number;
 }
@@ -130,9 +135,10 @@ function evaluateVisualAssertion(
     case "no-error":
       return {
         type: "no-error",
-        passed: !textContent.toLowerCase().includes("error") &&
-                !textContent.toLowerCase().includes("exception") &&
-                !textContent.toLowerCase().includes("crash"),
+        passed:
+          !textContent.toLowerCase().includes("error") &&
+          !textContent.toLowerCase().includes("exception") &&
+          !textContent.toLowerCase().includes("crash"),
         message: textContent.toLowerCase().includes("error")
           ? "Error detected on screen"
           : "No errors visible",

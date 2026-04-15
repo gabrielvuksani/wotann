@@ -17,16 +17,18 @@ describe("autoDream Learning Pipeline", () => {
       expect(shouldDream({ idleMinutes: 45, newObservations: 10, lastDreamHoursAgo: 6 })).toBe(true);
     });
 
-    it("blocks when not idle enough", () => {
-      expect(shouldDream({ idleMinutes: 10, newObservations: 10, lastDreamHoursAgo: 6 })).toBe(false);
+    // S2-8: idle threshold lowered 30min → 10min, dream cool-off 4h → 2h.
+    // Tests use values below each new threshold so blocking still applies.
+    it("blocks when not idle enough (<10 min)", () => {
+      expect(shouldDream({ idleMinutes: 5, newObservations: 10, lastDreamHoursAgo: 6 })).toBe(false);
     });
 
     it("blocks when not enough observations", () => {
       expect(shouldDream({ idleMinutes: 45, newObservations: 2, lastDreamHoursAgo: 6 })).toBe(false);
     });
 
-    it("blocks when dreamed too recently", () => {
-      expect(shouldDream({ idleMinutes: 45, newObservations: 10, lastDreamHoursAgo: 2 })).toBe(false);
+    it("blocks when dreamed too recently (<2 h)", () => {
+      expect(shouldDream({ idleMinutes: 45, newObservations: 10, lastDreamHoursAgo: 1 })).toBe(false);
     });
   });
 

@@ -17,9 +17,11 @@ describe("autoDream & Learning", () => {
       })).toBe(true);
     });
 
-    it("blocks when system not idle enough", () => {
+    // S2-8: idle threshold lowered 30min → 10min; use 5 min here so
+    // blocking still applies.
+    it("blocks when system not idle enough (<10 min)", () => {
       expect(shouldDream({
-        idleMinutes: 10,
+        idleMinutes: 5,
         newObservations: 10,
         lastDreamHoursAgo: 8,
       })).toBe(false);

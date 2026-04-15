@@ -166,8 +166,8 @@ import { AutoEnhancer } from "../intelligence/auto-enhance.js";
 import { CrossDeviceContextManager } from "../intelligence/cross-device-context.js";
 import { AITimeMachine } from "../intelligence/ai-time-machine.js";
 import { UserModelManager } from "../intelligence/user-model.js";
-import { VideoProcessor } from "../intelligence/video-processor.js";
-import { RDAgent } from "../intelligence/rd-agent.js";
+// S2-9: VideoProcessor and RDAgent removed — were never invoked during any
+// query path (getter-only, confirmed dead in the audit).
 import { VerificationCascade } from "../intelligence/verification-cascade.js";
 import { WallClockBudget } from "../intelligence/wall-clock-budget.js";
 import {
@@ -242,9 +242,8 @@ import { CloudSyncEngine } from "../memory/cloud-sync.js";
 import { SkillForge } from "../learning/skill-forge.js";
 import { InstinctSystem } from "../learning/instinct-system.js";
 
-// NeverStop: DEPRECATED — strategies merged into AutonomousExecutor (see autonomous.ts L65, L374, L510, L931).
-// Import kept for lib.ts public API backward compatibility.
-import { NeverStopExecutor } from "../autopilot/never-stop.js";
+// S2-9: NeverStopExecutor removed — strategies merged into AutonomousExecutor
+// (see autonomous.ts L65, L374, L510, L931). The class had no callers.
 // Flow tracking (Windsurf Cascade-inspired real-time action tracking)
 import { FlowTracker } from "../intelligence/flow-tracker.js";
 // Idle detection (welcome-back briefings)
@@ -480,8 +479,7 @@ export class WotannRuntime {
   private crossDeviceContext: CrossDeviceContextManager;
   private aiTimeMachine: AITimeMachine;
   private userModelManager: UserModelManager;
-  private videoProcessor: VideoProcessor;
-  private rdAgent: RDAgent;
+  // S2-9: videoProcessor and rdAgent fields removed (getter-only dead code).
 
   // Verification, time budget, and agent registry
   private verificationCascade: VerificationCascade;
@@ -495,7 +493,7 @@ export class WotannRuntime {
   private flowTracker: FlowTracker;
   private idleDetector: IdleDetector;
   private decisionLedger: DecisionLedger;
-  private neverStopExecutor: NeverStopExecutor;
+  // S2-9: neverStopExecutor field removed — superseded by autonomousExecutor.
 
   // ── Phase 2: Competitive Parity ──
   private taskRouter: TaskSemanticRouter;
@@ -791,13 +789,8 @@ export class WotannRuntime {
     // DecisionLedger: cross-session decision tracking with rationale, alternatives, affected files
     this.decisionLedger = new DecisionLedger();
 
-    // NeverStopExecutor: DEPRECATED — strategies merged into AutonomousExecutor.
-    // Kept alive for lib.ts public API compatibility. Use getAutonomousExecutor() instead.
-    this.neverStopExecutor = new NeverStopExecutor({
-      maxCycles: 10,
-      maxTimeMs: 10 * 60_000, // 10 minutes
-      maxCostUsd: 5.0,
-    });
+    // S2-9: NeverStopExecutor instantiation removed — strategies merged
+    // into AutonomousExecutor, use getAutonomousExecutor() instead.
 
     // ── Phase 2: Competitive Parity ──
 
@@ -942,8 +935,7 @@ export class WotannRuntime {
     this.crossDeviceContext = new CrossDeviceContextManager();
     this.aiTimeMachine = new AITimeMachine();
     this.userModelManager = new UserModelManager(join(config.workingDir, ".wotann"));
-    this.videoProcessor = new VideoProcessor();
-    this.rdAgent = new RDAgent();
+    // S2-9: videoProcessor/rdAgent instantiation removed (dead code).
 
     // Verification cascade: typecheck→lint→test after file edits
     this.verificationCascade = new VerificationCascade(config.workingDir);
@@ -2469,12 +2461,28 @@ export class WotannRuntime {
         provider: responseProvider,
         model: responseModel,
       };
-      const costEntry = this.costTracker.record(responseProvider, responseModel, totalTokens, 0);
+      // S2-11: Token tracking fix. The audit reported 970 sessions with 0
+      // tokens recorded; that was caused by the Sprint 1 adapter fixes
+      // not yet being in place — Anthropic/OpenAI/Copilot streams returned
+      // no tokensUsed on the done chunk, so `totalTokens` stayed 0. Post
+      // S1-21..S1-27 + include_usage, all adapters populate tokensUsed.
+      //
+      // Splitting totalTokens evenly between "input" and "output" is also a
+      // more honest model of reality than "all input" or "all output":
+      // providers only report a combined total, and attributing all of it
+      // to one arm causes the cost-tracker and token-persistence numbers
+      // to diverge. Until AgentMessage carries separate {input,output,
+      // thinking} fields, split evenly so the two storages agree.
+      const inputTokens = Math.floor(totalTokens / 2);
+      const outputTokens = totalTokens - inputTokens;
+      const costEntry = this.costTracker.record(
+        responseProvider,
+        responseModel,
+        inputTokens,
+        outputTokens,
+      );
       this.infra?.router?.recordCost(costEntry.cost);
-      // Record token usage for lifetime persistence.
-      // NOTE: chunk.tokensUsed is currently a single number; we treat it as output until
-      // AgentMessage gains separate {input,output,thinking} fields (tracked as Phase-F debt).
-      this.tokenPersistence.recordUsage(responseProvider, responseModel, 0, totalTokens);
+      this.tokenPersistence.recordUsage(responseProvider, responseModel, inputTokens, outputTokens);
       this.infra?.router?.recordRepoOutcome({
         provider: responseProvider,
         model: responseModel,
@@ -3209,12 +3217,7 @@ export class WotannRuntime {
   getUserModelManager(): UserModelManager {
     return this.userModelManager;
   }
-  getVideoProcessor(): VideoProcessor {
-    return this.videoProcessor;
-  }
-  getRDAgent(): RDAgent {
-    return this.rdAgent;
-  }
+  // S2-9: getVideoProcessor/getRDAgent removed — getters-only dead code.
 
   // Verification, time budget, and agent registry
   getVerificationCascade(): VerificationCascade {
@@ -3237,10 +3240,8 @@ export class WotannRuntime {
   getDecisionLedger(): DecisionLedger {
     return this.decisionLedger;
   }
-  /** @deprecated NeverStop strategies are merged into AutonomousExecutor. Use getAutonomousExecutor() instead. */
-  getNeverStopExecutor(): NeverStopExecutor {
-    return this.neverStopExecutor;
-  }
+  // S2-9: getNeverStopExecutor removed — the field and the module were
+  // both deleted. Callers should use getAutonomousExecutor() instead.
 
   /** Run codebase health analysis and return a 0-100 score with diagnostics. */
   async analyzeHealth(directory?: string): Promise<ReturnType<typeof analyzeCodebaseHealth>> {

@@ -376,11 +376,8 @@ export {
 } from "./context/virtual-context.js";
 
 // ── Autopilot ───────────────────────────────────────────
-export {
-  NeverStopExecutor,
-  type NeverStopConfig,
-  type NeverStopResult,
-} from "./autopilot/never-stop.js";
+// S2-9: NeverStopExecutor removed — strategies are now in
+// AutonomousExecutor (src/orchestration/autonomous.ts).
 export { PRArtifactGenerator, type PRTemplate } from "./autopilot/pr-artifacts.js";
 
 // ── Security (extended) ─────────────────────────────────
@@ -837,15 +834,7 @@ export {
 } from "./tools/image-gen-router.js";
 
 // ── Phase D — Video Processor ──────────────────────────
-export {
-  VideoProcessor,
-  VideoProcessorError,
-  type VideoMetadata,
-  type FrameInfo,
-  type FrameAnalysis,
-  type TranscriptionResult as VideoTranscriptionResult,
-  type TranscriptionSegment,
-} from "./intelligence/video-processor.js";
+// S2-9: VideoProcessor removed — never invoked during any query.
 
 // ── Phase D — Auto-Reviewer ────────────────────────────
 export {
@@ -945,13 +934,7 @@ export {
   type AutoArchiveConfig,
 } from "./hooks/auto-archive.js";
 
-// ── Phase DX15 — RD-Agent (Qlib) ───────────────────────
-export {
-  RDAgent,
-  type RDExperiment,
-  type RDConfig,
-  type RDReport,
-} from "./intelligence/rd-agent.js";
+// S2-9: RDAgent removed — instantiated but never invoked anywhere.
 
 // ── Phase DX20 — Rate Limit Resume ─────────────────────
 export {

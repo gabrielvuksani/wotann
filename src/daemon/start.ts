@@ -64,12 +64,59 @@ function loadProvidersEnv(): void {
 
 loadProvidersEnv();
 
-// Write PID file for process management
+// S2-30: PID + status-file management with liveness verification.
+//
+// Previously we wrote the new daemon's PID on top of any stale pid file,
+// and published `status: "starting"` atomically — that caused two
+// problems: (a) an old pid-file from a crashed daemon looked alive; and
+// (b) the status briefly reported "starting" even when the daemon
+// already was reachable on a port. Now:
+//   1. If a pid file exists, verify the process is alive via kill(pid, 0).
+//      If it's dead, silently remove the stale file. If alive, bail out
+//      with an informative error so we don't start a second daemon.
+//   2. Only write `status: "running"` after `daemon.start()` resolves
+//      successfully (handled below in the try block). The "starting"
+//      status is still useful for external monitors that want to see
+//      the transitional state.
 const pidPath = join(wotannDir, "daemon.pid");
+const statusPath = join(wotannDir, "daemon.status.json");
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    // `kill(pid, 0)` doesn't send a signal — it just tests for existence
+    // + permission. Throws ESRCH if the process is gone.
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+if (existsSync(pidPath)) {
+  try {
+    const raw = readFileSync(pidPath, "utf-8").trim();
+    const existing = parseInt(raw, 10);
+    if (isProcessAlive(existing) && existing !== process.pid) {
+      console.error(
+        `[KAIROS] Daemon already running (PID ${existing}). ` +
+          `Use 'wotann daemon stop' first, or delete ${pidPath} if the PID is a leftover.`,
+      );
+      process.exit(1);
+    }
+    // Stale pid file — clean up before we write our own.
+    try {
+      unlinkSync(pidPath);
+    } catch {
+      /* best-effort: we'll overwrite below anyway */
+    }
+  } catch {
+    // Unreadable pid file — treat as stale.
+  }
+}
+
 writeFileSync(pidPath, String(process.pid));
 
-// Write status file
-const statusPath = join(wotannDir, "daemon.status.json");
 writeFileSync(
   statusPath,
   JSON.stringify({
