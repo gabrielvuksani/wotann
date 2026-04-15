@@ -24,6 +24,7 @@ import {
 } from "../providers/registry.js";
 import { HookEngine } from "../hooks/engine.js";
 import { registerBuiltinHooks, clearReadTrackingForSession } from "../hooks/built-in.js";
+import { ActiveMemoryEngine } from "../memory/active-memory.js";
 import { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
 import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pipeline.js";
 import { assembleSystemPromptParts } from "../prompt/engine.js";
@@ -385,6 +386,7 @@ export class WotannRuntime {
   private fileFreezer: FileFreezer;
   private secretScanner: SecretScanner;
   private proactiveMemory: ProactiveMemoryEngine;
+  private activeMemory: ActiveMemoryEngine;
   private branchManager: ConversationBranchManager;
   private crossSessionLearner: CrossSessionLearner;
   private capabilityEqualizer: CapabilityEqualizer;
@@ -647,6 +649,13 @@ export class WotannRuntime {
 
     // Proactive memory: trigger-based context suggestions (on file open, error, etc.)
     this.proactiveMemory = new ProactiveMemoryEngine();
+
+    // S3-5: Active memory — blocking sub-agent that pre-processes user
+    // messages BEFORE the main reply. Extracts memory-worthy facts
+    // (preferences/decisions/facts) into the memory store and recalls
+    // relevant prior memory for question-shaped messages. Pattern-based
+    // for speed (~1ms per call). Wired into runtime.query().
+    this.activeMemory = new ActiveMemoryEngine(this.memoryStore);
 
     // Conversation branching: fork/merge conversation threads
     this.branchManager = new ConversationBranchManager();
@@ -1217,6 +1226,24 @@ export class WotannRuntime {
         prompt: `${this.pendingContextPrefix}${options.prompt}`,
       };
       this.pendingContextPrefix = null;
+    }
+
+    // S3-5: Active Memory pre-processing. A blocking sub-agent runs
+    // BEFORE the main reply: classifies the user message, extracts
+    // memory-worthy facts (preferences/decisions/facts) into the
+    // memory store, and for question-shaped messages recalls relevant
+    // prior memory and prepends it as a context block. Stays
+    // pattern-based for speed (~1ms per call).
+    try {
+      const activeResult = this.activeMemory.preprocess(options.prompt, this.session.id);
+      if (activeResult.contextPrefix) {
+        options = {
+          ...options,
+          prompt: `${activeResult.contextPrefix}${options.prompt}`,
+        };
+      }
+    } catch {
+      // Active memory preprocessing must never block the main query.
     }
 
     // WallClockBudget: inject time pressure prompt when approaching budget limit
