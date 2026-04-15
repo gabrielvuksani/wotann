@@ -21,7 +21,7 @@ One install. Every model. Every channel. Full autonomy.</p>
 
 ## What WOTANN Is
 
-A unified AI agent harness that **amplifies every model with the same intelligence layer**: 26-layer middleware, 8-layer memory, 29 orchestration patterns, 19-event hook engine, 4-layer Computer Use, and a Norse-themed identity system. Use it from the terminal, the desktop app, your iPhone (with Watch + CarPlay + Widgets + Siri), or any of 15 messaging channels — same agent, same memory, same capabilities.
+A unified AI agent harness that **amplifies every model with the same intelligence layer**: 20+ middleware layers (2 always-on, 16 conditional), 8-layer memory (SQLite + FTS5 + graph-RAG + vector), 10 genuine multi-step orchestration patterns, 19-event hook engine, 4-layer Computer Use, and a Norse-themed identity system. Use it from the terminal, the desktop app, your iPhone (with Watch + CarPlay + Widgets + Siri), or any of 14 real messaging channels — same agent, same memory, same capabilities.
 
 | | Most agents | WOTANN |
 |---|---|---|
@@ -85,8 +85,8 @@ WOTANN's `capability-augmenter.ts` injects tool-calling, vision (via OCR + a11y 
 
 | Surface | What you get |
 |---|---|
-| **CLI** | 78 commands incl. `init`, `engine`, `autopilot`, `compare`, `link`, `enhance`, `cost` |
-| **TUI** | Ink-rendered REPL with 20+ themes, voice push-to-talk, slash commands |
+| **CLI** | 78 commands incl. `init`, `engine`, `autonomous`, `arena`, `link`, `enhance`, `cost` |
+| **TUI** | Ink-rendered REPL with the Obsidian Precision theme, voice push-to-talk, slash commands |
 | **Desktop** (Tauri 2) | Chat / Editor (Monaco) / Workshop / Exploit / Trust / Integrations tabs, Computer Use panel, command palette ⌘K |
 | **iOS** | Phase C chat redesign, Phase D work tab with filter pills, Phase E onboarding wizard |
 | **Apple Watch** | Quick actions (run tests, build, lint, approve all, voice input) via WCSession |
@@ -99,7 +99,7 @@ WOTANN's `capability-augmenter.ts` injects tool-calling, vision (via OCR + a11y 
 ### Autonomous with proof
 
 ```bash
-wotann autopilot "fix the failing tests in src/memory"
+wotann autonomous "fix the failing tests in src/memory"
 ```
 
 Runs Ralph mode (verify-fix loop) + self-healing (provider fallback) + 8-strategy escalation (decompose, research-first, minimal-change, revert-and-retry, fresh-context, different-model, ask-for-help). Doom-loop detector prevents infinite cycles. Every completion ships with a **proof bundle**: tests, typecheck, lint, diff summary, optional screenshots. Trust UI surfaces them.
@@ -145,7 +145,7 @@ src/
 ├── intelligence/     42 modules (accuracy boost, ambient awareness, codebase health, ...)
 ├── orchestration/    29 patterns (coordinator, waves, PWR, Ralph, self-healing, council)
 ├── memory/           SQLite + FTS5 · 8 layers · vector · graph-RAG · episodic
-├── context/          5 compaction strategies · TurboQuant context extension
+├── context/          5 compaction strategies · Ollama KV cache compression (turboquant-wasm v0.3.0 integration on the v0.3.0 roadmap)
 ├── prompt/           Engine · 18 prompt modules · instruction provenance (E8)
 ├── hooks/            19 events · 17+ guards · DoomLoop · benchmark engineering
 ├── computer-use/     4-layer perception + action stack (text-mediated for any model)
@@ -175,11 +175,9 @@ research/             10 cloned competitor harnesses + 30+ tracked GitHub repos
 | `wotann init` | Initialize workspace |
 | `wotann engine` | Start the KAIROS daemon |
 | `wotann doctor` | Health diagnostics |
-| `wotann compare` | Arena — compare models blind |
-| `wotann autopilot <task>` | Autonomous execution with proof bundle |
-| `wotann link` | Pair an iPhone via QR or Bonjour |
-| `wotann debug share` | Generate scrubbed debug report for issues |
-| `wotann profile <list\|switch>` | Named harness profiles |
+| `wotann arena` | Compare models blind side-by-side |
+| `wotann autonomous <task>` | Autonomous execution with proof bundle |
+| `wotann link` | Pair an iPhone via PIN or Bonjour |
 | `wotann onboard` | Interactive provider setup |
 | `wotann voice` | Push-to-talk voice mode |
 

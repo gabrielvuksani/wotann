@@ -159,11 +159,10 @@ export {
 } from "./ui/canvas.js";
 
 // ── Marketplace ──────────────────────────────────────────
-export {
-  MCPMarketplace,
-  type MCPServerEntry,
-  type InstalledMCPServer,
-} from "./marketplace/mcp-marketplace.js";
+// S5-3: MCPMarketplace removed — vaporware (hardcoded 5 entries, fake
+// registry URL). The real MCP integration is MCPRegistry (below) which
+// imports MCP servers from the user's Claude Code / Cursor / Windsurf
+// configs instead of making up a registry.
 
 // ── Orchestration ────────────────────────────────────────
 export {

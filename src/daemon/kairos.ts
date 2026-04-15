@@ -54,7 +54,10 @@ import { ContextPressureMonitor } from "./context-pressure.js";
 import { TerminalMonitor } from "./terminal-monitor.js";
 import { FileDependencyGraph } from "./file-dep-graph.js";
 import { discoverModels } from "../providers/dynamic-discovery.js";
-import { MCPMarketplace } from "../marketplace/mcp-marketplace.js";
+// S5-3: MCPMarketplace removed — hardcoded 5 entries + fake registry URL
+// (`registry.wotann.com` never existed). The real integration is
+// MCPRegistry in ../marketplace/registry.ts, which actually imports MCP
+// servers from the user's Claude Code / Cursor / Windsurf / Codex configs.
 import { MCPRegistry, SkillMarketplace } from "../marketplace/registry.js";
 import { DockerSandbox } from "../sandbox/docker-backend.js";
 import { TaskIsolationManager } from "../sandbox/task-isolation.js";
@@ -198,7 +201,7 @@ export class KairosDaemon {
   private readonly workflowEngine = new WorkflowDAGEngine();
 
   // ── Marketplace + Sandbox + Identity (previously unwired) ──────────
-  private readonly mcpMarketplace = new MCPMarketplace();
+  // S5-3: mcpMarketplace field removed (vaporware). Use mcpRegistry instead.
   private readonly mcpRegistry = new MCPRegistry();
   private readonly skillMarketplace = new SkillMarketplace();
   private readonly dockerSandbox = new DockerSandbox();
@@ -618,9 +621,7 @@ export class KairosDaemon {
   }
 
   // ── Phase A7 Getters (marketplace, sandbox, identity, perception) ──
-  getMCPMarketplace(): MCPMarketplace {
-    return this.mcpMarketplace;
-  }
+  // S5-3: getMCPMarketplace removed — callers should use getMCPRegistry.
   getMCPRegistry(): MCPRegistry {
     return this.mcpRegistry;
   }
