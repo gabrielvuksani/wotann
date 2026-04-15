@@ -109,6 +109,19 @@ const COST_TABLE: Record<string, { input: number; output: number }> = {
   "accounts/fireworks/models/llama-v3p3-70b-instruct": { input: 0.0005, output: 0.0005 },
   "meta-llama/Meta-Llama-3.1-70B-Instruct": { input: 0.0008, output: 0.0008 },
   "meta-llama/Meta-Llama-3.1-8B-Instruct": { input: 0.0001, output: 0.0001 },
+
+  // Qwen — open-source coder/general models. HuggingFace adapter
+  // defaults include these but the prior cost table omitted them, so
+  // every prediction zeroed out for Qwen users.
+  "qwen2.5-coder:7b": { input: 0, output: 0 }, // local Ollama
+  "qwen3-coder": { input: 0.0002, output: 0.0008 }, // hosted approximate
+  "qwen3-coder-next": { input: 0.0002, output: 0.0008 },
+  "qwen3.5": { input: 0.0003, output: 0.001 },
+  "Qwen3-Coder-480B": { input: 0.0008, output: 0.0024 },
+
+  // Gemini short-form alias — some callers use the version-less name.
+  "gemini-3-pro": { input: 0.002, output: 0.012 }, // alias of gemini-3.1-pro
+  "gemini-3-flash": { input: 0.00025, output: 0.0015 }, // alias of gemini-3.1-flash
 };
 
 // Provider-to-model mapping for cost predictions. Expanded in S2-32.

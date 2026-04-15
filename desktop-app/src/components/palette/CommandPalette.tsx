@@ -36,6 +36,20 @@ interface CommandPaletteProps {
   readonly onClose: () => void;
 }
 
+// ── JSON-RPC envelope helper ──────────────────────────────────
+//
+// Opus audit (2026-04-15) found that 12 palette actions called
+// `tauriCommands.sendMessage("/session create")` with raw text. The
+// `send_message` Tauri command tries to parse the prompt as JSON-RPC,
+// fails on the raw slash, and falls through to a synthesized `msg-{ts}`
+// id — the user sees apparent success but nothing happens server-side.
+//
+// `toRpc` wraps method+params into the JSON envelope `send_message`
+// actually expects, so each palette action lights up a real handler.
+function toRpc(method: string, params: Record<string, unknown> = {}): string {
+  return JSON.stringify({ method, params });
+}
+
 // ── Recent-command persistence ────────────────────────────────
 
 const RECENTS_KEY = "wotann-palette-recents";
@@ -229,7 +243,10 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "session.create — new session via RPC",
         category: "Session",
         icon: "✨",
-        action: () => void rpcCall("Create session", () => tauriCommands.sendMessage("/session create")),
+        action: () =>
+          void rpcCall("Create session", () =>
+            tauriCommands.sendMessage(toRpc("session.create")),
+          ),
       },
       {
         id: "session-list",
@@ -305,7 +322,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "memory.mine — extract patterns from history",
         category: "Memory",
         icon: "⛏",
-        action: () => void rpcCall("Memory mine", () => tauriCommands.sendMessage("/memory mine")),
+        action: () =>
+          void rpcCall("Memory mine", () => tauriCommands.sendMessage(toRpc("memory.mine"))),
       },
       {
         id: "memory-quality",
@@ -313,7 +331,10 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "memory.quality — retrieval accuracy report",
         category: "Memory",
         icon: "📊",
-        action: () => void rpcCall("Memory quality", () => tauriCommands.sendMessage("/memory quality")),
+        action: () =>
+          void rpcCall("Memory quality", () =>
+            tauriCommands.sendMessage(toRpc("memory.quality")),
+          ),
       },
       {
         id: "memory-fence",
@@ -321,7 +342,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "memory.fence — lock specific memories into view",
         category: "Memory",
         icon: "🧱",
-        action: () => void rpcCall("Memory fence", () => tauriCommands.sendMessage("/memory fence")),
+        action: () =>
+          void rpcCall("Memory fence", () => tauriCommands.sendMessage(toRpc("memory.fence"))),
       },
 
       // ── Skills ──
@@ -347,7 +369,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "skills.merge — combine skills into a persona",
         category: "Skills",
         icon: "🔀",
-        action: () => void rpcCall("Skills merge", () => tauriCommands.sendMessage("/skills merge")),
+        action: () =>
+          void rpcCall("Skills merge", () => tauriCommands.sendMessage(toRpc("skills.merge"))),
       },
 
       // ── Agents ──
@@ -383,7 +406,10 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "prompts.adaptive — per-model prompt tuning",
         category: "Intelligence",
         icon: "🪄",
-        action: () => void rpcCall("Adaptive prompts", () => tauriCommands.sendMessage("/prompts adaptive")),
+        action: () =>
+          void rpcCall("Adaptive prompts", () =>
+            tauriCommands.sendMessage(toRpc("prompts.adaptive")),
+          ),
       },
       {
         id: "benchmark-best",
@@ -391,7 +417,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "benchmark.best — recommend model by benchmark",
         category: "Intelligence",
         icon: "🏆",
-        action: () => void rpcCall("Benchmark", () => tauriCommands.sendMessage("/benchmark best")),
+        action: () =>
+          void rpcCall("Benchmark", () => tauriCommands.sendMessage(toRpc("benchmark.best"))),
       },
       {
         id: "decisions-list",
@@ -399,7 +426,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "decisions.list — architectural decisions",
         category: "Intelligence",
         icon: "📝",
-        action: () => void rpcCall("Decisions", () => tauriCommands.sendMessage("/decisions list")),
+        action: () =>
+          void rpcCall("Decisions", () => tauriCommands.sendMessage(toRpc("decisions.list"))),
       },
       {
         id: "proofs-list",
@@ -434,7 +462,10 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "autonomous.cancel — stop the current run",
         category: "Autonomous",
         icon: "⛔",
-        action: () => void rpcCall("Autonomous cancel", () => tauriCommands.sendMessage("/autonomous cancel")),
+        action: () =>
+          void rpcCall("Autonomous cancel", () =>
+            tauriCommands.sendMessage(toRpc("autonomous.cancel")),
+          ),
       },
       {
         id: "autopilot-status",
@@ -460,7 +491,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "files.hotspots — most-edited files",
         category: "Workspace",
         icon: "🔥",
-        action: () => void rpcCall("Hotspots", () => tauriCommands.sendMessage("/files hotspots")),
+        action: () =>
+          void rpcCall("Hotspots", () => tauriCommands.sendMessage(toRpc("files.hotspots"))),
       },
       {
         id: "files-search",
@@ -486,7 +518,10 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "context.pressure — auto-compaction trigger",
         category: "Context",
         icon: "🌡",
-        action: () => void rpcCall("Context pressure", () => tauriCommands.sendMessage("/context pressure")),
+        action: () =>
+          void rpcCall("Context pressure", () =>
+            tauriCommands.sendMessage(toRpc("context.pressure")),
+          ),
       },
       {
         id: "wakeup-payload",
@@ -494,7 +529,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         subtitle: "wakeup.payload — context recovery snapshot",
         category: "Context",
         icon: "💤",
-        action: () => void rpcCall("Wakeup", () => tauriCommands.sendMessage("/wakeup payload")),
+        action: () =>
+          void rpcCall("Wakeup", () => tauriCommands.sendMessage(toRpc("wakeup.payload"))),
       },
 
       // ── Navigation ──

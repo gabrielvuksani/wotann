@@ -60,13 +60,23 @@ interface GeminiPartExecutableCode {
 interface GeminiPartCodeExecutionResult {
   readonly codeExecutionResult: { readonly outcome: string; readonly output?: string };
 }
+/** Inline binary data part for multimodal input — images, audio, video. */
+interface GeminiPartInlineData {
+  readonly inlineData: { readonly mimeType: string; readonly data: string };
+}
+/** File-data reference (URI to uploaded asset, e.g. for files >20MB). */
+interface GeminiPartFileData {
+  readonly fileData: { readonly mimeType: string; readonly fileUri: string };
+}
 type GeminiPart =
   | GeminiPartText
   | GeminiPartFunctionCall
   | GeminiPartFunctionResponse
   | GeminiPartThought
   | GeminiPartExecutableCode
-  | GeminiPartCodeExecutionResult;
+  | GeminiPartCodeExecutionResult
+  | GeminiPartInlineData
+  | GeminiPartFileData;
 
 interface GeminiContent {
   readonly role: "user" | "model";
@@ -89,6 +99,17 @@ interface GeminiUsageMetadata {
 interface GeminiStreamChunk {
   readonly candidates?: readonly GeminiCandidate[];
   readonly usageMetadata?: GeminiUsageMetadata;
+  /**
+   * When the prompt itself is blocked (before any candidate is produced),
+   * Gemini returns no candidates and instead populates promptFeedback
+   * with the reason. Without this field, prior code surfaced a silent
+   * empty `done` with stopReason "stop" — making prompt-level blocks
+   * indistinguishable from normal completion.
+   */
+  readonly promptFeedback?: {
+    readonly blockReason?: string;
+    readonly safetyRatings?: readonly Record<string, unknown>[];
+  };
 }
 
 // ── Adapter options ───────────────────────────────────────────────
@@ -120,7 +141,17 @@ export interface GeminiNativeOptions {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-/** Convert our internal AgentMessage array into Gemini Content[] */
+/**
+ * Convert our internal AgentMessage array into Gemini Content[].
+ *
+ * Multimodal handling: when `content` is a data: URL (e.g.
+ * `data:image/png;base64,iVBORw0...`), it gets emitted as an `inlineData`
+ * part with the appropriate mimeType. When it's a regular string, it's
+ * emitted as a text part. This lets multimodal capabilities flow through
+ * even though AgentMessage's `content` field is currently typed as
+ * `string` — callers can encode images as data URLs and they reach the
+ * model intact instead of being stringified to "[image]".
+ */
 function toGeminiContents(
   messages: readonly { role: string; content: string; toolCallId?: string }[],
 ): GeminiContent[] {
@@ -128,6 +159,20 @@ function toGeminiContents(
     .filter((m) => m.role !== "system") // systemInstruction carries system content
     .map((m) => {
       const role: "user" | "model" = m.role === "assistant" ? "model" : "user";
+      const dataUrlMatch = m.content.match(/^data:([^;]+);base64,(.+)$/);
+      if (dataUrlMatch) {
+        return {
+          role,
+          parts: [
+            {
+              inlineData: {
+                mimeType: dataUrlMatch[1] ?? "application/octet-stream",
+                data: dataUrlMatch[2] ?? "",
+              },
+            },
+          ],
+        };
+      }
       return { role, parts: [{ text: m.content }] };
     });
 }
@@ -266,6 +311,7 @@ export function createGeminiNativeAdapter(
       const decoder = new TextDecoder();
       let buffer = "";
       let totalTokens = 0;
+      let thoughtsTokens = 0;
       let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
 
       while (true) {
@@ -287,6 +333,25 @@ export function createGeminiNativeAdapter(
             chunk = JSON.parse(data) as GeminiStreamChunk;
           } catch {
             continue; // malformed SSE fragment
+          }
+
+          // Surface prompt-level blocks (no candidate produced — Gemini
+          // returns promptFeedback.blockReason instead). Prior behavior
+          // dropped this silently and emitted a normal "stop" — making
+          // SAFETY blocks indistinguishable from natural completion.
+          if (chunk.promptFeedback?.blockReason) {
+            const reason = chunk.promptFeedback.blockReason;
+            stopReason = "content_filter";
+            yield {
+              type: "error",
+              content: `Gemini prompt blocked: ${reason}`,
+              model,
+              provider: "gemini",
+              stopReason: "content_filter",
+            };
+            // Continue draining the stream — there may still be a usage
+            // chunk or graceful close — but don't expect candidate text.
+            continue;
           }
 
           const candidate = chunk.candidates?.[0];
@@ -349,12 +414,15 @@ export function createGeminiNativeAdapter(
           if (chunk.usageMetadata?.totalTokenCount) {
             totalTokens = chunk.usageMetadata.totalTokenCount;
           }
+          if (chunk.usageMetadata?.thoughtsTokenCount) {
+            thoughtsTokens = chunk.usageMetadata.thoughtsTokenCount;
+          }
         }
       }
 
       yield {
         type: "done",
-        content: "",
+        content: thoughtsTokens > 0 ? `[thoughts: ${thoughtsTokens} tokens]` : "",
         model,
         provider: "gemini",
         tokensUsed: totalTokens,
