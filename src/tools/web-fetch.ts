@@ -76,9 +76,7 @@ function decodeHtmlEntities(text: string): string {
   }
 
   // Numeric entities: &#123; and &#x1A;
-  result = result.replace(/&#(\d+);/g, (_, code) =>
-    String.fromCharCode(Number(code)),
-  );
+  result = result.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
   result = result.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
     String.fromCharCode(parseInt(hex as string, 16)),
   );
@@ -103,7 +101,10 @@ function stripHtml(html: string): string {
   text = text.replace(/<!--[\s\S]*?-->/g, "");
 
   // Replace block-level elements with newlines for readability
-  text = text.replace(/<\/?(?:div|p|br|h[1-6]|li|tr|blockquote|section|article|header|footer|nav|aside|main|pre|hr)[^>]*>/gi, "\n");
+  text = text.replace(
+    /<\/?(?:div|p|br|h[1-6]|li|tr|blockquote|section|article|header|footer|nav|aside|main|pre|hr)[^>]*>/gi,
+    "\n",
+  );
 
   // Strip all remaining tags
   text = text.replace(/<[^>]+>/g, "");
@@ -147,26 +148,92 @@ function extractMainContent(html: string): string {
 // ── SSRF Protection ─────────────────────────────────────
 
 /**
- * Check if a hostname resolves to a private/reserved IP range.
- * Prevents SSRF attacks targeting internal services, cloud metadata endpoints, etc.
+ * Check if an IP literal or hostname token matches a private/reserved IP range.
+ *
+ * Hostnames alone aren't enough: an attacker-controlled DNS server can
+ * return a public IP on the first resolve and a private IP on the second
+ * (classic DNS rebinding). `isPrivateHost` is therefore used as a *fast
+ * pre-filter* on the URL hostname, and `isPrivateIP` is applied to the
+ * actually-resolved address before the fetch runs (S2-20).
  */
 function isPrivateHost(hostname: string): boolean {
   const privatePatterns = [
-    /^127\./,                          // Loopback
-    /^10\./,                           // Private Class A
-    /^172\.(1[6-9]|2\d|3[01])\./,     // Private Class B
-    /^192\.168\./,                     // Private Class C
-    /^169\.254\./,                     // Link-local / AWS metadata
-    /^0\./,                            // Current network
+    /^127\./, // Loopback
+    /^10\./, // Private Class A
+    /^172\.(1[6-9]|2\d|3[01])\./, // Private Class B
+    /^192\.168\./, // Private Class C
+    /^169\.254\./, // Link-local / AWS metadata
+    /^0\./, // Current network
     /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // Shared address space
-    /^localhost$/i,                    // Localhost hostname
-    /^\[?::1\]?$/,                    // IPv6 loopback
-    /^\[?fc/i,                        // IPv6 unique local
-    /^\[?fd/i,                        // IPv6 unique local
-    /^\[?fe80/i,                      // IPv6 link-local
+    /^localhost$/i, // Localhost hostname
+    /^\[?::1\]?$/, // IPv6 loopback
+    /^\[?fc/i, // IPv6 unique local
+    /^\[?fd/i, // IPv6 unique local
+    /^\[?fe80/i, // IPv6 link-local
   ];
 
-  return privatePatterns.some(p => p.test(hostname));
+  return privatePatterns.some((p) => p.test(hostname));
+}
+
+/**
+ * Check whether a resolved IP literal is in a private/reserved range.
+ * Must accept both IPv4 and IPv6 addresses from `dns.lookup`. This is the
+ * post-resolution check that defeats DNS rebinding.
+ */
+function isPrivateIP(address: string, family: 4 | 6): boolean {
+  if (family === 4) {
+    return isPrivateHost(address);
+  }
+  // Normalise IPv6 to lowercase for prefix checks.
+  const a = address.toLowerCase();
+  if (a === "::1" || a === "::") return true;
+  if (a.startsWith("fc") || a.startsWith("fd")) return true; // unique local
+  if (a.startsWith("fe80")) return true; // link-local
+  if (a.startsWith("::ffff:")) {
+    // IPv4-mapped IPv6 — re-check the embedded IPv4.
+    return isPrivateHost(a.slice("::ffff:".length));
+  }
+  return false;
+}
+
+/**
+ * Resolve a hostname via node:dns and reject when it maps to a
+ * private/reserved IP range. Catches DNS rebinding that string-based URL
+ * validation misses.
+ */
+async function assertPublicResolvable(hostname: string): Promise<void> {
+  // IP literals — short-circuit on the string form; no DNS lookup needed.
+  const literalV4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  const literalV6 = hostname.includes(":");
+  if (literalV4 || literalV6) {
+    if (isPrivateHost(hostname)) {
+      throw new Error(`SSRF blocked: private/reserved IP literal "${hostname}"`);
+    }
+    return;
+  }
+
+  // In unit tests the mock `fetch` intercepts before the network, so a
+  // real DNS call would either hit the network (flaky) or fail with
+  // ENOTFOUND for mock hostnames like `api.example.com`. The URL-string
+  // check in validateUrl's isPrivateHost is still in effect.
+  if (process.env["WOTANN_TEST_MODE"] || process.env["VITEST"]) {
+    return;
+  }
+
+  const { lookup } = await import("node:dns");
+  const { promisify } = await import("node:util");
+  const lookupAsync = promisify(lookup);
+  // `all:true` returns every A/AAAA record so we reject even if ONE of
+  // several resolved addresses lands in a private range.
+  const addresses = (await lookupAsync(hostname, { all: true })) as Array<{
+    address: string;
+    family: 4 | 6;
+  }>;
+  for (const { address, family } of addresses) {
+    if (isPrivateIP(address, family)) {
+      throw new Error(`SSRF blocked: hostname "${hostname}" resolves to private IP ${address}`);
+    }
+  }
 }
 
 // ── URL Validation ───────────────────────────────────────
@@ -178,7 +245,9 @@ function isPrivateHost(hostname: string): boolean {
 function validateUrl(
   url: string,
   allowedProtocols: readonly string[],
-): { readonly valid: true; readonly parsed: URL } | { readonly valid: false; readonly error: string } {
+):
+  | { readonly valid: true; readonly parsed: URL }
+  | { readonly valid: false; readonly error: string } {
   try {
     const parsed = new URL(url);
     if (!allowedProtocols.includes(parsed.protocol)) {
@@ -226,7 +295,12 @@ function truncateToBytes(
 
 // ── Exported Utilities (for testing) ─────────────────────
 
-export { stripHtml as _stripHtml, extractTitle as _extractTitle, validateUrl as _validateUrl, extractMainContent as _extractMainContent };
+export {
+  stripHtml as _stripHtml,
+  extractTitle as _extractTitle,
+  validateUrl as _validateUrl,
+  extractMainContent as _extractMainContent,
+};
 
 // ── WebFetchTool ─────────────────────────────────────────
 
@@ -251,28 +325,75 @@ export class WebFetchTool {
     }
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.config.timeoutMs);
+      // S2-20: defeat DNS rebinding + redirect-to-private.
+      // 1) Resolve the initial hostname via node:dns and reject if ANY
+      //    returned address is in a private range.
+      // 2) Manually follow redirects (up to 5) and re-validate each hop
+      //    so an open-redirect on an allowed origin can't pivot into
+      //    a private target.
+      try {
+        await assertPublicResolvable(validation.parsed.hostname);
+      } catch (ssrfErr) {
+        return this.errorResult(
+          url,
+          ssrfErr instanceof Error ? ssrfErr.message : "SSRF blocked",
+          startMs,
+        );
+      }
 
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": this.config.userAgent,
-          "Accept": "text/html, application/json, text/plain, */*",
-        },
-        redirect: this.config.followRedirects ? "follow" : "manual",
-      });
+      let currentUrl = url;
+      let response: Response;
+      const maxRedirects = this.config.followRedirects ? 5 : 0;
+      let redirectsFollowed = 0;
 
-      clearTimeout(timeoutId);
+      while (true) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.config.timeoutMs);
+
+        response = await fetch(currentUrl, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": this.config.userAgent,
+            Accept: "text/html, application/json, text/plain, */*",
+          },
+          redirect: "manual",
+        });
+
+        clearTimeout(timeoutId);
+
+        if (response.status >= 300 && response.status < 400 && response.headers.get("location")) {
+          if (redirectsFollowed >= maxRedirects) break;
+          const location = response.headers.get("location")!;
+          const nextUrl = new URL(location, currentUrl).toString();
+          const nextValidation = validateUrl(nextUrl, this.config.allowedProtocols);
+          if (!nextValidation.valid) {
+            return this.errorResult(url, `Redirect blocked: ${nextValidation.error}`, startMs);
+          }
+          try {
+            await assertPublicResolvable(nextValidation.parsed.hostname);
+          } catch (ssrfErr) {
+            return this.errorResult(
+              url,
+              `Redirect blocked: ${ssrfErr instanceof Error ? ssrfErr.message : "SSRF"}`,
+              startMs,
+            );
+          }
+          currentUrl = nextUrl;
+          redirectsFollowed++;
+          continue;
+        }
+        break;
+      }
 
       const rawText = await response.text();
       const contentType = response.headers.get("content-type") ?? "unknown";
       const isHtml = contentType.toLowerCase().includes("text/html");
 
-      const { text: content, truncated, byteLength } = truncateToBytes(
-        rawText,
-        this.config.maxContentBytes,
-      );
+      const {
+        text: content,
+        truncated,
+        byteLength,
+      } = truncateToBytes(rawText, this.config.maxContentBytes);
 
       const markdown = isHtml ? stripHtml(content) : content;
       const title = isHtml ? extractTitle(content) : null;

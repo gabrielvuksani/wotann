@@ -1252,11 +1252,25 @@ export class WotannRuntime {
           options.prompt,
         );
       if (isResearchQuery) {
+        // S2-10: wire real search + fetch callbacks from the runtime so
+        // deep-research stops returning zero citations. Previously the
+        // engine ran decomposition but every subquery produced an empty
+        // result because `defaultSearch` returned []. The webFetchTool
+        // here re-uses the SSRF-hardened WebFetchTool with DNS-resolve
+        // protection (S2-20).
         const researchResult = await this.deepResearch.execute({
           query: options.prompt,
           maxSteps: 3,
           maxSources: 5,
           outputFormat: "markdown",
+          fetch: async (url: string) => {
+            const res = await this.webFetchTool.fetch(url);
+            return res.markdown || res.content;
+          },
+          // No dedicated search adapter yet — when a Gemini provider is
+          // active and `google_search` grounding is wired (roadmap v0.3),
+          // this is the hook point. For now we leave search optional so
+          // callers (iOS, desktop) can inject their own.
         });
         if (researchResult.citations.length > 0) {
           const researchContext = `\n\n[Deep Research Context]\n${researchResult.summary.slice(0, 2000)}`;

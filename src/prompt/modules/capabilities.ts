@@ -14,33 +14,74 @@ function getProviderProfile(provider: string, model: string): ProviderProfile {
   const native: string[] = ["text generation", "code editing", "reasoning"];
   const emulated: string[] = [];
 
+  // Normalise the provider string so "google" and "gemini" map to the same
+  // profile — the adapter is called `gemini` internally but the README
+  // refers to Google; both names must produce the same capability prompt.
+  const p = provider === "google" ? "gemini" : provider;
+
   // Tier 1: Full native support
-  if (provider === "anthropic") {
+  if (p === "anthropic" || p === "anthropic-subscription") {
     native.push("tool calling", "vision", "extended thinking", "computer use");
     if (model.includes("opus")) native.push("1M context window");
-  } else if (provider === "openai") {
+    if (model.includes("sonnet")) native.push("200K context window");
+  } else if (p === "openai") {
     native.push("tool calling", "vision", "function calling", "JSON mode");
-    if (model.includes("gpt-4") || model.includes("o3")) native.push("128K context");
-  } else if (provider === "google") {
-    native.push("tool calling", "vision", "grounding", "code execution");
-    if (model.includes("gemini")) native.push("1M context window");
+    if (model.includes("gpt-5")) native.push("parallel tool calls", "256K context");
+    else if (model.includes("gpt-4") || model.includes("o3")) native.push("128K context");
+  } else if (p === "gemini" || p === "vertex") {
+    native.push(
+      "tool calling",
+      "vision",
+      "google_search grounding (FREE)",
+      "code_execution sandbox (FREE)",
+      "url_context (FREE)",
+    );
+    if (model.includes("gemini-3")) native.push("1M context window", "native video understanding");
+    else if (model.includes("gemini-2")) native.push("1M context window");
 
-  // Tier 2: Partial native + emulation
-  } else if (provider === "ollama") {
-    native.push("local inference", "privacy");
+    // Tier 2: Partial native + emulation
+  } else if (p === "ollama") {
+    native.push("local inference", "privacy", "offline");
     if (model.includes("gemma4")) {
-      native.push("tool calling", "vision", "128K context");
+      native.push("tool calling", "vision", "audio", "128K context");
     } else {
       emulated.push("tool calling (XML extraction)");
     }
 
-  // Tier 3: API-only providers
-  } else if (provider === "groq") {
+    // Tier 3: API-only providers with tool support
+  } else if (p === "copilot") {
+    native.push("tool calling", "vision");
+    if (model.includes("gpt-5") || model.includes("sonnet")) native.push("128K context");
+  } else if (p === "codex") {
+    native.push("tool calling", "reasoning");
+    if (model.includes("codexplan")) native.push("extended thinking (high effort)");
+  } else if (p === "deepseek") {
+    native.push("tool calling", "reasoning");
+    if (model.includes("r1")) native.push("extended thinking");
+  } else if (p === "xai") {
+    native.push("tool calling", "vision", "real-time web");
+    if (model.includes("grok-4")) native.push("128K context");
+  } else if (p === "mistral") {
+    native.push("tool calling", "multilingual");
+    if (model.includes("large")) native.push("128K context");
+    if (model.includes("codestral")) native.push("code specialist");
+  } else if (p === "free" || p === "groq") {
+    native.push("fast inference (300+ tok/s)");
+    emulated.push("tool calling (XML extraction)");
+  } else if (p === "together" || p === "fireworks" || p === "perplexity") {
+    native.push("tool calling");
+  } else if (p === "huggingface") {
+    native.push("open-model access");
+    emulated.push("tool calling (XML extraction)");
+  } else if (p === "azure" || p === "bedrock") {
+    // Hosted versions of upstream models — capability depends on the model.
+    native.push("tool calling", "vision");
+  } else if (p === "sambanova") {
     native.push("fast inference");
     emulated.push("tool calling (XML extraction)");
-  } else if (provider === "deepseek") {
-    native.push("tool calling", "reasoning");
   } else {
+    // Unknown provider — fall back to emulated XML tool calling so the
+    // agent doesn't lose tool capability entirely.
     emulated.push("tool calling (XML extraction)", "vision (text description fallback)");
   }
 
