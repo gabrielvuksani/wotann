@@ -1294,15 +1294,51 @@ fn validate_path(path: &str) -> Result<std::path::PathBuf, String> {
         return Err("Access denied: path traversal detected after resolution".into());
     }
 
-    // Reject sensitive directories
+    // Reject sensitive directories. Opus audit (2026-04-15) found the
+    // prior list only covered .ssh + .gnupg; cloud-credential paths
+    // (AWS/GCP/Kubernetes/Terraform/Docker) and shell-history files
+    // were all readable. Expanded to cover the canonical "leaked these
+    // and you're owned" set.
     let sensitive_prefixes = [
         "/etc/",
         "/usr/",
         "/System/",
+        "/private/etc/",
+        "/var/db/",
+        "/var/root/",
+        // SSH + GPG
         &format!("{}/.ssh/", home),
         &format!("{}/.ssh", home),
         &format!("{}/.gnupg/", home),
         &format!("{}/.gnupg", home),
+        // Cloud credentials
+        &format!("{}/.aws/", home),
+        &format!("{}/.aws", home),
+        &format!("{}/.kube/", home),
+        &format!("{}/.kube", home),
+        &format!("{}/.config/gcloud/", home),
+        &format!("{}/.config/gcloud", home),
+        &format!("{}/.azure/", home),
+        &format!("{}/.azure", home),
+        &format!("{}/.terraform.d/", home),
+        &format!("{}/.terraformrc", home),
+        // Container runtimes + Docker auth
+        &format!("{}/.docker/", home),
+        &format!("{}/.docker", home),
+        // Browser profile + token storage
+        &format!("{}/Library/Application Support/Google/Chrome/", home),
+        &format!("{}/Library/Application Support/Firefox/", home),
+        // Shell history (often contains accidentally-pasted secrets)
+        &format!("{}/.bash_history", home),
+        &format!("{}/.zsh_history", home),
+        &format!("{}/.psql_history", home),
+        &format!("{}/.mysql_history", home),
+        // Keychain
+        &format!("{}/Library/Keychains/", home),
+        // Generic dotfiles known to hold secrets
+        &format!("{}/.netrc", home),
+        &format!("{}/.npmrc", home),
+        &format!("{}/.pypirc", home),
     ];
     for prefix in &sensitive_prefixes {
         if canon_str.starts_with(prefix) || canon_str.as_ref() == *prefix {

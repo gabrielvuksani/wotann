@@ -211,6 +211,15 @@ function isPrivateIP(address: string, family: 4 | 6): boolean {
  * Resolve a hostname via node:dns and reject when it maps to a
  * private/reserved IP range. Catches DNS rebinding that string-based URL
  * validation misses.
+ *
+ * NOTE: this defence is TOCTOU-vulnerable — between this resolution and
+ * the actual fetch's internal re-resolution, an attacker-controlled
+ * nameserver with TTL=0 can return a different (private) IP. A complete
+ * fix requires a custom undici Agent with a `connect.lookup` callback
+ * that pins the resolved IP for the connection. Documented in
+ * docs/GAP_AUDIT_2026-04-15.md as a remaining gap. The current check
+ * still defeats the simpler "always-private DNS response" + "ANY of
+ * multiple returned IPs is private" attacks.
  */
 async function assertPublicResolvable(hostname: string): Promise<void> {
   // IP literals — short-circuit on the string form; no DNS lookup needed.

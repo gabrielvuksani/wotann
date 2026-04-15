@@ -1905,13 +1905,21 @@ export class KairosRPCHandler {
 
       // Return a new config object with the updated key (immutable pattern)
       const updated = { ...config, [key]: value };
-      // Write with 0o600 perms so API keys aren't world-readable.
-      writeFileSync(configPath, yamlStringify(updated), { encoding: "utf-8", mode: 0o600 });
+      // Atomic write via tmp + rename. Closes the Opus-audit-flagged
+      // race window where a concurrent reader could see new content
+      // with old (loose) perms during the brief gap between writeFileSync
+      // and chmodSync. The tmp file is created with 0o600 so the rename
+      // brings the correct perms with it atomically.
+      const tmpPath = `${configPath}.tmp.${process.pid}.${Date.now()}`;
+      writeFileSync(tmpPath, yamlStringify(updated), { encoding: "utf-8", mode: 0o600 });
       try {
-        chmodSync(configPath, 0o600);
+        chmodSync(tmpPath, 0o600);
       } catch {
-        // best-effort: on some FS (FAT/exfat) chmod is a no-op
+        // best-effort: on FAT/exfat chmod is a no-op; the writeFileSync
+        // mode arg already set perms at create time.
       }
+      const { renameSync } = await import("node:fs");
+      renameSync(tmpPath, configPath);
       return { success: true, key, value };
     });
 
@@ -4730,17 +4738,50 @@ export class KairosRPCHandler {
     });
 
     // ── Quick action (Siri / widget tap) ───────────────────────
+    //
+    // Opus audit (2026-04-15) found this was a wildcard dispatcher:
+    // ANY authenticated Siri call could invoke ANY registered RPC
+    // handler — including config.set, composer.apply, execute, etc.
+    // That made Siri's auth surface the weakest link in the entire
+    // RPC tree. Now restricted to an explicit allowlist of read-only
+    // and intentionally-Siri-callable methods. Anything else falls
+    // through to the natural-language prompt path which respects the
+    // normal middleware pipeline + hook guards.
+    const SIRI_ALLOWLIST: ReadonlySet<string> = new Set([
+      "status",
+      "cost.current",
+      "cost.snapshot",
+      "memory.search",
+      "memory.mine",
+      "session.list",
+      "providers.list",
+      "providers.snapshot",
+      "skills.list",
+      "doctor",
+      "context.info",
+      "agents.list",
+      "workflow.list",
+      "channels.status",
+      "ping",
+      "briefing.daily",
+      "meet.summarize",
+    ]);
     this.handlers.set("quickAction", async (params) => {
       const { action, args } = params as { action?: string; args?: Record<string, unknown> };
       if (!action) return { error: "action required" };
       if (!this.runtime) return { error: "Runtime not initialized" };
       try {
-        const handler = this.handlers.get(action);
-        if (handler) {
-          const result = await handler(args ?? {});
-          return { ok: true, action, result };
+        if (SIRI_ALLOWLIST.has(action)) {
+          const handler = this.handlers.get(action);
+          if (handler) {
+            const result = await handler(args ?? {});
+            return { ok: true, action, result };
+          }
         }
-        // Treat unknown action as a natural-language prompt to autopilot
+        // Unknown or non-allowlisted action: treat as a natural-language
+        // prompt to autopilot. The prompt path goes through the normal
+        // middleware pipeline + hook guards (DestructiveGuard etc.) so
+        // it's the safe default for arbitrary Siri input.
         let response = "";
         for await (const chunk of this.runtime.query({
           prompt: `[SIRI ACTION] ${action}${args ? " " + JSON.stringify(args) : ""}`,

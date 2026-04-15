@@ -9,7 +9,14 @@
 import { KairosDaemon } from "./kairos.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  unlinkSync,
+  renameSync,
+} from "node:fs";
 import { ensureAllSidecars } from "../utils/sidecar-downloader.js";
 
 const wotannDir = join(homedir(), ".wotann");
@@ -85,12 +92,40 @@ function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     // `kill(pid, 0)` doesn't send a signal — it just tests for existence
-    // + permission. Throws ESRCH if the process is gone.
+    // + permission. Throws ESRCH if the process is gone, EPERM if the
+    // PID is owned by another user (which means it IS alive).
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    // Opus audit (2026-04-15): prior catch{} treated EPERM (alive but
+    // not ours) as dead, which on multi-tenant hosts let two daemons
+    // race for the same socket/port. Now: EPERM means alive (return
+    // true), ESRCH means dead (return false), anything else: be safe
+    // and assume alive (better to refuse start than collide).
+    const code = (err as { code?: string }).code;
+    if (code === "ESRCH") return false;
+    return true;
   }
+}
+
+/**
+ * Write a file atomically via tmp + rename. POSIX rename is atomic on
+ * the same filesystem, so two concurrent daemon-start invocations either
+ * both succeed in writing their own tmp file but only one wins the
+ * rename, or one wins and the other fails the rename — never partial.
+ *
+ * Closes the "PID write non-atomic" Opus audit finding: previously
+ * `writeFileSync(pidPath, ...)` could be observed mid-write by a
+ * concurrent reader, and two writers would clobber each other.
+ */
+function atomicWrite(targetPath: string, content: string): void {
+  const tmpPath = `${targetPath}.tmp.${process.pid}.${Date.now()}`;
+  writeFileSync(tmpPath, content);
+  // O_EXCL-style: if the target was created by another process between
+  // our existsSync check and now, the rename still atomically replaces
+  // it. We accept "last writer wins" semantics — the alternative
+  // (bail-out via O_EXCL) would race with stale-cleanup paths.
+  renameSync(tmpPath, targetPath);
 }
 
 if (existsSync(pidPath)) {
@@ -115,7 +150,7 @@ if (existsSync(pidPath)) {
   }
 }
 
-writeFileSync(pidPath, String(process.pid));
+atomicWrite(pidPath, String(process.pid));
 
 writeFileSync(
   statusPath,
