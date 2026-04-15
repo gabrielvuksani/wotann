@@ -15,15 +15,11 @@ import type { WotannMode } from "../core/mode-cycling.js";
 import type { CompanionDevice } from "./types.js";
 import type { Conversation, DesktopMessage } from "./conversation-manager.js";
 import type { Artifact } from "./artifacts.js";
+import { resolveDefaultProvider } from "../core/default-provider.js";
 
 // ── State Types ────────────────────────────────────────
 
-export type SidebarTab =
-  | "conversations"
-  | "projects"
-  | "skills"
-  | "channels"
-  | "settings";
+export type SidebarTab = "conversations" | "projects" | "skills" | "channels" | "settings";
 
 export type ThemePreference = "system" | "light" | "dark";
 
@@ -57,8 +53,13 @@ export interface DesktopAppState {
   readonly notifications: readonly AppNotification[];
   readonly costToday: number;
   readonly contextPercent: number;
-  readonly activeProvider: string;
-  readonly activeModel: string;
+  /**
+   * Active provider/model from the last user selection, discovered config,
+   * or env detection. `null` means "no provider configured" — the UI shows
+   * the onboarding/setup flow instead of pretending Anthropic is selected.
+   */
+  readonly activeProvider: string | null;
+  readonly activeModel: string | null;
   readonly currentMode: WotannMode;
 }
 
@@ -68,8 +69,16 @@ export type AppAction =
   | { readonly type: "CREATE_CONVERSATION"; readonly conversation: Conversation }
   | { readonly type: "DELETE_CONVERSATION"; readonly conversationId: string }
   | { readonly type: "SWITCH_CONVERSATION"; readonly conversationId: string }
-  | { readonly type: "UPDATE_CONVERSATION"; readonly conversationId: string; readonly updates: Partial<Conversation> }
-  | { readonly type: "APPEND_MESSAGE"; readonly conversationId: string; readonly message: DesktopMessage }
+  | {
+      readonly type: "UPDATE_CONVERSATION";
+      readonly conversationId: string;
+      readonly updates: Partial<Conversation>;
+    }
+  | {
+      readonly type: "APPEND_MESSAGE";
+      readonly conversationId: string;
+      readonly message: DesktopMessage;
+    }
   | { readonly type: "SET_STREAMING"; readonly isStreaming: boolean }
   | { readonly type: "SET_VOICE_ACTIVE"; readonly voiceActive: boolean }
   | { readonly type: "TOGGLE_SIDEBAR" }
@@ -87,10 +96,33 @@ export type AppAction =
   | { readonly type: "UPDATE_CONTEXT"; readonly contextPercent: number }
   | { readonly type: "SET_PROVIDER"; readonly provider: string; readonly model: string }
   | { readonly type: "SET_MODE"; readonly mode: WotannMode }
-  | { readonly type: "PIN_ARTIFACT"; readonly conversationId: string; readonly messageId: string; readonly artifactId: string }
-  | { readonly type: "UNPIN_ARTIFACT"; readonly conversationId: string; readonly messageId: string; readonly artifactId: string };
+  | {
+      readonly type: "PIN_ARTIFACT";
+      readonly conversationId: string;
+      readonly messageId: string;
+      readonly artifactId: string;
+    }
+  | {
+      readonly type: "UNPIN_ARTIFACT";
+      readonly conversationId: string;
+      readonly messageId: string;
+      readonly artifactId: string;
+    };
 
 // ── Initial State ──────────────────────────────────────
+
+/**
+ * Initial state with an honest "no provider configured" default (S1-18).
+ *
+ * The previous implementation hardcoded activeProvider/activeModel to
+ * "anthropic" / "claude-sonnet-4-6" — which showed "Anthropic" as the
+ * selected provider in the status bar even for users who had only
+ * configured Gemini or were still onboarding. resolveDefaultProvider()
+ * probes (in order): WOTANN_DEFAULT_PROVIDER env, ~/.wotann/wotann.yaml,
+ * then individual provider env keys. If nothing resolves we leave both
+ * fields null so the UI knows to show onboarding.
+ */
+const INITIAL_DEFAULT = resolveDefaultProvider();
 
 export const INITIAL_STATE: DesktopAppState = {
   conversations: [],
@@ -107,8 +139,8 @@ export const INITIAL_STATE: DesktopAppState = {
   notifications: [],
   costToday: 0,
   contextPercent: 0,
-  activeProvider: "anthropic",
-  activeModel: "claude-sonnet-4-20250514",
+  activeProvider: INITIAL_DEFAULT?.provider ?? null,
+  activeModel: INITIAL_DEFAULT?.model ?? null,
   currentMode: "default",
 };
 
@@ -125,9 +157,10 @@ export function appReducer(state: DesktopAppState, action: AppAction): DesktopAp
 
     case "DELETE_CONVERSATION": {
       const filtered = state.conversations.filter((c) => c.id !== action.conversationId);
-      const newActive = state.activeConversationId === action.conversationId
-        ? (filtered[0]?.id ?? null)
-        : state.activeConversationId;
+      const newActive =
+        state.activeConversationId === action.conversationId
+          ? (filtered[0]?.id ?? null)
+          : state.activeConversationId;
       return { ...state, conversations: filtered, activeConversationId: newActive };
     }
 
@@ -147,7 +180,11 @@ export function appReducer(state: DesktopAppState, action: AppAction): DesktopAp
         ...state,
         conversations: state.conversations.map((c) =>
           c.id === action.conversationId
-            ? { ...c, messages: [...c.messages, action.message], updatedAt: action.message.timestamp }
+            ? {
+                ...c,
+                messages: [...c.messages, action.message],
+                updatedAt: action.message.timestamp,
+              }
             : c,
         ),
       };
@@ -215,10 +252,22 @@ export function appReducer(state: DesktopAppState, action: AppAction): DesktopAp
       return { ...state, currentMode: action.mode };
 
     case "PIN_ARTIFACT":
-      return updateArtifactInState(state, action.conversationId, action.messageId, action.artifactId, true);
+      return updateArtifactInState(
+        state,
+        action.conversationId,
+        action.messageId,
+        action.artifactId,
+        true,
+      );
 
     case "UNPIN_ARTIFACT":
-      return updateArtifactInState(state, action.conversationId, action.messageId, action.artifactId, false);
+      return updateArtifactInState(
+        state,
+        action.conversationId,
+        action.messageId,
+        action.artifactId,
+        false,
+      );
   }
 }
 

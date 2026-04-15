@@ -13,6 +13,7 @@
 
 import type { WotannMode } from "../core/mode-cycling.js";
 import type { Artifact } from "./artifacts.js";
+import { resolveDefaultProvider } from "../core/default-provider.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -43,8 +44,13 @@ export interface Conversation {
   readonly id: string;
   readonly title: string;
   readonly messages: readonly DesktopMessage[];
-  readonly provider: string;
-  readonly model: string;
+  /**
+   * Provider this conversation is bound to. May be null on a brand-new
+   * conversation created before the user has configured any provider —
+   * the UI prompts them to pick one before sending the first message.
+   */
+  readonly provider: string | null;
+  readonly model: string | null;
   readonly mode: WotannMode;
   readonly project?: string;
   readonly createdAt: string;
@@ -103,19 +109,28 @@ export function generateTitle(firstMessage: string): string {
 // ── Conversation Factory ───────────────────────────────
 
 export function createConversation(options?: {
-  readonly provider?: string;
-  readonly model?: string;
+  readonly provider?: string | null;
+  readonly model?: string | null;
   readonly mode?: WotannMode;
   readonly project?: string;
   readonly tags?: readonly string[];
 }): Conversation {
   const now = new Date().toISOString();
+  // S1-18: resolve the default provider honestly — caller override first,
+  // then env/YAML-discovered default. If nothing is configured we leave
+  // both fields null so the UI can prompt the user to pick a provider
+  // instead of silently sending the first message to Anthropic.
+  const discovered = resolveDefaultProvider();
+  const provider =
+    options?.provider !== undefined ? options.provider : (discovered?.provider ?? null);
+  const model = options?.model !== undefined ? options.model : (discovered?.model ?? null);
+
   return {
     id: generateId("conv"),
     title: "New Conversation",
     messages: [],
-    provider: options?.provider ?? "anthropic",
-    model: options?.model ?? "claude-sonnet-4-20250514",
+    provider,
+    model,
     mode: options?.mode ?? "default",
     project: options?.project,
     createdAt: now,
@@ -130,15 +145,13 @@ export function createConversation(options?: {
 
 // ── Immutable Update Operations ────────────────────────
 
-export function addMessage(
-  conversation: Conversation,
-  message: DesktopMessage,
-): Conversation {
+export function addMessage(conversation: Conversation, message: DesktopMessage): Conversation {
   const tokenDelta = message.tokensUsed ?? 0;
   const costDelta = message.cost ?? 0;
-  const title = conversation.messages.length === 0 && message.role === "user"
-    ? generateTitle(message.content)
-    : conversation.title;
+  const title =
+    conversation.messages.length === 0 && message.role === "user"
+      ? generateTitle(message.content)
+      : conversation.title;
 
   return {
     ...conversation,
@@ -150,10 +163,7 @@ export function addMessage(
   };
 }
 
-export function deleteMessage(
-  conversation: Conversation,
-  messageId: string,
-): Conversation {
+export function deleteMessage(conversation: Conversation, messageId: string): Conversation {
   const msg = conversation.messages.find((m) => m.id === messageId);
   const tokenDelta = msg?.tokensUsed ?? 0;
   const costDelta = msg?.cost ?? 0;
@@ -177,7 +187,11 @@ export function archiveConversation(conversation: Conversation, archived: boolea
 
 export function tagConversation(conversation: Conversation, tag: string): Conversation {
   if (conversation.tags.includes(tag)) return conversation;
-  return { ...conversation, tags: [...conversation.tags, tag], updatedAt: new Date().toISOString() };
+  return {
+    ...conversation,
+    tags: [...conversation.tags, tag],
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 export function untagConversation(conversation: Conversation, tag: string): Conversation {
@@ -286,9 +300,7 @@ export function toSummary(conversation: Conversation): ConversationSummary {
 export function getSortedSummaries(
   conversations: readonly Conversation[],
 ): readonly ConversationSummary[] {
-  const summaries = conversations
-    .filter((c) => !c.archived)
-    .map(toSummary);
+  const summaries = conversations.filter((c) => !c.archived).map(toSummary);
 
   const pinned = summaries.filter((s) => s.pinned);
   const unpinned = summaries.filter((s) => !s.pinned);

@@ -32,6 +32,8 @@
 
 import {
   OracleWorkerPolicy,
+  DEFAULT_CONFIG as DEFAULT_ORACLE_CONFIG,
+  resolveOracleWorkerModels,
   type EscalationReason,
   type OracleConsultation,
   type OracleResponse,
@@ -71,6 +73,14 @@ export interface AutonomousConfig {
   readonly contextPressureCritical: number;
   /** Enable self-troubleshooting: classify errors and attempt automatic fixes (merged from NeverStop) */
   readonly enableSelfTroubleshoot: boolean;
+  /**
+   * Provider whose oracle/worker model pair should be used for escalation
+   * (S1-17). When omitted, defaults to Anthropic's Haiku↔Opus pair —
+   * reasonable for Anthropic-bound sessions but fatal for Gemini/Ollama/etc.
+   * Runtime passes the session's active provider here so escalation model
+   * IDs match the provider we're actually querying.
+   */
+  readonly oracleProvider?: string;
 }
 
 export interface AutonomousCycleResult {
@@ -434,7 +444,20 @@ export class AutonomousExecutor {
     // `recordIteration` is called after each cycle; `shouldEscalate` runs
     // before each new step. If callers don't supply an `onOracleConsult`
     // hook we silently degrade to worker-only execution.
-    const oraclePolicy = new OracleWorkerPolicy();
+    //
+    // S1-17: resolve provider-specific worker/oracle model IDs so sessions
+    // bound to non-Anthropic providers don't get Claude model strings.
+    const policyModels = this.config.oracleProvider
+      ? resolveOracleWorkerModels(this.config.oracleProvider)
+      : {
+          workerModel: DEFAULT_ORACLE_CONFIG.workerModel,
+          oracleModel: DEFAULT_ORACLE_CONFIG.oracleModel,
+        };
+    const oraclePolicy = new OracleWorkerPolicy({
+      ...DEFAULT_ORACLE_CONFIG,
+      workerModel: policyModels.workerModel,
+      oracleModel: policyModels.oracleModel,
+    });
     let oracleGuidance: string | null = null;
 
     for (let cycle = 0; cycle < this.config.maxCycles; cycle++) {

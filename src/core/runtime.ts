@@ -17,6 +17,7 @@
 import type { ProviderName, WotannQueryOptions, AgentMessage, ToolDefinition } from "./types.js";
 import type { StreamChunk } from "../providers/types.js";
 import { discoverProviders } from "../providers/discovery.js";
+import { resolveDefaultProvider } from "./default-provider.js";
 import {
   createProviderInfrastructure,
   type ProviderInfrastructure,
@@ -306,6 +307,19 @@ export interface RuntimeConfig {
   readonly thinkingEffort?: ThinkingEffort;
   readonly maxContextTokens?: number;
   readonly enableAntiDistillation?: boolean;
+  /**
+   * Provider to use when discovery hasn't run yet and the user hasn't
+   * picked one. Historically hardcoded to "anthropic" throughout the
+   * codebase; S1-16/17/18 make this configurable so free-tier users (who
+   * may only have Gemini or a local Ollama model) don't get error
+   * chunks attributed to a provider they haven't configured.
+   */
+  readonly defaultProvider?: ProviderName;
+  /**
+   * Default model paired with `defaultProvider`. When omitted, downstream
+   * code treats it as "auto" and lets the router choose.
+   */
+  readonly defaultModel?: string;
 }
 
 export interface RuntimeStatus {
@@ -553,8 +567,19 @@ export class WotannRuntime {
     // Initialize semantic search index
     this.semanticIndex = new TFIDFIndex();
 
-    // Initialize context window intelligence (provider-aware budget management)
-    this.contextIntelligence = new ContextWindowIntelligence("anthropic");
+    // Initialize context window intelligence (provider-aware budget management).
+    // S1-16: resolve the default provider honestly — explicit config wins,
+    // then env/YAML discovery, then `null` meaning "no provider configured
+    // yet". ContextWindowIntelligence needs a concrete provider for its
+    // budget tables, so when nothing is known we use "ollama" as the safest
+    // fallback (local, free, conservative default context window). The
+    // adaptToProvider() call at query time replaces this with the real
+    // provider once discovery resolves.
+    const bootstrapProvider: ProviderName =
+      config.defaultProvider ??
+      (resolveDefaultProvider()?.provider as ProviderName | undefined) ??
+      "ollama";
+    this.contextIntelligence = new ContextWindowIntelligence(bootstrapProvider);
 
     // Initialize per-file edit tracker (benchmark engineering: warn at 4, block at 8)
     this.editTracker = new PerFileEditTracker();
@@ -577,8 +602,10 @@ export class WotannRuntime {
       join(config.workingDir, ".wotann", "model-performance.json"),
     );
 
-    // Initialize session
-    this.session = createSession("anthropic", "auto");
+    // Initialize session. Session provider is cosmetic here — the real
+    // provider is resolved per-query by the router — but it flows into
+    // telemetry and UI attribution, so honour the resolved default.
+    this.session = createSession(bootstrapProvider, config.defaultModel ?? "auto");
 
     // Initialize memory store (if enabled)
     if (config.enableMemory !== false) {
@@ -624,8 +651,9 @@ export class WotannRuntime {
     // Plugin lifecycle: pre/post LLM call hooks, session hooks
     this.pluginLifecycle = new PluginLifecycle();
 
-    // Session recorder: record/replay sessions for debugging
-    this.sessionRecorder = new SessionRecorder("anthropic", "auto");
+    // Session recorder: record/replay sessions for debugging. Reuse the
+    // bootstrap provider so telemetry attribution matches the session.
+    this.sessionRecorder = new SessionRecorder(bootstrapProvider, config.defaultModel ?? "auto");
     this.sessionRecorder.start();
 
     // Shadow git: checkpoint-based rollback for autonomous mode
@@ -1009,9 +1037,12 @@ export class WotannRuntime {
     // CrossDeviceContext: inject cross-device awareness if devices are connected
     const crossDevicePrompt = this.crossDeviceContext.buildPromptContext();
 
-    // Phase 4: Adaptive prompt section — adds scaffolding for weaker models, minimalism for frontier
+    // Phase 4: Adaptive prompt section — adds scaffolding for weaker models,
+    // minimalism for frontier. When no model is known yet, pass an empty
+    // string so the adaptive layer falls back to its generic scaffolding
+    // rather than biasing toward a specific vendor's tier.
     const adaptiveSection = this.adaptivePrompts.generateAdaptiveSection(
-      this.session.model ?? "claude-sonnet-4-6",
+      this.session.model ?? "",
       "",
     );
 
@@ -1084,11 +1115,16 @@ export class WotannRuntime {
    * 12. Cost tracking + session update
    */
   async *query(options: WotannQueryOptions): AsyncGenerator<StreamChunk> {
+    // S1-16: attribute errors to the actual targeted provider, falling back
+    // through config → discovered default → session provider (honest:
+    // whatever the runtime bootstrapped with). Never hardcoded to Anthropic.
+    const attributedProvider: ProviderName =
+      options.provider ?? this.config.defaultProvider ?? (this.session.provider as ProviderName);
     if (!this.infra) {
       yield {
         type: "error",
         content: "No providers configured. Run `wotann init` first.",
-        provider: "anthropic",
+        provider: attributedProvider,
       };
       return;
     }
@@ -1177,9 +1213,11 @@ export class WotannRuntime {
       if (this.config.enableWasmBypass !== false && canBypass(options.prompt)) {
         const result = executeBypass(options.prompt, options.prompt);
         if (result.output) {
-          streamCheckpointStore.appendText(streamCheckpoint.id, result.output, "anthropic");
-          yield { type: "text", content: result.output ?? "", provider: "anthropic" };
-          yield { type: "done", content: "", provider: "anthropic", tokensUsed: 0 };
+          // WASM bypass runs locally. Attribute to the user's targeted
+          // provider so UI labels don't claim a provider that was never called.
+          streamCheckpointStore.appendText(streamCheckpoint.id, result.output, attributedProvider);
+          yield { type: "text", content: result.output ?? "", provider: attributedProvider };
+          yield { type: "done", content: "", provider: attributedProvider, tokensUsed: 0 };
           streamCheckpointStore.markCompleted(streamCheckpoint.id);
           streamCompleted = true;
           return;
@@ -1226,7 +1264,7 @@ export class WotannRuntime {
         });
         if (hookResult.action === "block") {
           streamInterruptedReason = `Blocked by hook: ${hookResult.message ?? ""}`;
-          yield { type: "error", content: streamInterruptedReason, provider: "anthropic" };
+          yield { type: "error", content: streamInterruptedReason, provider: attributedProvider };
           return;
         }
       }
@@ -1252,7 +1290,7 @@ export class WotannRuntime {
         yield {
           type: "error",
           content: streamInterruptedReason,
-          provider: "anthropic",
+          provider: attributedProvider,
         };
         return;
       }
@@ -3275,8 +3313,12 @@ export class WotannRuntime {
     complexity: string;
     recommendedModel: string;
   } {
+    // When no infra is wired yet, pass an empty availability list — the
+    // classifier treats empty as "don't filter; return the general-best
+    // recommendation" rather than forcing any one model. Previously
+    // hardcoded ["claude-sonnet-4-6"] which silently biased the router.
     const status = this.infra ? this.getStatus() : null;
-    const available = status?.providers ? status.providers.map(String) : ["claude-sonnet-4-6"];
+    const available = status?.providers ? status.providers.map(String) : [];
     const classification = this.taskRouter.classify(prompt, available);
     return {
       taskType: classification.type,

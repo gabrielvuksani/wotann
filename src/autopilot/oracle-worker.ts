@@ -49,9 +49,21 @@ export interface OracleWorkerConfig {
   readonly maxEscalationsPerTask: number;
 }
 
+import { getProviderDefaults } from "../providers/model-defaults.js";
+
+/**
+ * Default config — resolved from the single-source-of-truth PROVIDER_DEFAULTS
+ * table. Previously hardcoded Haiku→Opus inline; the current defaults use
+ * Sonnet→Opus (Sonnet is the honest "fast/cheap coding" tier — Haiku is too
+ * weak for real agentic loops). To override, pass a custom config to
+ * `new OracleWorkerPolicy(config)` or set
+ * `~/.wotann/wotann.yaml: providers.anthropic.model`.
+ */
+const anthropicDefaults = getProviderDefaults("anthropic");
+
 export const DEFAULT_CONFIG: OracleWorkerConfig = {
-  workerModel: "claude-haiku-4-5-20251001",
-  oracleModel: "claude-opus-4-6",
+  workerModel: anthropicDefaults.workerModel,
+  oracleModel: anthropicDefaults.oracleModel,
   escalationThresholds: {
     repeatedErrorCount: 3,
     stuckIterations: 5,
@@ -60,6 +72,22 @@ export const DEFAULT_CONFIG: OracleWorkerConfig = {
   },
   maxEscalationsPerTask: 5,
 };
+
+/**
+ * Return the canonical worker/oracle model pair for a given provider.
+ * Looks up the single-source table in `model-defaults.ts`; to add a new
+ * provider or change the pair, edit that one file.
+ */
+export function resolveOracleWorkerModels(provider: string): {
+  workerModel: string;
+  oracleModel: string;
+} {
+  const defaults = getProviderDefaults(provider);
+  return {
+    workerModel: defaults.workerModel,
+    oracleModel: defaults.oracleModel,
+  };
+}
 
 export class OracleWorkerPolicy {
   private readonly config: OracleWorkerConfig;

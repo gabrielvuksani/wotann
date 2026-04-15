@@ -2710,26 +2710,77 @@ export class KairosRPCHandler {
 
     // ── CLI-Parity Methods ──────────────────────────────
 
-    // autonomous.run — start autonomous execution via runtime query
+    // autonomous.run — actually invoke the AutonomousExecutor loop (S1-12).
+    //
+    // The previous implementation only prefixed `[AUTONOMOUS MODE]` onto the
+    // user's prompt and ran a single query. That meant the doom-loop
+    // detection, strategy escalation, heartbeat watchdog, checkpointing, and
+    // verification cascade — all ~2,000 LOC of real autonomous execution —
+    // were never entered. The handler was effectively a docstring.
+    //
+    // This version bridges the executor's `execute(task, exec, verify)`
+    // signature onto the runtime's streaming query + verification cascade.
     this.handlers.set("autonomous.run", async (params) => {
       const task = (params.task as string) ?? (params.prompt as string);
       if (!task) throw new Error("task required");
       if (!this.runtime) throw new Error("Runtime not initialized");
-      // Verify executor is available, then route through runtime query
-      this.runtime.getAutonomousExecutor();
-      const notifier = this.runtime.getNotificationManager();
-      try {
-        let result = "";
-        for await (const chunk of this.runtime.query({ prompt: `[AUTONOMOUS MODE] ${task}` })) {
-          if (chunk.type === "text") result += chunk.content ?? "";
+
+      const runtime = this.runtime;
+      const executor = runtime.getAutonomousExecutor();
+      const cascade = runtime.getVerificationCascade();
+      const notifier = runtime.getNotificationManager();
+
+      // Per-turn executor: drives a single worker step through the runtime's
+      // normal query pipeline (so middleware, memory, and provider fallback
+      // all still apply).
+      const runTurn = async (
+        prompt: string,
+      ): Promise<{ output: string; costUsd: number; tokensUsed: number }> => {
+        let output = "";
+        let tokensUsed = 0;
+        for await (const chunk of runtime.query({ prompt })) {
+          if (chunk.type === "text") output += chunk.content ?? "";
+          if (typeof chunk.tokensUsed === "number") tokensUsed = chunk.tokensUsed;
         }
-        // Surface completion to desktop + iOS via notification queue.
+        return { output, costUsd: 0, tokensUsed };
+      };
+
+      // Adapter: AutonomousExecutor wants a verifier returning the classic
+      // tests/typecheck/lint tri-state. The cascade gives us a list of
+      // detected step results — fold those into the shape the executor wants.
+      const runVerifier = async (): Promise<{
+        testsPass: boolean;
+        typecheckPass: boolean;
+        lintPass: boolean;
+        output: string;
+      }> => {
+        const result = await cascade.run();
+        const stepPassed = (needle: string): boolean => {
+          const step = result.steps.find((s) => s.step.toLowerCase().includes(needle));
+          return step ? step.passed : true; // absent step counts as "not blocking"
+        };
+        return {
+          testsPass: stepPassed("test"),
+          typecheckPass: stepPassed("typecheck") || stepPassed("type-check"),
+          lintPass: stepPassed("lint"),
+          output: result.steps.map((s) => `[${s.step}] ${s.output}`).join("\n"),
+        };
+      };
+
+      try {
+        const result = await executor.execute(task, runTurn, runVerifier);
+
         notifier.push(
           "task-complete",
-          "Autonomous task complete",
-          task.length > 120 ? task.slice(0, 117) + "..." : task,
+          result.success ? "Autonomous task complete" : "Autonomous task halted",
+          `${task.slice(0, 100)} (${result.totalCycles} cycles, ${result.exitReason})`,
         );
-        return { task, result, timestamp: Date.now() };
+
+        return {
+          task,
+          result,
+          timestamp: Date.now(),
+        };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         notifier.push("error", "Autonomous task failed", `${task}: ${message}`.slice(0, 180));
