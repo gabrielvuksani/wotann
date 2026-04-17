@@ -9,6 +9,7 @@ import { getConnectors } from "../../store/engine";
 import type { ConnectorInfo } from "../../hooks/useTauriCommand";
 import { ConnectorCard } from "./ConnectorCard";
 import { ConnectorConfigForm, type SupportedConnectorType } from "./ConnectorConfigForm";
+import { ValknutSpinner } from "../wotann/ValknutSpinner";
 
 const SUPPORTED_TYPES: readonly SupportedConnectorType[] = [
   "google-drive", "notion", "github", "slack", "linear", "jira",
@@ -80,10 +81,7 @@ export function ConnectorsGUI() {
             className="flex items-center gap-3 text-sm"
             style={{ color: "var(--color-text-muted)" }}
           >
-            <span
-              className="w-4 h-4 border-2 rounded-full animate-spin"
-              style={{ borderColor: "var(--color-text-dim)", borderTopColor: "var(--color-primary)" }}
-            />
+            <ValknutSpinner size={18} color="var(--color-primary)" label="Loading connectors" />
             Loading connectors&hellip;
           </div>
         </div>
