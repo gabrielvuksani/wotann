@@ -276,19 +276,49 @@ export const useStore = create<DesktopState>((set) => ({
     }),
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setProvider: (provider, model) => {
+    // Validate against available providers so we can't get stuck in a
+    // state where the header pill shows "openai/gpt-5" but the dropdown
+    // only has "ollama/gemma" available. Silent reject would hide the
+    // bug; surface a notification instead so the user knows why their
+    // click didn't take.
+    const state = useStore.getState();
+    const target = state.providers.find((p) => p.id === provider);
+    const modelValid = target?.models.some((m) => m.id === model) ?? false;
+    if (!target || !target.enabled || !modelValid) {
+      // Add a notification for the user
+      const id = `notif-invalid-${Date.now()}`;
+      set((s) => ({
+        notifications: [
+          ...s.notifications,
+          {
+            id,
+            type: "error",
+            title: "Provider unavailable",
+            message: `${provider}/${model} is not in the enabled providers list — selection ignored.`,
+            timestamp: Date.now(),
+            read: false,
+          },
+        ],
+      }));
+      return;
+    }
+
     set({ provider, model });
-    // Persist the selection so status polling doesn't overwrite it
     localStorage.setItem("wotann-selected-provider", provider);
     localStorage.setItem("wotann-selected-model", model);
-    // Update Rust AppState so send_message_streaming uses the correct model
-    import("@tauri-apps/api/core").then(({ invoke }) => {
-      invoke("switch_provider", { provider, model }).catch(() => {});
-    }).catch(() => {});
-    // Also tell the daemon config
-    import("../store/engine").then(({ setConfig }) => {
-      setConfig("active_provider", provider).catch(() => {});
-      setConfig("active_model", model).catch(() => {});
-    }).catch(() => {});
+    // Sync to Rust AppState — this is the channel send_message_streaming uses
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => {
+        invoke("switch_provider", { provider, model }).catch(() => {});
+      })
+      .catch(() => {});
+    // Also tell the daemon config so it survives restarts
+    import("../store/engine")
+      .then(({ setConfig }) => {
+        setConfig("active_provider", provider).catch(() => {});
+        setConfig("active_model", model).catch(() => {});
+      })
+      .catch(() => {});
   },
   setMode: (mode) => set({ mode }),
   updateCost: (cost) => set({ cost }),

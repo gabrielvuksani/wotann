@@ -40,6 +40,22 @@ export function ModelPicker() {
     }
   }, [open]);
 
+  // Reconcile the current selection against the live providers list.
+  // If the selected provider/model is no longer available (provider
+  // disabled, or model removed), snap to the first enabled option so
+  // the header pill never lies about what's active.
+  useEffect(() => {
+    if (providers.length === 0) return;
+    const active = providers.find((p) => p.id === currentProvider);
+    const modelOk = active?.enabled && active.models.some((m) => m.id === currentModel);
+    if (modelOk) return;
+    const fallback = providers.find((p) => p.enabled && p.models.length > 0);
+    if (fallback && fallback.models[0]) {
+      // Use the store setter — it writes localStorage + syncs to engine
+      setProvider(fallback.id, fallback.models[0].id);
+    }
+  }, [providers, currentProvider, currentModel, setProvider]);
+
   // Filter providers/models by search term
   const filteredProviders = useMemo(() => {
     if (!search.trim()) return providers;

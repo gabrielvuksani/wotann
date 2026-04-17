@@ -249,29 +249,38 @@ pub fn run() {
 
             // Start the KAIROS daemon ASYNC — don't block app launch
             // The app ALWAYS opens. Engine connection is optional.
+            //
+            // Watchdog is always armed (even when the initial wait times out)
+            // so late socket creation is picked up automatically rather than
+            // stranding the app in standalone mode forever.
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let state = app_handle.state::<AppState>();
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let spawn_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     state.sidecar.spawn()
-                })) {
+                }));
+                match spawn_result {
                     Ok(Ok(())) => {
                         if state.sidecar.is_running() {
                             *state.engine_running.lock().unwrap_or_else(|e| e.into_inner()) = true;
                             println!("KAIROS daemon connected");
-                            // Start watchdog to auto-restart if daemon crashes
-                            state.sidecar.start_watchdog();
                         } else {
-                            println!("KAIROS daemon not available — running in standalone mode");
+                            println!(
+                                "KAIROS daemon not yet available — watchdog will keep trying"
+                            );
                         }
                     }
                     Ok(Err(e)) => {
-                        eprintln!("Daemon error: {} — running in standalone mode", e);
+                        eprintln!("Daemon error: {} — watchdog will retry", e);
                     }
                     Err(_) => {
-                        eprintln!("Daemon spawn panicked — running in standalone mode");
+                        eprintln!("Daemon spawn panicked — watchdog will retry");
                     }
                 }
+                // Always arm the watchdog. It polls every 15s and:
+                //   - flips engine_running=true the moment the socket appears
+                //   - restarts the daemon if the socket disappears
+                state.sidecar.start_watchdog();
             });
 
             // Set Ollama optimization environment variables for memory-constrained devices

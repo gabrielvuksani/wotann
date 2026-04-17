@@ -261,14 +261,31 @@ pub fn get_status(state: State<AppState>) -> RuntimeStatus {
                     .get("activeProvider")
                     .and_then(|v| v.as_str())
                     .is_some();
+                let provider = result
+                    .get("activeProvider")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("anthropic")
+                    .to_string();
+                // Prefer what KAIROS reports; fall back to locally-stored
+                // model selection. Prior versions hardcoded "auto" which
+                // broke the picker for every user (the stored selection
+                // and the header pill would never match reality).
+                let model = result
+                    .get("activeModel")
+                    .or_else(|| result.get("model"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+                    .unwrap_or_else(|| {
+                        state
+                            .model
+                            .lock()
+                            .map(|m| m.clone())
+                            .unwrap_or_else(|e| e.into_inner().clone())
+                    });
                 return RuntimeStatus {
                     connected,
-                    provider: result
-                        .get("activeProvider")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("anthropic")
-                        .to_string(),
-                    model: "auto".into(),
+                    provider,
+                    model,
                     mode: result
                         .get("currentMode")
                         .and_then(|v| v.as_str())
@@ -1006,44 +1023,158 @@ fn emit_streaming_response(
 
 // ── Fallback Data ────────────────────────────────────────
 
-/// When KAIROS is unavailable, return empty provider list.
-/// Never show fake providers — only real ones from the engine.
+/// When KAIROS is unavailable, probe for locally-installed + environment-
+/// configured providers so the picker doesn't go empty or lie about what's
+/// active. Every provider is gated on a real signal (reachable local
+/// endpoint OR a configured API key env var) — no fake advertising of
+/// providers the user hasn't actually set up.
 fn hardcoded_providers() -> Vec<ProviderInfo> {
     let mut providers = Vec::new();
-
-    // Probe Ollama directly when daemon is unavailable
-    if let Ok(resp) = reqwest::blocking::Client::new()
-        .get("http://localhost:11434/api/tags")
+    let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
-        .send()
-    {
-        if let Ok(body) = resp.json::<serde_json::Value>() {
-            if let Some(models) = body.get("models").and_then(|m| m.as_array()) {
-                let model_infos: Vec<ModelInfo> = models
-                    .iter()
-                    .filter_map(|m| {
-                        let name = m.get("name").and_then(|n| n.as_str())?;
-                        Some(ModelInfo {
-                            id: name.to_string(),
-                            name: name.to_string(),
-                            context_window: 0,
-                            cost_per_m_tok: 0.0,
-                        })
-                    })
-                    .collect();
+        .build()
+        .ok();
 
-                if !model_infos.is_empty() {
-                    let default_model = model_infos[0].id.clone();
-                    providers.push(ProviderInfo {
-                        id: "ollama".into(),
-                        name: "Ollama (local)".into(),
-                        enabled: true,
-                        models: model_infos,
-                        default_model,
-                    });
+    // 1. Ollama (local) — probe /api/tags
+    if let Some(ref c) = client {
+        if let Ok(resp) = c.get("http://localhost:11434/api/tags").send() {
+            if let Ok(body) = resp.json::<serde_json::Value>() {
+                if let Some(models) = body.get("models").and_then(|m| m.as_array()) {
+                    let model_infos: Vec<ModelInfo> = models
+                        .iter()
+                        .filter_map(|m| {
+                            let name = m.get("name").and_then(|n| n.as_str())?;
+                            Some(ModelInfo {
+                                id: name.to_string(),
+                                name: name.to_string(),
+                                context_window: 32_768,
+                                cost_per_m_tok: 0.0,
+                            })
+                        })
+                        .collect();
+                    if !model_infos.is_empty() {
+                        let default_model = model_infos[0].id.clone();
+                        providers.push(ProviderInfo {
+                            id: "ollama".into(),
+                            name: "Ollama (local)".into(),
+                            enabled: true,
+                            models: model_infos,
+                            default_model,
+                        });
+                    }
                 }
             }
         }
+    }
+
+    // 2. Anthropic — gated on ANTHROPIC_API_KEY
+    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        providers.push(ProviderInfo {
+            id: "anthropic".into(),
+            name: "Anthropic".into(),
+            enabled: true,
+            models: vec![
+                ModelInfo {
+                    id: "claude-opus-4-7".into(),
+                    name: "Claude Opus 4.7".into(),
+                    context_window: 1_000_000,
+                    cost_per_m_tok: 15.0,
+                },
+                ModelInfo {
+                    id: "claude-sonnet-4-6".into(),
+                    name: "Claude Sonnet 4.6".into(),
+                    context_window: 1_000_000,
+                    cost_per_m_tok: 3.0,
+                },
+                ModelInfo {
+                    id: "claude-haiku-4-5-20251001".into(),
+                    name: "Claude Haiku 4.5".into(),
+                    context_window: 200_000,
+                    cost_per_m_tok: 0.25,
+                },
+            ],
+            default_model: "claude-opus-4-7".into(),
+        });
+    }
+
+    // 3. OpenAI — gated on OPENAI_API_KEY
+    if std::env::var("OPENAI_API_KEY").is_ok() {
+        providers.push(ProviderInfo {
+            id: "openai".into(),
+            name: "OpenAI".into(),
+            enabled: true,
+            models: vec![
+                ModelInfo {
+                    id: "gpt-5".into(),
+                    name: "GPT-5".into(),
+                    context_window: 256_000,
+                    cost_per_m_tok: 10.0,
+                },
+                ModelInfo {
+                    id: "gpt-5-mini".into(),
+                    name: "GPT-5 mini".into(),
+                    context_window: 128_000,
+                    cost_per_m_tok: 0.5,
+                },
+            ],
+            default_model: "gpt-5".into(),
+        });
+    }
+
+    // 4. Google Gemini — gated on GEMINI_API_KEY or GOOGLE_API_KEY
+    if std::env::var("GEMINI_API_KEY").is_ok() || std::env::var("GOOGLE_API_KEY").is_ok() {
+        providers.push(ProviderInfo {
+            id: "gemini".into(),
+            name: "Google Gemini".into(),
+            enabled: true,
+            models: vec![
+                ModelInfo {
+                    id: "gemini-3-pro".into(),
+                    name: "Gemini 3 Pro".into(),
+                    context_window: 2_000_000,
+                    cost_per_m_tok: 3.5,
+                },
+                ModelInfo {
+                    id: "gemini-3-flash".into(),
+                    name: "Gemini 3 Flash".into(),
+                    context_window: 1_000_000,
+                    cost_per_m_tok: 0.15,
+                },
+            ],
+            default_model: "gemini-3-pro".into(),
+        });
+    }
+
+    // 5. Groq — gated on GROQ_API_KEY
+    if std::env::var("GROQ_API_KEY").is_ok() {
+        providers.push(ProviderInfo {
+            id: "groq".into(),
+            name: "Groq (free tier)".into(),
+            enabled: true,
+            models: vec![ModelInfo {
+                id: "llama-3.3-70b-versatile".into(),
+                name: "Llama 3.3 70B".into(),
+                context_window: 128_000,
+                cost_per_m_tok: 0.0,
+            }],
+            default_model: "llama-3.3-70b-versatile".into(),
+        });
+    }
+
+    // 6. Cerebras — gated on CEREBRAS_API_KEY
+    if std::env::var("CEREBRAS_API_KEY").is_ok() {
+        providers.push(ProviderInfo {
+            id: "cerebras".into(),
+            name: "Cerebras".into(),
+            enabled: true,
+            models: vec![ModelInfo {
+                id: "llama3.1-70b".into(),
+                name: "Llama 3.1 70B".into(),
+                context_window: 128_000,
+                cost_per_m_tok: 0.0,
+            }],
+            default_model: "llama3.1-70b".into(),
+        });
     }
 
     providers

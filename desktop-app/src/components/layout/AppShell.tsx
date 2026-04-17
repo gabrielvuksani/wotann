@@ -278,7 +278,23 @@ export function AppShell() {
 
           {/* Disconnected banner */}
           {!engineConnected && (
-            <DisconnectedBanner onRetry={() => initializeFromEngine()} />
+            <DisconnectedBanner
+              onRetry={async () => {
+                // Previous wiring just re-ran initializeFromEngine() which
+                // queries the daemon but never respawns it. When the daemon
+                // was dead (socket missing / stale), Reconnect did nothing
+                // visible. Now: ask Rust to actually restart the sidecar,
+                // then refresh state once the socket is up.
+                try {
+                  const { invoke } = await import("@tauri-apps/api/core");
+                  await invoke("restart_engine");
+                } catch {
+                  /* fall through to init — worst case the watchdog
+                     eventually catches up on its next tick */
+                }
+                await initializeFromEngine();
+              }}
+            />
           )}
 
           {/* Content + panels area */}

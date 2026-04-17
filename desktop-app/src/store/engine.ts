@@ -106,6 +106,77 @@ export async function initializeFromEngine(): Promise<void> {
     patch.providers = providersResult.value as readonly ProviderInfo[];
   }
 
+  // Resolve the provider/model to use for this session. Priority order:
+  //   1. Saved localStorage choice, IF the pair still exists in providers[]
+  //   2. Current engine status (status.provider + status.model), IF valid
+  //   3. First enabled provider + its first model (fallback)
+  //
+  // Surfaces a notification when the saved pair was pruned so the user
+  // understands why their previous choice didn't stick.
+  const savedProvider = localStorage.getItem("wotann-selected-provider");
+  const savedModel = localStorage.getItem("wotann-selected-model");
+  const availableProviders = (patch.providers as readonly ProviderInfo[] | undefined) ?? [];
+  const pairExists = (p: string, m: string): boolean => {
+    const found = availableProviders.find((x) => x.id === p && x.enabled);
+    return !!found && found.models.some((mm) => mm.id === m);
+  };
+  const firstEnabled = availableProviders.find((p) => p.enabled && p.models.length > 0);
+  let resolvedProvider: string | undefined;
+  let resolvedModel: string | undefined;
+
+  if (savedProvider && savedModel && pairExists(savedProvider, savedModel)) {
+    resolvedProvider = savedProvider;
+    resolvedModel = savedModel;
+  } else if (
+    typeof patch.provider === "string" &&
+    typeof patch.model === "string" &&
+    pairExists(patch.provider, patch.model)
+  ) {
+    resolvedProvider = patch.provider;
+    resolvedModel = patch.model;
+    if (savedProvider && savedModel) {
+      // Clean up stale saved pair so we don't keep bouncing back to an
+      // unavailable provider on every restart.
+      localStorage.removeItem("wotann-selected-provider");
+      localStorage.removeItem("wotann-selected-model");
+      pushNotification(
+        "error",
+        "Provider no longer available",
+        `Saved choice ${savedProvider}/${savedModel} was pruned — using ${resolvedProvider}/${resolvedModel} instead.`,
+      );
+    }
+  } else if (firstEnabled && firstEnabled.models[0]) {
+    resolvedProvider = firstEnabled.id;
+    resolvedModel = firstEnabled.models[0].id;
+    localStorage.removeItem("wotann-selected-provider");
+    localStorage.removeItem("wotann-selected-model");
+  }
+
+  if (resolvedProvider && resolvedModel) {
+    patch.provider = resolvedProvider;
+    patch.model = resolvedModel;
+    // Persist + sync to Rust AppState. The previous implementation did
+    // this inside a savedProvider-gated branch, so first-launch users
+    // never got localStorage + engine in sync.
+    localStorage.setItem("wotann-selected-provider", resolvedProvider);
+    localStorage.setItem("wotann-selected-model", resolvedModel);
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => {
+        invoke("switch_provider", {
+          provider: resolvedProvider,
+          model: resolvedModel,
+        }).catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          pushNotification(
+            "error",
+            "Provider sync failed",
+            `Could not sync ${resolvedProvider}/${resolvedModel} to engine: ${message}`,
+          );
+        });
+      })
+      .catch(() => {});
+  }
+
   if (costResult.status === "fulfilled") {
     patch.cost = costResult.value as CostSnapshot;
   }
@@ -116,33 +187,6 @@ export async function initializeFromEngine(): Promise<void> {
 
   if (conversationsResult.status === "fulfilled") {
     patch.conversations = conversationsResult.value as readonly ConversationSummary[];
-  }
-
-  // Restore saved provider/model selection from localStorage
-  const savedProvider = localStorage.getItem("wotann-selected-provider");
-  const savedModel = localStorage.getItem("wotann-selected-model");
-  if (savedProvider && savedModel) {
-    patch.provider = savedProvider;
-    patch.model = savedModel;
-    // Sync to Rust AppState so send_message_streaming uses the correct model.
-    // Surface failures as a notification instead of silently swallowing —
-    // the common cause is a stale provider/model pairing after the user
-    // disabled a provider, and the user needs to know their saved choice
-    // is not what the engine is actually using.
-    import("@tauri-apps/api/core")
-      .then(({ invoke }) => {
-        invoke("switch_provider", { provider: savedProvider, model: savedModel }).catch(
-          (err) => {
-            const message = err instanceof Error ? err.message : String(err);
-            pushNotification(
-              "error",
-              "Provider restore failed",
-              `Could not restore ${savedProvider}/${savedModel}: ${message}`,
-            );
-          },
-        );
-      })
-      .catch(() => {});
   }
 
   useStore.setState(patch);

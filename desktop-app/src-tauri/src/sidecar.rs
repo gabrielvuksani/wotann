@@ -112,7 +112,15 @@ impl SidecarManager {
     }
 
     fn spawn_with_policy(&self, allow_protected_source: bool) -> Result<(), String> {
-        // If socket already exists, daemon is running
+        // Clear stale socket file first — prior daemon may have been SIGKILLed
+        // without cleanup, leaving a zombie inode that confuses is_daemon_healthy()
+        // and blocks connect() attempts from the RPC layer.
+        if Self::socket_path().exists() && !Self::is_daemon_healthy() {
+            let _ = std::fs::remove_file(Self::socket_path());
+            println!("Cleared stale KAIROS socket file");
+        }
+
+        // If socket already exists AND a daemon is actually listening, skip spawn
         if Self::is_daemon_running() {
             println!("KAIROS daemon already running (socket exists)");
             return Ok(());
@@ -213,12 +221,18 @@ impl SidecarManager {
                 println!("KAIROS daemon spawned directly (PID: {})", child.id());
                 *guard = Some(child);
 
-                // Wait for socket
+                // Wait for socket. Cold-start via `npx tsx src/daemon/start.ts`
+                // commonly takes 15-25s because tsx has to JIT-transform ~200
+                // TypeScript modules, initialize the runtime (providers, memory,
+                // hooks, sandbox), THEN bind the socket. The prior 5s timeout
+                // caused spurious "standalone mode" even on successful spawns.
                 drop(guard); // Release lock before waiting
-                if Self::wait_for_socket(Duration::from_secs(5)) {
+                if Self::wait_for_socket(Duration::from_secs(30)) {
                     println!("KAIROS daemon ready (socket created)");
                 } else {
-                    println!("KAIROS daemon spawned but socket not yet available");
+                    println!(
+                        "KAIROS daemon spawned but socket not yet available after 30s — watchdog will retry"
+                    );
                 }
                 Ok(())
             }
@@ -241,21 +255,65 @@ impl SidecarManager {
         false
     }
 
-    /// Start a background watchdog that monitors daemon health and auto-restarts
+    /// Start a background watchdog that monitors daemon health and auto-restarts.
+    ///
+    /// Behaviour:
+    ///   - Polls every 5s (was 15s — faster recovery on cold start).
+    ///   - Tracks the previous "healthy" state so we log transitions
+    ///     ("came online" / "disappeared") instead of spamming on every check.
+    ///   - When the daemon is unhealthy, attempts a respawn. Back-off up to
+    ///     60s between respawn attempts so we don't hammer the TS runtime
+    ///     if it's in a persistent crash loop.
     pub fn start_watchdog(&self) {
         std::thread::spawn(|| {
-            println!("KAIROS watchdog started (checking every 15s)");
+            println!("KAIROS watchdog started (checking every 5s)");
+            let mut was_healthy = false;
+            let mut last_spawn_attempt = Instant::now() - Duration::from_secs(120);
+            let mut consecutive_failures = 0u32;
             loop {
-                std::thread::sleep(Duration::from_secs(15));
+                std::thread::sleep(Duration::from_secs(5));
+                let healthy = Self::is_daemon_healthy();
 
-                // Check if socket still exists
-                if !Self::socket_path().exists() {
-                    println!("[WATCHDOG] Socket disappeared — daemon may have crashed. Attempting restart...");
-                    let manager = SidecarManager::new();
-                    if let Err(e) = manager.spawn() {
-                        eprintln!("[WATCHDOG] Restart failed: {}", e);
-                    } else {
-                        println!("[WATCHDOG] Daemon restarted successfully");
+                match (was_healthy, healthy) {
+                    (false, true) => {
+                        println!("[WATCHDOG] Daemon came online");
+                        consecutive_failures = 0;
+                    }
+                    (true, false) => {
+                        println!("[WATCHDOG] Socket disappeared — daemon may have crashed");
+                    }
+                    _ => {}
+                }
+                was_healthy = healthy;
+
+                if healthy {
+                    continue;
+                }
+
+                // Back-off: respawn at most every (5s * 2^failures) up to 60s.
+                let backoff = Duration::from_secs(
+                    (5u64).saturating_mul(1u64 << consecutive_failures.min(4)),
+                )
+                .min(Duration::from_secs(60));
+                if last_spawn_attempt.elapsed() < backoff {
+                    continue;
+                }
+
+                println!(
+                    "[WATCHDOG] Daemon unhealthy — attempting respawn (attempt #{})",
+                    consecutive_failures + 1
+                );
+                let manager = SidecarManager::new();
+                match manager.spawn() {
+                    Ok(()) => {
+                        last_spawn_attempt = Instant::now();
+                        // Don't reset consecutive_failures here — the next health
+                        // check will decide whether the spawn actually worked.
+                    }
+                    Err(e) => {
+                        eprintln!("[WATCHDOG] Respawn failed: {}", e);
+                        last_spawn_attempt = Instant::now();
+                        consecutive_failures = consecutive_failures.saturating_add(1);
                     }
                 }
             }
