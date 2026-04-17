@@ -10,6 +10,7 @@ import type {
   ToolDefinition,
   SessionState,
 } from "./types.js";
+import { extractTrackedFilePath } from "./tool-path-extractor.js";
 import type { StreamChunk } from "../providers/types.js";
 import type { HookEngine } from "../hooks/engine.js";
 import type { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
@@ -140,18 +141,8 @@ export interface QueryPipelineCallbacks {
 
 // ── Helpers ────────────────────────────────────────────────
 
-/** Extract a file path from a tool_use chunk's input payload. */
-function extractTrackedFilePath(toolInput?: Record<string, unknown>): string | null {
-  if (!toolInput) return null;
-
-  const candidate =
-    toolInput["file_path"] ??
-    toolInput["path"] ??
-    toolInput["target_file"] ??
-    toolInput["targetPath"];
-
-  return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
-}
+// extractTrackedFilePath moved to src/core/tool-path-extractor.ts —
+// shared with runtime.ts to prevent the two copies from drifting.
 
 // ── QueryPipeline ──────────────────────────────────────────
 

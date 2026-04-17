@@ -15,6 +15,7 @@
  */
 
 import type { ProviderName, WotannQueryOptions, AgentMessage, ToolDefinition } from "./types.js";
+import { extractTrackedFilePath } from "./tool-path-extractor.js";
 import type { StreamChunk } from "../providers/types.js";
 import { discoverProviders } from "../providers/discovery.js";
 import { resolveDefaultProvider } from "./default-provider.js";
@@ -4390,14 +4391,6 @@ export async function createRuntime(
   return runtime;
 }
 
-function extractTrackedFilePath(toolInput?: Record<string, unknown>): string | null {
-  if (!toolInput) return null;
-
-  const candidate =
-    toolInput["file_path"] ??
-    toolInput["path"] ??
-    toolInput["target_file"] ??
-    toolInput["targetPath"];
-
-  return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
-}
+// extractTrackedFilePath moved to src/core/tool-path-extractor.ts —
+// the duplicate previously in runtime-query-pipeline.ts silently
+// drifted (both copies missed notebook_path, see 2026-04-15 audit).

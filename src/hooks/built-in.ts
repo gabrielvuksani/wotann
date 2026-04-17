@@ -187,12 +187,21 @@ export const frustrationDetector: HookHandler = {
 
 // ── Config Protection (standard) ────────────────────────────
 
+// Patterns kept in sync with autoLint's LINTER_CONFIGS — agent-4 audit
+// caught that `eslint.config.(js|mjs|cjs|ts)` (ESLint 9 flat config) was
+// missing here even though autoLint correctly listed them; this repo's
+// own `eslint.config.js` from commit 81700d2 was silently unprotected.
 const PROTECTED_FILES: readonly RegExp[] = [
   /\.eslintrc/,
+  /eslint\.config\.(?:js|mjs|cjs|ts)$/,
   /\.prettierrc/,
+  /prettier\.config\.(?:js|mjs|cjs|ts)$/,
   /biome\.json/,
   /\.editorconfig/,
   /tsconfig\.json$/,
+  /tsconfig\.[a-zA-Z0-9-]+\.json$/,
+  /vitest\.config\.(?:js|mjs|cjs|ts)$/,
+  /package\.json$/,
 ];
 
 export const configProtection: HookHandler = {
@@ -586,22 +595,30 @@ export const tddEnforcement: HookHandler = {
     // Skip if writing a test file
     if (/\.(test|spec)\.(ts|js|tsx|jsx)$/.test(payload.filePath)) return { action: "allow" };
 
-    // Check if a corresponding test file exists
+    // Check if a corresponding test file exists. Session-4 audit (Opus
+    // Agent 1) flagged that prior logic only checked adjacent sibling
+    // files (`foo.test.ts` next to `foo.ts`) and `__tests__/` folders —
+    // but this repo (and most modern monorepos) uses a mirrored
+    // `tests/` root. On the strict profile, every new production-file
+    // Write was falsely blocked. The fix broadens the search to the
+    // mirror path (`src/foo/bar.ts` → `tests/foo/bar.test.ts`).
     const dir = dirname(payload.filePath);
     const base = payload.filePath.replace(/\.(ts|js|tsx|jsx)$/, "");
+    const filename =
+      payload.filePath
+        .split("/")
+        .pop()
+        ?.replace(/\.(ts|js|tsx|jsx)$/, "") ?? "";
+    const mirroredPath = payload.filePath.startsWith("src/")
+      ? `tests/${payload.filePath.slice(4).replace(/\.(ts|js|tsx|jsx)$/, ".test.ts")}`
+      : null;
     const testExists =
       existsSync(`${base}.test.ts`) ||
       existsSync(`${base}.spec.ts`) ||
-      existsSync(
-        join(
-          dir,
-          "__tests__",
-          payload.filePath
-            .split("/")
-            .pop()!
-            .replace(/\.(ts|js)$/, ".test.ts"),
-        ),
-      );
+      existsSync(join(dir, "__tests__", `${filename}.test.ts`)) ||
+      existsSync(join(dir, "__tests__", `${filename}.spec.ts`)) ||
+      (mirroredPath !== null && existsSync(mirroredPath)) ||
+      (mirroredPath !== null && existsSync(mirroredPath.replace(".test.", ".spec.")));
 
     if (!testExists) {
       // S2-14: upgrade from warn → block on the strict profile. TDD
