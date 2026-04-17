@@ -297,13 +297,20 @@ function createPinnedDispatcher(
   // Without this branch the socket layer crashes with
   // "Invalid IP address: undefined" because the positional signature's
   // second arg (a string address) arrives as an array element.
+  //
+  // Session-5 (Phase-1 GAP-4): the prior version pinned ONLY the
+  // primary IP even when options.all === true, so hostnames with
+  // legitimate multi-IP round-robin (Cloudflare, Akamai) lost the
+  // failover backups. Now we pass the full pre-validated set through
+  // — each address was verified by `assertPublicResolvable` so
+  // forwarding them ALL preserves undici's retry behavior without
+  // opening a DNS-rebinding window.
+  const allRecords = addresses.map((a) => ({ address: a.address, family: a.family }));
   return new Agent({
     connect: {
       lookup: (_hostname, options, callback) => {
         if (options && options.all === true) {
-          callback(null, [
-            { address: primary.address, family: primary.family },
-          ] as unknown as Parameters<typeof callback>[1]);
+          callback(null, allRecords as unknown as Parameters<typeof callback>[1]);
           return;
         }
         callback(null, primary.address, primary.family);
@@ -323,9 +330,22 @@ function createPinnedDispatcher(
  */
 function isTestEnvironment(): boolean {
   if (process.env["NODE_ENV"] !== "test") return false;
+  // Session-5 (Phase-1 GAP-10): session-4's narrow "1"|"true" string
+  // match was fragile to future vitest versions that may emit other
+  // truthy strings (e.g., "vitest@x" or just the worker id) and missed
+  // jest entirely. A small regex + a jest-specific marker covers the
+  // common runners without widening the gate to any non-empty string
+  // (the original session-3 bug of treating "0" as truthy).
+  const truthy = /^(1|true|yes|on)$/i;
   const testMode = process.env["WOTANN_TEST_MODE"];
   const vitest = process.env["VITEST"];
-  return testMode === "1" || testMode === "true" || vitest === "1" || vitest === "true";
+  const jestWorkerId = process.env["JEST_WORKER_ID"];
+  if (testMode !== undefined && truthy.test(testMode)) return true;
+  if (vitest !== undefined && truthy.test(vitest)) return true;
+  // jest auto-sets JEST_WORKER_ID to a numeric string in every worker;
+  // presence alone is sufficient — it never appears outside a jest run.
+  if (jestWorkerId !== undefined && jestWorkerId !== "") return true;
+  return false;
 }
 
 // ── URL Validation ───────────────────────────────────────

@@ -201,13 +201,20 @@ export function parseDeepSeekAll(text: string): ReadonlyArray<ParsedToolCall> {
     const json = tolerantJSONParse(body);
     results.push({ name, args: asArgs(json) });
   }
-  if (results.length > 0) return results;
 
   // Format (a'): older variant — name inside JSON. Uses matchAll on the
   // per-call wrapper so multi-call arrays don't silently drop after first.
   // Accepts both singular (`tool_call_begin`) and plural
   // (`tool_calls_begin`) on each side for back-compat with fine-tunes
   // that mix the outer-wrapper and per-call tags.
+  //
+  // Session-5 (Phase-1 GAP-9): previously early-returned after format
+  // (a), silently dropping mixed-format responses where a model emits
+  // one sep-form call followed by one block-form call in the same
+  // output (rare but documented for DeepSeek V3). Accumulating across
+  // all three formats lets us capture ALL calls without duplicating
+  // work — each format's pattern is format-specific enough that
+  // collisions are zero.
   const blockPattern =
     /<[｜|]tool[▁_]calls?[▁_]begin[｜|]>([\s\S]*?)<[｜|]tool[▁_]calls?[▁_]end[｜|]>/g;
   for (const match of text.matchAll(blockPattern)) {
@@ -222,26 +229,33 @@ export function parseDeepSeekAll(text: string): ReadonlyArray<ParsedToolCall> {
       }
     }
   }
-  if (results.length > 0) return results;
 
   // Format (b): no marker at all — bare `{"name":"...","arguments":{...}}`
-  // JSON as produced by some distilled / Instruct variants.
-  const trimmed = text.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    const json = tolerantJSONParse(trimmed);
-    if (json && typeof json === "object" && !Array.isArray(json)) {
-      const obj = json as { name?: unknown; arguments?: unknown };
-      if (typeof obj.name === "string") {
-        results.push({ name: obj.name, args: asArgs(obj.arguments) });
+  // JSON as produced by some distilled / Instruct variants. Only
+  // consulted when prior formats returned nothing (bare JSON cannot
+  // coexist with the delimited forms in the same response).
+  if (results.length === 0) {
+    const trimmed = text.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      const json = tolerantJSONParse(trimmed);
+      if (json && typeof json === "object" && !Array.isArray(json)) {
+        const obj = json as { name?: unknown; arguments?: unknown };
+        if (typeof obj.name === "string") {
+          results.push({ name: obj.name, args: asArgs(obj.arguments) });
+        }
       }
     }
   }
-  if (results.length > 0) return results;
 
   // Format (c): fall through to functionary-style (single result only —
-  // functionary wire format is single-recipient).
-  const fallback = parseFunctionary(text);
-  return fallback ? [fallback] : [];
+  // functionary wire format is single-recipient). Only consulted as a
+  // last resort when nothing else matched.
+  if (results.length === 0) {
+    const fallback = parseFunctionary(text);
+    if (fallback) results.push(fallback);
+  }
+
+  return results;
 }
 
 /** Back-compat single-return. Returns first call or null. */
@@ -306,7 +320,14 @@ export function parseJambaAll(text: string): ReadonlyArray<ParsedToolCall> {
   // Fallback: older attribute-on-tag format observed in some fine-tunes.
   // Prior session-3 code looked for `<function_call name=...>` by mistake;
   // real legacy form is `<tool_call name=...>` per AI21's old spec.
-  const attrPattern = /<tool_call\s+name="([^"]+)"\s*(?:\/|>\s*([\s\S]*?)<\/tool_call)>/g;
+  //
+  // Session-5 (Phase-1 GAP-8): the regex's bracket placement required a
+  // trailing `>` AFTER either the self-closing `/>` branch or the
+  // `</tool_call>` branch — so `<tool_call name="x"></tool_call>` failed
+  // silently (the `</tool_call>` already consumed the closing `>`).
+  // Moved the closing `>` inside each branch so both self-closing and
+  // paired forms match correctly.
+  const attrPattern = /<tool_call\s+name="([^"]+)"(?:\s*\/>|>\s*([\s\S]*?)<\/tool_call>)/g;
   for (const match of text.matchAll(attrPattern)) {
     const name = match[1] ?? "";
     if (!name) continue;

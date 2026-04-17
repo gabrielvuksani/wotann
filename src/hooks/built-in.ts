@@ -603,22 +603,45 @@ export const tddEnforcement: HookHandler = {
     // Write was falsely blocked. The fix broadens the search to the
     // mirror path (`src/foo/bar.ts` → `tests/foo/bar.test.ts`).
     const dir = dirname(payload.filePath);
+    const extMatch = payload.filePath.match(/\.(ts|tsx|js|jsx)$/);
+    const sourceExt = extMatch ? extMatch[1] : "ts";
     const base = payload.filePath.replace(/\.(ts|js|tsx|jsx)$/, "");
     const filename =
       payload.filePath
         .split("/")
         .pop()
         ?.replace(/\.(ts|js|tsx|jsx)$/, "") ?? "";
+    // Session-5 (Phase-1 GAP-5): the mirrored path previously hardcoded
+    // `.test.ts` for every source extension, so a React component at
+    // src/ui/Button.tsx was looking for tests/ui/Button.test.ts even
+    // when the developer had put the tests at Button.test.tsx (the
+    // idiomatic pairing). Preserve the source extension so the mirror
+    // matches the convention both in the TS and JSX worlds.
     const mirroredPath = payload.filePath.startsWith("src/")
+      ? `tests/${payload.filePath.slice(4).replace(/\.(ts|js|tsx|jsx)$/, `.test.${sourceExt}`)}`
+      : null;
+    // Also check the other-extension pairing (tsx source ↔ ts test, etc.)
+    // since some repos mix the two.
+    const mirroredPathAlt = payload.filePath.startsWith("src/")
       ? `tests/${payload.filePath.slice(4).replace(/\.(ts|js|tsx|jsx)$/, ".test.ts")}`
       : null;
     const testExists =
       existsSync(`${base}.test.ts`) ||
+      existsSync(`${base}.test.tsx`) ||
       existsSync(`${base}.spec.ts`) ||
+      existsSync(`${base}.spec.tsx`) ||
       existsSync(join(dir, "__tests__", `${filename}.test.ts`)) ||
+      existsSync(join(dir, "__tests__", `${filename}.test.tsx`)) ||
       existsSync(join(dir, "__tests__", `${filename}.spec.ts`)) ||
+      existsSync(join(dir, "__tests__", `${filename}.spec.tsx`)) ||
       (mirroredPath !== null && existsSync(mirroredPath)) ||
-      (mirroredPath !== null && existsSync(mirroredPath.replace(".test.", ".spec.")));
+      (mirroredPath !== null && existsSync(mirroredPath.replace(".test.", ".spec."))) ||
+      (mirroredPathAlt !== null &&
+        mirroredPathAlt !== mirroredPath &&
+        existsSync(mirroredPathAlt)) ||
+      (mirroredPathAlt !== null &&
+        mirroredPathAlt !== mirroredPath &&
+        existsSync(mirroredPathAlt.replace(".test.", ".spec.")));
 
     if (!testExists) {
       // S2-14: upgrade from warn → block on the strict profile. TDD
