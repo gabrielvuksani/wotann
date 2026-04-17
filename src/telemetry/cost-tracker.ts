@@ -81,7 +81,11 @@ const COST_TABLE: Record<string, { input: number; output: number }> = {
   "mistral-nemo": { input: 0.00002, output: 0.00004 },
   codestral: { input: 0.0003, output: 0.0009 },
 
-  // Groq (open-model hosting — extremely cheap)
+  // Groq (open-model hosting — extremely cheap). Paid-tier rates;
+  // session-5 adds Groq free-tier $0/$0 pricing below, gated on
+  // WOTANN_GROQ_FREE=1 so callers on the free plan aren't charged
+  // fictional costs for models that are actually free at their usage
+  // level (Groq offers a generous free tier with daily rate limits).
   "llama-3.3-70b-versatile": { input: 0.00059, output: 0.00079 },
   "llama-3.1-8b-instant": { input: 0.00005, output: 0.00008 },
   "llama-4-scout-17b-16e": { input: 0.0001, output: 0.0003 },
@@ -147,6 +151,23 @@ const PROVIDER_MODELS: Record<string, readonly string[]> = {
 // Extended pricing kept for downstream code that reads from it by name.
 // Aliased to COST_TABLE now that the main table has full coverage.
 const EXTENDED_COST_TABLE = COST_TABLE;
+
+/**
+ * Groq free-tier model identifiers. Users who opt in via
+ * `WOTANN_GROQ_FREE=1` get $0 cost predictions for these models
+ * instead of the paid-tier rates in COST_TABLE. Groq's free plan has
+ * daily rate limits but no monetary charges, so the paid-rate number
+ * is misleading for free-tier users.
+ */
+const GROQ_FREE_TIER_MODELS = new Set<string>([
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "llama-4-scout-17b-16e",
+]);
+
+function isGroqFreeTierModel(model: string): boolean {
+  return GROQ_FREE_TIER_MODELS.has(model);
+}
 
 export class CostTracker {
   private readonly entries: CostEntry[] = [];
@@ -221,6 +242,15 @@ export class CostTracker {
   }
 
   estimateCost(model: string, inputTokens: number, outputTokens: number): number {
+    // Session-5: Groq free-tier honors WOTANN_GROQ_FREE=1 across the
+    // three Groq-hosted llama models. Groq's free plan has generous
+    // daily rate limits (14,400 requests/day for llama-3.3-70b, etc.)
+    // and users on it shouldn't see the paid-tier cost estimate since
+    // they won't actually be billed. This is opt-in via env var so the
+    // default remains safe (over-estimate rather than under-estimate).
+    if (isGroqFreeTierModel(model) && process.env["WOTANN_GROQ_FREE"] === "1") {
+      return 0;
+    }
     const rates = COST_TABLE[model];
     if (!rates) return 0;
 
