@@ -11,8 +11,16 @@
  * WOTANN preserves EVERYTHING.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  readdirSync,
+  unlinkSync,
+} from "node:fs";
 import { join } from "node:path";
+import { buildRecap, renderRecap } from "./session-recap.js";
 
 // ── Types ───────────────────────────────────────────────
 
@@ -150,7 +158,19 @@ export class SessionStore {
   }
 
   /**
-   * Build a resume prompt from saved session state.
+   * Build a compact session recap — C23 port of the Claude Code session
+   * resume conveniences. Returns a short card-sized markdown block with
+   * auto-generated title, last action, next step, and blockers.
+   * Callers who want the verbose dump can still use `buildResumePrompt`.
+   */
+  buildRecap(snapshot: SessionSnapshot): string {
+    return renderRecap(buildRecap(snapshot));
+  }
+
+  /**
+   * Build a resume prompt from saved session state. Prepends the C23
+   * compact recap so the agent sees the headline information first
+   * regardless of how long the verbose dump becomes.
    */
   buildResumePrompt(snapshot: SessionSnapshot): string {
     const age = Date.now() - snapshot.savedAt;
@@ -158,6 +178,8 @@ export class SessionStore {
     const ageStr = ageMinutes < 60 ? `${ageMinutes}m` : `${Math.round(ageMinutes / 60)}h`;
 
     const lines: string[] = [
+      renderRecap(buildRecap(snapshot)),
+      "",
       `# Session Resumed (saved ${ageStr} ago)`,
       "",
       `**Mode:** ${snapshot.modeCycle}`,
@@ -196,7 +218,8 @@ export class SessionStore {
     if (recentConversation.length > 0) {
       lines.push("", "## Recent Conversation");
       for (const msg of recentConversation) {
-        const truncated = msg.content.length > 200 ? msg.content.slice(0, 200) + "..." : msg.content;
+        const truncated =
+          msg.content.length > 200 ? msg.content.slice(0, 200) + "..." : msg.content;
         lines.push(`**${msg.role}:** ${truncated}`);
       }
     }
