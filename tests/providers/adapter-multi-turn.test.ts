@@ -138,9 +138,40 @@ describe("Copilot adapter — multi-turn tool-loop shape (8d78efe)", () => {
 
 describe("Codex adapter — multi-turn tool-loop shape (8d78efe)", () => {
   const originalFetch = globalThis.fetch;
+  const originalAuthPath = process.env["CODEX_AUTH_JSON_PATH"];
   let lastRequestBody: unknown;
+  let fakeAuthPath: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Session-5 quality-bar-12 fix: the adapter reads auth from
+    // ~/.codex/auth.json on disk. Local dev has it; CI doesn't —
+    // without a file the adapter yields an error chunk BEFORE ever
+    // calling fetch, so the test would pass locally and fail on CI
+    // (the exact environment-dependent pattern session-3 hit). Point
+    // the adapter at a temp auth.json via the CODEX_AUTH_JSON_PATH
+    // env var the adapter already supports.
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const tmpDir = mkdtempSync(join(tmpdir(), "codex-auth-"));
+    fakeAuthPath = join(tmpDir, "auth.json");
+    writeFileSync(
+      fakeAuthPath,
+      JSON.stringify({
+        OPENAI_API_KEY: "",
+        tokens: {
+          id_token: "fake_id_token",
+          access_token: "fake_access_token",
+          refresh_token: "fake_refresh_token",
+          account_id: "fake_account_id",
+        },
+        // "just refreshed" so the adapter doesn't attempt to call
+        // auth.openai.com/oauth/token on our behalf.
+        last_refresh: new Date().toISOString(),
+      }),
+    );
+    process.env["CODEX_AUTH_JSON_PATH"] = fakeAuthPath;
+
     lastRequestBody = undefined;
     globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
       if (init?.body) {
@@ -172,6 +203,11 @@ describe("Codex adapter — multi-turn tool-loop shape (8d78efe)", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (originalAuthPath === undefined) {
+      delete process.env["CODEX_AUTH_JSON_PATH"];
+    } else {
+      process.env["CODEX_AUTH_JSON_PATH"] = originalAuthPath;
+    }
     vi.restoreAllMocks();
   });
 
