@@ -171,6 +171,55 @@ export class CostTracker {
     return this.dailyStore;
   }
 
+  /**
+   * Project the entries into the legacy `TokenStats` shape the removed
+   * `TokenPersistence` class used to expose. Session-5 consolidated the
+   * two surfaces onto CostTracker as the single authoritative source
+   * (previously: one write-path for cost + a parallel write-only
+   * `token-stats.json`). This projection is computed on demand from the
+   * entries array so callers still have the cumulative per-provider /
+   * per-model totals they had before, without the dual-writer + drift
+   * risk the audit (GAP_AUDIT_2026-04-15 Tier 2) flagged.
+   */
+  getTokenStats(): {
+    readonly totalInputTokens: number;
+    readonly totalOutputTokens: number;
+    readonly lastUpdated: number;
+    readonly entryCount: number;
+    readonly byProvider: Readonly<Record<string, { input: number; output: number }>>;
+    readonly byModel: Readonly<Record<string, { input: number; output: number }>>;
+  } {
+    let totalInput = 0;
+    let totalOutput = 0;
+    let lastUpdated = 0;
+    const byProvider: Record<string, { input: number; output: number }> = {};
+    const byModel: Record<string, { input: number; output: number }> = {};
+    for (const entry of this.entries) {
+      totalInput += entry.inputTokens;
+      totalOutput += entry.outputTokens;
+      const ts = entry.timestamp.getTime();
+      if (ts > lastUpdated) lastUpdated = ts;
+      const prevProv = byProvider[entry.provider] ?? { input: 0, output: 0 };
+      byProvider[entry.provider] = {
+        input: prevProv.input + entry.inputTokens,
+        output: prevProv.output + entry.outputTokens,
+      };
+      const prevModel = byModel[entry.model] ?? { input: 0, output: 0 };
+      byModel[entry.model] = {
+        input: prevModel.input + entry.inputTokens,
+        output: prevModel.output + entry.outputTokens,
+      };
+    }
+    return {
+      totalInputTokens: totalInput,
+      totalOutputTokens: totalOutput,
+      lastUpdated,
+      entryCount: this.entries.length,
+      byProvider,
+      byModel,
+    };
+  }
+
   estimateCost(model: string, inputTokens: number, outputTokens: number): number {
     const rates = COST_TABLE[model];
     if (!rates) return 0;

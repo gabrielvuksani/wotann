@@ -105,16 +105,21 @@ export class SelfImprovementEngine {
   // ── Analysis Checks ────────────────────────────────────
 
   private checkLargeFiles(): SelfImprovementSuggestion[] {
-    // Files > 800 lines should be split
+    // Files > 800 lines should be split. Session-5 deleted the stale
+    // runtime-query-pipeline.ts parallel extract since it had drifted
+    // significantly and had zero consumers — a clean re-extraction
+    // would be the right approach if this split is ever revisited.
     return [
       {
         id: "large-runtime",
         category: "code-quality",
         file: "src/core/runtime.ts",
-        description: "runtime.ts exceeds 2000 lines — extract RuntimeQueryPipeline",
+        description: "runtime.ts is large; consider splitting by concern",
         severity: "high",
         estimatedEffort: "large",
-        suggestedFix: "Move query() generator into src/core/runtime-query-pipeline.ts (file exists but is unused)",
+        suggestedFix:
+          "Fresh extraction by concern (query pipeline, lifecycle, intelligence) when " +
+          "the refactor is scheduled. Prior partial extract was deleted in session-5.",
       },
     ];
   }

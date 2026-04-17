@@ -120,11 +120,8 @@ import {
 } from "../tools/hashline-edit.js";
 import { HASH_ANCHORED_EDIT_TOOL_SCHEMA } from "../tools/hash-anchored-edit.js";
 import { ImageGenRouter } from "../tools/image-gen-router.js";
-import { TokenPersistence } from "../telemetry/token-persistence.js";
 import { compileAmbientContext, type AmbientContext } from "../intelligence/ambient-awareness.js";
 import { generateFakeTools } from "../security/anti-distillation.js";
-// Phase F1: QueryPipeline available for progressive migration from monolithic query()
-export { QueryPipeline } from "./runtime-query-pipeline.js";
 import { UnifiedDispatchPlane } from "../channels/unified-dispatch.js";
 import { writeAutonomousProofBundle } from "../orchestration/proof-bundles.js";
 import type { AutonomousResult } from "../orchestration/autonomous.js";
@@ -481,8 +478,13 @@ export class WotannRuntime {
   private wallClockBudget: WallClockBudget;
   private agentRegistryInstance: AgentRegistry;
 
-  // Token persistence — cumulative token stats across sessions
-  private tokenPersistence: TokenPersistence;
+  // Session-5: TokenPersistence deleted. CostTracker is now the single
+  // authoritative source of token + cost data across sessions — it already
+  // stored per-entry inputTokens/outputTokens per provider/model plus a
+  // DailyCostStore rollup, so the parallel `~/.wotann/token-stats.json`
+  // file TokenPersistence maintained was pure write-only duplication
+  // (grep confirmed zero readers). Callers wanting the old TokenStats
+  // shape should use `runtime.getCostTracker().getTokenStats()`.
 
   // ── Newly wired lib.ts-only modules (32→37, 86%→100%) ──
   private flowTracker: FlowTracker;
@@ -543,13 +545,12 @@ export class WotannRuntime {
     // Initialize middleware pipeline
     this.pipeline = createDefaultPipeline();
 
-    // Initialize cost tracker
+    // Initialize cost tracker. Single authoritative source for cost AND
+    // token accounting since session-5 deleted the parallel TokenPersistence
+    // class — CostTracker's `entries[]` already carries inputTokens/
+    // outputTokens per provider/model, so `getTokenStats()` projects the
+    // same shape the old TokenPersistence exposed.
     this.costTracker = new CostTracker(join(config.workingDir, ".wotann", "cost.json"));
-
-    // Initialize token persistence (cumulative stats across sessions)
-    this.tokenPersistence = new TokenPersistence(
-      join(config.workingDir, ".wotann", "token-stats.json"),
-    );
 
     // Initialize intelligence amplifier
     this.amplifier = new IntelligenceAmplifier();
@@ -2599,7 +2600,10 @@ export class WotannRuntime {
         outputTokens,
       );
       this.infra?.router?.recordCost(costEntry.cost);
-      this.tokenPersistence.recordUsage(responseProvider, responseModel, inputTokens, outputTokens);
+      // Session-5: TokenPersistence removed — CostTracker.record() already
+      // captures inputTokens/outputTokens per provider/model in the same
+      // pass. The old dual-write is gone; `getTokenStats()` projects the
+      // legacy shape from the single authoritative source.
       this.infra?.router?.recordRepoOutcome({
         provider: responseProvider,
         model: responseModel,
@@ -3250,9 +3254,6 @@ export class WotannRuntime {
   }
   getTrainingPipeline(): TrainingPipeline {
     return this.trainingPipeline;
-  }
-  getTokenPersistence(): TokenPersistence {
-    return this.tokenPersistence;
   }
   getActiveROESessionId(): string | undefined {
     return this.activeROESessionId;
@@ -4444,5 +4445,9 @@ export async function createRuntime(
 }
 
 // extractTrackedFilePath moved to src/core/tool-path-extractor.ts —
-// the duplicate previously in runtime-query-pipeline.ts silently
-// drifted (both copies missed notebook_path, see 2026-04-15 audit).
+// a duplicate previously lived in a second runtime module that
+// silently drifted (both copies missed notebook_path, caught in the
+// 2026-04-15 audit). Session-5 deleted the drifted second module
+// entirely (it had zero live consumers and had fallen further behind
+// the real runtime — missing anti-distillation, flow tracker, active
+// memory, user model, and instinct system wiring).
