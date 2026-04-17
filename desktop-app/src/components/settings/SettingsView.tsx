@@ -15,6 +15,7 @@ import { PluginManager } from "../plugins/PluginManager";
 import { ExecApprovals } from "../security/ExecApprovals";
 import { QRCodeSVG } from "qrcode.react";
 import { RemoteControlView } from "../companion/RemoteControlView";
+import { WotannThemePicker } from "../wotann/WotannThemePicker";
 
 interface SettingsSection {
   readonly id: string;
@@ -197,6 +198,12 @@ export function SettingsView() {
                 <option value="light">WOTANN Light</option>
                 <option value="system">System</option>
               </select>
+            </SettingRow>
+            <SettingRow
+              label="Signature palette"
+              description="WOTANN's Norse-themed overlay — sits on top of the base theme"
+            >
+              <WotannThemePicker />
             </SettingRow>
             <SettingRow label="Accent color" description="Primary color used across the interface">
               <div className="flex items-center gap-2">
