@@ -75,6 +75,30 @@ impl SidecarManager {
             return Some(path);
         }
 
+        // Walk up from the running binary's own path looking for the wotann
+        // package.json. This covers dev/cargo-run from anywhere, packaged
+        // .app installs, and users who cloned the repo to non-default
+        // locations — all without needing WOTANN_SOURCE_DIR to be set.
+        // Only walks inside the user's home tree and respects TCC rules
+        // when include_protected_dirs is false.
+        if let Ok(exe) = std::env::current_exe() {
+            let mut cur = exe.as_path();
+            while let Some(parent) = cur.parent() {
+                let candidate = parent.join("package.json");
+                if candidate.exists() {
+                    // Found a package.json; check it's the wotann one
+                    if let Ok(raw) = std::fs::read_to_string(&candidate) {
+                        if raw.contains("\"wotann\"") || raw.contains("wotann-desktop") {
+                            if include_protected_dirs || !Self::is_tcc_protected(parent) {
+                                return Some(parent.to_path_buf());
+                            }
+                        }
+                    }
+                }
+                cur = parent;
+            }
+        }
+
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         let mut candidates = vec![
             PathBuf::from(&home).join("Projects/wotann"),
