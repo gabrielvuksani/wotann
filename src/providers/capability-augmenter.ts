@@ -17,7 +17,7 @@
  */
 
 import type { ProviderCapabilities, UnifiedQueryOptions, ToolSchema } from "./types.js";
-import { parseToolCall } from "./tool-parsers/index.js";
+import { parseToolCall, parseToolCalls } from "./tool-parsers/index.js";
 import { describeImageForPrompt } from "../utils/vision-ocr.js";
 
 // ── Tool Calling Augmentation ──────────────────────────────
@@ -204,6 +204,11 @@ export function augmentQuery(
 /**
  * Parse tool call XML from models that used prompt-injected tool definitions.
  * Returns null if no tool call is detected in the response.
+ *
+ * Back-compat single-return. Prefer `parseToolCallsFromText` for any new
+ * caller — real Mistral-large, Command-R+, Jamba, and DeepSeek V3 emit
+ * multiple tool calls per turn, and this function silently drops all but
+ * the first (session-4 audit Agent 3 finding).
  */
 export function parseToolCallFromText(
   text: string,
@@ -217,6 +222,26 @@ export function parseToolCallFromText(
   // priority order until one matches. See ./tool-parsers/parsers.ts.
   const parsed = parseToolCall(text, modelName);
   if (!parsed) return null;
+  return coerceArgs(parsed);
+}
+
+/**
+ * Parse ALL tool calls emitted by the model's response. Prefer this over
+ * `parseToolCallFromText` — single-return coerces multi-call to first-only,
+ * which is a real user-visible bug on Mistral/Command-R+/Jamba/DeepSeek-V3.
+ */
+export function parseToolCallsFromText(
+  text: string,
+  modelName?: string,
+): ReadonlyArray<{ name: string; args: Record<string, string> }> {
+  const parsed = parseToolCalls(text, modelName);
+  return parsed.map(coerceArgs);
+}
+
+function coerceArgs(parsed: { name: string; args: Record<string, unknown> }): {
+  name: string;
+  args: Record<string, string>;
+} {
   // Coerce args to Record<string, string> for the legacy contract that
   // some downstream consumers still rely on.
   const args: Record<string, string> = {};

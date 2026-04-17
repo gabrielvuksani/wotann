@@ -76,15 +76,20 @@ export function parseHermes(text: string): ParsedToolCall | null {
 
 // ── 2. Mistral ──────────────────────────────────────────────
 //
-// [TOOL_CALLS][{"name": "fn", "arguments": {...}}]
+// [TOOL_CALLS][{"name": "fn", "arguments": {...}}, {"name": "fn2", ...}]
 // Used by: mistral-large, mistral-small, codestral
 //
 // Bracket-balanced extraction (the original lazy `\]` regex broke the
 // moment an argument contained a nested array like `{"items":[1,2,3]}` —
 // common in real Mistral output).
-export function parseMistral(text: string): ParsedToolCall | null {
+//
+// Real Mistral-large routinely emits multiple tool calls in one
+// `[TOOL_CALLS]` array; prior versions silently dropped everything
+// after `arr[0]`. parseMistralAll walks the entire array so the runtime
+// can dispatch each call.
+export function parseMistralAll(text: string): ReadonlyArray<ParsedToolCall> {
   const markerIdx = text.indexOf("[TOOL_CALLS]");
-  if (markerIdx < 0) return null;
+  if (markerIdx < 0) return [];
   const afterMarker = markerIdx + "[TOOL_CALLS]".length;
   // Skip whitespace to find the opening '[' of the JSON array.
   let start = -1;
@@ -94,9 +99,9 @@ export function parseMistral(text: string): ParsedToolCall | null {
       start = i;
       break;
     }
-    if (!/\s/.test(ch)) return null;
+    if (!/\s/.test(ch)) return [];
   }
-  if (start < 0) return null;
+  if (start < 0) return [];
   // Walk forward with a bracket/string-aware counter so arrays/objects
   // nested inside argument values don't terminate the match early.
   let depth = 0;
@@ -124,12 +129,22 @@ export function parseMistral(text: string): ParsedToolCall | null {
       }
     }
   }
-  if (end < 0) return null;
+  if (end < 0) return [];
   const arr = tolerantJSONParse(text.slice(start, end + 1));
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-  const first = arr[0] as { name?: unknown; arguments?: unknown };
-  if (typeof first?.name !== "string") return null;
-  return { name: first.name, args: asArgs(first.arguments) };
+  if (!Array.isArray(arr) || arr.length === 0) return [];
+  const results: ParsedToolCall[] = [];
+  for (const entry of arr) {
+    const obj = entry as { name?: unknown; arguments?: unknown };
+    if (typeof obj?.name === "string") {
+      results.push({ name: obj.name, args: asArgs(obj.arguments) });
+    }
+  }
+  return results;
+}
+
+/** Back-compat single-return. Returns first call or null. */
+export function parseMistral(text: string): ParsedToolCall | null {
+  return parseMistralAll(text)[0] ?? null;
 }
 
 // ── 3. Llama 3.x ────────────────────────────────────────────
@@ -167,42 +182,71 @@ export function parseQwen(text: string): ParsedToolCall | null {
 //   {args...}
 //   ```<｜tool▁call▁end｜><｜tool▁calls▁end｜>
 //
-// Earlier version read `obj.name` from the parsed JSON — which always
-// returned null for real DeepSeek output because the JSON has only args.
+// Fine-tuned / distilled V3 variants sometimes emit the inline-JSON form
+// WITHOUT the code fence — the session-3 regex hard-required a fence and
+// silently returned null for such variants. parseDeepSeekAll makes the
+// fence optional (matches inline JSON directly when no ```) and uses
+// matchAll so multi-call responses don't drop everything after the first.
 // Used by: deepseek-v3, deepseek-v4, deepseek-r1
-export function parseDeepSeek(text: string): ParsedToolCall | null {
-  // Format (a): V3 structured call with explicit separator — name lives
-  // outside the JSON fence. Pipes can be either unicode (U+FF5C) or ASCII
-  // and the separator glyph can be either ▁ (U+2581) or underscore.
-  const sepMatch = text.match(
-    /<[｜|]tool[▁_]call[▁_]begin[｜|]>\s*function\s*<[｜|]tool[▁_]sep[｜|]>\s*([^\n`]+?)\s*\n+\s*```(?:json)?\s*([\s\S]*?)\s*```\s*<[｜|]tool[▁_]call[▁_]end[｜|]>/,
-  );
-  if (sepMatch) {
-    const name = (sepMatch[1] ?? "").trim();
-    if (name) {
-      const json = tolerantJSONParse(sepMatch[2] ?? "");
-      return { name, args: asArgs(json) };
-    }
+export function parseDeepSeekAll(text: string): ReadonlyArray<ParsedToolCall> {
+  const results: ParsedToolCall[] = [];
+  // Format (a): V3 sep-form — name outside JSON, fence optional.
+  // The body is either ```json...``` OR a bare JSON object `{...}`.
+  const sepPattern =
+    /<[｜|]tool[▁_]call[▁_]begin[｜|]>\s*function\s*<[｜|]tool[▁_]sep[｜|]>\s*([^\n`]+?)\s*\n+\s*(?:```(?:json)?\s*([\s\S]*?)\s*```|(\{[\s\S]*?\}))\s*<[｜|]tool[▁_]call[▁_]end[｜|]>/g;
+  for (const match of text.matchAll(sepPattern)) {
+    const name = (match[1] ?? "").trim();
+    if (!name) continue;
+    const body = match[2] ?? match[3] ?? "";
+    const json = tolerantJSONParse(body);
+    results.push({ name, args: asArgs(json) });
   }
-  // Format (a'): older variant where the JSON object itself carries the
-  // name key — retained for back-compat with earlier DeepSeek fine-tunes.
-  const blockMatch = text.match(
-    /<[｜|]tool[▁_]calls[▁_]begin[｜|]>([\s\S]*?)<[｜|]tool[▁_]call[▁_]end[｜|]>/,
-  );
-  if (blockMatch) {
-    const inner = blockMatch[1] ?? "";
+  if (results.length > 0) return results;
+
+  // Format (a'): older variant — name inside JSON. Uses matchAll on the
+  // per-call wrapper so multi-call arrays don't silently drop after first.
+  // Accepts both singular (`tool_call_begin`) and plural
+  // (`tool_calls_begin`) on each side for back-compat with fine-tunes
+  // that mix the outer-wrapper and per-call tags.
+  const blockPattern =
+    /<[｜|]tool[▁_]calls?[▁_]begin[｜|]>([\s\S]*?)<[｜|]tool[▁_]calls?[▁_]end[｜|]>/g;
+  for (const match of text.matchAll(blockPattern)) {
+    const inner = match[1] ?? "";
     const fenced = inner.match(/```(?:json)?\s*([\s\S]*?)```/);
     const candidate = fenced ? fenced[1] : inner;
     const json = tolerantJSONParse(candidate ?? "");
     if (json && typeof json === "object" && !Array.isArray(json)) {
       const obj = json as { name?: unknown; arguments?: unknown };
       if (typeof obj.name === "string") {
-        return { name: obj.name, args: asArgs(obj.arguments) };
+        results.push({ name: obj.name, args: asArgs(obj.arguments) });
       }
     }
   }
-  // Format (b): fall through to functionary-style or standard JSON
-  return parseFunctionary(text);
+  if (results.length > 0) return results;
+
+  // Format (b): no marker at all — bare `{"name":"...","arguments":{...}}`
+  // JSON as produced by some distilled / Instruct variants.
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    const json = tolerantJSONParse(trimmed);
+    if (json && typeof json === "object" && !Array.isArray(json)) {
+      const obj = json as { name?: unknown; arguments?: unknown };
+      if (typeof obj.name === "string") {
+        results.push({ name: obj.name, args: asArgs(obj.arguments) });
+      }
+    }
+  }
+  if (results.length > 0) return results;
+
+  // Format (c): fall through to functionary-style (single result only —
+  // functionary wire format is single-recipient).
+  const fallback = parseFunctionary(text);
+  return fallback ? [fallback] : [];
+}
+
+/** Back-compat single-return. Returns first call or null. */
+export function parseDeepSeek(text: string): ParsedToolCall | null {
+  return parseDeepSeekAll(text)[0] ?? null;
 }
 
 // ── 6. Functionary ──────────────────────────────────────────
@@ -223,8 +267,7 @@ export function parseFunctionary(text: string): ParsedToolCall | null {
 
 // ── 7. Jamba (AI21) ─────────────────────────────────────────
 //
-// Real Jamba 1.5 format uses nested child elements (per AI21's tool-use
-// spec), NOT an attribute-on-tag shape:
+// Real Jamba 1.5 format per AI21's chat template:
 //   <tool_calls>
 //     <tool_call>
 //       <name>fn</name>
@@ -232,52 +275,84 @@ export function parseFunctionary(text: string): ParsedToolCall | null {
 //     </tool_call>
 //   </tool_calls>
 //
+// Per AI21's spec the outer `<tool_calls>` wrapper is OPTIONAL — a
+// single call in the chat template is frequently emitted bare, and
+// multi-call responses wrap. XML entities inside <arguments> are
+// XML-1.0-escaped JSON that must be decoded before JSON.parse.
 // Used by: jamba-1.5-large, jamba-1.5-mini
-export function parseJamba(text: string): ParsedToolCall | null {
-  // Primary: nested-child format per AI21 spec.
-  const nestedMatch = text.match(
-    /<tool_calls?>\s*<tool_call>\s*<name>\s*([^<]+?)\s*<\/name>\s*<arguments>\s*([\s\S]*?)\s*<\/arguments>\s*<\/tool_call>/,
-  );
-  if (nestedMatch) {
-    const name = (nestedMatch[1] ?? "").trim();
-    if (name) {
-      const json = tolerantJSONParse(nestedMatch[2] ?? "");
-      return { name, args: asArgs(json) };
-    }
+function decodeXmlEntities(raw: string): string {
+  return raw
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+export function parseJambaAll(text: string): ReadonlyArray<ParsedToolCall> {
+  // Primary: nested-child format per AI21 spec. `matchAll` so multiple
+  // calls in one wrapper don't silently drop after the first.
+  const pattern =
+    /<tool_call>\s*<name>\s*([^<]+?)\s*<\/name>\s*<arguments>\s*([\s\S]*?)\s*<\/arguments>\s*<\/tool_call>/g;
+  const results: ParsedToolCall[] = [];
+  for (const match of text.matchAll(pattern)) {
+    const name = (match[1] ?? "").trim();
+    if (!name) continue;
+    const rawJson = decodeXmlEntities(match[2] ?? "");
+    const json = tolerantJSONParse(rawJson);
+    results.push({ name, args: asArgs(json) });
   }
+  if (results.length > 0) return results;
   // Fallback: older attribute-on-tag format observed in some fine-tunes.
-  const attrMatch = text.match(
-    /<function_call(?:\s+name="([^"]+)")?\s*>([\s\S]*?)<\/function_call>/,
-  );
-  if (attrMatch) {
-    const name = attrMatch[1] ?? "";
-    if (!name) return null;
-    const json = tolerantJSONParse(attrMatch[2] ?? "");
-    return { name, args: asArgs(json) };
+  // Prior session-3 code looked for `<function_call name=...>` by mistake;
+  // real legacy form is `<tool_call name=...>` per AI21's old spec.
+  const attrPattern = /<tool_call\s+name="([^"]+)"\s*(?:\/|>\s*([\s\S]*?)<\/tool_call)>/g;
+  for (const match of text.matchAll(attrPattern)) {
+    const name = match[1] ?? "";
+    if (!name) continue;
+    const body = match[2] ? decodeXmlEntities(match[2]) : "";
+    const json = body ? tolerantJSONParse(body) : {};
+    results.push({ name, args: asArgs(json) });
   }
-  return null;
+  return results;
+}
+
+/** Back-compat single-return. Returns first call or null. */
+export function parseJamba(text: string): ParsedToolCall | null {
+  return parseJambaAll(text)[0] ?? null;
 }
 
 // ── 8. Command R / R+ (Cohere) ──────────────────────────────
 //
 // Action: ```json
-// [{"tool_name": "fn", "parameters": {...}}]
+// [{"tool_name": "fn", "parameters": {...}}, {"tool_name": "fn2", ...}]
 // ```
 // Used by: command-r, command-r-plus, command-r7b
-export function parseCommandR(text: string): ParsedToolCall | null {
+//
+// Cohere's Command R+ routinely emits arrays with 2+ tool calls —
+// parseCommandRAll iterates so the runtime can dispatch each.
+export function parseCommandRAll(text: string): ReadonlyArray<ParsedToolCall> {
   const match = text.match(/Action:\s*```(?:json)?\s*([\s\S]*?)```/);
-  if (!match) return null;
+  if (!match) return [];
   const arr = tolerantJSONParse(match[1] ?? "");
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-  const first = arr[0] as { tool_name?: unknown; name?: unknown; parameters?: unknown };
-  const name =
-    typeof first?.tool_name === "string"
-      ? first.tool_name
-      : typeof first?.name === "string"
-        ? first.name
-        : "";
-  if (!name) return null;
-  return { name, args: asArgs(first.parameters) };
+  if (!Array.isArray(arr) || arr.length === 0) return [];
+  const results: ParsedToolCall[] = [];
+  for (const entry of arr) {
+    const obj = entry as { tool_name?: unknown; name?: unknown; parameters?: unknown };
+    const name =
+      typeof obj?.tool_name === "string"
+        ? obj.tool_name
+        : typeof obj?.name === "string"
+          ? obj.name
+          : "";
+    if (name) results.push({ name, args: asArgs(obj.parameters) });
+  }
+  return results;
+}
+
+/** Back-compat single-return. Returns first call or null. */
+export function parseCommandR(text: string): ParsedToolCall | null {
+  return parseCommandRAll(text)[0] ?? null;
 }
 
 // ── 9. ToolBench / ChatGLM ──────────────────────────────────
@@ -368,6 +443,12 @@ export type ParserFn = (text: string) => ParsedToolCall | null;
 // as `/(^a)|b|c/`), so substrings in the middle of the model name could
 // accidentally match unrelated patterns. Each entry is therefore wrapped
 // in `(?:...)` so every alternation is properly start-anchored.
+//
+// The session-4 audit added two pattern improvements: Qwen now matches
+// the `qwen3-coder` family (Alibaba's flagship coder model); and the
+// resolveParser step strips cross-provider routing prefixes
+// (`openrouter/`, `litellm/`, `together_ai/`, etc.) before matching
+// so `openrouter/meta-llama/llama-3.3` actually reaches parseLlama.
 const PARSER_REGISTRY: ReadonlyArray<{
   readonly pattern: RegExp;
   readonly parser: ParserFn;
@@ -375,25 +456,83 @@ const PARSER_REGISTRY: ReadonlyArray<{
 }> = [
   { pattern: /^(?:hermes|nous-?hermes|openhermes)/i, parser: parseHermes, family: "hermes" },
   { pattern: /^(?:mistral|codestral|mixtral)/i, parser: parseMistral, family: "mistral" },
-  { pattern: /^(?:llama-?[34]|llama-?\d{1,2}\.\d)/i, parser: parseLlama, family: "llama" },
-  { pattern: /^(?:qwen[23]?\.?\d|qwen-?coder)/i, parser: parseQwen, family: "qwen" },
+  {
+    pattern: /^(?:llama-?[34]|llama-?\d{1,2}\.\d|meta-llama|llama-?3-?\d)/i,
+    parser: parseLlama,
+    family: "llama",
+  },
+  {
+    pattern: /^(?:qwen(?:[23]?(?:[-.]?\d+)?(?:-coder)?|-?coder|3-?coder))/i,
+    parser: parseQwen,
+    family: "qwen",
+  },
   { pattern: /^(?:deepseek)/i, parser: parseDeepSeek, family: "deepseek" },
   { pattern: /^(?:functionary)/i, parser: parseFunctionary, family: "functionary" },
   { pattern: /^(?:jamba)/i, parser: parseJamba, family: "jamba" },
-  { pattern: /^(?:command-?r|cohere)/i, parser: parseCommandR, family: "command-r" },
+  { pattern: /^(?:command-?r|cohere|c4ai)/i, parser: parseCommandR, family: "command-r" },
   { pattern: /^(?:toolbench|chatglm)/i, parser: parseToolBench, family: "toolbench" },
   { pattern: /^(?:glaive)/i, parser: parseGlaive, family: "glaive" },
 ];
 
 /**
- * Resolve the parser for a given model name. Falls through to a
- * try-everything dispatcher when no specific match (best-effort
- * recovery for unknown models that emit a recognisable format).
+ * Strip cross-provider routing prefixes so `openrouter/deepseek-v3` and
+ * similar names reach the correct family parser. Session-4 audit found
+ * provider-prefixed names were silently falling through to parseAny's
+ * try-everything path — the per-family dispatch was dead code for
+ * anyone routing through OpenRouter, LiteLLM, Portkey, Together, etc.
+ *
+ * Handled prefixes (empirically observed): `openrouter/`, `litellm/`,
+ * `portkey/`, `together_ai/`, `together/`, `fireworks/`, `anthropic/`,
+ * `google/`, `groq/`. Plus the nested `vendor/family/` shape OpenRouter
+ * uses (e.g. `openrouter/meta-llama/llama-3.3-70b` → strip
+ * `openrouter/meta-llama/`).
+ */
+function stripProviderPrefix(modelName: string): string {
+  const KNOWN_PREFIXES = [
+    "openrouter/",
+    "litellm/",
+    "portkey/",
+    "together_ai/",
+    "together/",
+    "fireworks/",
+    "anthropic/",
+    "google/",
+    "groq/",
+  ];
+  for (const prefix of KNOWN_PREFIXES) {
+    if (modelName.toLowerCase().startsWith(prefix)) {
+      const rest = modelName.slice(prefix.length);
+      // OpenRouter nests a second vendor segment like `meta-llama/`; if
+      // rest looks like `vendor/model` AND vendor is a known family name,
+      // strip that too so `meta-llama/llama-3.3` arrives as `llama-3.3`.
+      const slashIdx = rest.indexOf("/");
+      if (slashIdx > 0) {
+        const vendor = rest.slice(0, slashIdx).toLowerCase();
+        if (
+          /^(meta-llama|mistralai|qwen|deepseek-ai|cohere|ai21|nousresearch|google|anthropic)$/.test(
+            vendor,
+          )
+        ) {
+          return rest.slice(slashIdx + 1);
+        }
+      }
+      return rest;
+    }
+  }
+  return modelName;
+}
+
+/**
+ * Resolve the parser for a given model name. Strips provider routing
+ * prefixes (openrouter/ etc.) before matching so cross-provider routing
+ * names don't bypass the per-family dispatch. Falls through to a
+ * try-everything dispatcher when no specific match.
  */
 export function resolveParser(modelName: string | undefined): ParserFn {
   if (modelName) {
+    const stripped = stripProviderPrefix(modelName);
     for (const entry of PARSER_REGISTRY) {
-      if (entry.pattern.test(modelName)) return entry.parser;
+      if (entry.pattern.test(stripped)) return entry.parser;
     }
   }
   return parseAny;
@@ -425,12 +564,30 @@ export function parseAny(text: string): ParsedToolCall | null {
  * The Wotann legacy XML format is always tried first as a backstop.
  */
 export function parseToolCall(text: string, modelName?: string): ParsedToolCall | null {
-  // Always try the legacy XML format first — capability-augmenter still
-  // injects this format for emulated tool calling, so a model that
-  // followed the instructions exactly will produce this format
-  // regardless of family.
+  return parseToolCalls(text, modelName)[0] ?? null;
+}
+
+/**
+ * Array-returning variant that surfaces EVERY tool call in the text,
+ * not just the first. Real Mistral-large, Command-R+, Jamba, and
+ * DeepSeek V3 routinely emit 2-3 tool calls per turn; callers that
+ * only look at [0] silently drop the rest, causing user-visible gaps
+ * ("I asked for weather in NY and SF — why only NY?").
+ *
+ * Dispatch order: Wotann XML backstop → family-specific parser by
+ * model name. Family parsers that return arrays (Mistral, Command-R,
+ * Jamba, DeepSeek) surface multi-call directly; single-return parsers
+ * (Hermes, Llama, Qwen, Functionary, Glaive, ToolBench, ReAct) are
+ * wrapped in 0-or-1-element arrays.
+ */
+export function parseToolCalls(text: string, modelName?: string): ReadonlyArray<ParsedToolCall> {
   const wotann = parseWotannXML(text);
-  if (wotann) return wotann;
-  const parser = resolveParser(modelName);
-  return parser(text);
+  if (wotann) return [wotann];
+  const resolved = resolveParser(modelName);
+  if (resolved === parseMistral) return parseMistralAll(text);
+  if (resolved === parseCommandR) return parseCommandRAll(text);
+  if (resolved === parseJamba) return parseJambaAll(text);
+  if (resolved === parseDeepSeek) return parseDeepSeekAll(text);
+  const single = resolved(text);
+  return single ? [single] : [];
 }

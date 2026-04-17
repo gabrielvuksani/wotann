@@ -14,7 +14,7 @@ import type { ProviderAdapter, StreamChunk, UnifiedQueryOptions } from "../provi
 import { ModelRouter } from "../providers/model-router.js";
 import { RateLimitManager } from "../providers/rate-limiter.js";
 import { buildFallbackChain, resolveNextProvider } from "../providers/fallback-chain.js";
-import { augmentQuery, parseToolCallFromText } from "../providers/capability-augmenter.js";
+import { augmentQuery, parseToolCallsFromText } from "../providers/capability-augmenter.js";
 import { AccountPool } from "../providers/account-pool.js";
 
 export interface AgentBridgeConfig {
@@ -162,47 +162,54 @@ export class AgentBridge {
             } else if (chunk.type === "text") {
               emulatedTextBuffer += chunk.content;
               if (!emulatedToolEmitted) {
-                // S3-2: pass model name so parseToolCallFromText can
-                // dispatch to the family-specific parser (Hermes / Mistral
-                // / Llama / Qwen / DeepSeek / Functionary / Jamba /
-                // Command R / ToolBench / Glaive). Without the model name
-                // the 11-parser dispatch is dead code and every call
-                // falls through to parseAny's try-everything path.
-                const parsed = parseToolCallFromText(emulatedTextBuffer, adapterOptions.model);
-                if (parsed) {
-                  // Synthesize a structured tool_use chunk. Suppress the raw
-                  // XML text so downstream consumers don't see it twice.
+                // S3-2: pass model name so the parser can dispatch to the
+                // family-specific variant (Hermes / Mistral / Llama / Qwen /
+                // DeepSeek / Functionary / Jamba / Command R / ToolBench /
+                // Glaive). Without the model name the 11-parser dispatch
+                // is dead code and every call falls through to parseAny.
+                // Session-4: use the array-returning variant so multi-call
+                // responses (Mistral/Command-R+/Jamba/DeepSeek routinely
+                // emit 2-3 calls per turn) yield every call, not just the
+                // first. Prior single-return silently dropped tail calls.
+                const calls = parseToolCallsFromText(emulatedTextBuffer, adapterOptions.model);
+                if (calls.length > 0) {
+                  // Synthesize structured tool_use chunks for each parsed
+                  // call. Suppress the raw XML text so downstream consumers
+                  // don't see it twice.
                   emulatedToolEmitted = true;
-                  yield {
-                    type: "tool_use",
-                    content: JSON.stringify(parsed.args),
-                    toolName: parsed.name,
-                    toolInput: parsed.args as Record<string, unknown>,
-                    provider: entry.provider,
-                    stopReason: "tool_calls",
-                  };
+                  for (const parsed of calls) {
+                    yield {
+                      type: "tool_use",
+                      content: JSON.stringify(parsed.args),
+                      toolName: parsed.name,
+                      toolInput: parsed.args as Record<string, unknown>,
+                      provider: entry.provider,
+                      stopReason: "tool_calls",
+                    };
+                  }
                 } else {
                   yield { ...chunk, provider: entry.provider };
                 }
               }
-              // If we already emitted the tool_use chunk, swallow any trailing
-              // text fragments from the same XML block.
+              // If we already emitted the tool_use chunks, swallow any
+              // trailing text fragments from the same XML block.
             } else if (chunk.type === "done") {
               // Re-run the parser on the final buffer in case the tool XML
               // only became complete on the last delta (rare but possible).
               if (!emulatedToolEmitted) {
-                // S3-2: see note above — pass modelName for family dispatch.
-                const parsed = parseToolCallFromText(emulatedTextBuffer, adapterOptions.model);
-                if (parsed) {
+                const calls = parseToolCallsFromText(emulatedTextBuffer, adapterOptions.model);
+                if (calls.length > 0) {
                   emulatedToolEmitted = true;
-                  yield {
-                    type: "tool_use",
-                    content: JSON.stringify(parsed.args),
-                    toolName: parsed.name,
-                    toolInput: parsed.args as Record<string, unknown>,
-                    provider: entry.provider,
-                    stopReason: "tool_calls",
-                  };
+                  for (const parsed of calls) {
+                    yield {
+                      type: "tool_use",
+                      content: JSON.stringify(parsed.args),
+                      toolName: parsed.name,
+                      toolInput: parsed.args as Record<string, unknown>,
+                      provider: entry.provider,
+                      stopReason: "tool_calls",
+                    };
+                  }
                 }
               }
               yield {

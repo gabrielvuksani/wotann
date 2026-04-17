@@ -164,7 +164,13 @@ describe("tool-parsers: parseJamba — nested-child regression (Agent audit #3)"
   });
 
   it("falls back to attribute-on-tag for older fine-tunes", () => {
-    const text = `<function_call name="old_fn">{"k":"v"}</function_call>`;
+    // Session-4 audit (Agent 3 HIGH #8): the prior test asserted
+    // `<function_call name=...>` — but AI21's real legacy attribute
+    // form is `<tool_call name=...>`. The session-3 fix preserved
+    // the wrong tag; session-4 corrects it and the test follows.
+    // Quality-bar #9: test files can codify bugs — update them
+    // alongside the production fix.
+    const text = `<tool_call name="old_fn">{"k":"v"}</tool_call>`;
     const result = parseJamba(text);
     expect(result?.name).toBe("old_fn");
   });
