@@ -339,6 +339,36 @@ program
     await runDoctor(process.cwd());
   });
 
+// ── wotann git (Magic Git — C20) ─────────────────────────────
+
+program
+  .command("git <verb>")
+  .description("Magic Git: commit-msg | pr-desc | resolve-conflict")
+  .option("--hint <text>", "Hint for commit subject")
+  .option("--base <branch>", "Base branch for pr-desc", "main")
+  .option("--file <path>", "Path to file with conflict markers")
+  .action(async (verb: string, options: { hint?: string; base?: string; file?: string }) => {
+    const allowed = ["commit-msg", "pr-desc", "resolve-conflict"] as const;
+    if (!allowed.includes(verb as (typeof allowed)[number])) {
+      console.log(chalk.red(`Unknown git verb: ${verb}. Expected one of ${allowed.join(", ")}.`));
+      process.exit(1);
+    }
+    const { runMagicGit } = await import("./cli/commands.js");
+    try {
+      await runMagicGit({
+        verb: verb as "commit-msg" | "pr-desc" | "resolve-conflict",
+        hint: options.hint,
+        baseBranch: options.base,
+        file: options.file,
+      });
+    } catch (error) {
+      console.log(
+        chalk.red(`git ${verb} failed: ${error instanceof Error ? error.message : "unknown"}`),
+      );
+      process.exit(1);
+    }
+  });
+
 // ── wotann dream ────────────────────────────────────────────
 
 program

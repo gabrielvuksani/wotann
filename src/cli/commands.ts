@@ -4,9 +4,22 @@
  */
 
 import chalk from "chalk";
+import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createWorkspace } from "../core/workspace.js";
 import { discoverProviders, formatFullStatus } from "../providers/discovery.js";
 import type { ProviderStatus } from "../core/types.js";
+import {
+  buildPRDescription,
+  parseConflictBlocks,
+  parseDiffStat,
+  renderCommitMessage,
+  suggestCommitMessage,
+  suggestConflictResolution,
+} from "../git/magic-git.js";
+
+const execFileAsync = promisify(execFile);
 
 // ── wotann init ──────────────────────────────────────────────
 
@@ -350,4 +363,96 @@ export async function runDoctor(targetDir: string): Promise<void> {
       ? chalk.green("  All checks passed.\n")
       : chalk.yellow("  Some checks failed. Fix issues above.\n"),
   );
+}
+
+// ── wotann git (Magic Git — C20) ─────────────────────────────
+
+export type MagicGitVerb = "commit-msg" | "pr-desc" | "resolve-conflict";
+
+export interface MagicGitOptions {
+  readonly verb: MagicGitVerb;
+  readonly hint?: string;
+  readonly baseBranch?: string;
+  readonly file?: string;
+  readonly cwd?: string;
+}
+
+/**
+ * `wotann git commit-msg` / `pr-desc` / `resolve-conflict` — surfaces the
+ * Magic Git analyzers from src/git/magic-git.ts as CLI verbs. Shells out
+ * to `git` for numstat / log data; all inference runs locally with no
+ * LLM call, so the verbs are fast and deterministic.
+ */
+export async function runMagicGit(options: MagicGitOptions): Promise<void> {
+  const cwd = options.cwd ?? process.cwd();
+
+  if (options.verb === "commit-msg") {
+    const { stdout } = await execFileAsync("git", ["diff", "--cached", "--numstat"], { cwd });
+    const stats = parseDiffStat(stdout);
+    const suggestion = suggestCommitMessage(stats, { hint: options.hint });
+    console.log(renderCommitMessage(suggestion));
+    console.log();
+    console.log(
+      chalk.dim(
+        `  (type=${suggestion.type}, scope=${suggestion.scope ?? "-"}, ` +
+          `confidence=${(suggestion.confidence * 100).toFixed(0)}%)`,
+      ),
+    );
+    return;
+  }
+
+  if (options.verb === "pr-desc") {
+    const base = options.baseBranch ?? "main";
+    const { stdout: logOut } = await execFileAsync(
+      "git",
+      ["log", "--pretty=%H%x09%s", `${base}..HEAD`],
+      { cwd },
+    );
+    const commits = logOut
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [hash, ...rest] = line.split("\t");
+        return { hash: hash ?? "", subject: rest.join("\t") };
+      });
+    const { stdout: numOut } = await execFileAsync("git", ["diff", `${base}...HEAD`, "--numstat"], {
+      cwd,
+    });
+    const diffStats = parseDiffStat(numOut);
+    const body = buildPRDescription({
+      title: commits[0]?.subject ?? "Updates",
+      commits,
+      diffStats,
+      baseBranch: base,
+    });
+    console.log(body);
+    return;
+  }
+
+  if (options.verb === "resolve-conflict") {
+    if (!options.file) {
+      console.log(chalk.red("  --file <path> required for resolve-conflict"));
+      return;
+    }
+    const content = readFileSync(options.file, "utf-8");
+    const hunks = parseConflictBlocks(content);
+    if (hunks.length === 0) {
+      console.log(chalk.green(`  No conflict markers in ${options.file}.`));
+      return;
+    }
+    console.log(chalk.bold(`  ${hunks.length} conflict hunk(s) in ${options.file}`) + "\n");
+    hunks.forEach((hunk, idx) => {
+      const suggestion = suggestConflictResolution(hunk);
+      console.log(chalk.bold(`  Hunk ${idx + 1}: ${suggestion.strategy}`));
+      console.log(chalk.dim(`    reason: ${suggestion.reason}`));
+      if (suggestion.resolved !== undefined) {
+        const preview = suggestion.resolved.slice(0, 200).replace(/\n/g, "\n    ");
+        console.log(`    resolved:\n    ${preview}`);
+      }
+      console.log();
+    });
+    return;
+  }
+
+  console.log(chalk.red(`  Unknown magic-git verb: ${options.verb}`));
 }
