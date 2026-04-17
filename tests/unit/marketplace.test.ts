@@ -66,13 +66,92 @@ describe("Marketplace & MCP Registry (Phase 15)", () => {
 
       const registered = registry.registerBuiltins();
 
-      expect(registered).toBe(1);
+      // QMD always registers (process.execPath always exists); cognee
+      // and omi only register if their binaries happen to be on PATH,
+      // so the total is >= 1 rather than exactly 1.
+      expect(registered).toBeGreaterThanOrEqual(1);
       expect(registry.getServer("qmd")).toMatchObject({
         command: process.execPath,
         args: ["mcp"],
         transport: "stdio",
         enabled: true,
       });
+    });
+
+    // ── C15 + C18 — opt-in MCP builtins for external memory systems ──
+    // These tests assert the registration *shape* rather than presence,
+    // because they depend on whether the user has `cognee` / `omi` CLIs
+    // on PATH. We explicitly override the command via env var so the
+    // positive path is testable on any machine.
+
+    it("registers Cognee MCP when COGNEE_CMD points to a real binary (C15)", () => {
+      const prior = process.env["COGNEE_CMD"];
+      process.env["COGNEE_CMD"] = process.execPath;
+      try {
+        const registry = new MCPRegistry({ projectDir: process.cwd() });
+        const ok = registry.registerCogneeServer();
+        expect(ok).toBe(true);
+        expect(registry.getServer("cognee")).toMatchObject({
+          name: "cognee",
+          command: process.execPath,
+          args: ["mcp"],
+          transport: "stdio",
+          enabled: false, // opt-in
+          autoStart: false,
+        });
+      } finally {
+        if (prior === undefined) delete process.env["COGNEE_CMD"];
+        else process.env["COGNEE_CMD"] = prior;
+      }
+    });
+
+    it("skips Cognee when the binary is not on PATH", () => {
+      const prior = process.env["COGNEE_CMD"];
+      process.env["COGNEE_CMD"] = "definitely-not-a-real-binary-7f3a9b2c";
+      try {
+        const registry = new MCPRegistry({ projectDir: process.cwd() });
+        const ok = registry.registerCogneeServer();
+        expect(ok).toBe(false);
+        expect(registry.getServer("cognee")).toBeUndefined();
+      } finally {
+        if (prior === undefined) delete process.env["COGNEE_CMD"];
+        else process.env["COGNEE_CMD"] = prior;
+      }
+    });
+
+    it("registers Omi MCP when OMI_CMD points to a real binary (C18)", () => {
+      const prior = process.env["OMI_CMD"];
+      process.env["OMI_CMD"] = process.execPath;
+      try {
+        const registry = new MCPRegistry({ projectDir: process.cwd() });
+        const ok = registry.registerOmiServer();
+        expect(ok).toBe(true);
+        expect(registry.getServer("omi")).toMatchObject({
+          name: "omi",
+          command: process.execPath,
+          args: ["mcp"],
+          transport: "stdio",
+          enabled: false,
+          autoStart: false,
+        });
+      } finally {
+        if (prior === undefined) delete process.env["OMI_CMD"];
+        else process.env["OMI_CMD"] = prior;
+      }
+    });
+
+    it("is idempotent — duplicate register calls do not multiply", () => {
+      const prior = process.env["COGNEE_CMD"];
+      process.env["COGNEE_CMD"] = process.execPath;
+      try {
+        const registry = new MCPRegistry({ projectDir: process.cwd() });
+        expect(registry.registerCogneeServer()).toBe(true);
+        expect(registry.registerCogneeServer()).toBe(true);
+        expect(registry.getServerCount()).toBe(1);
+      } finally {
+        if (prior === undefined) delete process.env["COGNEE_CMD"];
+        else process.env["COGNEE_CMD"] = prior;
+      }
     });
   });
 

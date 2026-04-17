@@ -3,7 +3,17 @@
  * Config-based server registration, import from Claude Code, hot-add.
  */
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
@@ -77,10 +87,67 @@ export class MCPRegistry {
 
   registerBuiltins(): number {
     let registered = 0;
-    if (this.registerQMDServer()) {
-      registered++;
-    }
+    if (this.registerQMDServer()) registered++;
+    if (this.registerCogneeServer()) registered++;
+    if (this.registerOmiServer()) registered++;
     return registered;
+  }
+
+  /**
+   * C15 — Cognee MCP wrapper. Cognee is an external memory system exposing
+   * the four verbs `remember`, `recall`, `forget`, `improve` over stdio
+   * when the `cognee` CLI is installed (pipx install cognee). We register
+   * it as a non-autostart MCP source so the memory router can optionally
+   * consult it alongside WOTANN's built-in memory. Opt-in: disabled by
+   * default, users enable via `wotann mcp enable cognee`.
+   */
+  registerCogneeServer(): boolean {
+    if (this.servers.has("cognee")) return true;
+    // Prefer a user-provided path (COGNEE_CMD) to accommodate pipx/uv
+    // venvs; fall back to the bare command name so PATH lookup happens.
+    const bin = process.env["COGNEE_CMD"] ?? "cognee";
+    if (!commandExists(bin)) return false;
+
+    this.register({
+      name: "cognee",
+      command: bin,
+      args: ["mcp"],
+      transport: "stdio",
+      env: {
+        COGNEE_PROJECT_ROOT: this.projectDir,
+      },
+      // Opt-in by default — cognee routes memory to an external model/DB
+      // which is not a choice WOTANN wants to make silently.
+      enabled: false,
+      autoStart: false,
+    });
+    return true;
+  }
+
+  /**
+   * C18 — Omi MCP integration. Omi is a personal-memory MCP server
+   * ($HOME/.omi/mcp). Like Cognee, registered disabled-by-default so the
+   * user opts in explicitly — Omi memories may contain personal
+   * cross-context data that should not leak into code tasks without
+   * explicit consent.
+   */
+  registerOmiServer(): boolean {
+    if (this.servers.has("omi")) return true;
+    const bin = process.env["OMI_CMD"] ?? "omi";
+    if (!commandExists(bin)) return false;
+
+    this.register({
+      name: "omi",
+      command: bin,
+      args: ["mcp"],
+      transport: "stdio",
+      env: {
+        OMI_PROJECT_ROOT: this.projectDir,
+      },
+      enabled: false,
+      autoStart: false,
+    });
+    return true;
   }
 
   registerQMDServer(): boolean {
@@ -252,13 +319,9 @@ export class SkillMarketplace {
     return discovered
       .filter((skill) => {
         if (!normalized) return true;
-        return [
-          skill.name,
-          skill.description,
-          skill.category,
-          skill.author,
-          skill.url,
-        ].some((field) => field.toLowerCase().includes(normalized));
+        return [skill.name, skill.description, skill.category, skill.author, skill.url].some(
+          (field) => field.toLowerCase().includes(normalized),
+        );
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -277,7 +340,9 @@ export class SkillMarketplace {
       return installFromPath(name, targetDir);
     }
 
-    const match = (await this.search(name)).find((skill) => skill.name === name || skill.url === name);
+    const match = (await this.search(name)).find(
+      (skill) => skill.name === name || skill.url === name,
+    );
     if (!match?.sourcePath) return false;
 
     return installFromPath(match.sourcePath, targetDir);
@@ -294,9 +359,7 @@ export class SkillMarketplace {
    */
   async installFromGitHub(repo: string): Promise<InstalledSkillMeta | null> {
     const repoName = extractRepoName(repo);
-    const repoUrl = repo.startsWith("https://")
-      ? repo
-      : `https://github.com/${repo}.git`;
+    const repoUrl = repo.startsWith("https://") ? repo : `https://github.com/${repo}.git`;
 
     const installDir = join(this.marketplaceDir, repoName);
 
@@ -330,10 +393,7 @@ export class SkillMarketplace {
     };
 
     // Persist metadata alongside the skill
-    writeFileSync(
-      join(installDir, ".wotann-meta.json"),
-      JSON.stringify(meta, null, 2),
-    );
+    writeFileSync(join(installDir, ".wotann-meta.json"), JSON.stringify(meta, null, 2));
 
     return meta;
   }
@@ -356,16 +416,21 @@ export class SkillMarketplace {
     }
 
     try {
-      const searchQuery = query
-        ? `${query} topic:wotann-skill`
-        : "topic:wotann-skill";
+      const searchQuery = query ? `${query} topic:wotann-skill` : "topic:wotann-skill";
 
-      const { stdout } = await execFileAsync("gh", [
-        "search", "repos",
-        searchQuery,
-        "--json", "name,fullName,description,url,stargazersCount,updatedAt",
-        "--limit", "25",
-      ], { timeout: 15_000 });
+      const { stdout } = await execFileAsync(
+        "gh",
+        [
+          "search",
+          "repos",
+          searchQuery,
+          "--json",
+          "name,fullName,description,url,stargazersCount,updatedAt",
+          "--limit",
+          "25",
+        ],
+        { timeout: 15_000 },
+      );
 
       const results = JSON.parse(stdout) as readonly RawGitHubSearchResult[];
 
@@ -482,10 +547,7 @@ export class SkillMarketplace {
     }
 
     const grade: SkillEvalGrade =
-      score >= 90 ? "gold" :
-      score >= 70 ? "silver" :
-      score >= 50 ? "bronze" :
-      "unrated";
+      score >= 90 ? "gold" : score >= 70 ? "silver" : score >= 50 ? "bronze" : "unrated";
 
     return {
       skillName: "evaluated",
@@ -561,9 +623,7 @@ function parseSkillMetadata(filePath: string): MarketplaceSkill | null {
 
     if (!name || !description) return null;
 
-    const sourcePath = basename(filePath) === "SKILL.md"
-      ? dirname(filePath)
-      : filePath;
+    const sourcePath = basename(filePath) === "SKILL.md" ? dirname(filePath) : filePath;
 
     return {
       name,
@@ -589,9 +649,7 @@ function extractFrontmatter(raw: string): Record<string, unknown> {
 
   try {
     const parsed = YAML.parse(raw.slice(4, endIndex));
-    return typeof parsed === "object" && parsed !== null
-      ? parsed as Record<string, unknown>
-      : {};
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -622,11 +680,13 @@ function inferSkillName(filePath: string): string {
 }
 
 function looksLikeGitSource(source: string): boolean {
-  return source.startsWith("git@") ||
+  return (
+    source.startsWith("git@") ||
     source.startsWith("https://") ||
     source.startsWith("ssh://") ||
     source.startsWith("file://") ||
-    source.endsWith(".git");
+    source.endsWith(".git")
+  );
 }
 
 function installFromGit(source: string, targetDir: string, gitBinary: string): boolean {
@@ -650,9 +710,10 @@ function installFromPath(source: string, targetDir: string): boolean {
   if (!existsSync(resolvedSource)) return false;
 
   const sourceStats = statSync(resolvedSource);
-  const normalizedSource = sourceStats.isFile() && basename(resolvedSource) === "SKILL.md"
-    ? dirname(resolvedSource)
-    : resolvedSource;
+  const normalizedSource =
+    sourceStats.isFile() && basename(resolvedSource) === "SKILL.md"
+      ? dirname(resolvedSource)
+      : resolvedSource;
   const destName = basename(normalizedSource);
   const destination = uniqueDestination(join(targetDir, destName));
 
