@@ -112,27 +112,70 @@ describe("Copilot adapter — multi-turn tool-loop shape (8d78efe)", () => {
     expect(toolMessage?.["tool_call_id"]).toBe("call_123");
   });
 
-  // Reasoning-delta forwarding (regression #1) is tested indirectly via
-  // the stream consumption loop — if the adapter's type definitions
-  // lose `reasoning`/`reasoning_content`, the fix regresses and the
-  // chunks stop being yielded. A direct stream-shape test is possible
-  // but requires a richer SSE fixture; we lean on typecheck + manual
-  // field presence here.
-  it("delta interface includes reasoning fields for Copilot-proxied models", () => {
-    // Import the interface at module scope to confirm TypeScript
-    // validates both fields. This is a compile-time assertion.
-    type ChunkDelta = {
-      content?: string;
-      reasoning?: string;
-      reasoning_content?: string;
-      tool_calls?: unknown[];
-    };
-    const delta: ChunkDelta = {
-      reasoning: "thinking...",
-      reasoning_content: "more thinking",
-    };
-    expect(delta.reasoning).toBeDefined();
-    expect(delta.reasoning_content).toBeDefined();
+  // Reasoning-delta forwarding (regression #1). Session-5 (Phase-1
+  // GAP-7) replaced a tautological test that defined its OWN local
+  // type literal and asserted fields on it — which never exercised
+  // the real adapter. This version streams an SSE chunk with a
+  // reasoning field through `adapter.query()` and verifies the adapter
+  // yields a `thinking` chunk with the reasoning content intact. Any
+  // regression that stops handling reasoning / reasoning_content at
+  // copilot-adapter.ts:405-407 now fails loudly.
+  it("forwards reasoning SSE deltas as thinking chunks (regression #1)", async () => {
+    // Custom fetch mock that returns an SSE chunk carrying a
+    // `reasoning_content` field — this simulates the o-series models
+    // Copilot proxies (o3/o3-mini/o4/gpt-5.x) emitting chain-of-thought.
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/copilot_internal/v2/token")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ token: "t_fake", expires_at: Date.now() + 60_000 }),
+        } as unknown as Response;
+      }
+      if (init?.body) lastRequestBody = JSON.parse(init.body as string);
+      const sseFrame = (d: Record<string, unknown>) => `data: ${JSON.stringify(d)}\n\n`;
+      const chunks = [
+        sseFrame({
+          choices: [{ index: 0, delta: { reasoning: "Let me think about this..." } }],
+        }),
+        sseFrame({
+          choices: [
+            { index: 0, delta: { reasoning_content: "Considering the implications" } },
+          ],
+        }),
+        sseFrame({ choices: [{ index: 0, delta: { content: "Here's the answer." } }] }),
+        "data: [DONE]\n\n",
+      ];
+      const body = new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) {
+            controller.enqueue(new TextEncoder().encode(chunk));
+          }
+          controller.close();
+        },
+      });
+      return { ok: true, status: 200, body } as unknown as Response;
+    });
+
+    const adapter = createCopilotAdapter("ghp_fakeTokenForTesting");
+    const thinkingContents: string[] = [];
+    const textContents: string[] = [];
+    for await (const chunk of adapter.query({
+      prompt: "Reason about this",
+      model: "gpt-5",
+      maxTokens: 100,
+      stream: true,
+    })) {
+      if (chunk.type === "thinking") thinkingContents.push(chunk.content ?? "");
+      if (chunk.type === "text") textContents.push(chunk.content ?? "");
+    }
+    // Both reasoning paths should have produced thinking chunks — the
+    // adapter handles `delta.reasoning` and `delta.reasoning_content`
+    // at the same yield site.
+    expect(thinkingContents).toContain("Let me think about this...");
+    expect(thinkingContents).toContain("Considering the implications");
+    // And the plain content still comes through as text.
+    expect(textContents.join("")).toContain("Here's the answer.");
   });
 });
 
