@@ -14,7 +14,7 @@
  * happening".
  */
 
-import { useId } from "react";
+import { useId, type JSX } from "react";
 
 export interface ValknutSpinnerProps {
   /** Diameter in px. Default 32. */
