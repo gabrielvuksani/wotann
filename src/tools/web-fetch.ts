@@ -1,5 +1,5 @@
 /**
- * Web Fetch Tool — lightweight web content retrieval using Node's built-in fetch().
+ * Web Fetch Tool — lightweight web content retrieval using undici's fetch().
  *
  * Fills the #5 competitive gap: WOTANN needs web capability.
  *
@@ -14,12 +14,15 @@
  *   on that second lookup, slipping past our validation)
  * - Parallel multi-URL fetching
  *
- * Node 20+'s global `fetch` IS undici under the hood, so the `dispatcher`
- * option is honored at runtime even though it isn't in the WHATWG fetch
- * type. A local interface extension keeps TypeScript happy.
+ * Session 3 (2026-04-15) discovered that Node's bundled undici and an
+ * `npm install undici` can diverge on the Dispatcher handler protocol
+ * (Node 25 rejects a v8.1.0 Agent with "invalid onRequestStart method").
+ * The fix: use `undici.fetch` paired with `undici.Agent` from the SAME
+ * installed package so request/response protocol matches. Test mode
+ * (dispatcher null) still uses `globalThis.fetch` so existing mocks work.
  */
 
-import { Agent } from "undici";
+import { Agent, fetch as undiciFetch } from "undici";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -244,18 +247,13 @@ async function assertPublicResolvable(
   // ENOTFOUND for mock hostnames like `api.example.com`. The URL-string
   // check in validateUrl's isPrivateHost is still in effect.
   //
-  // Why the extra `NODE_ENV === "test"` gate: adversarial audit (opus,
-  // 2026-04-15) found that a single stray `WOTANN_TEST_MODE=1` leaked into
-  // a production environment would disable the entire DNS-rebinding defence
-  // and allow fetches to `169.254.169.254/latest/meta-data/` (AWS instance
-  // metadata). Now both flags must be set simultaneously — NODE_ENV=test
-  // cannot accidentally leak in production because node sets it to
-  // "production" by default on most platforms and test runners override it.
-  const nodeEnv = process.env["NODE_ENV"];
-  const inTest =
-    (process.env["WOTANN_TEST_MODE"] || process.env["VITEST"]) &&
-    (nodeEnv === "test" || process.env["VITEST"]);
-  if (inTest) {
+  // Why the strict env-var equality checks: the session-3 adversarial
+  // audit found that the prior `||` chain accepted `VITEST=1` alone (which
+  // is auto-set by vitest but also falsely present in any script that
+  // shares env) AND treated `WOTANN_TEST_MODE=0` as truthy (strings are).
+  // Explicit string equality closes both holes — NODE_ENV=test is
+  // mandatory, and the test-runner signal must be an explicit "1" / "true".
+  if (isTestEnvironment()) {
     return [];
   }
 
@@ -293,13 +291,41 @@ function createPinnedDispatcher(
   if (addresses.length === 0) return null;
   const primary = addresses[0];
   if (!primary) return null;
+  // undici's connect.lookup follows the dns.lookup contract — including the
+  // `options.all === true` branch where the callback receives an array of
+  // `{address, family}` records rather than two separate positional args.
+  // Without this branch the socket layer crashes with
+  // "Invalid IP address: undefined" because the positional signature's
+  // second arg (a string address) arrives as an array element.
   return new Agent({
     connect: {
-      lookup: (_hostname, _options, callback) => {
+      lookup: (_hostname, options, callback) => {
+        if (options && options.all === true) {
+          callback(null, [
+            { address: primary.address, family: primary.family },
+          ] as unknown as Parameters<typeof callback>[1]);
+          return;
+        }
         callback(null, primary.address, primary.family);
       },
     },
   });
+}
+
+/**
+ * Strict test-environment detection. Both signals must match exactly:
+ * (a) NODE_ENV === "test" (node/runners override this explicitly) AND
+ * (b) a test-runner marker is explicitly set to "1" or "true".
+ *
+ * Returns false in production even if an operator set WOTANN_TEST_MODE=0
+ * (old `||` chain treated string "0" as truthy — opposite of intent).
+ * Exported for use by the caller in choosing globalThis.fetch vs undiciFetch.
+ */
+function isTestEnvironment(): boolean {
+  if (process.env["NODE_ENV"] !== "test") return false;
+  const testMode = process.env["WOTANN_TEST_MODE"];
+  const vitest = process.env["VITEST"];
+  return testMode === "1" || testMode === "true" || vitest === "1" || vitest === "true";
 }
 
 // ── URL Validation ───────────────────────────────────────
@@ -366,6 +392,8 @@ export {
   extractTitle as _extractTitle,
   validateUrl as _validateUrl,
   extractMainContent as _extractMainContent,
+  isTestEnvironment as _isTestEnvironment,
+  createPinnedDispatcher as _createPinnedDispatcher,
 };
 
 // ── WebFetchTool ─────────────────────────────────────────
@@ -421,13 +449,14 @@ export class WebFetchTool {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.config.timeoutMs);
 
-        // The `dispatcher` option is honored at runtime (Node 20+'s
-        // global fetch IS undici underneath) but isn't in the WHATWG
-        // `RequestInit` type, and the two undici typings on our
-        // classpath (Node's bundled `undici-types` vs our installed
-        // `undici`) disagree on the `Dispatcher` shape. Cast through
-        // `unknown` to skip the type-level mismatch without losing
-        // runtime behaviour.
+        // When a pinned dispatcher is present we route through the
+        // installed undici's `fetch` — `globalThis.fetch` is bound to
+        // Node's bundled undici which has a different Dispatcher handler
+        // protocol and rejects a v8.1.0 Agent with
+        // "invalid onRequestStart method". Tests that mock
+        // `globalThis.fetch` still intercept because test mode
+        // short-circuits the dispatcher to null, so we only reach for
+        // `undiciFetch` when dispatcher is set (production).
         const init = {
           signal: controller.signal,
           headers: {
@@ -437,7 +466,11 @@ export class WebFetchTool {
           redirect: "manual" as const,
           ...(dispatcher ? { dispatcher } : {}),
         };
-        response = await fetch(currentUrl, init as unknown as RequestInit);
+        if (dispatcher) {
+          response = (await undiciFetch(currentUrl, init as never)) as unknown as Response;
+        } else {
+          response = await fetch(currentUrl, init as RequestInit);
+        }
 
         clearTimeout(timeoutId);
 

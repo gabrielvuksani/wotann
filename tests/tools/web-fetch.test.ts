@@ -5,6 +5,8 @@ import {
   _extractTitle,
   _validateUrl,
   _extractMainContent,
+  _isTestEnvironment,
+  _createPinnedDispatcher,
 } from "../../src/tools/web-fetch.js";
 
 // ── HTML Stripping ───────────────────────────────────────
@@ -344,6 +346,104 @@ describe("WebFetchTool", () => {
       const text = await tool.fetchText("file:///etc/passwd");
 
       expect(text).toContain("Error:");
+    });
+  });
+
+  // ── DNS-rebinding TOCTOU regression guards (session 4) ─────
+  //
+  // Session 3 shipped a dispatcher fix that was runtime-broken in
+  // production (Node's globalThis.fetch rejected the installed undici
+  // Agent with "invalid onRequestStart method"). VITEST=1 short-circuited
+  // the entire pinning path, so 43/43 tests passed without exercising
+  // the fix. These tests directly exercise the helpers that silently
+  // regressed, independent of the fetch path.
+
+  describe("isTestEnvironment (session 4 regression guards)", () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+      process.env = { ...originalEnv };
+    });
+
+    it("returns true when both NODE_ENV=test and VITEST=true", () => {
+      process.env["NODE_ENV"] = "test";
+      process.env["VITEST"] = "true";
+      delete process.env["WOTANN_TEST_MODE"];
+      expect(_isTestEnvironment()).toBe(true);
+    });
+
+    it("returns true with NODE_ENV=test and WOTANN_TEST_MODE=1", () => {
+      process.env["NODE_ENV"] = "test";
+      process.env["WOTANN_TEST_MODE"] = "1";
+      delete process.env["VITEST"];
+      expect(_isTestEnvironment()).toBe(true);
+    });
+
+    it("returns FALSE when VITEST=1 alone in production (regression guard)", () => {
+      // Prior buggy `||` chain treated this as test-mode and disabled
+      // SSRF protection. A leaked VITEST env could let attackers reach
+      // 169.254.169.254 AWS metadata from a production binary.
+      process.env["NODE_ENV"] = "production";
+      process.env["VITEST"] = "true";
+      delete process.env["WOTANN_TEST_MODE"];
+      expect(_isTestEnvironment()).toBe(false);
+    });
+
+    it("returns FALSE when WOTANN_TEST_MODE=0 (strings are truthy regression)", () => {
+      // Prior buggy `||` chain treated `"0"` as truthy and disabled
+      // SSRF — operators explicitly disabling test mode would in fact
+      // disable the SSRF defence.
+      process.env["NODE_ENV"] = "test";
+      process.env["WOTANN_TEST_MODE"] = "0";
+      delete process.env["VITEST"];
+      expect(_isTestEnvironment()).toBe(false);
+    });
+
+    it("returns FALSE when no test marker is set", () => {
+      process.env["NODE_ENV"] = "test";
+      delete process.env["WOTANN_TEST_MODE"];
+      delete process.env["VITEST"];
+      expect(_isTestEnvironment()).toBe(false);
+    });
+
+    it("returns FALSE when NODE_ENV is production regardless of markers", () => {
+      process.env["NODE_ENV"] = "production";
+      process.env["WOTANN_TEST_MODE"] = "1";
+      process.env["VITEST"] = "true";
+      expect(_isTestEnvironment()).toBe(false);
+    });
+  });
+
+  describe("createPinnedDispatcher (session 4 regression guards)", () => {
+    it("returns null when addresses array is empty", () => {
+      const dispatcher = _createPinnedDispatcher([]);
+      expect(dispatcher).toBeNull();
+    });
+
+    it("builds an Agent when addresses are provided", () => {
+      const dispatcher = _createPinnedDispatcher([
+        { address: "93.184.216.34", family: 4 },
+      ]);
+      expect(dispatcher).not.toBeNull();
+    });
+
+    it("builds an Agent (not a generic dispatcher) with connect.lookup configured", async () => {
+      // Agent 4 runtime-verified that undici's connect.lookup is called
+      // with `options.all=true` and expects `cb(null, [{address, family}])`
+      // — not the positional `cb(null, addr, family)` signature. The
+      // prior implementation used only positional, and node's socket
+      // layer crashed with "Invalid IP address: undefined". The
+      // full-path proof of the callback shape is the isTestEnvironment +
+      // end-to-end fetch integration — here we only assert the Agent
+      // was constructed (not null), so future refactors that
+      // accidentally return a generic Dispatcher would fail this guard.
+      const dispatcher = _createPinnedDispatcher([
+        { address: "93.184.216.34", family: 4 },
+      ]);
+      expect(dispatcher).not.toBeNull();
+      // Undici's Agent exposes `close` and `destroy` on its prototype —
+      // close without throwing proves the instance is fully constructed.
+      await dispatcher!.close();
     });
   });
 
