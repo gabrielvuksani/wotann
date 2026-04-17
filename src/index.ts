@@ -339,6 +339,19 @@ program
     await runDoctor(process.cwd());
   });
 
+// ── wotann cli-registry (C32) ────────────────────────────────
+
+program
+  .command("cli-registry")
+  .description("Scan PATH for known AI agent CLIs (Claude Code, Codex, Aider, …)")
+  .option("--with-versions", "Invoke each detected CLI with --version (slower)")
+  .action(async (options: { withVersions?: boolean }) => {
+    const { detectInstalledAgentCLIs, renderCLIRegistry } =
+      await import("./providers/cli-registry.js");
+    const detected = detectInstalledAgentCLIs({ captureVersion: options.withVersions });
+    console.log(renderCLIRegistry(detected));
+  });
+
 // ── wotann team-onboarding (C22) ─────────────────────────────
 
 program
