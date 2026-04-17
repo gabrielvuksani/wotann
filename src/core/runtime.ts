@@ -33,6 +33,7 @@ import { canBypass, executeBypass } from "../utils/wasm-bypass.js";
 import { CostTracker } from "../telemetry/cost-tracker.js";
 import { MemoryStore } from "../memory/store.js";
 import { TFIDFIndex } from "../memory/semantic-search.js";
+import { QuantizedVectorStore } from "../memory/quantized-vector-store.js";
 import {
   createSession,
   addMessage,
@@ -343,6 +344,17 @@ export class WotannRuntime {
   private modeCycler: ModeCycler;
   private accountPool: AccountPool;
   private semanticIndex: TFIDFIndex;
+  // Session-6 (GAP-11 fix): QuantizedVectorStore was ADDED in session-2
+  // and RUNTIME-TEST-SCAFFOLDED in session-4 but the session-4 audit
+  // agent missed that runtime.ts never instantiated it — zero consumers.
+  // Session-6 now wires it as an OPT-IN companion index: when
+  // `WOTANN_ENABLE_ONNX_EMBEDDINGS=1` is set + @xenova/transformers is
+  // installed, every addDocument to semanticIndex is mirrored here, and
+  // searchEnhanced() runs RRF-merge between TF-IDF and MiniLM. The
+  // async search path is exposed via a new runtime method rather than
+  // replacing the sync semanticIndex.search (which still has 2 legacy
+  // callsites at runtime.ts:2818, :817 and memory/store.ts:817).
+  private quantizedVectorStore: QuantizedVectorStore | null = null;
   private contextIntelligence: ContextWindowIntelligence;
   private editTracker: PerFileEditTracker;
   private sessionAnalytics: SessionAnalytics;
@@ -578,8 +590,16 @@ export class WotannRuntime {
     this.accountPool = new AccountPool();
     this.accountPool.discoverFromEnv();
 
-    // Initialize semantic search index
+    // Initialize semantic search index (TF-IDF default — zero deps, sync).
     this.semanticIndex = new TFIDFIndex();
+    // Session-6 (GAP-11): opt-in MiniLM semantic search via
+    // @xenova/transformers. Runs as a COMPANION index to semanticIndex
+    // when WOTANN_ENABLE_ONNX_EMBEDDINGS=1 is set. Falls back to
+    // TF-IDF silently if the optional dep isn't installed. See
+    // src/memory/quantized-vector-store.ts for the implementation.
+    if (process.env["WOTANN_ENABLE_ONNX_EMBEDDINGS"] === "1") {
+      this.quantizedVectorStore = new QuantizedVectorStore();
+    }
 
     // Initialize context window intelligence (provider-aware budget management).
     // S1-16: resolve the default provider honestly — explicit config wins,
@@ -2559,7 +2579,14 @@ export class WotannRuntime {
 
         // Also index in semantic search
         if (this.config.enableSemanticSearch !== false) {
-          this.semanticIndex.addDocument(`response-${Date.now()}`, fullContent.slice(0, 1000));
+          const responseDocId = `response-${Date.now()}`;
+          this.semanticIndex.addDocument(responseDocId, fullContent.slice(0, 1000));
+          // Session-6 (GAP-11): mirror into the ONNX companion index when
+          // enabled. Fire-and-forget — the internal encode queue drains
+          // in the background without blocking the query path.
+          if (this.quantizedVectorStore) {
+            this.quantizedVectorStore.addDocument(responseDocId, fullContent.slice(0, 1000));
+          }
         }
 
         // Index in vector store for hybrid search
@@ -3254,6 +3281,15 @@ export class WotannRuntime {
   }
   getTrainingPipeline(): TrainingPipeline {
     return this.trainingPipeline;
+  }
+  /**
+   * Session-6 (GAP-11): expose the optional QuantizedVectorStore so
+   * RPC handlers (memory.search-enhanced) and tests can reach it.
+   * Returns null when the opt-in env flag is off, signalling callers to
+   * fall back to semanticIndex.search().
+   */
+  getQuantizedVectorStore(): QuantizedVectorStore | null {
+    return this.quantizedVectorStore;
   }
   getActiveROESessionId(): string | undefined {
     return this.activeROESessionId;
