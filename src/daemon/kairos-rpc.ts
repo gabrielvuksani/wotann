@@ -32,6 +32,51 @@ import type { Workflow } from "../orchestration/workflow-dag.js";
 import type { WotannMode } from "../core/mode-cycling.js";
 import { createECDH, hkdfSync } from "node:crypto";
 import { sanitizeCommand } from "../security/command-sanitizer.js";
+import { VoicePipeline } from "../voice/voice-pipeline.js";
+
+// ── Voice pipeline singleton + streaming bookkeeping ──────
+//
+// Session-5 wiring for `voice.transcribe` and `voice.stream.{start,poll,
+// cancel}` — session-4's commit message claimed these were wired, but
+// the live handlers still returned an honest-error envelope (see the
+// Phase-1 adversarial audit GAP-1). VoicePipeline already exposes
+// `transcribe(audioPath)` via the STTDetector fallback chain (Web Speech
+// API → system → whisper-local → whisper-cloud → deepgram), so wiring
+// the RPC is just instantiation + delegation.
+//
+// NDJSON IPC doesn't carry subscriptions, so `voice.stream` is a
+// polling protocol: start() seeds a stream id, poll() returns
+// chunks-since-cursor, cancel() frees buffers. Streaming transcription
+// for longer audio drops partial text chunks into the buffer as the
+// underlying STT emits them; for the single-shot backend path we emit
+// one chunk containing the full transcription and mark the stream
+// done. Both cases release resources via cancel() even on error.
+let sharedVoicePipeline: VoicePipeline | null = null;
+async function getVoicePipeline(): Promise<VoicePipeline> {
+  if (sharedVoicePipeline) return sharedVoicePipeline;
+  const vp = new VoicePipeline();
+  await vp.initialize();
+  sharedVoicePipeline = vp;
+  return vp;
+}
+
+interface VoiceStream {
+  readonly id: string;
+  chunks: Array<{ readonly seq: number; readonly text: string; readonly isFinal: boolean }>;
+  done: boolean;
+  error?: string;
+  createdAt: number;
+}
+
+const voiceStreams = new Map<string, VoiceStream>();
+
+/** Drop streams that haven't been polled in N seconds (defensive GC). */
+function pruneStaleVoiceStreams(maxAgeMs: number = 10 * 60 * 1000): void {
+  const now = Date.now();
+  for (const [id, stream] of voiceStreams.entries()) {
+    if (now - stream.createdAt > maxAgeMs) voiceStreams.delete(id);
+  }
+}
 
 // ── Helpers ─────────────────────────────────────────────
 
@@ -3923,27 +3968,172 @@ export class KairosRPCHandler {
       }
     });
 
-    // voice.transcribe — single-shot transcription. Full pipeline
-    // integration (Whisper / faster-whisper / Edge STT) is in the voice
-    // module but not yet exposed here. Return an honest error surface
-    // rather than pretending to succeed with empty text.
-    this.handlers.set("voice.transcribe", async () => {
+    // voice.transcribe — single-shot transcription via VoicePipeline's
+    // existing STT fallback chain. Session-5 replaced the honest-error
+    // stub after Phase-1 GAP-1 found session-4's "wired" claim was a
+    // commit-message fabrication: VoicePipeline.transcribe(audioPath)
+    // already handled the full Web Speech API → system → whisper-local
+    // → whisper-cloud → deepgram cascade, and wiring the RPC to it was
+    // 3 lines. Returns `{ok: true, text, language, confidence,
+    // durationMs}` on success, `{ok: false, error}` on STT failure.
+    this.handlers.set("voice.transcribe", async (params) => {
+      const p = (params ?? {}) as Record<string, unknown>;
+      const audioPath = typeof p["audioPath"] === "string" ? (p["audioPath"] as string) : null;
+      if (!audioPath) {
+        return { ok: false, error: "audioPath (string) required" };
+      }
+      try {
+        const vp = await getVoicePipeline();
+        const result = await vp.transcribe(audioPath);
+        if (!result) {
+          return {
+            ok: false,
+            error: "transcription failed: no STT backend produced a confidence > 0 result",
+          };
+        }
+        return {
+          ok: true,
+          text: result.text,
+          language: result.language,
+          confidence: result.confidence,
+          durationMs: result.durationMs,
+          segments: result.segments,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    });
+
+    // voice.stream.start — opens a polling stream. Client calls
+    // voice.stream.poll(streamId, cursor) every ~200ms to drain new
+    // chunks; voice.stream.cancel(streamId) frees buffers. This matches
+    // the session-4 design note about NDJSON being subscription-free.
+    //
+    // For single-shot audio paths, we emit one final chunk with the full
+    // transcription then mark done. For continuous listening the
+    // underlying STTDetector.on("interim"/"result") events populate the
+    // buffer as partial results arrive. Either way callers see the same
+    // protocol shape: `{chunks: [{seq, text, isFinal}], done: boolean}`.
+    this.handlers.set("voice.stream.start", async (params) => {
+      const p = (params ?? {}) as Record<string, unknown>;
+      const audioPath = typeof p["audioPath"] === "string" ? (p["audioPath"] as string) : null;
+      pruneStaleVoiceStreams();
+      const streamId = `vstream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const stream: VoiceStream = { id: streamId, chunks: [], done: false, createdAt: Date.now() };
+      voiceStreams.set(streamId, stream);
+      // Fire-and-forget: run the transcription in the background, push
+      // chunks as they appear. On completion or error, mark done so
+      // subsequent polls drain cleanly.
+      if (audioPath) {
+        (async () => {
+          try {
+            const vp = await getVoicePipeline();
+            const result = await vp.transcribe(audioPath);
+            if (result) {
+              stream.chunks.push({ seq: 0, text: result.text, isFinal: true });
+            } else {
+              stream.error = "transcription failed";
+            }
+          } catch (err) {
+            stream.error = err instanceof Error ? err.message : String(err);
+          } finally {
+            stream.done = true;
+          }
+        })();
+      } else {
+        // No audio path → open a live mic stream. VoicePipeline.onTranscription
+        // registers a callback for Web Speech API interim + final events.
+        (async () => {
+          try {
+            const vp = await getVoicePipeline();
+            let seq = 0;
+            vp.onTranscription((text: string, isFinal: boolean) => {
+              stream.chunks.push({ seq: seq++, text, isFinal });
+              if (isFinal) stream.done = true;
+            });
+            const started = vp.startListening();
+            if (!started) {
+              stream.error = "could not start listening (no STT provider available)";
+              stream.done = true;
+            }
+          } catch (err) {
+            stream.error = err instanceof Error ? err.message : String(err);
+            stream.done = true;
+          }
+        })();
+      }
+      return { ok: true, streamId };
+    });
+
+    // voice.stream.poll — drain new chunks since `cursor`. Returns an
+    // ordered slice of the stream's chunk buffer plus a `done` flag.
+    // The client increments its local cursor by chunks.length.
+    this.handlers.set("voice.stream.poll", async (params) => {
+      const p = (params ?? {}) as Record<string, unknown>;
+      const streamId = typeof p["streamId"] === "string" ? (p["streamId"] as string) : null;
+      const cursor = typeof p["cursor"] === "number" ? (p["cursor"] as number) : 0;
+      if (!streamId) return { ok: false, error: "streamId (string) required" };
+      const stream = voiceStreams.get(streamId);
+      if (!stream) return { ok: false, error: "stream not found (may have expired)" };
+      const slice = stream.chunks.slice(cursor);
       return {
-        ok: false,
-        text: "",
-        error: "voice.transcribe: RPC surface not yet wired — use voice CLI or local capture",
+        ok: true,
+        chunks: slice,
+        done: stream.done,
+        error: stream.error ?? null,
       };
     });
 
-    // voice.stream — streaming transcription would need a multi-chunk
-    // delivery channel over the NDJSON socket. Same honest-stub semantic
-    // as voice.transcribe; real streaming requires subscription-style
-    // handler support tracked as a separate design item.
-    this.handlers.set("voice.stream", async () => {
-      return {
-        ok: false,
-        error: "voice.stream: streaming transcription not yet wired",
-      };
+    // voice.stream.cancel — stop listening and free buffers. Safe to
+    // call on an already-done stream (idempotent).
+    this.handlers.set("voice.stream.cancel", async (params) => {
+      const p = (params ?? {}) as Record<string, unknown>;
+      const streamId = typeof p["streamId"] === "string" ? (p["streamId"] as string) : null;
+      if (!streamId) return { ok: false, error: "streamId (string) required" };
+      const stream = voiceStreams.get(streamId);
+      if (!stream) return { ok: true, cancelled: false };
+      try {
+        // Only stop the mic if this stream was a live-mic stream (no audio path).
+        if (sharedVoicePipeline) sharedVoicePipeline.stopListening();
+      } catch {
+        /* non-fatal — still release the buffer */
+      }
+      stream.done = true;
+      voiceStreams.delete(streamId);
+      return { ok: true, cancelled: true };
+    });
+
+    // voice.stream — single-shot alias that wraps start/poll/cancel for
+    // callers that want a blocking transcription without managing the
+    // polling cursor themselves. Returns the final text directly.
+    this.handlers.set("voice.stream", async (params) => {
+      const p = (params ?? {}) as Record<string, unknown>;
+      const audioPath = typeof p["audioPath"] === "string" ? (p["audioPath"] as string) : null;
+      if (!audioPath) {
+        return {
+          ok: false,
+          error:
+            "voice.stream (blocking form) requires audioPath. For live-mic streaming use " +
+            "voice.stream.start without audioPath, then poll voice.stream.poll.",
+        };
+      }
+      try {
+        const vp = await getVoicePipeline();
+        const result = await vp.transcribe(audioPath);
+        if (!result) return { ok: false, error: "transcription failed" };
+        return {
+          ok: true,
+          text: result.text,
+          language: result.language,
+          confidence: result.confidence,
+          durationMs: result.durationMs,
+        };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
     });
 
     // composer.plan — dry-run of composer.apply with REAL line-by-line
