@@ -13,6 +13,27 @@
 
 import type { HookEvent, HookProfile } from "../core/types.js";
 
+/**
+ * Hook "kind" distinguishes how the handler is dispatched. Session-7 port
+ * of Claude Code v2.1.85's typed handler model:
+ *
+ *   - "tool"   : classical tool-interception (default). Runs on every event
+ *                this hook is registered for.
+ *   - "prompt" : receives the prompt text (payload.content) and may return
+ *                a `modifiedContent` that is threaded back into the user
+ *                message stream. Only active on UserPromptSubmit /
+ *                SessionStart events.
+ *   - "agent"  : the handler is an async dispatch target that may spawn
+ *                sub-agents or call back into the runtime. The engine
+ *                awaits the result like any async handler but the kind
+ *                lets downstream listeners (UI / telemetry) render the
+ *                extra latency as "consulting sub-agent…" instead of a
+ *                generic hook spinner.
+ *
+ * Default is "tool" so all existing hooks continue to work unchanged.
+ */
+export type HookKind = "tool" | "prompt" | "agent";
+
 export interface HookHandler {
   readonly name: string;
   readonly event: HookEvent;
@@ -21,6 +42,19 @@ export interface HookHandler {
   readonly priority?: number;
   /** Max execution time in ms. Default: 5000 */
   readonly timeoutMs?: number;
+  /**
+   * Claude Code v2.1.85 `if` predicate. When present and returns false (or
+   * a promise resolving to false), the handler is skipped without counting
+   * as fired. Lets users scope hooks to specific tools / file paths /
+   * session IDs without littering the handler body with early returns.
+   *
+   * Predicate errors are treated as "condition did not match" — the hook
+   * simply doesn't fire, and the error is surfaced as a warning so callers
+   * can notice misconfigured predicates without the agent halting.
+   */
+  readonly if?: (payload: HookPayload) => boolean | Promise<boolean>;
+  /** Dispatch kind — see HookKind docstring. Default "tool". */
+  readonly kind?: HookKind;
   readonly handler: (payload: HookPayload) => Promise<HookResult> | HookResult;
 }
 
@@ -126,8 +160,26 @@ export class HookEngine {
     const activeHandlers = handlers.filter((h) => this.isHookActiveInProfile(h.profile));
 
     const warnings: string[] = [];
+    const originalContent = payload.content;
+    let anyModified = false;
 
     for (const handler of activeHandlers) {
+      // C14: Evaluate `if` predicate BEFORE counting a fire. A handler
+      // gated out by its predicate is semantically "not this event" rather
+      // than "fired and allowed" — keeping stats clean lets dashboards
+      // distinguish misconfigured hooks from legitimately-scoped ones.
+      if (handler.if) {
+        try {
+          const conditionResult = await Promise.resolve(handler.if(payload));
+          if (!conditionResult) continue;
+        } catch (error) {
+          warnings.push(
+            `Hook ${handler.name} if-predicate error: ${error instanceof Error ? error.message : "unknown"}`,
+          );
+          continue;
+        }
+      }
+
       const start = Date.now();
       const stats = this.stats.get(handler.name);
       if (stats) stats.fires++;
@@ -161,9 +213,13 @@ export class HookEngine {
           if (stats) stats.warnings++;
           if (result.message) warnings.push(result.message);
         }
-        if (result.action === "modify" && result.modifiedContent) {
-          // Pass modified content to subsequent hooks
+        if (result.action === "modify" && typeof result.modifiedContent === "string") {
+          // Pass modified content to subsequent hooks, and remember that
+          // a rewrite happened so the final result carries the new content
+          // back to the caller. C14 prompt hooks rely on this — prior
+          // behaviour dropped modifications silently once the loop ended.
           payload = { ...payload, content: result.modifiedContent };
+          anyModified = true;
         }
       } catch (error) {
         if (stats) stats.errors++;
@@ -175,7 +231,15 @@ export class HookEngine {
     }
 
     if (warnings.length > 0) {
-      return { action: "warn", message: warnings.join("; ") };
+      const base =
+        anyModified && payload.content !== originalContent
+          ? { action: "warn" as const, modifiedContent: payload.content }
+          : { action: "warn" as const };
+      return { ...base, message: warnings.join("; ") };
+    }
+
+    if (anyModified && payload.content !== originalContent) {
+      return { action: "modify", modifiedContent: payload.content };
     }
 
     return { action: "allow" };
@@ -202,6 +266,27 @@ export class HookEngine {
     let contextPrefix: string | undefined;
 
     for (const handler of activeHandlers) {
+      // C14: Sync-path predicate. Async predicates (rare) are treated as
+      // "condition unknown" and cause the handler to skip — sync hooks
+      // have no way to await a thenable without breaking sync semantics.
+      if (handler.if) {
+        try {
+          const result = handler.if(payload);
+          if (result && typeof result === "object" && "then" in result) {
+            warnings.push(
+              `Hook ${handler.name} if-predicate is async and was skipped on the sync path`,
+            );
+            continue;
+          }
+          if (!result) continue;
+        } catch (error) {
+          warnings.push(
+            `Hook ${handler.name} if-predicate error: ${error instanceof Error ? error.message : "unknown"}`,
+          );
+          continue;
+        }
+      }
+
       const stats = this.stats.get(handler.name);
       if (stats) stats.fires++;
       try {
@@ -267,6 +352,22 @@ export class HookEngine {
     return this.hooks.get(event) ?? [];
   }
 
+  /**
+   * C14: query by handler kind. Useful for UI surfaces that want to
+   * render "agent consultations" differently from "tool interceptions",
+   * or for tests that want to assert only prompt-rewriting hooks are
+   * registered on UserPromptSubmit.
+   */
+  getHooksByKind(kind: HookKind): readonly HookHandler[] {
+    const all: HookHandler[] = [];
+    for (const handlers of this.hooks.values()) {
+      for (const h of handlers) {
+        if ((h.kind ?? "tool") === kind) all.push(h);
+      }
+    }
+    return all;
+  }
+
   getHookStats(hookName: string): HookStats | undefined {
     return this.stats.get(hookName);
   }
@@ -289,4 +390,80 @@ export class HookEngine {
     }
     return { minimal, standard, strict };
   }
+}
+
+// ── Typed builders (C14) ────────────────────────────────────
+//
+// Encodes the "prompt" and "agent" kinds as ergonomic factory functions
+// rather than demanding hook authors memorise which fields go with which
+// kind. Both builders return a plain HookHandler so registration is
+// identical to tool hooks — the only difference is the `kind` field that
+// downstream consumers (UI, telemetry) can inspect.
+
+export interface PromptRewriteInput {
+  readonly name: string;
+  readonly profile: HookProfile;
+  readonly event?: "UserPromptSubmit" | "SessionStart";
+  readonly priority?: number;
+  readonly timeoutMs?: number;
+  readonly if?: (payload: HookPayload) => boolean | Promise<boolean>;
+  /**
+   * Receives the current prompt text. Return a string to replace the
+   * prompt, or null/undefined to leave it unchanged.
+   */
+  readonly rewrite: (
+    prompt: string,
+    payload: HookPayload,
+  ) => string | null | undefined | Promise<string | null | undefined>;
+}
+
+export function definePromptHook(input: PromptRewriteInput): HookHandler {
+  return {
+    name: input.name,
+    event: input.event ?? "UserPromptSubmit",
+    profile: input.profile,
+    priority: input.priority,
+    timeoutMs: input.timeoutMs,
+    if: input.if,
+    kind: "prompt",
+    async handler(payload: HookPayload): Promise<HookResult> {
+      const current = payload.content ?? "";
+      const rewritten = await Promise.resolve(input.rewrite(current, payload));
+      if (typeof rewritten === "string" && rewritten !== current) {
+        return { action: "modify", modifiedContent: rewritten };
+      }
+      return { action: "allow" };
+    },
+  };
+}
+
+export interface AgentConsultInput {
+  readonly name: string;
+  readonly event: HookEvent;
+  readonly profile: HookProfile;
+  readonly priority?: number;
+  readonly timeoutMs?: number;
+  readonly if?: (payload: HookPayload) => boolean | Promise<boolean>;
+  /**
+   * Dispatch a sub-agent or long-running async consult. Returning a
+   * HookResult lets the consult either allow, warn, or block — same
+   * semantics as tool hooks but marked `kind: "agent"` so callers can
+   * surface the latency as "consulting sub-agent".
+   */
+  readonly consult: (payload: HookPayload) => Promise<HookResult>;
+}
+
+export function defineAgentHook(input: AgentConsultInput): HookHandler {
+  return {
+    name: input.name,
+    event: input.event,
+    profile: input.profile,
+    priority: input.priority,
+    timeoutMs: input.timeoutMs ?? 30_000,
+    if: input.if,
+    kind: "agent",
+    async handler(payload: HookPayload): Promise<HookResult> {
+      return input.consult(payload);
+    },
+  };
 }
