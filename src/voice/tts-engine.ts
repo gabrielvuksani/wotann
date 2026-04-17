@@ -23,7 +23,13 @@ import { tmpdir, platform } from "node:os";
 
 // ── Types ───────────────────────────────────────────────
 
-export type TTSProviderType = "web-speech-api" | "system" | "piper" | "elevenlabs" | "openai-tts";
+export type TTSProviderType =
+  | "web-speech-api"
+  | "system"
+  | "piper"
+  | "edge-tts"
+  | "elevenlabs"
+  | "openai-tts";
 
 export interface TTSEngineConfig {
   readonly language: string;
@@ -135,7 +141,18 @@ export class TTSEngine {
       return "piper";
     }
 
-    // 4. ElevenLabs (premium, optional)
+    // 4. Edge TTS — Microsoft's Edge browser voices, free, offline-after-first-use
+    //    via the `edge-tts` Python CLI. Session-6 S5-1 wiring: the backend
+    //    module src/voice/edge-tts-backend.ts was landed in session 1 but never
+    //    reached the cascade. Now checked between piper and paid backends so
+    //    users with `pip install edge-tts` get a higher-quality free voice
+    //    than Web Speech API without reaching for API keys.
+    if (isCommandAvailable("edge-tts") || isEdgeTTSViaPython()) {
+      this.activeProvider = "edge-tts";
+      return "edge-tts";
+    }
+
+    // 5. ElevenLabs (premium, optional)
     if (process.env["ELEVENLABS_API_KEY"]) {
       this.activeProvider = "elevenlabs";
       return "elevenlabs";
@@ -258,7 +275,7 @@ export class TTSEngine {
     const startTime = Date.now();
 
     try {
-      let success: boolean;
+      let success = false;
 
       switch (provider) {
         case "web-speech-api":
@@ -269,6 +286,10 @@ export class TTSEngine {
           break;
         case "piper":
           success = this.speakPiper(prepared);
+          break;
+        case "edge-tts":
+          // Session-6 S5-1: route through edge-tts-backend (landed session 1)
+          success = await this.speakEdgeTTS(prepared);
           break;
         case "elevenlabs":
           success = await this.speakElevenLabs(prepared);
@@ -480,6 +501,38 @@ export class TTSEngine {
     }
   }
 
+  // ── Edge TTS (free, high-quality, offline after first run) ─────────
+
+  /**
+   * Session-6 S5-1: wire the existing `src/voice/edge-tts-backend.ts`
+   * synthesize path into the cascade. Edge TTS ships ~500 voices across
+   * 140+ languages via Microsoft's Edge browser infrastructure; a single
+   * `pip install edge-tts` makes it available on any platform. Quality
+   * is on par with ElevenLabs for most voices, at zero cost. Prefers
+   * the CLI when on PATH, falls back to `python -m edge_tts`.
+   */
+  private async speakEdgeTTS(utterance: TTSUtterance): Promise<boolean> {
+    try {
+      const { edgeTTSSynthesize } = await import("./edge-tts-backend.js");
+      const outputPath = join(tmpdir(), `wotann-edge-tts-${Date.now()}.mp3`);
+      // Edge TTS rate expects a ±N% string (e.g. "+0%", "-15%"). Our
+      // internal rate is a multiplier (1.0 = normal); convert with
+      // rounding so callers can keep using the numeric config.
+      const ratePercent = `${Math.round((this.config.rate - 1) * 100)}%`;
+      const ratePrefix = this.config.rate >= 1 ? "+" : "";
+      const result = await edgeTTSSynthesize(utterance.text, {
+        outputPath,
+        voice: utterance.voice ?? this.config.voice,
+        rate: `${ratePrefix}${ratePercent}`,
+      });
+      if (!result) return false;
+      playAudioFile(result);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // ── ElevenLabs ──────────────────────────────────────────
 
   private async speakElevenLabs(utterance: TTSUtterance): Promise<boolean> {
@@ -676,6 +729,27 @@ function isCommandAvailable(cmd: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Session-6 S5-1: detect edge-tts when installed as a Python module
+ * rather than a CLI on PATH (`pip install edge-tts` installs the
+ * `edge-tts` entry point but some environments only expose the Python
+ * module). Probe `python -m edge_tts --version` as a fallback.
+ */
+function isEdgeTTSViaPython(): boolean {
+  for (const python of ["python3", "python"]) {
+    try {
+      execFileSync(python, ["-m", "edge_tts", "--version"], {
+        stdio: "pipe",
+        timeout: 3000,
+      });
+      return true;
+    } catch {
+      // try next interpreter
+    }
+  }
+  return false;
 }
 
 /**

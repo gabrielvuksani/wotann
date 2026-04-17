@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { detectSandbox, type PlatformSandbox } from "./security.js";
+import { getTimeoutForCommand } from "../intelligence/forgecode-techniques.js";
 
 const SEATBELT_BINARY = "/usr/bin/sandbox-exec";
 
@@ -46,7 +47,8 @@ export function runSandboxedCommandSync(
 ): SandboxedCommandResult {
   const workingDir = normalizePath(options.workingDir);
   const sandbox = detectSandbox();
-  const nestedSandbox = (options.env?.["WOTANN_SANDBOX_ACTIVE"] ?? process.env["WOTANN_SANDBOX_ACTIVE"]) === "1";
+  const nestedSandbox =
+    (options.env?.["WOTANN_SANDBOX_ACTIVE"] ?? process.env["WOTANN_SANDBOX_ACTIVE"]) === "1";
   const sandboxEnv = buildSandboxEnv(workingDir, options.env);
   const writePaths = collectWritePaths(workingDir, options.allowWritePaths);
   const enforceSeatbelt = !nestedSandbox && sandbox === "seatbelt" && existsSync(SEATBELT_BINARY);
@@ -54,16 +56,29 @@ export function runSandboxedCommandSync(
   const invocation = enforceSeatbelt
     ? {
         binary: SEATBELT_BINARY,
-        args: ["-p", buildSeatbeltProfile({
-          allowNetwork: options.allowNetwork ?? false,
-          writePaths,
-        }), binary, ...args],
+        args: [
+          "-p",
+          buildSeatbeltProfile({
+            allowNetwork: options.allowNetwork ?? false,
+            writePaths,
+          }),
+          binary,
+          ...args,
+        ],
       }
     : { binary, args: [...args] };
 
+  // Session-6 S5-8: wire getTimeoutForCommand (forgecode technique #9)
+  // into the executor so long-running commands (npm install, cargo build,
+  // docker, pytest full-suite, yarn, go build, etc.) get extended
+  // timeouts instead of failing fast at 60s. Explicit caller timeoutMs
+  // wins; if none is given we infer from the command line.
+  const inferredTimeout = getTimeoutForCommand([binary, ...args].join(" "));
+  const effectiveTimeout = options.timeoutMs ?? inferredTimeout;
+
   const result = spawnSync(invocation.binary, invocation.args, {
     cwd: workingDir,
-    timeout: options.timeoutMs ?? 60_000,
+    timeout: effectiveTimeout,
     encoding: "utf-8",
     stdio: "pipe",
     env: sandboxEnv,
@@ -105,7 +120,9 @@ export function buildSeatbeltProfile(options: SeatbeltProfileOptions): string {
     "(allow file-read*)",
     options.allowNetwork ? "(allow network*)" : null,
     writeRules.length > 0 ? `(allow file-write*\n${writeRules}\n)` : null,
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildSandboxEnv(
@@ -140,10 +157,7 @@ function collectWritePaths(
   workingDir: string,
   extraWritePaths: readonly string[] | undefined,
 ): readonly string[] {
-  const paths = [
-    workingDir,
-    ...(extraWritePaths ?? []).map((path) => normalizePath(path)),
-  ];
+  const paths = [workingDir, ...(extraWritePaths ?? []).map((path) => normalizePath(path))];
   return [...new Set(paths)];
 }
 

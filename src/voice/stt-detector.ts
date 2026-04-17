@@ -113,16 +113,31 @@ export class STTDetector {
       return "web-speech-api";
     }
 
-    // 2. macOS system speech recognition
-    if (platform() === "darwin") {
-      this.activeProvider = "system";
-      return "system";
-    }
-
-    // 3. Local Whisper CLI
+    // 2. Local Whisper CLI — honestly better quality than macOS's legacy
+    //    NSSpeechRecognizer. Preferred over "system" across platforms.
+    //    Session-6 S5-7: previously the "system" branch fired BEFORE
+    //    whisper even on macOS, returning a stub message like
+    //    "[Audio recorded at /path — install whisper for transcription]"
+    //    with confidence 0. That's a misleading success envelope — the
+    //    caller thinks STT worked when it didn't. Now we check for
+    //    whisper FIRST (works on all platforms), then honestly fall back
+    //    to platform-specific system STT only when a real dictation API
+    //    is reachable.
     if (isCommandAvailable("whisper") || isCommandAvailable("faster-whisper")) {
       this.activeProvider = "whisper-local";
       return "whisper-local";
+    }
+
+    // 3. macOS system speech recognition — only if the user has
+    //    opted in via WOTANN_ENABLE_MACOS_SYSTEM_STT=1. The stub
+    //    implementation at transcribeSystem() returns confidence:0
+    //    with a "install whisper" note, which is better surfaced as
+    //    null than as an honest-looking-but-fake success. Opting in
+    //    keeps the flag available for callers who want to show the
+    //    install-hint to the user while still returning null upstream.
+    if (platform() === "darwin" && process.env["WOTANN_ENABLE_MACOS_SYSTEM_STT"] === "1") {
+      this.activeProvider = "system";
+      return "system";
     }
 
     // 4. OpenAI Whisper API (cloud, optional upgrade)
@@ -230,7 +245,10 @@ export class STTDetector {
       this.silenceTimer = null;
     }
 
-    if (this.recognition && typeof (this.recognition as { stop?: () => void }).stop === "function") {
+    if (
+      this.recognition &&
+      typeof (this.recognition as { stop?: () => void }).stop === "function"
+    ) {
       (this.recognition as { stop: () => void }).stop();
     }
 
@@ -291,7 +309,10 @@ export class STTDetector {
 
   off(eventType: STTEventType, listener: STTEventListener): void {
     const existing = this.listeners.get(eventType) ?? [];
-    this.listeners.set(eventType, existing.filter((l) => l !== listener));
+    this.listeners.set(
+      eventType,
+      existing.filter((l) => l !== listener),
+    );
   }
 
   // ── Web Speech API (Primary — Free, Built-In) ──────────
@@ -408,15 +429,27 @@ export class STTDetector {
     if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
     try {
-      execFileSync(cmd, [
-        audioPath,
-        "--model", this.config.whisperModelSize,
-        "--language", this.config.language.split("-")[0] ?? "en",
-        "--output_format", "txt",
-        "--output_dir", outputDir,
-      ], { timeout: 120_000, stdio: "pipe" });
+      execFileSync(
+        cmd,
+        [
+          audioPath,
+          "--model",
+          this.config.whisperModelSize,
+          "--language",
+          this.config.language.split("-")[0] ?? "en",
+          "--output_format",
+          "txt",
+          "--output_dir",
+          outputDir,
+        ],
+        { timeout: 120_000, stdio: "pipe" },
+      );
 
-      const baseName = audioPath.split("/").pop()?.replace(/\.\w+$/, "") ?? "audio";
+      const baseName =
+        audioPath
+          .split("/")
+          .pop()
+          ?.replace(/\.\w+$/, "") ?? "audio";
       const txtPath = join(outputDir, `${baseName}.txt`);
       const text = existsSync(txtPath) ? readFileSync(txtPath, "utf-8").trim() : "";
 
@@ -455,7 +488,7 @@ export class STTDetector {
 
       const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
         method: "POST",
-        headers: { "Authorization": `Bearer ${apiKey}` },
+        headers: { Authorization: `Bearer ${apiKey}` },
         body: formData,
       });
 
@@ -503,7 +536,7 @@ export class STTDetector {
         {
           method: "POST",
           headers: {
-            "Authorization": `Token ${apiKey}`,
+            Authorization: `Token ${apiKey}`,
             "Content-Type": "audio/wav",
           },
           body: audioData,
@@ -553,16 +586,17 @@ export class STTDetector {
       return this.transcribeWhisperLocal(audioPath);
     }
 
-    // Fallback: use macOS dictation (limited programmatic access)
-    return {
-      text: `[Audio recorded at ${audioPath} — install whisper for transcription]`,
-      confidence: 0,
-      language: this.config.language,
-      isFinal: true,
-      alternatives: [],
-      durationMs: 0,
-      provider: "system",
-    };
+    // Session-6 S5-7: honest empty transcription instead of the
+    // fabricated-success envelope that looked transcribed but wasn't.
+    // VoicePipeline.transcribe() translates confidence:0 into `null`,
+    // which the voice.transcribe RPC turns into `{ok:false, error}` —
+    // no more silent success masquerading as real STT output.
+    return emptyTranscription(
+      `System STT unavailable — no whisper/faster-whisper in PATH. Install one ` +
+        `(e.g. brew install openai-whisper) to enable transcription. ` +
+        `Audio saved at ${audioPath}.`,
+      "system",
+    );
   }
 
   // ── Helpers ─────────────────────────────────────────────
