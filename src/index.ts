@@ -339,6 +339,24 @@ program
     await runDoctor(process.cwd());
   });
 
+// ── wotann autofix-pr (C21) ──────────────────────────────────
+
+program
+  .command("autofix-pr")
+  .description("Analyze the current branch's latest CI failures and produce a fix plan")
+  .option("--branch <name>", "Branch to analyse (defaults to current)")
+  .action(async (options: { branch?: string }) => {
+    const { runAutofixPR } = await import("./cli/autofix-pr.js");
+    try {
+      await runAutofixPR({ branch: options.branch });
+    } catch (error) {
+      console.log(
+        chalk.red(`autofix-pr failed: ${error instanceof Error ? error.message : "unknown"}`),
+      );
+      process.exit(1);
+    }
+  });
+
 // ── wotann git (Magic Git — C20) ─────────────────────────────
 
 program
