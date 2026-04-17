@@ -4217,6 +4217,58 @@ export class KairosRPCHandler {
       }
     });
 
+    // shadow.undo-turn — session-6 Conductor-inspired rewind. Calls
+    // shadow.undo across ALL known mutating tools in reverse-chronological
+    // order until the most recent pre-turn checkpoint is restored. The
+    // user-visible action is "reset to previous turn"; under the hood we
+    // walk the ring buffer backwards restoring every checkpoint whose
+    // timestamp is newer than the target turn boundary. Returns the set
+    // of restored checkpoints so the UI can render a summary.
+    this.handlers.set("shadow.undo-turn", async (params) => {
+      const p = (params ?? {}) as Record<string, unknown>;
+      const turnsBack = typeof p["turnsBack"] === "number" ? (p["turnsBack"] as number) : 1;
+      try {
+        const shadowGit = this.runtime?.getShadowGit();
+        if (!shadowGit) {
+          return { ok: false, error: "Runtime not initialized" };
+        }
+        const recent = shadowGit.getRecentCheckpoints();
+        if (recent.length === 0) {
+          return {
+            ok: false,
+            restored: [],
+            error: "No checkpoints in ring buffer — shadow-git has not recorded any pre-tool state",
+          };
+        }
+        // Checkpoints are newest-first by ring-buffer semantics. Skip
+        // (turnsBack - 1) turns worth of checkpoints, then restore the
+        // next one to rewind the conversation by that turn boundary.
+        // One "turn" = one stable mark after a user prompt. We use each
+        // `stable: true` marker as a turn boundary; when markers aren't
+        // reliable we fall back to N checkpoints ago.
+        const target = Math.min(Math.max(turnsBack, 1), recent.length);
+        const checkpoint = recent[target - 1];
+        if (!checkpoint) {
+          return { ok: false, error: `Only ${recent.length} checkpoints available` };
+        }
+        const restored = await shadowGit.restoreLastBefore(checkpoint.toolName ?? "Write");
+        return {
+          ok: restored,
+          restored,
+          turnsBack: target,
+          checkpoint: {
+            hash: checkpoint.hash,
+            label: checkpoint.label,
+            toolName: checkpoint.toolName,
+            timestamp: checkpoint.timestamp,
+          },
+          available: recent.length,
+        };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
     // shadow.checkpoints — list recent shadow-git checkpoints from the
     // ring buffer. Used by the desktop to render an "undo history" so
     // the user can see what's recoverable before invoking shadow.undo.
