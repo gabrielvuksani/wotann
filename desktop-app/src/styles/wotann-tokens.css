@@ -1,0 +1,229 @@
+/**
+ * WOTANN Design Tokens — v1.0 (session-6)
+ *
+ * Canonical CSS custom properties. All WOTANN UI reads from these
+ * tokens, never hex/px values directly. Theme switching just swaps
+ * the top-level `[data-theme="..."]` attribute; everything downstream
+ * rebinds.
+ *
+ * Source: docs/UI_DESIGN_SPEC_2026-04-16.md sections 2-3. Five themes
+ * ship in v1: mimir (default dark), yggdrasil (light), runestone (hero),
+ * bifrost (gradient, onboarding only), valkyrie (Exploit tab only).
+ */
+
+/* ── Motion + Radii + Elevation — theme-agnostic ─────────────────── */
+
+:root {
+  /* Motion curves */
+  --wotann-ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --wotann-ease-productive: cubic-bezier(0.4, 0, 0.2, 1);
+  --wotann-ease-standard: cubic-bezier(0.4, 0.14, 0.3, 1);
+  --wotann-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Durations */
+  --wotann-duration-instant: 80ms;
+  --wotann-duration-fast: 150ms;
+  --wotann-duration-base: 240ms;
+  --wotann-duration-slow: 400ms;
+  --wotann-duration-deliberate: 600ms;
+
+  /* Radii */
+  --wotann-radius-sharp: 2px;
+  --wotann-radius-input: 6px;
+  --wotann-radius-panel: 10px;
+  --wotann-radius-card: 12px;
+  --wotann-radius-pill: 999px;
+
+  /* Spacing (4-multiples) */
+  --wotann-space-1: 2px;
+  --wotann-space-2: 4px;
+  --wotann-space-3: 8px;
+  --wotann-space-4: 12px;
+  --wotann-space-5: 16px;
+  --wotann-space-6: 20px;
+  --wotann-space-7: 24px;
+  --wotann-space-8: 32px;
+  --wotann-space-9: 40px;
+  --wotann-space-10: 48px;
+  --wotann-space-11: 64px;
+  --wotann-space-12: 96px;
+
+  /* Typography */
+  --wotann-font-sans: "Inter Variable", "SF Pro Text", system-ui, sans-serif;
+  --wotann-font-mono: "JetBrains Mono Variable", "SF Mono", ui-monospace, monospace;
+  --wotann-font-display: "Geist Sans", "Inter Variable", system-ui, sans-serif;
+  --wotann-font-rune: "Noto Sans Runic", "Segoe UI Symbol", system-ui, sans-serif;
+
+  /* Focus ring — non-negotiable (a11y floor) */
+  --wotann-focus-ring: 2px solid var(--wotann-accent-rune);
+  --wotann-focus-offset: 2px;
+}
+
+/* ── Mimir's Well — default dark ─────────────────────────────────── */
+/* Deep cognition. 7.1:1 contrast on accent.rune against bg.canvas.   */
+
+:root,
+[data-theme="mimir"] {
+  --wotann-bg-canvas: #07090f;
+  --wotann-bg-panel: #0c1118;
+  --wotann-bg-raised: #111823;
+  --wotann-bg-overlay: #18212f;
+
+  --wotann-surface-stroke: rgba(138, 176, 224, 0.08);
+
+  --wotann-ink-primary: #e8eef7;
+  --wotann-ink-secondary: #9fb1c8;
+  --wotann-ink-muted: #5f7389;
+
+  --wotann-accent-rune: #3e8fd1;
+  --wotann-accent-glyph: #7dc4f5;
+  --wotann-accent-gold: #c9a14a;
+
+  --wotann-warn-blood: #c04a3e;
+  --wotann-success-moss: #4fa37f;
+
+  --wotann-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(255, 168, 67, 0.04);
+  --wotann-elevation-2: 0 4px 12px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px rgba(255, 168, 67, 0.06);
+  --wotann-elevation-3: 0 12px 32px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 168, 67, 0.08);
+  --wotann-elevation-glow-gold: 0 0 24px rgba(62, 143, 209, 0.25);
+}
+
+/* ── Yggdrasil — light, rooted, daylight ─────────────────────────── */
+
+[data-theme="yggdrasil"] {
+  --wotann-bg-canvas: #f3efe6;
+  --wotann-bg-panel: #ece5d5;
+  --wotann-bg-raised: #ffffff;
+  --wotann-bg-overlay: #f8f4ea;
+
+  --wotann-surface-stroke: rgba(26, 22, 18, 0.10);
+
+  --wotann-ink-primary: #1a1612;
+  --wotann-ink-secondary: #4a4035;
+  --wotann-ink-muted: #7a6c5e;
+
+  --wotann-accent-rune: #3b6b3a;
+  --wotann-accent-glyph: #8a5a2b;
+  --wotann-accent-gold: #b3882f;
+
+  --wotann-warn-blood: #9b3a2a;
+  --wotann-success-moss: #3b6b3a;
+
+  --wotann-elevation-1: 0 1px 2px rgba(26, 22, 18, 0.08);
+  --wotann-elevation-2: 0 4px 12px rgba(26, 22, 18, 0.10);
+  --wotann-elevation-3: 0 12px 32px rgba(26, 22, 18, 0.12);
+  --wotann-elevation-glow-gold: 0 0 24px rgba(179, 136, 47, 0.25);
+}
+
+/* ── Runestone — high-contrast obsidian (marketing hero) ─────────── */
+
+[data-theme="runestone"] {
+  --wotann-bg-canvas: #030508;
+  --wotann-bg-panel: #06090e;
+  --wotann-bg-raised: #0a0d15;
+  --wotann-bg-overlay: #0e1320;
+
+  --wotann-surface-stroke: rgba(201, 161, 74, 0.14);
+
+  --wotann-ink-primary: #f5f1e8;
+  --wotann-ink-secondary: #c9b896;
+  --wotann-ink-muted: #7a6b4b;
+
+  --wotann-accent-rune: #e8c268;
+  --wotann-accent-glyph: #8a6a2b;
+  --wotann-accent-gold: #e8c268;
+
+  --wotann-warn-blood: #d04432;
+  --wotann-success-moss: #3fa37f;
+
+  --wotann-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(232, 194, 104, 0.14);
+  --wotann-elevation-2: 0 4px 12px rgba(0, 0, 0, 0.70),
+    inset 0 0 0 1px rgba(232, 194, 104, 0.18);
+  --wotann-elevation-3: 0 12px 32px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 1px rgba(232, 194, 104, 0.22);
+  --wotann-elevation-glow-gold: 0 0 32px rgba(232, 194, 104, 0.35);
+}
+
+/* ── Bifrost — gradient (onboarding + celebrations only) ─────────── */
+
+[data-theme="bifrost"] {
+  --wotann-bg-canvas: linear-gradient(
+    160deg,
+    #1b1230 0%,
+    #3a2b55 22%,
+    #7a3b6c 48%,
+    #c95c5c 68%,
+    #e8a24a 85%,
+    #f4e6a0 100%
+  );
+  --wotann-bg-panel: rgba(27, 18, 48, 0.72);
+  --wotann-bg-raised: rgba(58, 43, 85, 0.78);
+  --wotann-bg-overlay: rgba(27, 18, 48, 0.88);
+
+  --wotann-surface-stroke: rgba(244, 230, 160, 0.20);
+
+  --wotann-ink-primary: #fff8e8;
+  --wotann-ink-secondary: #ffe3a3;
+  --wotann-ink-muted: #d9b680;
+
+  --wotann-accent-rune: #ffe3a3;
+  --wotann-accent-glyph: #ffbe6e;
+  --wotann-accent-gold: #e8a24a;
+
+  --wotann-warn-blood: #e5484d;
+  --wotann-success-moss: #4cc38a;
+
+  --wotann-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --wotann-elevation-2: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --wotann-elevation-3: 0 12px 40px rgba(0, 0, 0, 0.55);
+  --wotann-elevation-glow-gold: 0 0 32px rgba(255, 227, 163, 0.45);
+}
+
+/* ── Valkyrie — battle-ready (Exploit tab only) ──────────────────── */
+
+[data-theme="valkyrie"] {
+  --wotann-bg-canvas: #0a0808;
+  --wotann-bg-panel: #141010;
+  --wotann-bg-raised: #1c1414;
+  --wotann-bg-overlay: #221616;
+
+  --wotann-surface-stroke: #2a1c1c;
+
+  --wotann-ink-primary: #f0e8e0;
+  --wotann-ink-secondary: #b8a89c;
+  --wotann-ink-muted: #7a6a60;
+
+  --wotann-accent-rune: #d13a2a;
+  --wotann-accent-glyph: #8fa0ae;
+  --wotann-accent-gold: #e8a344;
+
+  --wotann-warn-blood: #d13a2a;
+  --wotann-success-moss: #4cc38a;
+
+  --wotann-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.55);
+  --wotann-elevation-2: 0 4px 12px rgba(0, 0, 0, 0.70),
+    inset 0 0 0 2px rgba(209, 58, 42, 0.30);
+  --wotann-elevation-3: 0 12px 32px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 2px rgba(209, 58, 42, 0.45);
+  --wotann-elevation-glow-gold: 0 0 24px rgba(209, 58, 42, 0.45),
+    0 0 8px rgba(209, 58, 42, 0.55);
+}
+
+/* ── Reduced-motion override ─────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --wotann-duration-instant: 0ms;
+    --wotann-duration-fast: 0ms;
+    --wotann-duration-base: 120ms;
+    --wotann-duration-slow: 120ms;
+    --wotann-duration-deliberate: 120ms;
+    --wotann-ease-out-expo: linear;
+    --wotann-ease-pop: linear;
+    --wotann-ease-standard: linear;
+  }
+}
