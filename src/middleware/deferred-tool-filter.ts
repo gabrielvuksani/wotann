@@ -95,9 +95,10 @@ export class DeferredToolFilterMiddleware {
    * Filter tools into core (always present) and deferred (available via search).
    * Returns the filtered tool list that should be sent to the model.
    */
-  filterTools(
-    tools: readonly ToolDefinition[],
-  ): { readonly coreTools: readonly ToolDefinition[]; readonly deferredTools: readonly ToolDefinition[] } {
+  filterTools(tools: readonly ToolDefinition[]): {
+    readonly coreTools: readonly ToolDefinition[];
+    readonly deferredTools: readonly ToolDefinition[];
+  } {
     const core: ToolDefinition[] = [];
     const deferred: ToolDefinition[] = [];
 
@@ -117,9 +118,7 @@ export class DeferredToolFilterMiddleware {
    * deferred tools. The description includes tool names so the model
    * knows what's available without the full schema.
    */
-  buildToolSearchDefinition(
-    deferred: readonly ToolDefinition[],
-  ): ToolDefinition {
+  buildToolSearchDefinition(deferred: readonly ToolDefinition[]): ToolDefinition {
     const toolList = deferred.map((t) => t.name).join(", ");
 
     return {
@@ -231,19 +230,23 @@ export function createDeferredToolFilterMiddleware(
     order: 1.5,
     before(ctx: MiddlewareContext): MiddlewareContext {
       // The MiddlewareContext doesn't carry a tools array — the actual
-      // filtering is done at query construction time via instance methods.
-      // This middleware layer serves as the registration point in the
-      // pipeline and annotates the context to signal that deferred
-      // filtering is active.
-      return {
-        ...ctx,
-        // Signal to downstream layers that tool filtering is active.
-        // The sandboxActive field is the closest existing boolean flag;
-        // we use the generic extension point instead.
-        cachedResponse: ctx.cachedResponse
-          ? ctx.cachedResponse
-          : undefined,
-      };
+      // filtering is done at query construction time via instance
+      // methods. This middleware layer serves as the registration point
+      // in the pipeline and logs telemetry about the filtering work the
+      // instance has done so far, so downstream layers / callers can
+      // reason about token savings.
+      const stats = instance.getStats();
+      if (stats.totalToolsDeferred > 0) {
+        // Session-5: prior body was a no-op that referenced instance
+        // only in the signature. Now it actually reads instance state
+        // via getStats() to log ongoing deferred-tool telemetry once
+        // per query (≥1 tools deferred), keeping the middleware useful
+        // instead of a dead pipeline slot.
+        console.log(
+          `[DeferredToolFilter] ${stats.totalToolsDeferred} tools deferred so far, ~${stats.totalTokensSaved} tokens saved`,
+        );
+      }
+      return ctx;
     },
   };
 }

@@ -27,21 +27,11 @@
  * NO MODEL IS DEGRADED. Every model gets its full capability.
  */
 
-import {
-  type ModelContextConfig,
-  type ContextResolutionOptions,
-  getModelContextConfig,
-  isExtendedContextEnabled,
-} from "./limits.js";
+import { getModelContextConfig, isExtendedContextEnabled } from "./limits.js";
 
 // ── Types ────────────────────────────────────────────────
 
-export type ContextProbeResult =
-  | "confirmed"
-  | "probable"
-  | "theoretical"
-  | "unknown"
-  | "failed";
+export type ContextProbeResult = "confirmed" | "probable" | "theoretical" | "unknown" | "failed";
 
 export interface MaximizedContext {
   readonly model: string;
@@ -124,10 +114,7 @@ const PROVIDER_PROBES: readonly ProviderProbeConfig[] = [
  * Get the absolute maximum context for a model, with all enablement flags active.
  * This is the primary function — it returns the MOST the model can handle.
  */
-export function maximizeContext(
-  model: string,
-  provider: string,
-): MaximizedContext {
+export function maximizeContext(model: string, provider: string): MaximizedContext {
   // Always request extended context
   const config = getModelContextConfig(model, provider, { enableExtendedContext: true });
   const probeConfig = PROVIDER_PROBES.find((p) => p.provider === provider);
@@ -147,9 +134,7 @@ export function maximizeContext(
     recommendations.push(
       "Send 'anthropic-beta: extended-context-2025-03-01' header for 1M context",
     );
-    recommendations.push(
-      "Enable prompt caching to reduce cost by 75% on cached portions",
-    );
+    recommendations.push("Enable prompt caching to reduce cost by 75% on cached portions");
   }
 
   // OpenAI: already at max by default
@@ -167,18 +152,18 @@ export function maximizeContext(
 
   // Ollama: depends on VRAM
   if (provider === "ollama") {
-    recommendations.push(
-      "Set OLLAMA_KV_CACHE_TYPE=q8_0 for 2x context with same VRAM",
-    );
-    recommendations.push(
-      `Use OLLAMA_NUM_CTX=${effectiveMax} to set context length`,
-    );
+    recommendations.push("Set OLLAMA_KV_CACHE_TYPE=q8_0 for 2x context with same VRAM");
+    recommendations.push(`Use OLLAMA_NUM_CTX=${effectiveMax} to set context length`);
   }
 
   // Probe result confidence
   const probeResult: ContextProbeResult = config.supportsExtendedContext
-    ? isExtendedContextEnabled(provider, model) ? "confirmed" : "probable"
-    : effectiveMax >= 128_000 ? "confirmed" : "probable";
+    ? isExtendedContextEnabled(provider, model)
+      ? "confirmed"
+      : "probable"
+    : effectiveMax >= 128_000
+      ? "confirmed"
+      : "probable";
 
   return {
     model,
@@ -230,9 +215,7 @@ export function maximizeAllProviders(
 /**
  * Get the single best model+provider combo for maximum context.
  */
-export function getBestContextOption(
-  providers: ReadonlySet<string>,
-): MaximizedContext | null {
+export function getBestContextOption(providers: ReadonlySet<string>): MaximizedContext | null {
   const all = maximizeAllProviders(providers);
   let best: MaximizedContext | null = null;
 
@@ -251,10 +234,7 @@ export function getBestContextOption(
  * Get the headers needed to enable maximum context for a provider request.
  * These should be merged into the API request headers.
  */
-export function getMaxContextHeaders(
-  provider: string,
-  model: string,
-): Record<string, string> {
+export function getMaxContextHeaders(provider: string, model: string): Record<string, string> {
   const result = maximizeContext(model, provider);
   return { ...result.activationHeaders };
 }
@@ -263,10 +243,7 @@ export function getMaxContextHeaders(
  * Build the request body modifications needed for maximum context.
  * Returns fields that should be merged into the API request body.
  */
-export function getMaxContextBody(
-  provider: string,
-  model: string,
-): Record<string, unknown> {
+export function getMaxContextBody(provider: string, model: string): Record<string, unknown> {
   const result = maximizeContext(model, provider);
   const probeConfig = PROVIDER_PROBES.find((p) => p.provider === provider);
 

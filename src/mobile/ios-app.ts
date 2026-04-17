@@ -13,7 +13,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { IOSConversation, IOSMessage, IOSAttachment, LiveActivityState } from "./ios-types.js";
 import { VoicePipeline } from "../voice/voice-pipeline.js";
-import type { TranscriptionResult } from "../voice/voice-pipeline.js";
 
 // ── Sync Types ─────────────────────────────────────────
 

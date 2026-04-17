@@ -7,7 +7,7 @@
  * CodeNodes and CodeEdges. Supports Mermaid and inline SVG output.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, extname, relative, basename, dirname } from "node:path";
 
 // ── Public Types ──────────────────────────────────────

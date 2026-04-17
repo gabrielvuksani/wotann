@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ReplaySession, ReplayEvent } from "../telemetry/session-replay.js";
+import type { ReplaySession } from "../telemetry/session-replay.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -32,6 +32,8 @@ export interface PairMetadata {
   readonly success: boolean;
   readonly duration: number;
   readonly quality: number;
+  /** Tokens consumed generating this response (0 when unknown). */
+  readonly tokens: number;
 }
 
 export interface ExtractionResult {
@@ -86,11 +88,7 @@ function scoreQuality(prompt: string, response: string): number {
 
 function computeFingerprint(text: string): string {
   // Normalize whitespace and lowercase for comparison
-  return text
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 200);
+  return text.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
 function deduplicatePairs(pairs: readonly ExtractedPair[]): readonly ExtractedPair[] {
@@ -152,6 +150,10 @@ export class SessionExtractor {
             success: quality >= this.qualityThreshold,
             duration,
             quality,
+            // Session-5 fix: tokens was extracted but not persisted to
+            // the training pair's metadata. Downstream consumers that
+            // want to filter by token count couldn't — now they can.
+            tokens,
           },
         });
       }

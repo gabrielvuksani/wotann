@@ -13,7 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir, platform } from "node:os";
+import { platform } from "node:os";
 import type { BackgroundTaskStatus } from "../agents/background-agent.js";
 
 // ── Push Notification ────────────────────────────────────────

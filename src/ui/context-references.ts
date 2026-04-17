@@ -32,7 +32,8 @@ export interface ResolvedReference {
 
 // ── Constants ────────────────────────────────────────────
 
-const REFERENCE_PATTERN = /(?:^|\s)@((?:file|folder|url|git|memory|skill|context)(?::[^\s]+)?|[./][^\s]+)/g;
+const REFERENCE_PATTERN =
+  /(?:^|\s)@((?:file|folder|url|git|memory|skill|context)(?::[^\s]+)?|[./][^\s]+)/g;
 
 const TYPED_PREFIX_PATTERN = /^(file|folder|url|git|memory|skill|context):(.+)$/;
 
@@ -174,7 +175,23 @@ function resolveFolder(arg: string, workingDir: string): ResolvedReference {
           collectFiles(fullPath);
         } else if (stat.isFile()) {
           const ext = extname(entry);
-          if ([".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java", ".md", ".json", ".yaml", ".yml", ".toml"].includes(ext)) {
+          if (
+            [
+              ".ts",
+              ".tsx",
+              ".js",
+              ".jsx",
+              ".py",
+              ".rs",
+              ".go",
+              ".java",
+              ".md",
+              ".json",
+              ".yaml",
+              ".yml",
+              ".toml",
+            ].includes(ext)
+          ) {
             files.push(fullPath);
           }
         }
@@ -188,7 +205,10 @@ function resolveFolder(arg: string, workingDir: string): ResolvedReference {
       const relPath = relative(workingDir, file);
       const content = readFileSync(file, "utf-8");
       const lines = content.split("\n").slice(0, MAX_LINES_PER_FILE);
-      const truncated = lines.length < content.split("\n").length ? `\n... (truncated at ${MAX_LINES_PER_FILE} lines)` : "";
+      const truncated =
+        lines.length < content.split("\n").length
+          ? `\n... (truncated at ${MAX_LINES_PER_FILE} lines)`
+          : "";
       parts.push(`## ${relPath}\n\`\`\`\n${lines.join("\n")}${truncated}\n\`\`\`\n`);
     }
 
@@ -238,7 +258,11 @@ async function resolveUrl(arg: string): Promise<ResolvedReference> {
     }
 
     const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/html") && !contentType.includes("text/plain") && !contentType.includes("application/json")) {
+    if (
+      !contentType.includes("text/html") &&
+      !contentType.includes("text/plain") &&
+      !contentType.includes("application/json")
+    ) {
       const content = `[URL ${arg}: binary content (${contentType})]`;
       return {
         type: "url",
@@ -249,9 +273,10 @@ async function resolveUrl(arg: string): Promise<ResolvedReference> {
     }
 
     const body = await response.text();
-    const truncatedBody = body.length > MAX_FILE_CHARS
-      ? `${body.slice(0, MAX_FILE_CHARS)}\n...[truncated at ${MAX_FILE_CHARS} chars]`
-      : body;
+    const truncatedBody =
+      body.length > MAX_FILE_CHARS
+        ? `${body.slice(0, MAX_FILE_CHARS)}\n...[truncated at ${MAX_FILE_CHARS} chars]`
+        : body;
 
     // Extract <title> if HTML
     const titleMatch = body.match(/<title[^>]*>([^<]+)<\/title>/i);
@@ -334,7 +359,12 @@ function resolveGit(arg: string, workingDir: string): ResolvedReference {
  * via resolveReferences' optional runtime parameter.
  */
 export interface MemorySearchFn {
-  (query: string): readonly { readonly id: string; readonly score: number; readonly text: string; readonly type: string }[];
+  (query: string): readonly {
+    readonly id: string;
+    readonly score: number;
+    readonly text: string;
+    readonly type: string;
+  }[];
 }
 
 /**
@@ -365,9 +395,13 @@ function resolveMemory(query: string, searchMemory?: MemorySearchFn): ResolvedRe
       };
     }
 
-    const formatted = results.slice(0, 10).map((r, i) =>
-      `${i + 1}. [${r.type}] (score: ${r.score.toFixed(3)})\n   ${r.text.slice(0, 200)}${r.text.length > 200 ? "..." : ""}`,
-    ).join("\n\n");
+    const formatted = results
+      .slice(0, 10)
+      .map(
+        (r, i) =>
+          `${i + 1}. [${r.type}] (score: ${r.score.toFixed(3)})\n   ${r.text.slice(0, 200)}${r.text.length > 200 ? "..." : ""}`,
+      )
+      .join("\n\n");
 
     const content = `Memory search results for "${query}" (${results.length} found):\n\n${formatted}`;
     return {
@@ -528,10 +562,7 @@ function listDirectoryEntries(dir: string, workingDir: string): readonly string[
  * List available skills by scanning skill directories.
  */
 function listSkills(workingDir: string): readonly string[] {
-  const skillDirs = [
-    join(workingDir, "skills"),
-    join(workingDir, ".claude", "skills"),
-  ];
+  const skillDirs = [join(workingDir, "skills"), join(workingDir, ".claude", "skills")];
 
   const skills = new Set<string>();
 
@@ -578,9 +609,7 @@ export function getCompletions(partial: string, workingDir: string): readonly st
   const colonIndex = afterAt.indexOf(":");
   if (colonIndex === -1) {
     // Partial type name — filter matching types
-    return REFERENCE_TYPES
-      .filter((t) => t.startsWith(afterAt))
-      .map((t) => `@${t}:`);
+    return REFERENCE_TYPES.filter((t) => t.startsWith(afterAt)).map((t) => `@${t}:`);
   }
 
   const type = afterAt.slice(0, colonIndex);
@@ -593,26 +622,24 @@ export function getCompletions(partial: string, workingDir: string): readonly st
         ? resolve(workingDir, arg.slice(0, arg.lastIndexOf("/") + 1))
         : workingDir;
 
+      // `listDirectoryEntries` already returns paths relative to the
+      // working directory (e.g. `src/main.ts`, not just `main.ts`), so
+      // filtering entries by `arg` as the startsWith pattern correctly
+      // narrows to completions that match the already-typed prefix.
+      // A prior version computed a separate `prefix` local and dropped
+      // it — session-5 audit caught the dead assignment. The simplest
+      // fix is to trust the helper's already-prefixed contract.
       const entries = listDirectoryEntries(dir, workingDir);
-      const prefix = arg.includes("/")
-        ? arg.slice(0, arg.lastIndexOf("/") + 1)
-        : "";
 
-      return entries
-        .filter((entry) => entry.startsWith(arg))
-        .map((entry) => `@file:${entry}`);
+      return entries.filter((entry) => entry.startsWith(arg)).map((entry) => `@file:${entry}`);
     }
 
     case "git":
-      return GIT_SUBCOMMANDS
-        .filter((cmd) => cmd.startsWith(arg))
-        .map((cmd) => `@git:${cmd}`);
+      return GIT_SUBCOMMANDS.filter((cmd) => cmd.startsWith(arg)).map((cmd) => `@git:${cmd}`);
 
     case "skill": {
       const skills = listSkills(workingDir);
-      return skills
-        .filter((s) => s.startsWith(arg))
-        .map((s) => `@skill:${s}`);
+      return skills.filter((s) => s.startsWith(arg)).map((s) => `@skill:${s}`);
     }
 
     case "memory":

@@ -49,11 +49,11 @@ interface SearchResult {
 // ── Signal Weights ───────────────────────────────────
 
 const WEIGHTS = {
-  fuzzy: 0.30,
+  fuzzy: 0.3,
   frecency: 0.25,
   combo: 0.15,
-  gitStatus: 0.10,
-  proximity: 0.10,
+  gitStatus: 0.1,
+  proximity: 0.1,
   definition: 0.05,
   fileSize: 0.05,
 } as const;
@@ -150,9 +150,7 @@ export class SmartFileSearch {
       });
     }
 
-    return results
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+    return results.sort((a, b) => b.score - a.score).slice(0, limit);
   }
 
   /**
@@ -184,8 +182,17 @@ export class SmartFileSearch {
   private indexFiles(): void {
     this.files = [];
     const ignore = new Set([
-      "node_modules", ".git", "dist", "build", ".next", ".cache",
-      "__pycache__", ".wotann", "target", ".turbo", "coverage",
+      "node_modules",
+      ".git",
+      "dist",
+      "build",
+      ".next",
+      ".cache",
+      "__pycache__",
+      ".wotann",
+      "target",
+      ".turbo",
+      "coverage",
     ]);
 
     const walk = (dir: string, depth: number): void => {
@@ -257,9 +264,13 @@ export class SmartFileSearch {
   }
 
   private getMostFrequent(limit: number): readonly SearchResult[] {
+    // The `record` value from frecencyDb.entries() is informational only
+    // — `getFrecencyScore(path)` reads the same record internally, so the
+    // destructured value was redundant. Dropped to quiet the unused-arg
+    // lint without changing behavior.
     return [...this.frecencyDb.entries()]
       .filter(([path]) => existsSync(path))
-      .map(([path, record]) => ({
+      .map(([path]) => ({
         path,
         relativePath: relative(this.workingDir, path),
         score: this.getFrecencyScore(path),

@@ -267,7 +267,10 @@ export function applyReviews(
   reviews: ReadonlyMap<string, HunkReview>,
 ): string {
   const originalLines = proposal.originalContent.split("\n");
-  const proposedLines = proposal.proposedContent.split("\n");
+  // Session-5 cleanup: the prior `const proposedLines = proposal.proposedContent.split("\n")`
+  // was dead — the all-accepted branch returns proposal.proposedContent
+  // directly and partial-apply uses each hunk's proposedLines. The whole-
+  // content split was never consumed.
 
   // If all hunks are accepted, return proposed content directly
   const allAccepted = proposal.hunks.every((h) => reviews.get(h.id)?.decision === "accept");

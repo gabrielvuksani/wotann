@@ -12,7 +12,6 @@
 
 import type {
   AutonomousResult,
-  AutonomousCycleResult,
 } from "../orchestration/autonomous.js";
 
 // ── Types ────────────────────────────────────────────────────

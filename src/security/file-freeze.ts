@@ -12,7 +12,7 @@
  * - Focus mode: only allow edits to a single file/directory
  */
 
-import { join, resolve, relative, isAbsolute } from "node:path";
+import { resolve, relative, isAbsolute } from "node:path";
 
 export interface FreezeRule {
   readonly pattern: string;

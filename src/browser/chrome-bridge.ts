@@ -50,8 +50,16 @@ export interface DOMElement {
 }
 
 export interface BrowserAction {
-  readonly type: "click" | "type" | "navigate" | "screenshot" | "read_dom" |
-                "fill_form" | "scroll" | "wait" | "read_console";
+  readonly type:
+    | "click"
+    | "type"
+    | "navigate"
+    | "screenshot"
+    | "read_dom"
+    | "fill_form"
+    | "scroll"
+    | "wait"
+    | "read_console";
   readonly selector?: string;
   readonly value?: string;
   readonly url?: string;
@@ -239,7 +247,10 @@ export class ChromeBridge {
     try {
       const response = await fetch(`http://localhost:${this.cdpPort}/json/list`);
       if (!response.ok) return null;
-      const tabs = (await response.json()) as Array<{ webSocketDebuggerUrl?: string; type: string }>;
+      const tabs = (await response.json()) as Array<{
+        webSocketDebuggerUrl?: string;
+        type: string;
+      }>;
       const page = tabs.find((t) => t.type === "page");
       return page?.webSocketDebuggerUrl ?? null;
     } catch {
@@ -247,18 +258,30 @@ export class ChromeBridge {
     }
   }
 
-  private async sendCDP<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  private async sendCDP<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+  ): Promise<T> {
     const wsUrl = await this.getFirstPageWsUrl();
     if (!wsUrl) throw new Error("No browser page available. Open a tab first.");
 
     return new Promise((resolve, reject) => {
-      const ws = new (globalThis as unknown as { WebSocket: new (url: string) => WebSocket }).WebSocket(wsUrl);
+      const ws = new (
+        globalThis as unknown as { WebSocket: new (url: string) => WebSocket }
+      ).WebSocket(wsUrl);
       const id = Date.now();
-      const timeout = setTimeout(() => { ws.close(); reject(new Error("CDP timeout")); }, 10_000);
+      const timeout = setTimeout(() => {
+        ws.close();
+        reject(new Error("CDP timeout"));
+      }, 10_000);
 
       ws.onopen = () => ws.send(JSON.stringify({ id, method, params }));
       ws.onmessage = (event: { data: string }) => {
-        const msg = JSON.parse(event.data) as { id?: number; result?: T; error?: { message: string } };
+        const msg = JSON.parse(event.data) as {
+          id?: number;
+          result?: T;
+          error?: { message: string };
+        };
         if (msg.id === id) {
           clearTimeout(timeout);
           ws.close();
@@ -266,7 +289,11 @@ export class ChromeBridge {
           else resolve(msg.result as T);
         }
       };
-      ws.onerror = () => { clearTimeout(timeout); ws.close(); reject(new Error("CDP WebSocket error")); };
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        ws.close();
+        reject(new Error("CDP WebSocket error"));
+      };
     });
   }
 
@@ -278,13 +305,18 @@ export class ChromeBridge {
       // Wait for load
       await this.sendCDP("Page.enable");
       return { success: true, data: `Navigated to ${url}` };
-    } catch (error) {
+    } catch {
       // Fallback: open new tab via HTTP
       try {
-        const response = await fetch(`http://localhost:${this.cdpPort}/json/new?` + encodeURIComponent(url));
+        const response = await fetch(
+          `http://localhost:${this.cdpPort}/json/new?` + encodeURIComponent(url),
+        );
         return { success: response.ok, data: `Navigated to ${url}` };
       } catch (fallbackError) {
-        return { success: false, error: `Navigate failed: ${fallbackError instanceof Error ? fallbackError.message : "unknown"}` };
+        return {
+          success: false,
+          error: `Navigate failed: ${fallbackError instanceof Error ? fallbackError.message : "unknown"}`,
+        };
       }
     }
   }
@@ -292,7 +324,9 @@ export class ChromeBridge {
   private async readDOM(selector?: string): Promise<BrowserActionResult> {
     try {
       // Get the document root
-      const docResult = await this.sendCDP<{ root: { nodeId: number } }>("DOM.getDocument", { depth: -1 });
+      const docResult = await this.sendCDP<{ root: { nodeId: number } }>("DOM.getDocument", {
+        depth: -1,
+      });
       const rootNodeId = docResult.root.nodeId;
 
       // If selector provided, query for that element; otherwise get body
@@ -306,7 +340,9 @@ export class ChromeBridge {
       }
 
       // Get outer HTML
-      const htmlResult = await this.sendCDP<{ outerHTML: string }>("DOM.getOuterHTML", { nodeId: targetNodeId });
+      const htmlResult = await this.sendCDP<{ outerHTML: string }>("DOM.getOuterHTML", {
+        nodeId: targetNodeId,
+      });
       const html = htmlResult.outerHTML;
 
       // Build simplified DOM tree from HTML
@@ -318,13 +354,18 @@ export class ChromeBridge {
         domTree,
       };
     } catch (error) {
-      return { success: false, error: `readDOM: ${error instanceof Error ? error.message : "unknown"}` };
+      return {
+        success: false,
+        error: `readDOM: ${error instanceof Error ? error.message : "unknown"}`,
+      };
     }
   }
 
   private async takeScreenshot(): Promise<BrowserActionResult> {
     try {
-      const result = await this.sendCDP<{ data: string }>("Page.captureScreenshot", { format: "png" });
+      const result = await this.sendCDP<{ data: string }>("Page.captureScreenshot", {
+        format: "png",
+      });
       const { writeFileSync } = await import("node:fs");
       const { join } = await import("node:path");
       const { mkdirSync, existsSync } = await import("node:fs");
@@ -337,7 +378,10 @@ export class ChromeBridge {
 
       return { success: true, screenshotPath: path, data: `Screenshot saved to ${path}` };
     } catch (error) {
-      return { success: false, error: `Screenshot: ${error instanceof Error ? error.message : "unknown"}` };
+      return {
+        success: false,
+        error: `Screenshot: ${error instanceof Error ? error.message : "unknown"}`,
+      };
     }
   }
 
@@ -355,9 +399,12 @@ export class ChromeBridge {
       }
 
       // Resolve to runtime object to get coordinates
-      const resolveResult = await this.sendCDP<{ object: { objectId: string } }>("DOM.resolveNode", {
-        nodeId: queryResult.nodeId,
-      });
+      const resolveResult = await this.sendCDP<{ object: { objectId: string } }>(
+        "DOM.resolveNode",
+        {
+          nodeId: queryResult.nodeId,
+        },
+      );
 
       const boxResult = await this.sendCDP<{ model: { content: number[] } }>("DOM.getBoxModel", {
         objectId: resolveResult.object.objectId,
@@ -374,12 +421,27 @@ export class ChromeBridge {
       const cy = (y1 + y3) / 2;
 
       // Dispatch click
-      await this.sendCDP("Input.dispatchMouseEvent", { type: "mousePressed", x: cx, y: cy, button: "left", clickCount: 1 });
-      await this.sendCDP("Input.dispatchMouseEvent", { type: "mouseReleased", x: cx, y: cy, button: "left", clickCount: 1 });
+      await this.sendCDP("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: cx,
+        y: cy,
+        button: "left",
+        clickCount: 1,
+      });
+      await this.sendCDP("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: cx,
+        y: cy,
+        button: "left",
+        clickCount: 1,
+      });
 
       return { success: true, data: `Clicked ${selector} at (${cx.toFixed(0)}, ${cy.toFixed(0)})` };
     } catch (error) {
-      return { success: false, error: `Click ${selector}: ${error instanceof Error ? error.message : "unknown"}` };
+      return {
+        success: false,
+        error: `Click ${selector}: ${error instanceof Error ? error.message : "unknown"}`,
+      };
     }
   }
 
@@ -391,14 +453,20 @@ export class ChromeBridge {
       // Type each character via CDP Input events
       for (const char of value) {
         await this.sendCDP("Input.dispatchKeyEvent", {
-          type: "keyDown", text: char, key: char, code: `Key${char.toUpperCase()}`,
+          type: "keyDown",
+          text: char,
+          key: char,
+          code: `Key${char.toUpperCase()}`,
         });
         await this.sendCDP("Input.dispatchKeyEvent", { type: "keyUp", key: char });
       }
 
       return { success: true, data: `Typed "${value}" into ${selector}` };
     } catch (error) {
-      return { success: false, error: `Type into ${selector}: ${error instanceof Error ? error.message : "unknown"}` };
+      return {
+        success: false,
+        error: `Type into ${selector}: ${error instanceof Error ? error.message : "unknown"}`,
+      };
     }
   }
 
@@ -413,7 +481,10 @@ export class ChromeBridge {
 
       return { success: true, data: `Filled ${selector} with "${value}"` };
     } catch (error) {
-      return { success: false, error: `Fill form ${selector}: ${error instanceof Error ? error.message : "unknown"}` };
+      return {
+        success: false,
+        error: `Fill form ${selector}: ${error instanceof Error ? error.message : "unknown"}`,
+      };
     }
   }
 
@@ -423,13 +494,20 @@ export class ChromeBridge {
       const deltaX = direction === "left" ? -300 : direction === "right" ? 300 : 0;
 
       await this.sendCDP("Input.dispatchMouseEvent", {
-        type: "mouseWheel", x: 400, y: 300,
-        deltaX, deltaY, pointerType: "mouse",
+        type: "mouseWheel",
+        x: 400,
+        y: 300,
+        deltaX,
+        deltaY,
+        pointerType: "mouse",
       });
 
       return { success: true, data: `Scrolled ${direction}` };
     } catch (error) {
-      return { success: false, error: `Scroll ${direction}: ${error instanceof Error ? error.message : "unknown"}` };
+      return {
+        success: false,
+        error: `Scroll ${direction}: ${error instanceof Error ? error.message : "unknown"}`,
+      };
     }
   }
 
@@ -440,7 +518,9 @@ export class ChromeBridge {
 
       while (Date.now() < deadline) {
         const js = `!!document.querySelector(${JSON.stringify(selector)})`;
-        const result = await this.sendCDP<{ result: { value: boolean } }>("Runtime.evaluate", { expression: js });
+        const result = await this.sendCDP<{ result: { value: boolean } }>("Runtime.evaluate", {
+          expression: js,
+        });
         if (result.result.value) {
           return { success: true, data: `Element ${selector} found` };
         }
@@ -449,7 +529,10 @@ export class ChromeBridge {
 
       return { success: false, error: `Timed out waiting for ${selector} (${timeout}ms)` };
     } catch (error) {
-      return { success: false, error: `Wait for ${selector}: ${error instanceof Error ? error.message : "unknown"}` };
+      return {
+        success: false,
+        error: `Wait for ${selector}: ${error instanceof Error ? error.message : "unknown"}`,
+      };
     }
   }
 
@@ -463,10 +546,15 @@ export class ChromeBridge {
           return JSON.stringify(logs.slice(-20));
         })()
       `;
-      const result = await this.sendCDP<{ result: { value: string } }>("Runtime.evaluate", { expression: js });
+      const result = await this.sendCDP<{ result: { value: string } }>("Runtime.evaluate", {
+        expression: js,
+      });
       return { success: true, data: result.result.value ?? "[]" };
     } catch (error) {
-      return { success: false, error: `Read console: ${error instanceof Error ? error.message : "unknown"}` };
+      return {
+        success: false,
+        error: `Read console: ${error instanceof Error ? error.message : "unknown"}`,
+      };
     }
   }
 

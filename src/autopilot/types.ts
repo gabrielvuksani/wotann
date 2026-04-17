@@ -11,7 +11,7 @@
  * From GitHub Copilot Autopilot + Cursor Cloud Agents patterns.
  */
 
-import type { AutonomousConfig, AutonomousResult, AutonomousCycleResult } from "../orchestration/autonomous.js";
+import type { AutonomousConfig, AutonomousResult } from "../orchestration/autonomous.js";
 
 // ── Completion Criteria ────────────────────────────────
 

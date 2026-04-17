@@ -9,7 +9,7 @@
  * everything else) to validate conversation history integrity.
  */
 
-import type { Middleware, MiddlewareContext, AgentResult } from "./types.js";
+import type { Middleware, MiddlewareContext } from "./types.js";
 import type { AgentMessage } from "../core/types.js";
 
 // -- Types ----------------------------------------------------------------

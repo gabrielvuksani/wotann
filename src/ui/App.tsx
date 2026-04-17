@@ -531,10 +531,14 @@ export function WotannApp({
               setCurrentMode(newMode);
               sysMsg(`Mode switched to: ${newMode}`);
 
-              // When entering guardrails-off, prompt user to start an ROE session
+              // When entering guardrails-off, prompt user to start an ROE session.
+              // Session-5 cleanup: the prior `const terms = roe.getTerms()` call
+              // was dead — the returned terms object was never surfaced in the
+              // banner. If we want to show terms version in future, route it
+              // through the message builder; for now the getRulesOfEngagement()
+              // call is the only lookup we need.
               if (newMode === "guardrails-off" && runtime) {
-                const roe = runtime.getRulesOfEngagement();
-                const terms = roe.getTerms();
+                runtime.getRulesOfEngagement();
                 const activeId = runtime.getActiveROESessionId();
                 sysMsg(
                   [
@@ -1277,7 +1281,7 @@ export function WotannApp({
               }
               const results = contestants
                 .map(
-                  (c, i) =>
+                  (c) =>
                     `  ${c.label}: ${c.response.slice(0, 120)}${c.response.length > 120 ? "..." : ""}\n    (${c.tokensUsed} tokens, ${c.durationMs}ms)`,
                 )
                 .join("\n\n");
@@ -1637,9 +1641,7 @@ export function WotannApp({
               if (runtime) {
                 void (async () => {
                   const lsp = runtime.getLspManager() as unknown as {
-                    findSymbol(
-                      n: string,
-                    ): Promise<
+                    findSymbol(n: string): Promise<
                       readonly {
                         kind: string;
                         name: string;
@@ -1672,9 +1674,7 @@ export function WotannApp({
               if (runtime) {
                 void (async () => {
                   const lsp = runtime.getLspManager() as unknown as {
-                    findSymbol(
-                      n: string,
-                    ): Promise<
+                    findSymbol(n: string): Promise<
                       readonly {
                         uri: string;
                         range: { start: { line: number; character: number } };
@@ -1718,9 +1718,7 @@ export function WotannApp({
               if (runtime) {
                 void (async () => {
                   const lsp = runtime.getLspManager() as unknown as {
-                    findSymbol(
-                      n: string,
-                    ): Promise<
+                    findSymbol(n: string): Promise<
                       readonly {
                         uri: string;
                         range: { start: { line: number; character: number } };

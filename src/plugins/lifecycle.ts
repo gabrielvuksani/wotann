@@ -128,7 +128,7 @@ export class PluginLifecycle {
    * Unregister a lifecycle hook by ID.
    */
   unregister(hookId: string): boolean {
-    for (const [event, hooks] of this.hooks) {
+    for (const [, hooks] of this.hooks) {
       const idx = hooks.findIndex((h) => h.id === hookId);
       if (idx >= 0) {
         hooks.splice(idx, 1);

@@ -11,7 +11,7 @@ import type {
   ProviderCapabilities,
 } from "./types.js";
 import { openAIToAnthropic } from "./format-translator.js";
-import { getModelContextConfig, isExtendedContextEnabled } from "../context/limits.js";
+import { getModelContextConfig } from "../context/limits.js";
 
 /**
  * Minimum token length for a system block to be worth caching.
@@ -88,9 +88,10 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
     const model = options.model ?? "claude-sonnet-4-6";
     const maxTokens = options.maxTokens ?? 4096;
     const client = createClient(options.authToken);
-    const contextConfig = getModelContextConfig(model, "anthropic", {
-      enableExtendedContext: isExtendedContextEnabled("anthropic", model),
-    });
+    // NOTE: per-query context config is read at adapter construction
+    // time (defaultConfig, line 76) so we don't need a per-query lookup
+    // here. The prior `contextConfig = getModelContextConfig(...)` call
+    // was dead work that computed the same value for every request.
 
     const messages: Anthropic.MessageParam[] = [];
 

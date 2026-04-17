@@ -167,7 +167,7 @@ export async function executeGraph(
         }
 
         retries++;
-      } catch (error) {
+      } catch {
         if (retries >= maxRetries - 1) {
           results.push({ nodeId, status: "failure", duration: Date.now() - startTime });
           completed.add(nodeId);

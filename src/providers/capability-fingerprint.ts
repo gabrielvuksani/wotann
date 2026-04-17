@@ -217,7 +217,7 @@ export class CapabilityFingerprinter {
    * Find the best model for a specific capability across all fingerprinted providers.
    */
   bestModelForCapability(capabilityId: CapabilityId): { provider: string; model: string } | null {
-    for (const [key, fingerprint] of this.fingerprints) {
+    for (const [, fingerprint] of this.fingerprints) {
       const cap = fingerprint.capabilities.find((c) => c.id === capabilityId);
       if (cap?.supported) {
         return { provider: fingerprint.provider, model: fingerprint.model };

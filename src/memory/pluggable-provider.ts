@@ -13,7 +13,7 @@
  * Custom providers implement MemoryProvider interface and register via plugin system.
  */
 
-import type { MemoryEntry, MemorySearchResult, MemoryLayer, MemoryBlockType, MemorySourceType } from "./store.js";
+import type { MemoryEntry, MemorySearchResult, MemoryLayer, MemoryBlockType } from "./store.js";
 
 // ── Provider Interface ──────────────────────────────────────
 

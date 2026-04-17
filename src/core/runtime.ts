@@ -122,7 +122,7 @@ import { HASH_ANCHORED_EDIT_TOOL_SCHEMA } from "../tools/hash-anchored-edit.js";
 import { ImageGenRouter } from "../tools/image-gen-router.js";
 import { TokenPersistence } from "../telemetry/token-persistence.js";
 import { compileAmbientContext, type AmbientContext } from "../intelligence/ambient-awareness.js";
-import { generateFakeTools, type FakeToolDefinition } from "../security/anti-distillation.js";
+import { generateFakeTools } from "../security/anti-distillation.js";
 // Phase F1: QueryPipeline available for progressive migration from monolithic query()
 export { QueryPipeline } from "./runtime-query-pipeline.js";
 import { UnifiedDispatchPlane } from "../channels/unified-dispatch.js";
@@ -181,14 +181,6 @@ import { agentRegistry, type AgentRegistry } from "../orchestration/agent-regist
 // ── Tier 2B: LLM-invokable tools ──
 import { WebFetchTool } from "../tools/web-fetch.js";
 import { PlanStore } from "../orchestration/plan-store.js";
-
-// ── God Object Extraction: Runtime tool helpers (ready for incremental migration) ──
-import { buildEffectiveTools, isRuntimeTool, type ToolRegistryDeps } from "./runtime-tools.js";
-import {
-  dispatchRuntimeTool,
-  type ToolDispatchDeps,
-  type ToolDispatchContext,
-} from "./runtime-tool-dispatch.js";
 
 // ── Wired orphan modules ────────────────────────────────────
 
@@ -640,7 +632,7 @@ export class WotannRuntime {
       const dbPath = join(stateDir, "memory.db");
       try {
         this.memoryStore = new MemoryStore(dbPath);
-      } catch (_error: unknown) {
+      } catch {
         // Memory store creation may fail if state directory doesn't exist yet — not fatal
         // Store will be created on first write when the directory exists
       }
@@ -1460,6 +1452,10 @@ export class WotannRuntime {
       });
 
       // ── Step 5.1: Accuracy boost (Phase 1 wiring) ──
+      // The boosted prompt overlays structured accuracy techniques onto
+      // the raw amplified prompt. Session-5 fixed the drift where
+      // `boosted.boosted` was computed but downstream still used
+      // `amplified.amplified` — the booster output was silently dropped.
       const boosted = this.accuracyBooster.boost(amplified.amplified, {
         taskType: classifyTaskType(options.prompt),
         previousErrors: this.recentErrors,
@@ -1468,8 +1464,6 @@ export class WotannRuntime {
         recentToolResults: this.traceAnalyzer.getRecentEntries(3).map((e) => e.content),
         language: "typescript",
       });
-      // Use boosted prompt downstream instead of raw amplified
-      const effectivePrompt = boosted.boosted;
 
       // ── Step 5.5: Proactive memory & episodic recording ──
       const proactiveHints = this.proactiveMemory.processEvent({
@@ -1777,14 +1771,28 @@ export class WotannRuntime {
         .join("\n\n");
 
       // ── Step 6.5: PII redaction — scrub PII from prompt before provider ──
-      const piiResult = this.piiRedactor.redact(amplified.amplified);
+      // Session-5 fix: use the boosted prompt (step 5.1) instead of the
+      // raw amplified prompt — accuracy-booster output was previously
+      // dropped because PII redactor read `amplified.amplified` directly.
+      const piiResult = this.piiRedactor.redact(boosted.boosted);
       const sanitizedPrompt =
-        piiResult.totalRedacted > 0 ? piiResult.redactedText : amplified.amplified;
+        piiResult.totalRedacted > 0 ? piiResult.redactedText : boosted.boosted;
 
       // ── Step 6.7: AntiDistillation — inject fake tools to poison distillation ──
-      let antiDistillationTools: readonly FakeToolDefinition[] = [];
+      // Session-5 fix: the generated fake tools were previously stored
+      // in a local variable and never merged into the query's effective
+      // tool set — the whole feature was dead code. Now the fake tools
+      // are appended to `effectiveTools` so the model sees them and
+      // any distillation attempt captures them as noise.
       if (this.config.enableAntiDistillation) {
-        antiDistillationTools = generateFakeTools(2);
+        const fakeTools = generateFakeTools(2);
+        for (const fake of fakeTools) {
+          effectiveTools.push({
+            name: fake.name,
+            description: fake.description,
+            inputSchema: fake.inputSchema,
+          });
+        }
       }
 
       // ── Step 6.9: Provider arbitrage — find cheapest provider meeting capability ──
@@ -2351,13 +2359,12 @@ export class WotannRuntime {
         }
       }
 
-      // TrajectoryScorer: score this turn for efficiency and detect meandering
+      // TrajectoryScorer: score this turn for efficiency and detect
+      // meandering. The score itself is stored in the scorer's internal
+      // history; the downstream `shouldForceReplan()` / `analyze()`
+      // calls read that history, so we don't need to hold the return.
       const filesInContent = fullContent.match(/(?:src|lib|test)\/[\w\-./]+\.\w+/g) ?? [];
-      const turnScore = this.trajectoryScorer.scoreTurn(
-        fullContent.slice(0, 2000),
-        options.prompt,
-        filesInContent,
-      );
+      this.trajectoryScorer.scoreTurn(fullContent.slice(0, 2000), options.prompt, filesInContent);
       if (this.trajectoryScorer.shouldForceReplan()) {
         yield {
           type: "text" as const,
@@ -3766,7 +3773,11 @@ export class WotannRuntime {
       return {
         response: queryResult.content,
         tokensUsed: queryResult.tokensUsed,
-        durationMs: queryResult.durationMs,
+        // Session-5 fix: use wall-clock from the arena executor's start
+        // so the duration includes routing + fallback overhead the bridge
+        // itself doesn't measure. The prior code assigned startTime but
+        // threw it away — drift that was caught as a lint warning.
+        durationMs: queryResult.durationMs > 0 ? queryResult.durationMs : Date.now() - startTime,
         model: queryResult.model,
       };
     };
@@ -3796,16 +3807,22 @@ export class WotannRuntime {
 
     const bridge = this.infra.bridge;
     const executor: CouncilQueryExecutor = async (provider, model, prompt, systemPrompt) => {
+      // Session-5 fix: the council executor's signature includes a
+      // `model` arg (the specific model each council member should use)
+      // but the prior code dropped it — every council member queried
+      // the provider's default model instead. Thread `model` through
+      // so each expert's specified model is actually used.
       const startTime = Date.now();
       const queryResult = await bridge.querySync({
         prompt,
         provider,
+        model,
         systemPrompt,
       });
       return {
         response: queryResult.content,
         tokensUsed: queryResult.tokensUsed,
-        durationMs: queryResult.durationMs,
+        durationMs: queryResult.durationMs > 0 ? queryResult.durationMs : Date.now() - startTime,
       };
     };
 
@@ -3922,7 +3939,7 @@ export class WotannRuntime {
       return {
         response: queryResult.content,
         tokensUsed: queryResult.tokensUsed,
-        durationMs: queryResult.durationMs,
+        durationMs: queryResult.durationMs > 0 ? queryResult.durationMs : Date.now() - startTime,
       };
     };
 

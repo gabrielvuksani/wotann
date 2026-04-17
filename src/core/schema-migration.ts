@@ -14,7 +14,6 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 // ── Types ────────────────────────────────────────────────

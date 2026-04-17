@@ -92,9 +92,10 @@ export function detectNonInteractiveMode(): boolean {
  * Check if a response text contains clarification questions.
  * Returns matched patterns for diagnostics.
  */
-export function detectClarificationQuestions(
-  text: string,
-): { readonly detected: boolean; readonly patterns: readonly string[] } {
+export function detectClarificationQuestions(text: string): {
+  readonly detected: boolean;
+  readonly patterns: readonly string[];
+} {
   const matched: string[] = [];
   for (const pattern of CLARIFICATION_PATTERNS) {
     const match = text.match(pattern);
@@ -130,7 +131,6 @@ export class NonInteractiveMiddleware {
   private isNonInteractive: boolean;
   private suppressedCount = 0;
   private lastSuppressedTurn = 0;
-  private currentTurn = 0;
 
   constructor(forceNonInteractive?: boolean) {
     this.isNonInteractive = forceNonInteractive ?? detectNonInteractiveMode();
@@ -167,7 +167,6 @@ export class NonInteractiveMiddleware {
   reset(): void {
     this.suppressedCount = 0;
     this.lastSuppressedTurn = 0;
-    this.currentTurn = 0;
   }
 }
 
@@ -178,17 +177,14 @@ export class NonInteractiveMiddleware {
  * Runs at order 19 (after system notifications at 18) to be the
  * last thing the agent sees in context.
  */
-export function createNonInteractiveMiddleware(
-  instance: NonInteractiveMiddleware,
-): Middleware {
-  let currentTurn = 0;
-
+export function createNonInteractiveMiddleware(instance: NonInteractiveMiddleware): Middleware {
+  // Turn counter lives on the NonInteractiveMiddleware instance
+  // (instance.currentTurn) — the prior local was dead code incrementing
+  // a shadow counter that nothing ever read. Removed session-5.
   return {
     name: "NonInteractive",
     order: 19,
     before(ctx: MiddlewareContext): MiddlewareContext {
-      currentTurn++;
-
       if (!instance.isActive()) return ctx;
 
       // Override the clarification middleware: never request clarification

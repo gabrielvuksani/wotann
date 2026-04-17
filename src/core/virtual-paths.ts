@@ -12,7 +12,7 @@
  * - Path translation is consistent and reversible
  */
 
-import { join, normalize, relative, isAbsolute, sep } from "node:path";
+import { join, normalize, relative, isAbsolute } from "node:path";
 
 // ── Types ────────────────────────────────────────────────────
 

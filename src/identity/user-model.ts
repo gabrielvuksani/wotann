@@ -10,7 +10,7 @@
  * Persists to .wotann/context-tree/user/profile.json
  */
 
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomicSyncBestEffort } from "../utils/atomic-io.js";
 

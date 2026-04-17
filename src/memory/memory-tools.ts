@@ -13,15 +13,9 @@
  * so that any model/provider can call memory operations as tools.
  */
 
-import type {
-  MemoryEntry,
-  MemoryLayer,
-  MemoryBlockType,
-  MemorySearchResult,
-  ContradictionResult,
-} from "./store.js";
+import type { MemoryEntry, MemoryLayer, MemoryBlockType, MemorySearchResult } from "./store.js";
 import { ContradictionDetector, type ContradictionReport } from "./contradiction-detector.js";
-import { FreshnessDecayEngine, type FreshnessScore } from "./freshness-decay.js";
+import { FreshnessDecayEngine } from "./freshness-decay.js";
 
 // ── Types ────────────────────────────────────────────────
 

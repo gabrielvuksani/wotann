@@ -15,13 +15,12 @@
  */
 
 import type { ProviderName, AgentMessage, SessionState, ToolDefinition } from "../core/types.js";
-import type { ProviderCapabilities } from "./types.js";
 import {
   CapabilityEqualizer,
   type CapabilityGap,
   type CapabilityName,
 } from "./capability-equalizer.js";
-import { anthropicToOpenAI, openAIToAnthropic, toAgentMessages } from "./format-translator.js";
+// (session-5 cleanup: unused adapter re-exports removed)
 import { preserveVariantTag } from "./discovery.js";
 
 // ── Types ──────────────────────────────────────────────

@@ -156,7 +156,10 @@ export class AccuracyBooster {
 
     // Technique 4: Error-aware retry
     if (context.previousErrors.length > 0) {
-      const errorGuidance = this.buildErrorAwareRetry(context.previousErrors, context.previousAttempts);
+      const errorGuidance = this.buildErrorAwareRetry(
+        context.previousErrors,
+        context.previousAttempts,
+      );
       techniques.push({
         name: "error-aware-retry",
         description: "Analyze previous errors and modify approach",
@@ -202,7 +205,9 @@ export class AccuracyBooster {
       sections.push(exampleText);
     }
 
-    // Technique 5: Confidence calibration
+    // Technique 5: Confidence calibration — computes the per-prompt
+    // calibration string (prepends CONFIDENCE_CALIBRATION; may include
+    // task-specific context in future subclasses).
     const confidencePrompt = this.addConfidenceCalibration(prompt);
 
     // Technique 2: Multi-pass verification plan
@@ -217,7 +222,10 @@ export class AccuracyBooster {
       boosted,
       techniques,
       decomposedSteps: steps,
-      confidencePrompt: CONFIDENCE_CALIBRATION,
+      // Session-5 fix: prior code returned the static `CONFIDENCE_CALIBRATION`
+      // constant here, silently discarding the per-prompt output of
+      // `addConfidenceCalibration(prompt)`. Now returns the computed value.
+      confidencePrompt,
       verificationPlan,
     };
   }
@@ -344,7 +352,13 @@ export class AccuracyBooster {
     workingDir: string,
   ): Promise<TestDrivenFeedbackResult> {
     if (modifiedFiles.length === 0) {
-      return { testsFound: false, testsRan: false, passed: 0, failed: 0, feedback: "No modified files provided." };
+      return {
+        testsFound: false,
+        testsRan: false,
+        passed: 0,
+        failed: 0,
+        feedback: "No modified files provided.",
+      };
     }
 
     const testFiles = findTestFiles(modifiedFiles);
@@ -360,23 +374,28 @@ export class AccuracyBooster {
     }
 
     try {
-      const { stdout, stderr } = await execFileAsync(
-        "npx",
-        ["vitest", "run", ...testFiles],
-        { cwd: workingDir, timeout: 30_000 },
-      );
+      const { stdout, stderr } = await execFileAsync("npx", ["vitest", "run", ...testFiles], {
+        cwd: workingDir,
+        timeout: 30_000,
+      });
 
       const output = stdout + stderr;
       const { passed, failed } = parseTestOutput(output);
 
-      const feedback = failed > 0
-        ? `TEST FAILURE: ${failed} test(s) failed, ${passed} passed.\n\nTest output:\n${output.slice(0, 2000)}\n\nFix the failing tests before proceeding.`
-        : `All ${passed} test(s) passed for modified files.`;
+      const feedback =
+        failed > 0
+          ? `TEST FAILURE: ${failed} test(s) failed, ${passed} passed.\n\nTest output:\n${output.slice(0, 2000)}\n\nFix the failing tests before proceeding.`
+          : `All ${passed} test(s) passed for modified files.`;
 
       return { testsFound: true, testsRan: true, passed, failed, feedback };
     } catch (error: unknown) {
       // execFile rejects on non-zero exit codes (test failures) or timeout
-      const errorObj = error as { stdout?: string; stderr?: string; killed?: boolean; message?: string };
+      const errorObj = error as {
+        stdout?: string;
+        stderr?: string;
+        killed?: boolean;
+        message?: string;
+      };
       if (errorObj.killed) {
         return {
           testsFound: true,
@@ -435,11 +454,12 @@ export class AccuracyBooster {
       .map((e, i) => `  ${i + 1}. ${e.slice(0, 200)}`)
       .join("\n");
 
-    const strategy = attempts >= 3
-      ? "CRITICAL: 3+ attempts failed. Take a completely different approach."
-      : attempts >= 2
-        ? "Two attempts have failed. Carefully analyze what went wrong before trying again."
-        : "Previous attempt failed. Review the error and adjust your approach.";
+    const strategy =
+      attempts >= 3
+        ? "CRITICAL: 3+ attempts failed. Take a completely different approach."
+        : attempts >= 2
+          ? "Two attempts have failed. Carefully analyze what went wrong before trying again."
+          : "Previous attempt failed. Review the error and adjust your approach.";
 
     return [
       `ERROR-AWARE RETRY (attempt ${attempts + 1}):`,
@@ -465,10 +485,7 @@ export class AccuracyBooster {
     ].join("\n");
   }
 
-  private selectRelevantExamples(
-    taskType: TaskType,
-    language?: string,
-  ): readonly ExampleSnippet[] {
+  private selectRelevantExamples(taskType: TaskType, language?: string): readonly ExampleSnippet[] {
     const examples: ExampleSnippet[] = [];
     const lang = language ?? "typescript";
 
@@ -513,9 +530,7 @@ export class AccuracyBooster {
 
   private formatExamples(examples: readonly ExampleSnippet[]): string {
     if (examples.length === 0) return "";
-    const formatted = examples
-      .map((e) => `[${e.label}]\n${e.content}`)
-      .join("\n\n");
+    const formatted = examples.map((e) => `[${e.label}]\n${e.content}`).join("\n\n");
     return `REFERENCE EXAMPLES:\n${formatted}`;
   }
 
@@ -568,7 +583,11 @@ export function classifyTaskType(prompt: string): TaskType {
   }
   // Test-writing: must be about writing/adding tests, not a failing test.
   // Use compound patterns to distinguish "write tests" from "test is broken".
-  if (/\b(write\s+tests?|add\s+tests?|test\s+coverage|spec\s+for|assert|expect|describe\s*\(|it\s*\()\b/.test(lower)) {
+  if (
+    /\b(write\s+tests?|add\s+tests?|test\s+coverage|spec\s+for|assert|expect|describe\s*\(|it\s*\()\b/.test(
+      lower,
+    )
+  ) {
     return "test-writing";
   }
   if (/\b(document|readme|jsdoc|comment|explain)\b/.test(lower)) {
@@ -597,7 +616,10 @@ interface ExampleSnippet {
 type DecompositionFn = (prompt: string) => readonly string[];
 
 const DECOMPOSITION_STRATEGIES: Record<TaskType, DecompositionFn> = {
-  "code-generation": (prompt) => [
+  // Strategies return task-independent checklists — the `_prompt` arg is
+  // required by the DecompositionFn signature but not read. Future
+  // prompt-aware strategies can rename to `prompt`.
+  "code-generation": (_prompt) => [
     "Read existing related files to understand patterns and conventions",
     "Plan the implementation (interfaces, types, function signatures)",
     "Implement the core logic",
@@ -605,53 +627,55 @@ const DECOMPOSITION_STRATEGIES: Record<TaskType, DecompositionFn> = {
     "Write tests for the new code",
     "Run typecheck and tests to verify",
   ],
-  "bug-fix": (prompt) => [
+  "bug-fix": (_prompt) => [
     "Reproduce the bug (read the error, find the failing test or steps)",
     "Trace the error to its root cause",
     "Write a test that captures the bug (should fail now)",
     "Fix the minimal code to resolve the bug",
     "Verify the fix (test should pass, no regressions)",
   ],
-  "refactor": (prompt) => [
+  refactor: (_prompt) => [
     "Verify existing tests pass before changes",
     "Search for ALL references to the code being changed",
     "Make incremental changes, verifying after each",
     "Update all callers and references",
     "Run full test suite to verify no regressions",
   ],
-  "test-writing": (prompt) => [
+  "test-writing": (_prompt) => [
     "Read the source code to understand behavior and edge cases",
     "Identify happy path, error cases, and boundary conditions",
     "Write tests for the happy path first",
     "Add edge case and error condition tests",
     "Run tests and verify coverage",
   ],
-  "documentation": (_prompt) => [
+  documentation: (_prompt) => [
     "Read the current code to understand what it does",
     "Identify the target audience and purpose",
     "Write the documentation",
   ],
-  "configuration": (_prompt) => [
+  configuration: (_prompt) => [
     "Read existing configuration for context",
     "Make the configuration changes",
     "Verify the configuration is valid",
   ],
-  "investigation": (prompt) => [
+  investigation: (_prompt) => [
     "Gather information (read files, logs, error messages)",
     "Form hypotheses about the cause",
     "Test each hypothesis systematically",
     "Report findings with evidence",
   ],
-  "general": (_prompt) => [],
+  general: (_prompt) => [],
 };
 
 // ── Utility Functions ────────────────────────────────────────
 
 function isCodeTask(taskType: TaskType): boolean {
-  return taskType === "code-generation"
-    || taskType === "bug-fix"
-    || taskType === "refactor"
-    || taskType === "test-writing";
+  return (
+    taskType === "code-generation" ||
+    taskType === "bug-fix" ||
+    taskType === "refactor" ||
+    taskType === "test-writing"
+  );
 }
 
 function extractExtension(filePath: string): string {
@@ -661,8 +685,25 @@ function extractExtension(filePath: string): string {
 
 function isCodeExtension(ext: string): boolean {
   const codeExtensions = new Set([
-    "ts", "tsx", "js", "jsx", "py", "rs", "go", "java", "c", "cpp", "h",
-    "cs", "rb", "php", "swift", "kt", "scala", "zig", "dart",
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "py",
+    "rs",
+    "go",
+    "java",
+    "c",
+    "cpp",
+    "h",
+    "cs",
+    "rb",
+    "php",
+    "swift",
+    "kt",
+    "scala",
+    "zig",
+    "dart",
   ]);
   return codeExtensions.has(ext);
 }

@@ -176,7 +176,7 @@ export const DEFAULT_PROMPT_BAR: PromptBarConfig = {
 
 // ── Layout Calculation ──────────────────────────────────
 
-export function calculateLayout(windowWidth: number, windowHeight: number): LayoutConfig {
+export function calculateLayout(windowWidth: number, _windowHeight: number): LayoutConfig {
   if (windowWidth < 700) return MINI_LAYOUT;
   if (windowWidth < 900) return FOCUSED_LAYOUT;
   if (windowWidth < 1100) return COMPACT_LAYOUT;

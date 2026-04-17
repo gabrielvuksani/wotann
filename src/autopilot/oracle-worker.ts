@@ -185,7 +185,7 @@ export class OracleWorkerPolicy {
    * OracleConsultation to the router/runtime to actually call the oracle
    * model — this class stays transport-agnostic so it's easy to test.
    */
-  prepareConsultation(reason: EscalationReason, currentTask: string): OracleConsultation {
+  prepareConsultation(reason: EscalationReason, _currentTask: string): OracleConsultation {
     const workerAttempts = [...this.errorHistory].slice(-5);
     const stateSummary = this.iterationHistory
       .slice(-3)

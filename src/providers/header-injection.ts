@@ -5,7 +5,7 @@
  * This module centralizes header management across all providers.
  */
 
-import { isExtendedContextEnabled, type ContextActivationMode } from "../context/limits.js";
+import { isExtendedContextEnabled } from "../context/limits.js";
 
 export interface ProviderHeaders {
   readonly headers: Record<string, string>;
@@ -21,7 +21,8 @@ export function getProviderHeaders(
   model: string,
   options?: { enableExtendedContext?: boolean },
 ): ProviderHeaders {
-  const extendedContext = options?.enableExtendedContext ?? isExtendedContextEnabled(provider, model);
+  const extendedContext =
+    options?.enableExtendedContext ?? isExtendedContextEnabled(provider, model);
 
   switch (provider) {
     case "anthropic":
@@ -49,28 +50,28 @@ function getAnthropicHeaders(model: string, extendedContext: boolean): ProviderH
   if (model.includes("opus") || model.includes("sonnet")) {
     const existingBeta = headers["anthropic-beta"] ?? "";
     const thinkingBeta = "extended-thinking-2025-01-24";
-    headers["anthropic-beta"] = existingBeta
-      ? `${existingBeta},${thinkingBeta}`
-      : thinkingBeta;
+    headers["anthropic-beta"] = existingBeta ? `${existingBeta},${thinkingBeta}` : thinkingBeta;
   }
 
   // Prompt caching beta
   if (model.includes("opus") || model.includes("sonnet") || model.includes("haiku")) {
     const existingBeta = headers["anthropic-beta"] ?? "";
     const cachingBeta = "prompt-caching-2024-07-31";
-    headers["anthropic-beta"] = existingBeta
-      ? `${existingBeta},${cachingBeta}`
-      : cachingBeta;
+    headers["anthropic-beta"] = existingBeta ? `${existingBeta},${cachingBeta}` : cachingBeta;
   }
 
   return { headers };
 }
 
-function getOpenAIHeaders(model: string, extendedContext: boolean): ProviderHeaders {
+function getOpenAIHeaders(model: string, _extendedContext: boolean): ProviderHeaders {
+  // `_extendedContext` arg is required by the common header-getter
+  // signature (Anthropic also takes it and uses it to decide whether
+  // to inject the extended-context beta). OpenAI doesn't need a beta
+  // header for GPT-5.4's 1M context — it's default. Kept as `_`-
+  // prefixed so signature symmetry holds across providers.
   const headers: Record<string, string> = {};
 
-  // OpenAI doesn't need beta headers for GPT-5.4 1M context — it's default
-  // But structured output needs a specific header for some endpoints
+  // Structured output requires a beta header on some GPT-5 endpoints.
   if (model.includes("gpt-5")) {
     headers["OpenAI-Beta"] = "assistants=v2";
   }
@@ -83,7 +84,7 @@ function getGeminiHeaders(model: string): ProviderHeaders {
   return {
     headers: {},
     queryParams: {
-      "model": model,
+      model: model,
     },
   };
 }
@@ -91,11 +92,7 @@ function getGeminiHeaders(model: string): ProviderHeaders {
 /**
  * Build the full API URL with any provider-specific modifications.
  */
-export function buildProviderUrl(
-  baseUrl: string,
-  provider: string,
-  model: string,
-): string {
+export function buildProviderUrl(baseUrl: string, provider: string, model: string): string {
   switch (provider) {
     case "anthropic":
       return `${baseUrl}/v1/messages`;

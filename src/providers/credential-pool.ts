@@ -12,7 +12,7 @@
  * Wraps AccountPool for backward compatibility while adding new capabilities.
  */
 
-import { AccountPool, type AccountCredential, type AccountHealth } from "./account-pool.js";
+import { AccountPool, type AccountCredential } from "./account-pool.js";
 import type { ProviderName } from "../core/types.js";
 import { createHash } from "node:crypto";
 

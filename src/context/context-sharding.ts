@@ -186,7 +186,7 @@ export class ContextShardManager {
     }
 
     // Add offloaded summaries
-    for (const [id, summary] of this.offloadedSummaries) {
+    for (const [, summary] of this.offloadedSummaries) {
       if (usedTokens >= maxTokens) break;
       const summaryTokens = Math.ceil(summary.length / 4);
       if (usedTokens + summaryTokens <= maxTokens) {

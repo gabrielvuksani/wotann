@@ -391,9 +391,12 @@ export class QueryPipeline {
         .join("\n\n");
 
       // ── Step 6.5: PII redaction ──
-      const piiResult = this.ctx.piiRedactor.redact(amplified.amplified);
+      // Session-5 fix: mirror the runtime.ts fix — use the boosted
+      // prompt from step 5.1 instead of the raw amplified prompt so
+      // the accuracy-booster output actually reaches the provider.
+      const piiResult = this.ctx.piiRedactor.redact(boosted.boosted);
       const sanitizedPrompt =
-        piiResult.totalRedacted > 0 ? piiResult.redactedText : amplified.amplified;
+        piiResult.totalRedacted > 0 ? piiResult.redactedText : boosted.boosted;
 
       // ── Step 7: Query with amplified prompt ──
       const queryOptions: WotannQueryOptions = {

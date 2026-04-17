@@ -18,8 +18,8 @@
 import { execFileSync } from "node:child_process";
 import { STTDetector } from "./stt-detector.js";
 import { TTSEngine } from "./tts-engine.js";
-import type { STTProviderType, STTTranscription } from "./stt-detector.js";
-import type { TTSProviderType, TTSResult } from "./tts-engine.js";
+import type { STTTranscription } from "./stt-detector.js";
+import type { TTSResult } from "./tts-engine.js";
 
 // ── Types ───────────────────────────────────────────────
 

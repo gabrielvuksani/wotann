@@ -9,7 +9,7 @@
  * - Time patterns: morning = review PRs, afternoon = deep work
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join, dirname, basename, extname } from "node:path";
 
 export interface AwarenessSignal {

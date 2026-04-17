@@ -7,7 +7,6 @@
  * the model router learns from deliberation history.
  */
 
-import type { ProviderName, TaskCategory } from "../core/types.js";
 import type { CouncilResult } from "./council.js";
 
 // ── Types ──────────────────────────────────────────────

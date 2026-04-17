@@ -10,7 +10,6 @@
  * Default max depth: 2 (root at depth 0, children at depth 1).
  */
 
-import { randomUUID } from "node:crypto";
 
 // -- Types -------------------------------------------------------------------
 

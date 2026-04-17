@@ -23,12 +23,7 @@ export interface SpecRequirement {
   readonly estimatedEffort: "small" | "medium" | "large";
 }
 
-export type PipelinePhase =
-  | "research"
-  | "implement"
-  | "test"
-  | "review"
-  | "ship";
+export type PipelinePhase = "research" | "implement" | "test" | "review" | "ship";
 
 export interface PipelineTask {
   readonly id: string;
@@ -84,13 +79,26 @@ export interface PipelineProgress {
 
 // ── Parser ────────────────────────────────────────────────
 
-const PHASE_ORDER: readonly PipelinePhase[] = [
+/**
+ * Canonical ordering of pipeline phases. External consumers (UI, stats,
+ * CI reporters) can iterate this to display phase progress in the
+ * correct order. Session-5: promoted from private constant to public
+ * export so the name is actually consumed somewhere.
+ */
+export const PHASE_ORDER: readonly PipelinePhase[] = [
   "research",
   "implement",
   "test",
   "review",
   "ship",
 ];
+
+/** Return the next phase after `current`, or null if current is the last phase. */
+export function nextPhase(current: PipelinePhase): PipelinePhase | null {
+  const idx = PHASE_ORDER.indexOf(current);
+  if (idx < 0) return null;
+  return PHASE_ORDER[idx + 1] ?? null;
+}
 
 /**
  * Parse a spec/requirements document into structured form.
@@ -238,10 +246,7 @@ export class SpecToShipPipeline {
     });
 
     const totalTasks = phases.reduce((sum, p) => sum + p.tasks.length, 0);
-    const estimatedMinutes = phases.reduce(
-      (sum, p) => sum + p.estimatedMinutes,
-      0,
-    );
+    const estimatedMinutes = phases.reduce((sum, p) => sum + p.estimatedMinutes, 0);
 
     return { specTitle: spec.title, phases, totalTasks, estimatedMinutes };
   }
@@ -249,10 +254,7 @@ export class SpecToShipPipeline {
   /**
    * Execute a plan phase by phase using the provided executor.
    */
-  async executePlan(
-    plan: ImplementationPlan,
-    executor: TaskExecutor,
-  ): Promise<PipelineResult> {
+  async executePlan(plan: ImplementationPlan, executor: TaskExecutor): Promise<PipelineResult> {
     const results: TaskResult[] = [];
     const startTime = Date.now();
     let failedTasks = 0;
@@ -299,9 +301,7 @@ export class SpecToShipPipeline {
         this.progress = {
           ...this.progress,
           currentTaskIndex: results.length,
-          percentComplete: Math.round(
-            (results.length / plan.totalTasks) * 100,
-          ),
+          percentComplete: Math.round((results.length / plan.totalTasks) * 100),
         };
       }
 
@@ -364,9 +364,7 @@ function extractDescription(lines: readonly string[]): string {
   return descLines.join(" ").slice(0, 500);
 }
 
-function extractRequirements(
-  lines: readonly string[],
-): readonly SpecRequirement[] {
+function extractRequirements(lines: readonly string[]): readonly SpecRequirement[] {
   const requirements: SpecRequirement[] = [];
   let inRequirements = false;
   let counter = 0;
@@ -415,10 +413,7 @@ function extractRequirements(
   return requirements;
 }
 
-function extractSection(
-  lines: readonly string[],
-  keyword: string,
-): readonly string[] {
+function extractSection(lines: readonly string[], keyword: string): readonly string[] {
   const items: string[] = [];
   let inSection = false;
 
@@ -443,9 +438,7 @@ function extractSection(
   return items;
 }
 
-function inferPriority(
-  text: string,
-): SpecRequirement["priority"] {
+function inferPriority(text: string): SpecRequirement["priority"] {
   const lower = text.toLowerCase();
   if (/\b(must|critical|required|essential)\b/.test(lower)) return "must";
   if (/\b(should|important|recommended)\b/.test(lower)) return "should";
@@ -457,7 +450,6 @@ function inferPriority(
 function inferEffort(text: string): SpecRequirement["estimatedEffort"] {
   const lower = text.toLowerCase();
   if (/\b(simple|trivial|quick|minor)\b/.test(lower)) return "small";
-  if (/\b(complex|large|major|significant|architecture)\b/.test(lower))
-    return "large";
+  if (/\b(complex|large|major|significant|architecture)\b/.test(lower)) return "large";
   return "medium";
 }

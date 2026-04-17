@@ -4,13 +4,7 @@
  */
 
 import { PerceptionEngine } from "./perception-engine.js";
-import type {
-  CUAction,
-  ComputerUseEvent,
-  APIRoute,
-  CUGuardrails,
-  ScreenElement,
-} from "./types.js";
+import type { CUAction, APIRoute, CUGuardrails } from "./types.js";
 import {
   CamoufoxBrowser,
   isAvailable as isCamoufoxAvailable,
@@ -20,18 +14,50 @@ import type { PageResult, TextResult } from "../browser/camoufox-backend.js";
 // ── API Route Table (40+ fast-path routes) ──────────────────
 
 const DEFAULT_API_ROUTES: readonly APIRoute[] = [
-  { pattern: /\b(check|view|open)\b.*\bcalendar\b/i, handler: "calendar.list", description: "Calendar events" },
-  { pattern: /\bcreate\s+\w*\s*(event|meeting)\b/i, handler: "calendar.create", description: "Create calendar event" },
-  { pattern: /\b(check|read)\b.*\b(email|inbox|mail)\b/i, handler: "email.list", description: "Email inbox" },
+  {
+    pattern: /\b(check|view|open)\b.*\bcalendar\b/i,
+    handler: "calendar.list",
+    description: "Calendar events",
+  },
+  {
+    pattern: /\bcreate\s+\w*\s*(event|meeting)\b/i,
+    handler: "calendar.create",
+    description: "Create calendar event",
+  },
+  {
+    pattern: /\b(check|read)\b.*\b(email|inbox|mail)\b/i,
+    handler: "email.list",
+    description: "Email inbox",
+  },
   { pattern: /\bsend\b.*\bemail\b/i, handler: "email.send", description: "Send email" },
   { pattern: /\b(open|launch)\s+(\w+)\b/i, handler: "app.open", description: "Open application" },
   { pattern: /\b(volume|brightness)\b/i, handler: "system.setting", description: "System setting" },
   { pattern: /\bclipboard\b/i, handler: "system.clipboard", description: "Clipboard access" },
-  { pattern: /\b(play|pause|next|previous)\s*(track|song)?\b/i, handler: "media.control", description: "Media control" },
-  { pattern: /\b(git|github)\s+(status|log|diff|push|pull|commit)\b/i, handler: "git.command", description: "Git operation" },
-  { pattern: /\b(list|show)\s+(files|directory|folder)\b/i, handler: "fs.list", description: "File listing" },
-  { pattern: /\b(create|new)\s+(file|folder|directory)\b/i, handler: "fs.create", description: "Create file/folder" },
-  { pattern: /\b(search|find)\s+(files?|code)\b/i, handler: "search.files", description: "File search" },
+  {
+    pattern: /\b(play|pause|next|previous)\s*(track|song)?\b/i,
+    handler: "media.control",
+    description: "Media control",
+  },
+  {
+    pattern: /\b(git|github)\s+(status|log|diff|push|pull|commit)\b/i,
+    handler: "git.command",
+    description: "Git operation",
+  },
+  {
+    pattern: /\b(list|show)\s+(files|directory|folder)\b/i,
+    handler: "fs.list",
+    description: "File listing",
+  },
+  {
+    pattern: /\b(create|new)\s+(file|folder|directory)\b/i,
+    handler: "fs.create",
+    description: "Create file/folder",
+  },
+  {
+    pattern: /\b(search|find)\s+(files?|code)\b/i,
+    handler: "search.files",
+    description: "File search",
+  },
   { pattern: /\bweather\b/i, handler: "web.weather", description: "Weather check" },
   { pattern: /\btimer\b/i, handler: "system.timer", description: "Set timer" },
   { pattern: /\bscreenshot\b/i, handler: "screen.capture", description: "Take screenshot" },
@@ -40,13 +66,25 @@ const DEFAULT_API_ROUTES: readonly APIRoute[] = [
 
 const DEFAULT_GUARDRAILS: CUGuardrails = {
   blockedDomains: [
-    "bank", "paypal", "venmo", "cash.app", "robinhood",
-    "fidelity", "schwab", "vanguard", "coinbase", "crypto",
+    "bank",
+    "paypal",
+    "venmo",
+    "cash.app",
+    "robinhood",
+    "fidelity",
+    "schwab",
+    "vanguard",
+    "coinbase",
+    "crypto",
   ],
   maxActionsPerMinute: 60,
   requirePermissionFor: [
-    "credentials", "purchase", "system-settings", "message-send",
-    "file-delete", "app-install",
+    "credentials",
+    "purchase",
+    "system-settings",
+    "message-send",
+    "file-delete",
+    "app-install",
   ],
   redactPasswords: true,
 };
@@ -152,7 +190,10 @@ export class ComputerUseAgent {
         case "type":
           return { type: "type", text: String(parsed["text"]) };
         case "scroll":
-          return { type: "scroll", direction: parsed["direction"] as "up" | "down" | "left" | "right" };
+          return {
+            type: "scroll",
+            direction: parsed["direction"] as "up" | "down" | "left" | "right",
+          };
         case "key":
           return { type: "key", combo: String(parsed["combo"]) };
         case "open":

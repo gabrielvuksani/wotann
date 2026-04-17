@@ -7,20 +7,10 @@
  * Node.js types declared inline (daemon runtime provides the actual APIs).
  */
 
-// ── Minimal Node.js type shims (compile-time only) ─────────
-declare function require(id: string): unknown;
-interface NodeFS {
-  readFileSync(path: string, encoding: string): string;
-  writeFileSync(path: string, data: string, encoding: string): void;
-  existsSync(path: string): boolean;
-  mkdirSync(path: string, options?: { recursive?: boolean }): void;
-  watchFile(path: string, options: { interval: number },
-    listener: (curr: { mtimeMs: number }, prev: { mtimeMs: number }) => void): unknown;
-  unwatchFile(path: string): void;
-}
-interface NodeOS { homedir(): string; }
-interface NodePath { join(...segments: string[]): string; }
-interface NodeCrypto { randomUUID(): string; }
+// Node.js runtime types come from @types/node — the prior inline shims
+// (NodeFS/NodeOS/NodePath/NodeCrypto + `declare function require`) were
+// dead fallback declarations kept alongside the real imports below.
+// Removed session-5 to close 5 lint warnings.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -258,17 +248,19 @@ function extractGlobBase(pattern: string): string {
 
 // ── Automation Engine ──────────────────────────────────────
 
-export type AutomationExecuteHandler = (payload: Readonly<{
-  automationId: string;
-  automationName: string;
-  model: string;
-  systemPrompt: string;
-  maxTurns: number;
-  maxCost: number;
-  memoryScope: string;
-  triggerContext: Readonly<Record<string, unknown>>;
-  triggeredAt: number;
-}>) => Promise<void>;
+export type AutomationExecuteHandler = (
+  payload: Readonly<{
+    automationId: string;
+    automationName: string;
+    model: string;
+    systemPrompt: string;
+    maxTurns: number;
+    maxCost: number;
+    memoryScope: string;
+    triggerContext: Readonly<Record<string, unknown>>;
+    triggeredAt: number;
+  }>,
+) => Promise<void>;
 
 export class AutomationEngine {
   private automations: readonly AutomationConfig[] = [];
@@ -805,10 +797,4 @@ export type {
 
 // ── Exported Utilities (for testing) ───────────────────────
 
-export {
-  parseCronExpression,
-  cronMatchesDate,
-  nextCronMatch,
-  globMatches,
-  extractGlobBase,
-};
+export { parseCronExpression, cronMatchesDate, nextCronMatch, globMatches, extractGlobBase };

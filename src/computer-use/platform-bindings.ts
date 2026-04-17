@@ -17,10 +17,7 @@ import { execFileSync } from "node:child_process";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  CamoufoxBrowser,
-  isAvailable as isCamoufoxAvailable,
-} from "../browser/camoufox-backend.js";
+import { CamoufoxBrowser } from "../browser/camoufox-backend.js";
 import type { PageResult } from "../browser/camoufox-backend.js";
 import { convertToUTF8 } from "../tools/encoding-detector.js";
 
@@ -139,10 +136,11 @@ export function click(options: ClickOptions): boolean {
 
     if (os === "linux" && isAvailable("xdotool")) {
       const btn = button === "right" ? "3" : button === "middle" ? "2" : "1";
-      execFileSync("xdotool", [
-        "mousemove", String(x), String(y),
-        "click", "--repeat", String(clicks ?? 1), btn,
-      ], { stdio: "pipe", timeout: 3000 });
+      execFileSync(
+        "xdotool",
+        ["mousemove", String(x), String(y), "click", "--repeat", String(clicks ?? 1), btn],
+        { stdio: "pipe", timeout: 3000 },
+      );
       return true;
     }
   } catch {
@@ -161,7 +159,10 @@ export function moveMouse(x: number, y: number): boolean {
       return true;
     }
     if (os === "linux" && isAvailable("xdotool")) {
-      execFileSync("xdotool", ["mousemove", String(x), String(y)], { stdio: "pipe", timeout: 3000 });
+      execFileSync("xdotool", ["mousemove", String(x), String(y)], {
+        stdio: "pipe",
+        timeout: 3000,
+      });
       return true;
     }
   } catch {
@@ -192,7 +193,10 @@ export function mouseDown(x: number, y: number, button: "left" | "right" = "left
     }
     if (os === "linux" && isAvailable("xdotool")) {
       const btn = button === "right" ? "3" : "1";
-      execFileSync("xdotool", ["mousemove", String(x), String(y), "mousedown", btn], { stdio: "pipe", timeout: 3000 });
+      execFileSync("xdotool", ["mousemove", String(x), String(y), "mousedown", btn], {
+        stdio: "pipe",
+        timeout: 3000,
+      });
       return true;
     }
   } catch {
@@ -214,7 +218,10 @@ export function mouseUp(x?: number, y?: number, button: "left" | "right" = "left
     if (os === "linux" && isAvailable("xdotool")) {
       const btn = button === "right" ? "3" : "1";
       if (x !== undefined && y !== undefined) {
-        execFileSync("xdotool", ["mousemove", String(x), String(y), "mouseup", btn], { stdio: "pipe", timeout: 3000 });
+        execFileSync("xdotool", ["mousemove", String(x), String(y), "mouseup", btn], {
+          stdio: "pipe",
+          timeout: 3000,
+        });
       } else {
         execFileSync("xdotool", ["mouseup", btn], { stdio: "pipe", timeout: 3000 });
       }
@@ -230,7 +237,11 @@ export function mouseUp(x?: number, y?: number, button: "left" | "right" = "left
 export function drag(startX: number, startY: number, endX: number, endY: number): boolean {
   mouseDown(startX, startY);
   // Small delay to let the OS register the drag
-  try { execFileSync("sleep", ["0.1"], { stdio: "pipe", timeout: 1000 }); } catch { /* ok */ }
+  try {
+    execFileSync("sleep", ["0.1"], { stdio: "pipe", timeout: 1000 });
+  } catch {
+    /* ok */
+  }
   moveMouse(endX, endY);
   mouseUp(endX, endY);
   return true;
@@ -257,7 +268,10 @@ export function scroll(direction: "up" | "down" | "left" | "right", amount: numb
       // xdotool button 4=up, 5=down, 6=left, 7=right
       const buttonMap: Record<string, string> = { up: "4", down: "5", left: "6", right: "7" };
       const btn = buttonMap[direction] ?? "5";
-      execFileSync("xdotool", ["click", "--repeat", String(amount), btn], { stdio: "pipe", timeout: 3000 });
+      execFileSync("xdotool", ["click", "--repeat", String(amount), btn], {
+        stdio: "pipe",
+        timeout: 3000,
+      });
       return true;
     }
   } catch {
@@ -298,7 +312,13 @@ export function pressKey(options: KeyOptions): boolean {
 
   try {
     if (os === "darwin" && isAvailable("cliclick")) {
-      const modMap: Record<string, string> = { ctrl: "ctrl", alt: "alt", shift: "shift", cmd: "cmd", super: "cmd" };
+      const modMap: Record<string, string> = {
+        ctrl: "ctrl",
+        alt: "alt",
+        shift: "shift",
+        cmd: "cmd",
+        super: "cmd",
+      };
       const mods = (options.modifiers ?? []).map((m) => modMap[m] ?? m);
       const keySpec = mods.length > 0 ? `${mods.join(",")}:${options.key}` : options.key;
       execFileSync("cliclick", [`kp:${keySpec}`], { stdio: "pipe", timeout: 3000 });
@@ -306,7 +326,13 @@ export function pressKey(options: KeyOptions): boolean {
     }
 
     if (os === "linux" && isAvailable("xdotool")) {
-      const modMap: Record<string, string> = { ctrl: "ctrl", alt: "alt", shift: "shift", cmd: "super", super: "super" };
+      const modMap: Record<string, string> = {
+        ctrl: "ctrl",
+        alt: "alt",
+        shift: "shift",
+        cmd: "super",
+        super: "super",
+      };
       const mods = (options.modifiers ?? []).map((m) => modMap[m] ?? m).join("+");
       const keyCombo = mods ? `${mods}+${options.key}` : options.key;
       execFileSync("xdotool", ["key", keyCombo], { stdio: "pipe", timeout: 3000 });
@@ -332,7 +358,10 @@ export function holdKey(key: string, durationMs: number): boolean {
     }
     if (os === "linux" && isAvailable("xdotool")) {
       execFileSync("xdotool", ["keydown", key], { stdio: "pipe", timeout: 3000 });
-      execFileSync("sleep", [String(durationMs / 1000)], { stdio: "pipe", timeout: durationMs + 2000 });
+      execFileSync("sleep", [String(durationMs / 1000)], {
+        stdio: "pipe",
+        timeout: durationMs + 2000,
+      });
       execFileSync("xdotool", ["keyup", key], { stdio: "pipe", timeout: 3000 });
       return true;
     }
@@ -349,7 +378,9 @@ export function runAppleScript(script: string): string | null {
   if (detectPlatform() !== "darwin") return null;
   try {
     return execFileSync("osascript", ["-e", script], {
-      stdio: "pipe", timeout: 10000, encoding: "utf-8",
+      stdio: "pipe",
+      timeout: 10000,
+      encoding: "utf-8",
     }).trim();
   } catch {
     // Best-effort path — caller gets a safe fallback, no user-facing error.
@@ -367,7 +398,9 @@ export function getActiveWindowTitle(): string | null {
   if (os === "linux" && isAvailable("xdotool")) {
     try {
       return execFileSync("xdotool", ["getactivewindow", "getwindowname"], {
-        stdio: "pipe", timeout: 3000, encoding: "utf-8",
+        stdio: "pipe",
+        timeout: 3000,
+        encoding: "utf-8",
       }).trim();
     } catch {
       // Best-effort path — caller gets a safe fallback, no user-facing error.
@@ -383,7 +416,11 @@ export function closeWindow(): boolean {
   const os = detectPlatform();
   if (os === "darwin") {
     try {
-      execFileSync("osascript", ["-e", 'tell application "System Events" to keystroke "w" using command down'], { stdio: "pipe", timeout: 3000 });
+      execFileSync(
+        "osascript",
+        ["-e", 'tell application "System Events" to keystroke "w" using command down'],
+        { stdio: "pipe", timeout: 3000 },
+      );
       return true;
     } catch {
       // Best-effort path — caller gets a safe fallback, no user-facing error.
@@ -406,7 +443,11 @@ export function minimizeWindow(): boolean {
   const os = detectPlatform();
   if (os === "darwin") {
     try {
-      execFileSync("osascript", ["-e", 'tell application "System Events" to keystroke "m" using command down'], { stdio: "pipe", timeout: 3000 });
+      execFileSync(
+        "osascript",
+        ["-e", 'tell application "System Events" to keystroke "m" using command down'],
+        { stdio: "pipe", timeout: 3000 },
+      );
       return true;
     } catch {
       // Best-effort path — caller gets a safe fallback, no user-facing error.
@@ -415,7 +456,10 @@ export function minimizeWindow(): boolean {
   }
   if (os === "linux" && isAvailable("xdotool")) {
     try {
-      execFileSync("xdotool", ["getactivewindow", "windowminimize"], { stdio: "pipe", timeout: 3000 });
+      execFileSync("xdotool", ["getactivewindow", "windowminimize"], {
+        stdio: "pipe",
+        timeout: 3000,
+      });
       return true;
     } catch {
       // Best-effort path — caller gets a safe fallback, no user-facing error.
@@ -429,7 +473,14 @@ export function maximizeWindow(): boolean {
   const os = detectPlatform();
   if (os === "darwin") {
     try {
-      execFileSync("osascript", ["-e", 'tell application "System Events" to tell (first process whose frontmost is true) to set value of attribute "AXFullScreen" of window 1 to true'], { stdio: "pipe", timeout: 3000 });
+      execFileSync(
+        "osascript",
+        [
+          "-e",
+          'tell application "System Events" to tell (first process whose frontmost is true) to set value of attribute "AXFullScreen" of window 1 to true',
+        ],
+        { stdio: "pipe", timeout: 3000 },
+      );
       return true;
     } catch {
       // Best-effort path — caller gets a safe fallback, no user-facing error.
@@ -438,7 +489,10 @@ export function maximizeWindow(): boolean {
   }
   if (os === "linux" && isAvailable("xdotool")) {
     try {
-      execFileSync("xdotool", ["getactivewindow", "windowsize", "100%", "100%"], { stdio: "pipe", timeout: 3000 });
+      execFileSync("xdotool", ["getactivewindow", "windowsize", "100%", "100%"], {
+        stdio: "pipe",
+        timeout: 3000,
+      });
       return true;
     } catch {
       // Best-effort path — caller gets a safe fallback, no user-facing error.
@@ -452,7 +506,10 @@ export function switchWindow(app?: string, title?: string): boolean {
   const os = detectPlatform();
   if (os === "darwin" && app) {
     try {
-      execFileSync("osascript", ["-e", `tell application "${app}" to activate`], { stdio: "pipe", timeout: 3000 });
+      execFileSync("osascript", ["-e", `tell application "${app}" to activate`], {
+        stdio: "pipe",
+        timeout: 3000,
+      });
       return true;
     } catch {
       // Best-effort path — caller gets a safe fallback, no user-facing error.
@@ -462,9 +519,15 @@ export function switchWindow(app?: string, title?: string): boolean {
   if (os === "linux" && isAvailable("xdotool")) {
     try {
       if (title) {
-        execFileSync("xdotool", ["search", "--name", title, "windowactivate"], { stdio: "pipe", timeout: 3000 });
+        execFileSync("xdotool", ["search", "--name", title, "windowactivate"], {
+          stdio: "pipe",
+          timeout: 3000,
+        });
       } else if (app) {
-        execFileSync("xdotool", ["search", "--class", app, "windowactivate"], { stdio: "pipe", timeout: 3000 });
+        execFileSync("xdotool", ["search", "--class", app, "windowactivate"], {
+          stdio: "pipe",
+          timeout: 3000,
+        });
       }
       return true;
     } catch {
@@ -481,7 +544,11 @@ export function clipboardCopy(): boolean {
   const os = detectPlatform();
   try {
     if (os === "darwin") {
-      execFileSync("osascript", ["-e", 'tell application "System Events" to keystroke "c" using command down'], { stdio: "pipe", timeout: 3000 });
+      execFileSync(
+        "osascript",
+        ["-e", 'tell application "System Events" to keystroke "c" using command down'],
+        { stdio: "pipe", timeout: 3000 },
+      );
       return true;
     }
     if (os === "linux" && isAvailable("xdotool")) {
@@ -499,7 +566,11 @@ export function clipboardPaste(): boolean {
   const os = detectPlatform();
   try {
     if (os === "darwin") {
-      execFileSync("osascript", ["-e", 'tell application "System Events" to keystroke "v" using command down'], { stdio: "pipe", timeout: 3000 });
+      execFileSync(
+        "osascript",
+        ["-e", 'tell application "System Events" to keystroke "v" using command down'],
+        { stdio: "pipe", timeout: 3000 },
+      );
       return true;
     }
     if (os === "linux" && isAvailable("xdotool")) {
@@ -515,17 +586,30 @@ export function clipboardPaste(): boolean {
 
 // ── Screenshot Zoom (Region Capture) ────────────────────
 
-export function zoomRegion(region: { x: number; y: number; width: number; height: number }): ScreenshotResult | null {
+export function zoomRegion(region: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): ScreenshotResult | null {
   const os = detectPlatform();
   const path = join(tmpdir(), `wotann-zoom-${Date.now()}.png`);
   try {
     if (os === "darwin") {
       // Use screencapture with -R flag for region capture
-      execFileSync("screencapture", ["-x", "-R", `${region.x},${region.y},${region.width},${region.height}`, path], { stdio: "pipe", timeout: 5000 });
+      execFileSync(
+        "screencapture",
+        ["-x", "-R", `${region.x},${region.y},${region.width},${region.height}`, path],
+        { stdio: "pipe", timeout: 5000 },
+      );
       return { path, width: region.width, height: region.height, format: "png" };
     }
     if (os === "linux" && isAvailable("maim")) {
-      execFileSync("maim", ["-g", `${region.width}x${region.height}+${region.x}+${region.y}`, path], { stdio: "pipe", timeout: 5000 });
+      execFileSync(
+        "maim",
+        ["-g", `${region.width}x${region.height}+${region.x}+${region.y}`, path],
+        { stdio: "pipe", timeout: 5000 },
+      );
       return { path, width: region.width, height: region.height, format: "png" };
     }
   } catch {
@@ -541,7 +625,11 @@ export function getDisplayCount(): number {
   const os = detectPlatform();
   if (os === "darwin") {
     try {
-      const result = execFileSync("osascript", ["-e", 'tell application "System Events" to count of desktops'], { stdio: "pipe", timeout: 3000, encoding: "utf-8" });
+      const result = execFileSync(
+        "osascript",
+        ["-e", 'tell application "System Events" to count of desktops'],
+        { stdio: "pipe", timeout: 3000, encoding: "utf-8" },
+      );
       return parseInt(result.trim(), 10) || 1;
     } catch {
       // Best-effort path — caller gets a safe fallback, no user-facing error.
@@ -551,12 +639,18 @@ export function getDisplayCount(): number {
   return 1;
 }
 
-export function takeScreenshotOfDisplay(displayIndex: number, outputPath?: string): ScreenshotResult | null {
+export function takeScreenshotOfDisplay(
+  displayIndex: number,
+  outputPath?: string,
+): ScreenshotResult | null {
   const os = detectPlatform();
   const path = outputPath ?? join(tmpdir(), `wotann-display-${displayIndex}-${Date.now()}.png`);
   try {
     if (os === "darwin") {
-      execFileSync("screencapture", ["-x", "-D", String(displayIndex + 1), path], { stdio: "pipe", timeout: 5000 });
+      execFileSync("screencapture", ["-x", "-D", String(displayIndex + 1), path], {
+        stdio: "pipe",
+        timeout: 5000,
+      });
       return { path, width: 0, height: 0, format: "png" };
     }
   } catch {
@@ -580,60 +674,102 @@ export type RouteResult = { readonly success: boolean; readonly output: string }
 type RouteHandler = (params: Record<string, string>) => RouteResult;
 
 const ROUTE_TABLE: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>([
-  ["open-url", (p: Record<string, string>) => {
-    const url = p["url"] ?? "";
-    try {
+  [
+    "open-url",
+    (p: Record<string, string>) => {
+      const url = p["url"] ?? "";
+      try {
+        if (detectPlatform() === "darwin") {
+          execFileSync("open", [url], { stdio: "pipe", timeout: 5000 });
+        } else {
+          execFileSync("xdg-open", [url], { stdio: "pipe", timeout: 5000 });
+        }
+        return { success: true, output: `Opened ${url}` };
+      } catch {
+        return { success: false, output: "Failed to open URL" };
+      }
+    },
+  ],
+  [
+    "open-app",
+    (p: Record<string, string>) => {
+      const app = p["app"] ?? "";
       if (detectPlatform() === "darwin") {
-        execFileSync("open", [url], { stdio: "pipe", timeout: 5000 });
-      } else {
-        execFileSync("xdg-open", [url], { stdio: "pipe", timeout: 5000 });
+        const result = runAppleScript(`tell application "${app}" to activate`);
+        return { success: result !== null, output: result ?? "Failed" };
       }
-      return { success: true, output: `Opened ${url}` };
-    } catch { return { success: false, output: "Failed to open URL" }; }
-  }],
-  ["open-app", (p: Record<string, string>) => {
-    const app = p["app"] ?? "";
-    if (detectPlatform() === "darwin") {
-      const result = runAppleScript(`tell application "${app}" to activate`);
-      return { success: result !== null, output: result ?? "Failed" };
-    }
-    return { success: false, output: "Not supported on this platform" };
-  }],
-  ["get-clipboard", () => {
-    try {
-      if (detectPlatform() === "darwin") {
-        const text = execFileSync("pbpaste", [], { stdio: "pipe", timeout: 3000, encoding: "utf-8" });
-        return { success: true, output: text };
+      return { success: false, output: "Not supported on this platform" };
+    },
+  ],
+  [
+    "get-clipboard",
+    () => {
+      try {
+        if (detectPlatform() === "darwin") {
+          const text = execFileSync("pbpaste", [], {
+            stdio: "pipe",
+            timeout: 3000,
+            encoding: "utf-8",
+          });
+          return { success: true, output: text };
+        }
+        if (isAvailable("xclip")) {
+          const text = execFileSync("xclip", ["-selection", "clipboard", "-o"], {
+            stdio: "pipe",
+            timeout: 3000,
+            encoding: "utf-8",
+          });
+          return { success: true, output: text };
+        }
+      } catch {
+        /* fall through */
       }
-      if (isAvailable("xclip")) {
-        const text = execFileSync("xclip", ["-selection", "clipboard", "-o"], { stdio: "pipe", timeout: 3000, encoding: "utf-8" });
-        return { success: true, output: text };
+      return { success: false, output: "" };
+    },
+  ],
+  [
+    "set-clipboard",
+    (p: Record<string, string>) => {
+      const text = p["text"] ?? "";
+      try {
+        if (detectPlatform() === "darwin") {
+          execFileSync("pbcopy", [], {
+            input: text,
+            stdio: ["pipe", "pipe", "pipe"],
+            timeout: 3000,
+          });
+          return { success: true, output: "Copied to clipboard" };
+        }
+        if (isAvailable("xclip")) {
+          execFileSync("xclip", ["-selection", "clipboard"], {
+            input: text,
+            stdio: ["pipe", "pipe", "pipe"],
+            timeout: 3000,
+          });
+          return { success: true, output: "Copied to clipboard" };
+        }
+      } catch {
+        /* fall through */
       }
-    } catch { /* fall through */ }
-    return { success: false, output: "" };
-  }],
-  ["set-clipboard", (p: Record<string, string>) => {
-    const text = p["text"] ?? "";
-    try {
-      if (detectPlatform() === "darwin") {
-        execFileSync("pbcopy", [], { input: text, stdio: ["pipe", "pipe", "pipe"], timeout: 3000 });
-        return { success: true, output: "Copied to clipboard" };
-      }
-      if (isAvailable("xclip")) {
-        execFileSync("xclip", ["-selection", "clipboard"], { input: text, stdio: ["pipe", "pipe", "pipe"], timeout: 3000 });
-        return { success: true, output: "Copied to clipboard" };
-      }
-    } catch { /* fall through */ }
-    return { success: false, output: "Clipboard not available" };
-  }],
-  ["get-active-window", () => {
-    const title = getActiveWindowTitle();
-    return { success: title !== null, output: title ?? "Unknown" };
-  }],
-  ["screenshot", (p: Record<string, string>) => {
-    const result = takeScreenshot(p["path"]);
-    return result ? { success: true, output: result.path } : { success: false, output: "Screenshot failed" };
-  }],
+      return { success: false, output: "Clipboard not available" };
+    },
+  ],
+  [
+    "get-active-window",
+    () => {
+      const title = getActiveWindowTitle();
+      return { success: title !== null, output: title ?? "Unknown" };
+    },
+  ],
+  [
+    "screenshot",
+    (p: Record<string, string>) => {
+      const result = takeScreenshot(p["path"]);
+      return result
+        ? { success: true, output: result.path }
+        : { success: false, output: "Screenshot failed" };
+    },
+  ],
 ]);
 
 /**
@@ -662,7 +798,9 @@ export function listDesktopActions(): readonly string[] {
  * Uses the encoding-detector module to inspect Content-Type headers
  * and HTML meta charset tags, then converts the raw buffer to UTF-8.
  */
-export async function fetchWebContent(url: string): Promise<{ text: string; encoding: string; converted: boolean } | null> {
+export async function fetchWebContent(
+  url: string,
+): Promise<{ text: string; encoding: string; converted: boolean } | null> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     if (!res.ok) return null;

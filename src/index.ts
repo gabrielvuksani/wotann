@@ -985,7 +985,7 @@ daemonCmd
   .option("-v, --verbose", "Stream daemon log output to the terminal for the startup window")
   .action(async (opts: { verbose?: boolean }) => {
     const { existsSync, mkdirSync, readFileSync } = await import("node:fs");
-    const { pidPath } = getDaemonPaths(process.cwd());
+    const { pidPath } = getDaemonPaths();
     const wotannDir = join(process.cwd(), ".wotann");
     if (!existsSync(wotannDir)) mkdirSync(wotannDir, { recursive: true });
 
@@ -1037,7 +1037,7 @@ daemonCmd
   .command("stop")
   .description("Stop the background daemon")
   .action(async () => {
-    const { pidPath, statusPath } = getDaemonPaths(process.cwd());
+    const { pidPath, statusPath } = getDaemonPaths();
     const { existsSync, readFileSync, unlinkSync } = await import("node:fs");
     if (existsSync(pidPath)) {
       const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
@@ -1078,7 +1078,7 @@ daemonCmd
   .command("status")
   .description("Show daemon status")
   .action(async () => {
-    const { pidPath, statusPath } = getDaemonPaths(process.cwd());
+    const { pidPath, statusPath } = getDaemonPaths();
     const { existsSync, readFileSync } = await import("node:fs");
     if (existsSync(pidPath)) {
       const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
@@ -1119,7 +1119,7 @@ engineCmd
   .description("Start the WOTANN engine (background daemon with runtime hosting)")
   .action(async () => {
     const { existsSync, mkdirSync, readFileSync } = await import("node:fs");
-    const { pidPath } = getDaemonPaths(process.cwd());
+    const { pidPath } = getDaemonPaths();
     const wotannDir = join(process.cwd(), ".wotann");
     if (!existsSync(wotannDir)) mkdirSync(wotannDir, { recursive: true });
 
@@ -1132,7 +1132,10 @@ engineCmd
     }
 
     const entryPath = fileURLToPath(import.meta.url);
-    const child = spawnDaemonWorker(entryPath, process.cwd());
+    // Spawn detached — we don't hold a handle to the child because the
+    // daemon runs independently. `void` marks the discard explicitly so
+    // future readers don't think the handle was forgotten by accident.
+    void spawnDaemonWorker(entryPath, process.cwd());
     const ready = await waitForDaemonReady(pidPath, 6_000);
 
     if (!ready) {
@@ -1152,7 +1155,7 @@ engineCmd
   .command("stop")
   .description("Stop the WOTANN engine")
   .action(async () => {
-    const { pidPath, statusPath } = getDaemonPaths(process.cwd());
+    const { pidPath, statusPath } = getDaemonPaths();
     const { existsSync, readFileSync, unlinkSync } = await import("node:fs");
     if (existsSync(pidPath)) {
       const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
@@ -1193,7 +1196,7 @@ engineCmd
   .command("status")
   .description("Show WOTANN engine status")
   .action(async () => {
-    const { pidPath, statusPath } = getDaemonPaths(process.cwd());
+    const { pidPath, statusPath } = getDaemonPaths();
     const { existsSync, readFileSync } = await import("node:fs");
 
     // Check PID-based daemon status
@@ -2021,7 +2024,9 @@ program
       const { createRuntime } = await import("./core/runtime.js");
       const { runRuntimeQuery } = await import("./cli/runtime-query.js");
       const { mkdirSync, writeFileSync } = await import("node:fs");
-      const { ShadowGit } = await import("./utils/shadow-git.js");
+      // Session-5: autopilot callbacks now route shadow-git through
+      // runtime.getShadowGit() so the checkpoint ring stays coherent
+      // with PreToolUse hook entries. No direct ShadowGit import needed.
 
       const executor = new AutonomousExecutor({
         maxCycles: parseInt(options.maxCycles ?? "10", 10),
@@ -2183,12 +2188,13 @@ program
               mkdirSync(checkpointDir, { recursive: true });
               writeFileSync(join(checkpointDir, "latest.json"), JSON.stringify(state, null, 2));
             },
-            onShadowGitCommit: async (cycle, message) => {
+            onShadowGitCommit: async (_cycle, message) => {
               try {
                 // Route through the runtime's singleton so this checkpoint
                 // lands in the same ring buffer as the PreToolUse hook —
                 // a parallel `new ShadowGit(...)` instance here would
                 // silently decouple autopilot checkpoints from shadow.undo.
+                // `_cycle` unused: message already encodes the cycle context.
                 const sha = await runtime.getShadowGit().createCheckpoint(message);
                 if (sha) console.log(chalk.dim(`  Shadow git: ${sha.slice(0, 8)} — ${message}`));
               } catch {
@@ -2891,7 +2897,10 @@ function partitionFiles(files: readonly string[], groups: number): string[][] {
   return partitions.filter((group) => group.length > 0);
 }
 
-function getDaemonPaths(workingDir: string): { pidPath: string; statusPath: string } {
+function getDaemonPaths(): { pidPath: string; statusPath: string } {
+  // Daemon state lives in ~/.wotann/ regardless of cwd — the prior
+  // signature took a `workingDir` arg but ignored it, confusing
+  // readers and failing lint. Removed session-5.
   const wotannDir = join(homedir(), ".wotann");
   return {
     pidPath: join(wotannDir, "daemon.pid"),
