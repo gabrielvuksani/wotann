@@ -95,16 +95,30 @@ function isProcessAlive(pid: number): boolean {
     // + permission. Throws ESRCH if the process is gone, EPERM if the
     // PID is owned by another user (which means it IS alive).
     process.kill(pid, 0);
-    return true;
   } catch (err) {
-    // Opus audit (2026-04-15): prior catch{} treated EPERM (alive but
-    // not ours) as dead, which on multi-tenant hosts let two daemons
-    // race for the same socket/port. Now: EPERM means alive (return
-    // true), ESRCH means dead (return false), anything else: be safe
-    // and assume alive (better to refuse start than collide).
     const code = (err as { code?: string }).code;
     if (code === "ESRCH") return false;
-    return true;
+    // EPERM + other errors fall through to the cmdline check — the PID
+    // exists at the kernel level, but macOS recycles PIDs aggressively
+    // so we must confirm it's actually our daemon before claiming
+    // "already running" and bailing the new spawn.
+  }
+  // Verify the PID owner is actually a node daemon, not a recycled PID
+  // belonging to an unrelated process (SSH session, kernel task, etc).
+  try {
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    const cmd = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    // Match "node" + "daemon|wotann" in any order — covers both
+    // `tsx src/daemon/start.ts` and `node dist/daemon/start.js`.
+    return /node.*(daemon|wotann)|wotann.*daemon/i.test(cmd);
+  } catch {
+    // `ps` couldn't find the PID → recycled or gone. Let the caller
+    // treat the pid file as stale and clean it up rather than refusing
+    // to start forever.
+    return false;
   }
 }
 
