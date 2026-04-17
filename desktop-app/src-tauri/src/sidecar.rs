@@ -236,8 +236,14 @@ impl SidecarManager {
             .envs(std::env::vars())
             .env("PATH", augmented_path())
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            // Discard stdout/stderr instead of piping — piping without
+            // a reader fills the 64KB pipe buffer during startup logging
+            // and then every subsequent console.log() in the TS daemon
+            // blocks the process forever, preventing it from ever binding
+            // the socket. If daemon diagnostics are needed, tee them to
+            // ~/.wotann/daemon.log from inside the daemon itself.
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .spawn();
 
         match result {
@@ -292,8 +298,17 @@ impl SidecarManager {
         std::thread::spawn(|| {
             println!("KAIROS watchdog started (checking every 5s)");
             let mut was_healthy = false;
-            let mut last_spawn_attempt = Instant::now() - Duration::from_secs(120);
-            let mut consecutive_failures = 0u32;
+            // Initial grace period: the initial app-launch spawn kicks the
+            // TS daemon which typically needs 20-45s to bind its socket
+            // (tsx JIT + runtime init). If the watchdog fires inside this
+            // window it will double-spawn. Seed last_spawn_attempt to
+            // "just now" so the first respawn isn't allowed until the
+            // back-off has passed.
+            let mut last_spawn_attempt = Instant::now();
+            // Higher starting failure count → longer initial back-off
+            // (60s) so we give the initial spawn ample time to finish
+            // booting before any respawn is considered.
+            let mut consecutive_failures = 3u32;
             loop {
                 std::thread::sleep(Duration::from_secs(5));
                 let healthy = Self::is_daemon_healthy();
