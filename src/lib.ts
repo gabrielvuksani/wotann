@@ -480,16 +480,7 @@ export {
   type TaskResult,
   type PipelineProgress,
 } from "./orchestration/spec-to-ship.js";
-export {
-  AgentMessageBus,
-  type AgentAddress,
-  type AgentMessage as AgentBusMessage,
-  type AgentStatus as AgentBusStatus,
-  type MessageType as AgentMessageType,
-  type ForkedContext,
-  type DeliveryResult,
-  type MessageFilter,
-} from "./orchestration/agent-messaging.js";
+// Session-6: orchestration/agent-messaging removed — zero external consumers.
 export {
   PlanStore,
   type Plan,
@@ -500,11 +491,7 @@ export {
   type TaskStatus as PlanTaskStatus,
   type TaskPhase,
 } from "./orchestration/plan-store.js";
-export {
-  ConsensusRouter,
-  type ConsensusWeight,
-  type TaskTypeWeight,
-} from "./orchestration/consensus-router.js";
+// Session-6: orchestration/consensus-router removed — zero external consumers.
 export {
   RedBlueTestRunner,
   type TaskExecutor as RedBlueTaskExecutor,
@@ -514,15 +501,7 @@ export {
   type AdversarialRound,
   type AdversarialResult,
 } from "./orchestration/red-blue-testing.js";
-export {
-  AmbientCodeRadio,
-  type AmbientSuggestion,
-  type SuggestionType,
-  type SuggestionPriority,
-  type ChangeType,
-  type WatchOptions,
-  type ApplyResult as RadioApplyResult,
-} from "./orchestration/ambient-code-radio.js";
+// Session-6: orchestration/ambient-code-radio removed — zero external consumers.
 export {
   AutoCommitter,
   type ConventionalType,
@@ -567,14 +546,7 @@ export {
   type CostBreakdown,
   type ProviderCostComparison,
 } from "./telemetry/cost-oracle.js";
-export {
-  ProviderCostDashboard,
-  type CostRecord,
-  type ProviderCostBreakdown,
-  type ProviderSummary,
-  type CheapestRoute,
-  type BudgetAlert,
-} from "./telemetry/provider-cost-dashboard.js";
+// Session-6: telemetry/provider-cost-dashboard removed — zero external consumers.
 
 // ── Learning (extended) ─────────────────────────────────
 export { DecisionLedger, type Decision, type DecisionInput } from "./learning/decision-ledger.js";
@@ -906,14 +878,9 @@ export {
   type ExportConfig,
 } from "./telemetry/observability-export.js";
 
-// ── Phase D18 — Agent Protocol Standard ─────────────────
-export {
-  AgentProtocolHandler,
-  type AgentProtocolTask,
-  type AgentProtocolStep,
-  type AgentProtocolArtifact,
-  type AgentCapabilities,
-} from "./orchestration/agent-protocol.js";
+// Session-6: orchestration/agent-protocol removed — zero external consumers.
+// A fresh ACP (Agent Client Protocol) port per Zed's open-standard spec
+// is planned for v0.3 — the stale in-house variant would have blocked it.
 
 // ── Phase DX4 — Data Connectors (Onyx) ─────────────────
 export {
@@ -943,15 +910,7 @@ export {
   type ResumeResult,
 } from "./hooks/rate-limit-resume.js";
 
-// ── Phase DX21 — Agent Graph Gen (Hive) ────────────────
-export {
-  AgentGraphGenerator,
-  type AgentGraph,
-  type AgentGraphNode,
-  type AgentGraphEdge,
-  type GraphCheckpoint,
-  type GraphExecutionResult,
-} from "./orchestration/agent-graph-gen.js";
+// Session-6: orchestration/agent-graph-gen removed — zero external consumers.
 
 // ── Principle 4E — User Model (Hermes Honcho) ──────────
 export {
