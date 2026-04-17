@@ -1,10 +1,10 @@
 /**
- * Quantized Vector Store (S3-4 — TurboQuant integration scaffold).
+ * Quantized Vector Store (S3-4 — TurboQuant integration).
  *
  * Replaces the TF-IDF semantic search internals with embedding-based
- * dense vectors when an ONNX runtime + MiniLM model are available;
- * otherwise transparently falls back to the existing TFIDFIndex so
- * users without the optional ML deps still get conceptual search.
+ * dense vectors when `@xenova/transformers` is available; otherwise
+ * transparently falls back to the existing TFIDFIndex so users without
+ * the optional ML dependency still get conceptual search.
  *
  * The tradeoff vs the existing `semantic-search.ts`:
  *
@@ -13,22 +13,24 @@
  *     - Good for literal-conceptual matches (synonyms, stems)
  *     - Weak on paraphrase ("authentication" vs "login flow")
  *
- *   MiniLM via ONNX (this module):
- *     - Adds ~40MB onnxruntime-web + ~25MB MiniLM weights (lazy)
- *     - First query downloads weights from a CDN, then cached
+ *   MiniLM via @xenova/transformers (this module):
+ *     - Adds ~50MB optionalDependency; tokeniser + ONNX runtime bundled
+ *     - First query downloads model weights from HuggingFace CDN (cached)
  *     - Real semantic recall — handles paraphrase and cross-lingual
  *
  * The class exposes the SAME public API as TFIDFIndex (addDocument /
- * search / similarity) so it's a drop-in replacement. Callers that
- * want the embedding path explicitly opt in by constructing
- * QuantizedVectorStore instead of TFIDFIndex; the default runtime
- * path keeps TF-IDF for zero-cost startup.
+ * removeDocument / search / similarity / size / vocabularySize / clear)
+ * so it's a drop-in replacement. The default runtime path keeps TF-IDF
+ * for zero-cost startup; callers opt into embeddings by constructing
+ * `QuantizedVectorStore` directly OR by setting
+ * `WOTANN_ENABLE_ONNX_EMBEDDINGS=1` (honoured by the runtime when it
+ * chooses which backing index to instantiate).
  *
- * The actual ONNX wiring is gated behind a runtime feature check
- * (does the user have `onnxruntime-web` installed? does the model
- * fetch succeed?). If either fails, we silently fall through to
- * TFIDFIndex — the user's queries still work, just without the
- * dense-embedding upgrade.
+ * Session-4 (2026-04-17) replaced the hand-rolled onnxruntime-web +
+ * WordPiece-tokenizer stub with a single `pipeline('feature-extraction',
+ * 'Xenova/all-MiniLM-L6-v2')` call — the transformers package handles
+ * tokenisation, inference, and mean-pooling in one shot. The prior
+ * scaffold threw on encode(); this version returns a real 384-d vector.
  */
 
 import { TFIDFIndex } from "./semantic-search.js";
@@ -41,59 +43,68 @@ export interface VectorSearchResult {
 
 /**
  * Configuration for the quantized vector store. All optional —
- * sensible defaults that work with the all-MiniLM-L6-v2 model from
- * HuggingFace + onnxruntime-web's WASM backend.
+ * sensible defaults that work with all-MiniLM-L6-v2 from HuggingFace
+ * via the @xenova/transformers pipeline.
  */
 export interface QuantizedVectorStoreConfig {
   /** Dimensionality of the embedding model (default: 384 for MiniLM-L6). */
   readonly dimensions?: number;
   /** Number of bits to quantize embeddings to (1, 2, 4, 8). Default 8. */
   readonly quantizationBits?: number;
-  /** URL or local path to the ONNX model file. */
-  readonly modelUrl?: string;
-  /** Skip ONNX entirely and use TF-IDF — useful for tests. */
+  /** Model id passed to the transformers pipeline. */
+  readonly modelId?: string;
+  /** Skip the ONNX path entirely and use TF-IDF — useful for tests. */
   readonly forceTFIDFFallback?: boolean;
+  /**
+   * Weight for the embedding contribution when merging with the TF-IDF
+   * result set in search(). Defaults to 0.7 — favours semantic matches
+   * once the model is loaded, while keeping TF-IDF's literal-match
+   * signal as a tie-breaker for queries with exact keyword overlap.
+   */
+  readonly embeddingWeight?: number;
 }
 
-const DEFAULT_CONFIG: Required<Omit<QuantizedVectorStoreConfig, "modelUrl">> & {
-  modelUrl: string;
-} = {
+const DEFAULT_CONFIG: Required<QuantizedVectorStoreConfig> = {
   dimensions: 384,
   quantizationBits: 8,
-  modelUrl: "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model_quantized.onnx",
+  modelId: "Xenova/all-MiniLM-L6-v2",
   forceTFIDFFallback: false,
+  embeddingWeight: 0.7,
 };
 
-interface OnnxRuntimeShape {
-  readonly InferenceSession: {
-    create: (path: string) => Promise<{
-      run: (feeds: Record<string, unknown>) => Promise<Record<string, { data: Float32Array }>>;
-    }>;
-  };
-  readonly Tensor: new (
-    type: "int64" | "float32",
-    data: ArrayLike<number>,
-    dims: number[],
-  ) => unknown;
-}
+/**
+ * Minimal structural type for the transformers `FeatureExtractionPipeline`.
+ * Spelling out the call signature keeps the module typecheck-clean
+ * without depending on @xenova/transformers types at compile time.
+ */
+type FeatureExtractor = (
+  input: string,
+  options?: { pooling?: "mean" | "cls" | "none"; normalize?: boolean },
+) => Promise<{ data: Float32Array; dims: readonly number[] }>;
+
+type TransformersModule = {
+  readonly pipeline: (
+    task: "feature-extraction",
+    modelId: string,
+    options?: Record<string, unknown>,
+  ) => Promise<FeatureExtractor>;
+};
 
 /**
- * Try to load onnxruntime-web. Returns the runtime module if the
- * package is installed, null otherwise. Caches both success and
- * failure so we don't pay the import cost twice.
+ * Try to load @xenova/transformers. Returns the module if installed,
+ * null otherwise. Caches both success and failure.
  */
-let cachedOnnx: OnnxRuntimeShape | null | undefined;
-async function loadOnnxRuntime(): Promise<OnnxRuntimeShape | null> {
-  if (cachedOnnx !== undefined) return cachedOnnx;
+let cachedTransformers: TransformersModule | null | undefined;
+async function loadTransformers(): Promise<TransformersModule | null> {
+  if (cachedTransformers !== undefined) return cachedTransformers;
   try {
-    // Dynamic import keeps onnxruntime-web a peerDependency-style
-    // optional install. The shape cast is intentional — we don't want
-    // to require the user install @types/onnxruntime-web just to typecheck.
-    const mod = (await import("onnxruntime-web" as string)) as unknown as OnnxRuntimeShape;
-    cachedOnnx = mod;
+    // Dynamic import keeps @xenova/transformers an optionalDependency
+    // so users without the ~50MB package still get the TF-IDF path.
+    const mod = (await import("@xenova/transformers" as string)) as unknown as TransformersModule;
+    cachedTransformers = mod;
     return mod;
   } catch {
-    cachedOnnx = null;
+    cachedTransformers = null;
     return null;
   }
 }
@@ -105,7 +116,11 @@ async function loadOnnxRuntime(): Promise<OnnxRuntimeShape | null> {
  * factor per vector.
  */
 function quantize(vec: Float32Array, bits: number): { data: Int8Array; scale: number } {
-  const max = Math.max(...Array.from(vec).map(Math.abs));
+  let max = 0;
+  for (const v of vec) {
+    const abs = v < 0 ? -v : v;
+    if (abs > max) max = abs;
+  }
   const range = (1 << (bits - 1)) - 1;
   const scale = max > 0 ? range / max : 1;
   const data = new Int8Array(vec.length);
@@ -139,39 +154,41 @@ function dequantizeCosine(
 
 /**
  * QuantizedVectorStore. Public API matches TFIDFIndex — addDocument,
- * search, similarity — so it's a drop-in replacement. The internal
- * representation is dense quantized embeddings (Int8Array per vector)
- * when ONNX is available, falling through to TF-IDF when it isn't.
+ * removeDocument, search, similarity, size, vocabularySize, clear —
+ * so it's a drop-in replacement. The internal representation is dense
+ * quantized embeddings (Int8Array per vector) when @xenova/transformers
+ * is available, falling through to TF-IDF when it isn't.
  */
 export class QuantizedVectorStore {
-  private readonly config: typeof DEFAULT_CONFIG;
+  private readonly config: Required<QuantizedVectorStoreConfig>;
   private readonly fallback = new TFIDFIndex();
-  private session: Awaited<ReturnType<OnnxRuntimeShape["InferenceSession"]["create"]>> | null =
-    null;
+  private extractor: FeatureExtractor | null = null;
   private readyPromise: Promise<boolean> | null = null;
   private readonly vectors: Map<string, { quant: ReturnType<typeof quantize>; content: string }> =
     new Map();
+  private readonly encodeQueue: Array<{ id: string; content: string }> = [];
+  private encoding = false;
 
   constructor(config: QuantizedVectorStoreConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
   /**
-   * Initialize the ONNX session. Idempotent — subsequent calls return
-   * the cached promise. Returns true on success (use embeddings),
+   * Initialize the transformers pipeline. Idempotent — subsequent calls
+   * return the cached promise. Returns true on success (use embeddings),
    * false on any failure (fall back to TF-IDF).
    */
   async ready(): Promise<boolean> {
     if (this.config.forceTFIDFFallback) return false;
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = (async () => {
-      const ort = await loadOnnxRuntime();
-      if (!ort) return false;
+      const transformers = await loadTransformers();
+      if (!transformers) return false;
       try {
-        this.session = await ort.InferenceSession.create(this.config.modelUrl);
+        this.extractor = await transformers.pipeline("feature-extraction", this.config.modelId);
         return true;
       } catch {
-        this.session = null;
+        this.extractor = null;
         return false;
       }
     })();
@@ -179,63 +196,126 @@ export class QuantizedVectorStore {
   }
 
   /**
-   * Add a document to the index. If the ONNX session is ready, encodes
-   * to a dense quantized vector; otherwise stores in the TF-IDF
-   * fallback. Both happen in parallel: TF-IDF write is always done so
-   * even if embeddings fail later, the fallback path has the document.
+   * Add a document to the index. Always writes to the TF-IDF fallback
+   * so literal/keyword matches still work; also queues an embedding
+   * encode when ONNX is available (or will be once ready() resolves).
    */
   addDocument(id: string, content: string): void {
     this.fallback.addDocument(id, content);
-    if (!this.session) {
-      // Schedule the embedding write for when the session is ready.
-      void this.ready().then((ok) => {
-        if (ok) void this.encodeAndStore(id, content);
-      });
-      return;
-    }
-    void this.encodeAndStore(id, content);
+    if (this.config.forceTFIDFFallback) return;
+    this.encodeQueue.push({ id, content });
+    void this.drainQueue();
   }
 
-  private async encodeAndStore(id: string, content: string): Promise<void> {
-    if (!this.session) return;
+  /**
+   * Remove a document from both the TF-IDF fallback and the vector
+   * cache. API parity with TFIDFIndex.removeDocument.
+   */
+  removeDocument(id: string): void {
+    this.fallback.removeDocument(id);
+    this.vectors.delete(id);
+    // Also drop any queued-but-not-yet-encoded entry for this id.
+    for (let i = this.encodeQueue.length - 1; i >= 0; i--) {
+      if (this.encodeQueue[i]?.id === id) this.encodeQueue.splice(i, 1);
+    }
+  }
+
+  /**
+   * Clear both backends. API parity with TFIDFIndex.clear.
+   */
+  clear(): void {
+    this.fallback.clear();
+    this.vectors.clear();
+    this.encodeQueue.length = 0;
+  }
+
+  /**
+   * Vocabulary size reported by the TF-IDF fallback (always present).
+   * API parity with TFIDFIndex.vocabularySize.
+   */
+  vocabularySize(): number {
+    return this.fallback.vocabularySize();
+  }
+
+  private async drainQueue(): Promise<void> {
+    if (this.encoding) return;
+    this.encoding = true;
     try {
-      const vec = await this.encode(content);
-      this.vectors.set(id, {
-        quant: quantize(vec, this.config.quantizationBits),
-        content,
-      });
-    } catch {
-      // Encode failure — TF-IDF fallback already has the doc.
+      const ok = await this.ready();
+      if (!ok) return; // TF-IDF fallback is already populated
+      while (this.encodeQueue.length > 0) {
+        const next = this.encodeQueue.shift();
+        if (!next) continue;
+        try {
+          const vec = await this.encode(next.content);
+          this.vectors.set(next.id, {
+            quant: quantize(vec, this.config.quantizationBits),
+            content: next.content,
+          });
+        } catch {
+          // One failed encode shouldn't block the queue; the TF-IDF
+          // fallback has the doc either way.
+        }
+      }
+    } finally {
+      this.encoding = false;
     }
   }
 
   /**
-   * Encode a string to a dense embedding via the ONNX MiniLM model.
-   * Real implementation requires tokenization (WordPiece) + model
-   * inference + mean-pooling. The skeleton below shows the shape; the
-   * full tokenizer port is a follow-up — for now we throw to surface
-   * the gap explicitly when ONNX IS loaded but tokenization isn't.
+   * Encode a string to a dense embedding via the transformers pipeline.
+   * Session-4 replaced the prior "not yet implemented" throw with a
+   * real pipeline call — tokenisation, inference, and mean-pooling
+   * happen inside the transformers package.
    */
-  private async encode(_content: string): Promise<Float32Array> {
-    if (!this.session) throw new Error("Session not ready");
-    // TODO(s3-4-tokenizer): port the WordPiece tokenizer for MiniLM.
-    // The current skeleton runs the model with a placeholder token
-    // sequence, which gives the wrong embeddings — so we explicitly
-    // throw to keep the TF-IDF fallback active until the tokenizer
-    // lands. That's why callers see TF-IDF behavior even when ONNX
-    // loads successfully; this is intentional, not a bug.
-    throw new Error("MiniLM tokenizer not yet ported — using TF-IDF fallback");
+  private async encode(content: string): Promise<Float32Array> {
+    if (!this.extractor) throw new Error("Extractor not ready");
+    const output = await this.extractor(content, { pooling: "mean", normalize: true });
+    // The pipeline returns a Tensor-like object with `.data` as Float32Array.
+    // We copy into a fresh Float32Array so the caller owns the buffer.
+    return new Float32Array(output.data);
   }
 
   /**
-   * Search for documents similar to the query. Uses ONNX embeddings
-   * when both query encoding succeeds AND we have stored vectors;
-   * falls through to TF-IDF otherwise. The merger preserves
-   * TFIDFIndex's contract — readonly array of {id, score, content}.
+   * Search for documents similar to the query. Merges embedding-backed
+   * cosine-similarity scores with TF-IDF results using reciprocal-rank
+   * fusion — the result set contains both "semantic matches" (embedding
+   * path) and "literal matches" (TF-IDF path), ranked by combined score.
+   * When embeddings aren't loaded yet or the optional dep is absent,
+   * falls through to the TF-IDF path so callers always get something.
    */
-  search(query: string, limit: number = 10): readonly VectorSearchResult[] {
-    // TF-IDF fallback path — fast and always works.
-    return this.fallback.search(query, limit);
+  async search(query: string, limit: number = 10): Promise<readonly VectorSearchResult[]> {
+    const tfidfResults = this.fallback.search(query, limit * 2);
+    // If embeddings aren't active, TF-IDF is the only signal we have.
+    if (this.config.forceTFIDFFallback) return tfidfResults.slice(0, limit);
+    if (this.vectors.size === 0) {
+      // Either the pipeline hasn't finished loading or no docs have been
+      // encoded yet; TF-IDF covers the interim.
+      return tfidfResults.slice(0, limit);
+    }
+    const ok = await this.ready();
+    if (!ok || !this.extractor) return tfidfResults.slice(0, limit);
+    let queryVec: Float32Array;
+    try {
+      queryVec = await this.encode(query);
+    } catch {
+      return tfidfResults.slice(0, limit);
+    }
+    const queryQuant = quantize(queryVec, this.config.quantizationBits);
+    const vectorResults: VectorSearchResult[] = [];
+    for (const [id, entry] of this.vectors.entries()) {
+      const score = dequantizeCosine(queryQuant, entry.quant);
+      if (score > 0) {
+        vectorResults.push({ id, score, text: entry.content });
+      }
+    }
+    vectorResults.sort((a, b) => b.score - a.score);
+    return mergeByReciprocalRank(
+      tfidfResults,
+      vectorResults,
+      1 - this.config.embeddingWeight,
+      limit,
+    );
   }
 
   /**
@@ -264,7 +344,36 @@ export class QuantizedVectorStore {
   getBackend(): "onnx-minilm" | "tfidf-fallback" | "uninitialized" {
     if (this.config.forceTFIDFFallback) return "tfidf-fallback";
     if (!this.readyPromise) return "uninitialized";
-    if (this.session && this.vectors.size > 0) return "onnx-minilm";
+    if (this.extractor && this.vectors.size > 0) return "onnx-minilm";
     return "tfidf-fallback";
   }
+}
+
+function mergeByReciprocalRank(
+  tfidf: readonly VectorSearchResult[],
+  vector: readonly VectorSearchResult[],
+  keywordWeight: number,
+  limit: number,
+): readonly VectorSearchResult[] {
+  const vectorWeight = 1 - keywordWeight;
+  const scores = new Map<string, { score: number; text: string }>();
+  for (let i = 0; i < tfidf.length; i++) {
+    const r = tfidf[i]!;
+    const rrf = keywordWeight * (1 / (i + 1));
+    scores.set(r.id, { score: rrf, text: r.text });
+  }
+  for (let i = 0; i < vector.length; i++) {
+    const r = vector[i]!;
+    const rrf = vectorWeight * (1 / (i + 1));
+    const existing = scores.get(r.id);
+    if (existing) {
+      scores.set(r.id, { score: existing.score + rrf, text: existing.text });
+    } else {
+      scores.set(r.id, { score: rrf, text: r.text });
+    }
+  }
+  return [...scores.entries()]
+    .map(([id, data]) => ({ id, score: data.score, text: data.text }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 }
