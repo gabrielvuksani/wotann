@@ -263,14 +263,29 @@ export async function refreshStatus(): Promise<void> {
   try {
     const status = await commands.getStatus();
     const prevConnected = useStore.getState().engineConnected;
-    // Respect user's explicit model selection — don't overwrite with daemon defaults
+    // Respect the user's explicit selection only if it's still valid —
+    // otherwise fall back to whatever the daemon reports. Prior logic
+    // blindly trusted localStorage, so a stale saved pair would paint
+    // the header pill with a provider/model that wasn't in the live
+    // providers[], undoing initializeFromEngine's reconcile on every
+    // poll tick.
     const userProvider = localStorage.getItem("wotann-selected-provider");
     const userModel = localStorage.getItem("wotann-selected-model");
+    const availableProviders = useStore.getState().providers;
+    const savedPairValid =
+      !!userProvider &&
+      !!userModel &&
+      availableProviders.some(
+        (p) =>
+          p.id === userProvider &&
+          p.enabled &&
+          p.models.some((m) => m.id === userModel),
+      );
 
     const patch: Record<string, unknown> = {
       engineConnected: status.connected,
-      provider: userProvider || status.provider,
-      model: userModel || status.model,
+      provider: savedPairValid ? userProvider : status.provider,
+      model: savedPairValid ? userModel : status.model,
       mode: status.mode as "chat" | "build" | "autopilot" | "compare" | "review",
       totalTokens: status.totalTokens,
       contextPercent: status.contextPercent,
