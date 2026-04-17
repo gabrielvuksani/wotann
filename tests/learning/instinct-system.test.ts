@@ -167,11 +167,16 @@ describe("InstinctSystem", () => {
       const id = system.getAllInstincts()[0]!.id;
       const before = system.getInstinct(id)!.confidence;
 
-      // Same moment — no time has passed
+      // Same moment — no time has passed. A strict `toBe` assertion is
+      // environment-dependent (quality-bar #12, session 3): `new Date()`
+      // advances by fractions of a millisecond between observe() and
+      // applyDecay(), producing a tiny decay like 0.4999999998 on slow
+      // CI runners. Assert near-equality so a sub-millisecond timing
+      // wobble doesn't falsely fail.
       system.applyDecay(new Date());
 
       const after = system.getInstinct(id);
-      expect(after?.confidence).toBe(before);
+      expect(after?.confidence).toBeCloseTo(before, 4);
     });
 
     it("returns count of decayed instincts", () => {

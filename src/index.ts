@@ -170,7 +170,7 @@ program
         // type declarations for the optional peer dep. We cast to the
         // minimal shape we actually use.
         const modName = "qrcode-terminal";
-         
+
         const mod = (await import(modName)) as any;
         const generate = mod?.default?.generate ?? mod?.generate;
         if (typeof generate === "function") {
@@ -2185,8 +2185,11 @@ program
             },
             onShadowGitCommit: async (cycle, message) => {
               try {
-                const shadowGit = new ShadowGit(process.cwd());
-                const sha = await shadowGit.createCheckpoint(message);
+                // Route through the runtime's singleton so this checkpoint
+                // lands in the same ring buffer as the PreToolUse hook —
+                // a parallel `new ShadowGit(...)` instance here would
+                // silently decouple autopilot checkpoints from shadow.undo.
+                const sha = await runtime.getShadowGit().createCheckpoint(message);
                 if (sha) console.log(chalk.dim(`  Shadow git: ${sha.slice(0, 8)} — ${message}`));
               } catch {
                 // Shadow git is best-effort

@@ -70,6 +70,13 @@ export interface PipelineContext {
   readonly attempt: number;
   readonly priorErrors: readonly ClassifiedError[];
   readonly maxAttempts: number;
+  /**
+   * Optional pre-initialised ShadowGit instance (e.g. from the runtime
+   * singleton). When present, the code-rollback strategy threads it
+   * rather than constructing a parallel instance — keeps the
+   * recent-checkpoints ring coherent across runtime / hooks / RPC.
+   */
+  readonly shadowGit?: ShadowGit;
 }
 
 export interface PipelineResult {
@@ -89,56 +96,64 @@ const KNOWN_PATTERNS: readonly ErrorPattern[] = [
     id: "ts-type-mismatch",
     regex: /Type '(.+?)' is not assignable to type '(.+?)'/,
     category: "type-error",
-    fixTemplate: "Fix type mismatch: expected $2 but got $1. Check the variable declaration and ensure the types align.",
+    fixTemplate:
+      "Fix type mismatch: expected $2 but got $1. Check the variable declaration and ensure the types align.",
     priority: 1,
   },
   {
     id: "ts-missing-property",
     regex: /Property '(.+?)' does not exist on type '(.+?)'/,
     category: "type-error",
-    fixTemplate: "Add missing property '$1' to type '$2', or check if you meant a different property name.",
+    fixTemplate:
+      "Add missing property '$1' to type '$2', or check if you meant a different property name.",
     priority: 2,
   },
   {
     id: "ts-cannot-find-module",
     regex: /Cannot find module '(.+?)'/,
     category: "import-error",
-    fixTemplate: "Module '$1' not found. Check: 1) file exists at path, 2) exports are correct, 3) tsconfig paths are configured.",
+    fixTemplate:
+      "Module '$1' not found. Check: 1) file exists at path, 2) exports are correct, 3) tsconfig paths are configured.",
     priority: 1,
   },
   {
     id: "ts-import-not-exported",
     regex: /Module '(.+?)' has no exported member '(.+?)'/,
     category: "import-error",
-    fixTemplate: "Symbol '$2' is not exported from '$1'. Check the module's exports or use a different import.",
+    fixTemplate:
+      "Symbol '$2' is not exported from '$1'. Check the module's exports or use a different import.",
     priority: 2,
   },
   {
     id: "test-assertion-fail",
     regex: /expected (.+?) to (equal|be|match|contain) (.+)/i,
     category: "test-failure",
-    fixTemplate: "Test assertion failed: expected $1 to $2 $3. Review the implementation logic, not the test.",
+    fixTemplate:
+      "Test assertion failed: expected $1 to $2 $3. Review the implementation logic, not the test.",
     priority: 3,
   },
   {
     id: "test-timeout",
     regex: /Timeout of (\d+)ms exceeded/,
     category: "timeout",
-    fixTemplate: "Test timed out after $1ms. Check for: infinite loops, unresolved promises, missing async/await.",
+    fixTemplate:
+      "Test timed out after $1ms. Check for: infinite loops, unresolved promises, missing async/await.",
     priority: 2,
   },
   {
     id: "rate-limit-429",
     regex: /429|rate.?limit|too many requests/i,
     category: "rate-limit",
-    fixTemplate: "Rate limited. Wait and retry with exponential backoff, or switch to a different provider.",
+    fixTemplate:
+      "Rate limited. Wait and retry with exponential backoff, or switch to a different provider.",
     priority: 1,
   },
   {
     id: "context-overflow",
     regex: /context.?(window|length|limit)|maximum.?tokens|too.?long/i,
     category: "context-overflow",
-    fixTemplate: "Context window exceeded. Compact conversation, remove old tool results, or split the task.",
+    fixTemplate:
+      "Context window exceeded. Compact conversation, remove old tool results, or split the task.",
     priority: 1,
   },
   {
@@ -152,14 +167,16 @@ const KNOWN_PATTERNS: readonly ErrorPattern[] = [
     id: "syntax-error",
     regex: /SyntaxError|Unexpected token|Parse error/i,
     category: "syntax-error",
-    fixTemplate: "Syntax error in the generated code. Review brackets, semicolons, and template literals.",
+    fixTemplate:
+      "Syntax error in the generated code. Review brackets, semicolons, and template literals.",
     priority: 1,
   },
   {
     id: "circular-dep",
     regex: /circular dependency|cannot access .+ before initialization/i,
     category: "circular-dependency",
-    fixTemplate: "Circular dependency detected. Break the cycle by extracting shared types into a separate file.",
+    fixTemplate:
+      "Circular dependency detected. Break the cycle by extracting shared types into a separate file.",
     priority: 2,
   },
   {
@@ -254,15 +271,32 @@ const RECOVERY_STRATEGIES: readonly RecoveryStrategy[] = [
     description: "Revert changes via shadow git and retry with fresh codebase",
     execute: async (error, context) => {
       const start = Date.now();
-      const shadowGit = new ShadowGit(context.workingDir);
+      // Prefer the runtime-provided singleton so the recent-checkpoints
+      // ring stays coherent — constructing a parallel instance would
+      // always see an empty list and skip restore. Fallback to a fresh
+      // instance only when no singleton is available (standalone / test-
+      // only callers of SelfHealingPipeline).
+      const shadowGit = context.shadowGit ?? new ShadowGit(context.workingDir);
       const initialized = await shadowGit.initialize();
       if (!initialized) {
-        return { success: false, strategy: "code-rollback", output: "Could not init shadow git", tokensUsed: 0, durationMs: Date.now() - start };
+        return {
+          success: false,
+          strategy: "code-rollback",
+          output: "Could not init shadow git",
+          tokensUsed: 0,
+          durationMs: Date.now() - start,
+        };
       }
 
       const checkpoints = await shadowGit.listCheckpoints();
       if (checkpoints.length === 0) {
-        return { success: false, strategy: "code-rollback", output: "No checkpoints to restore", tokensUsed: 0, durationMs: Date.now() - start };
+        return {
+          success: false,
+          strategy: "code-rollback",
+          output: "No checkpoints to restore",
+          tokensUsed: 0,
+          durationMs: Date.now() - start,
+        };
       }
 
       const checkpoint = checkpoints[0]!;
@@ -270,7 +304,9 @@ const RECOVERY_STRATEGIES: readonly RecoveryStrategy[] = [
       return {
         success: restored,
         strategy: "code-rollback",
-        output: restored ? `Rolled back to checkpoint ${checkpoint.slice(0, 8)}` : "Rollback failed",
+        output: restored
+          ? `Rolled back to checkpoint ${checkpoint.slice(0, 8)}`
+          : "Rollback failed",
         tokensUsed: 0,
         durationMs: Date.now() - start,
       };
@@ -311,8 +347,9 @@ const RECOVERY_STRATEGIES: readonly RecoveryStrategy[] = [
         `**Provider:** ${context.provider} / ${context.model}`,
         "",
         "## Error History",
-        ...context.priorErrors.map((e, i) =>
-          `${i + 1}. [${e.category}] ${e.message.slice(0, 100)}${e.file ? ` (${e.file}:${e.line ?? "?"})` : ""}`
+        ...context.priorErrors.map(
+          (e, i) =>
+            `${i + 1}. [${e.category}] ${e.message.slice(0, 100)}${e.file ? ` (${e.file}:${e.line ?? "?"})` : ""}`,
         ),
         "",
         "## Last Error",
@@ -324,7 +361,9 @@ const RECOVERY_STRATEGIES: readonly RecoveryStrategy[] = [
         detectErrorRepetition(context.priorErrors).isRepeating
           ? "The same error type is repeating — the approach needs fundamental rethinking."
           : "Multiple different errors suggest the task is complex. Break it into smaller steps.",
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       return {
         success: false,
@@ -426,7 +465,8 @@ export class SelfHealingPipeline {
           recoveries: [...this.recoveryHistory],
           totalTokensUsed: this.totalTokensUsed,
           totalDurationMs: Date.now() - this.startTime,
-          finalStrategy: attempt === 0 ? "direct" : this.recoveryHistory.at(-1)?.strategy ?? "unknown",
+          finalStrategy:
+            attempt === 0 ? "direct" : (this.recoveryHistory.at(-1)?.strategy ?? "unknown"),
         };
       }
 
