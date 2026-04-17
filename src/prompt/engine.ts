@@ -146,6 +146,45 @@ const MODE_PROMPTS: Record<BehavioralMode, string> = {
 - Report by severity (CRITICAL/HIGH/MEDIUM/LOW)`,
 };
 
+// ── Karpathy-mode Preamble (opt-in via WOTANN_KARPATHY_MODE=1) ──────────────
+
+/**
+ * Compact form of the four engineering-discipline principles from
+ * `skills/karpathy-principles.md`. Rewritten from Karpathy's public
+ * engineering posture (llm.c, nanoGPT, micrograd) rather than the
+ * unlicensed source repo. Session-6 wiring for the skill — setting the
+ * env var prepends this preamble to the dynamic prompt section so all
+ * 4 tabs / channels get the discipline priors without per-session
+ * persona reconfig. The full-form skill remains loadable via the skill
+ * registry for deeper context on demand.
+ */
+const KARPATHY_PRINCIPLES_PREAMBLE = `Mode: KARPATHY (Engineering Discipline)
+Four priors, applied in order:
+
+1. Think-Before-Coding — State the problem in one sentence. Predict 2–3
+   failure modes. Identify the smallest change that could verify your
+   hypothesis, and run that first. Ask ONE specific question when
+   ambiguous; don't paragraph caveats.
+
+2. Simplicity-First — Write code a reader can hold in their head.
+   Prefer obvious over clever. One function, one purpose. Zero
+   indirection unless existing patterns require it. 15 lines of
+   hand-rolled often beats a library reach.
+
+3. Surgical-Changes — Edit the smallest possible scope. One concern
+   per commit. Never 'tidy up' in the same change as a bug fix. Reject
+   the temptation to "improve while you're there" — that's how churn
+   compounds.
+
+4. Goal-Driven-Execution — Rewrite imperatives as declarative success
+   criteria. "Fix the bug" → "the test at path:line passes." Before
+   long operations, state the expected outcome. Shorter feedback loops
+   over longer ones. "Done with tests green" beats "perfect".
+
+Quote the specific principle when it drives a decision. These are
+priors, not workflow gates — they layer cleanly on top of TDD / verify
+/ systematic-debugging without replacing them.`;
+
 // ── Prompt Assembly ─────────────────────────────────────────
 
 export function assembleSystemPrompt(options: PromptAssemblyOptions): string {
@@ -200,7 +239,9 @@ export function assembleSystemPromptParts(options: PromptAssemblyOptions): Promp
           cachedParts.push(`# Workspace: ${filename}\n\n${content}`);
           totalChars += content.length;
         }
-      } catch { /* skip unreadable files */ }
+      } catch {
+        /* skip unreadable files */
+      }
     }
   }
 
@@ -208,7 +249,7 @@ export function assembleSystemPromptParts(options: PromptAssemblyOptions): Promp
   const rulesDir = join(options.workspaceRoot, ".wotann", "rules");
   if (existsSync(rulesDir)) {
     try {
-      const ruleFiles = readdirSync(rulesDir).filter(f => f.endsWith(".md"));
+      const ruleFiles = readdirSync(rulesDir).filter((f) => f.endsWith(".md"));
       for (const ruleFile of ruleFiles) {
         const rulePath = join(rulesDir, ruleFile);
         const content = readFileSync(rulePath, "utf-8").slice(0, 10_000);
@@ -217,7 +258,9 @@ export function assembleSystemPromptParts(options: PromptAssemblyOptions): Promp
           totalChars += content.length;
         }
       }
-    } catch { /* skip unreadable rules directory */ }
+    } catch {
+      /* skip unreadable rules directory */
+    }
   }
 
   // 2. Behavioral mode
@@ -226,6 +269,20 @@ export function assembleSystemPromptParts(options: PromptAssemblyOptions): Promp
     if (modePrompt) {
       dynamicParts.push(modePrompt);
     }
+  }
+
+  // 2b. Session-6: Karpathy-mode preamble. Users who set
+  //     WOTANN_KARPATHY_MODE=1 (or `wotann --karpathy`) get the four
+  //     engineering-discipline principles (Think-Before-Coding,
+  //     Simplicity-First, Surgical-Changes, Goal-Driven-Execution)
+  //     prepended to the dynamic section so they apply to every turn
+  //     without needing a persona reconfiguration. Stacks cleanly
+  //     with behavioral modes + TDD / verify / systematic-debugging
+  //     skills — the principles are behavioral priors, not workflow
+  //     gates. Full wording lives in skills/karpathy-principles.md;
+  //     this is the compact preamble that injects inline.
+  if (process.env["WOTANN_KARPATHY_MODE"] === "1") {
+    dynamicParts.push(KARPATHY_PRINCIPLES_PREAMBLE);
   }
 
   // 3. Conditional rules (load by file pattern)
@@ -263,12 +320,14 @@ export function assembleSystemPromptParts(options: PromptAssemblyOptions): Promp
       options.model,
     );
     const config = modelFormatter.getFormatConfig(options.model);
-    const formattedCachedPrefix = rawCachedPrefix.length > 0
-      ? modelFormatter.formatSection("system_context", rawCachedPrefix, config.format)
-      : "";
-    const formattedDynamicSuffix = rawDynamicSuffix.length > 0
-      ? modelFormatter.formatSection("task_context", rawDynamicSuffix, config.format)
-      : "";
+    const formattedCachedPrefix =
+      rawCachedPrefix.length > 0
+        ? modelFormatter.formatSection("system_context", rawCachedPrefix, config.format)
+        : "";
+    const formattedDynamicSuffix =
+      rawDynamicSuffix.length > 0
+        ? modelFormatter.formatSection("task_context", rawDynamicSuffix, config.format)
+        : "";
 
     return {
       cachedPrefix: formattedCachedPrefix,
@@ -337,7 +396,9 @@ function formatPersona(persona: PersonaConfig): string {
     `Priorities: ${persona.priorities.join(", ")}`,
     `Communication style: ${persona.communication.join(", ")}`,
     persona.decisionFramework ? `Decision framework: ${persona.decisionFramework}` : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function matchGlobSimple(filePath: string, pattern: string): boolean {
