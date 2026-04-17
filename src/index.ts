@@ -339,6 +339,73 @@ program
     await runDoctor(process.cwd());
   });
 
+// ── wotann team-onboarding (C22) ─────────────────────────────
+
+program
+  .command("team-onboarding [action]")
+  .description("Generate or print a replayable setup recipe for teammates")
+  .option("--env <list>", "Comma-separated env vars that teammates need to set")
+  .option("--with-wotann", "Include WOTANN workspace init + MCP import steps")
+  .action(async (action: string | undefined, options: { env?: string; withWotann?: boolean }) => {
+    const verb = action ?? "plan";
+    const { buildRecipe, writeRecipe, readRecipe, renderRecipeChecklist } =
+      await import("./cli/team-onboarding.js");
+    const { ProjectOnboarder } = await import("./core/project-onboarding.js");
+    const projectDir = process.cwd();
+    const envVars = options.env
+      ?.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (verb === "plan") {
+      const result = new ProjectOnboarder().onboard(projectDir);
+      const recipe = buildRecipe({
+        projectDir,
+        stack: result.stack,
+        requiredEnvVars: envVars,
+        enableWotann: options.withWotann,
+      });
+      console.log(renderRecipeChecklist(recipe));
+      return;
+    }
+
+    if (verb === "record") {
+      const result = new ProjectOnboarder().onboard(projectDir);
+      const recipe = buildRecipe({
+        projectDir,
+        stack: result.stack,
+        requiredEnvVars: envVars,
+        enableWotann: options.withWotann,
+      });
+      const path = writeRecipe(projectDir, recipe);
+      console.log(chalk.green(`Wrote onboarding recipe to ${path}`));
+      return;
+    }
+
+    if (verb === "run") {
+      const recipe = readRecipe(projectDir);
+      if (!recipe) {
+        console.log(
+          chalk.red("No onboarding recipe found. Run `wotann team-onboarding record` first."),
+        );
+        process.exit(1);
+      }
+      console.log(renderRecipeChecklist(recipe));
+      console.log();
+      console.log(
+        chalk.dim(
+          "Walk through the checklist manually; execute mode is intentionally off by default.",
+        ),
+      );
+      return;
+    }
+
+    console.log(
+      chalk.red(`Unknown team-onboarding action: ${verb} (expected plan | record | run)`),
+    );
+    process.exit(1);
+  });
+
 // ── wotann autofix-pr (C21) ──────────────────────────────────
 
 program
