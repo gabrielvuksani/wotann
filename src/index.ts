@@ -339,6 +339,25 @@ program
     await runDoctor(process.cwd());
   });
 
+// ── wotann kanban (worktree board — C19) ─────────────────────
+
+program
+  .command("kanban")
+  .description("3-state worktree board: In Progress / Ready / Completed")
+  .action(async () => {
+    const { TaskIsolationManager } = await import("./sandbox/task-isolation.js");
+    const { buildBoard, renderBoard } = await import("./orchestration/worktree-kanban.js");
+    const { homedir } = await import("node:os");
+    const { join: pathJoin } = await import("node:path");
+
+    const repoRoot = process.cwd();
+    const isolationDir = pathJoin(homedir(), ".wotann", "isolation");
+    const mgr = new TaskIsolationManager(repoRoot, isolationDir);
+    const tasks = mgr.listAll();
+    const board = buildBoard(tasks);
+    console.log(renderBoard(board));
+  });
+
 // ── wotann cli-registry (C32) ────────────────────────────────
 
 program
