@@ -3761,23 +3761,123 @@ export class KairosRPCHandler {
       }
     });
 
-    // skills.forge.run — honest stub. Forge execution wiring requires
-    // connecting the merger's run path through the query pipeline, which
-    // is a multi-hour refactor tracked in docs/GAP_AUDIT_2026-04-15.md.
+    // skills.forge.run — session-5 wiring: runs the SkillMerger's
+    // runMerge() path to discover skills across sources, group by domain,
+    // and write merged skill files. The existing `skills.merge` handler
+    // (lower down this file) does the same work; `skills.forge.run` is
+    // the name the TrainingReview UI expects. Both route through the
+    // daemon's SkillMerger instance so the ring buffer of pending
+    // triggers stays consistent across RPC calls.
     this.handlers.set("skills.forge.run", async () => {
-      return {
-        ok: false,
-        error: "skills.forge.run: forge execution not yet wired through RPC",
-      };
+      try {
+        const merger = this.daemon?.getSkillMerger();
+        if (!merger) {
+          return {
+            ok: false,
+            error: "skills.forge.run: SkillMerger not available — requires skills directory",
+          };
+        }
+        const result = merger.runMerge();
+        return {
+          ok: true,
+          discovered: result.discovered,
+          groups: result.groups,
+          merged: result.merged,
+          outputDir: result.outputDir,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     });
 
-    // completion.suggest — inline completion ghost-text RPC. Real streaming
-    // implementation needs a dedicated short-context completion path + token
-    // budget + language-aware prefix/suffix handling. Until that lands, we
-    // return an empty suggestion so the UI renders nothing rather than
-    // silent-failing the whole ghost-text component.
-    this.handlers.set("completion.suggest", async () => {
-      return { suggestion: "", confidence: 0, model: null };
+    // completion.suggest — inline completion ghost-text RPC. Session-5:
+    // wired to runtime.query() with a short-context completion prompt +
+    // single-line extraction + 200-token budget. Per-session cache keyed
+    // by (prefix, suffix) hash prevents re-querying when the user
+    // re-focuses the same insertion point.
+    const completionCache = new Map<
+      string,
+      { suggestion: string; confidence: number; model: string | null }
+    >();
+    this.handlers.set("completion.suggest", async (params) => {
+      const p = params as Record<string, unknown>;
+      const prefix = typeof p["prefix"] === "string" ? (p["prefix"] as string) : "";
+      const suffix = typeof p["suffix"] === "string" ? (p["suffix"] as string) : "";
+      const language = typeof p["language"] === "string" ? (p["language"] as string) : "plaintext";
+      const maxTokens =
+        typeof p["maxTokens"] === "number" ? Math.min(p["maxTokens"] as number, 200) : 120;
+
+      // Short inputs or whitespace-only: return empty without hitting the model.
+      if (!prefix.trim() && !suffix.trim()) {
+        return { suggestion: "", confidence: 0, model: null };
+      }
+
+      // Cache key per (prefix, suffix, language). A session-scoped Map
+      // is enough — completion cache churns as the user types; there's
+      // no need for disk persistence.
+      const { createHash } = await import("node:crypto");
+      const cacheKey = createHash("sha256")
+        .update(`${language}\u0001${prefix}\u0002${suffix}`)
+        .digest("hex")
+        .slice(0, 32);
+      const cached = completionCache.get(cacheKey);
+      if (cached) return cached;
+
+      try {
+        // Fill-in-the-middle style prompt: the model sees the cursor
+        // position marked by <CURSOR> and completes the next line only.
+        const systemPrompt =
+          "You are an inline code completion assistant. The user's cursor is at <CURSOR>. " +
+          "Output ONLY the text that should be inserted at the cursor — no markdown, no code fences, " +
+          "no explanation. Complete at most one line; stop at the first newline unless the line is " +
+          "structurally incomplete (open brace, open string). Match the surrounding language and style.";
+        const userPrompt = `Language: ${language}\n\n\`\`\`\n${prefix.slice(-800)}<CURSOR>${suffix.slice(0, 400)}\n\`\`\``;
+        if (!this.runtime) {
+          return {
+            suggestion: "",
+            confidence: 0,
+            model: null,
+            error: "completion.suggest: runtime not initialised",
+          };
+        }
+        let suggestionText = "";
+        let modelUsed: string | null = null;
+        for await (const chunk of this.runtime.query({
+          prompt: userPrompt,
+          systemPrompt,
+          maxTokens,
+          temperature: 0.2,
+        })) {
+          if (chunk.type === "text") suggestionText += chunk.content;
+          if (chunk.model) modelUsed = chunk.model;
+          if (chunk.type === "done") break;
+        }
+        // Extract first line (strip markdown fences if model slipped one in).
+        let suggestion = suggestionText.trim();
+        if (suggestion.startsWith("```")) {
+          const inner = suggestion.replace(/^```[a-zA-Z0-9_-]*\s*\n/, "");
+          const idx = inner.indexOf("```");
+          suggestion = (idx >= 0 ? inner.slice(0, idx) : inner).trim();
+        }
+        const firstLine = suggestion.split("\n")[0] ?? "";
+        const result = {
+          suggestion: firstLine,
+          confidence: firstLine.length > 0 ? 0.6 : 0,
+          model: modelUsed,
+        };
+        completionCache.set(cacheKey, result);
+        return result;
+      } catch (err) {
+        return {
+          suggestion: "",
+          confidence: 0,
+          model: null,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     });
 
     // completion.accept — telemetry when the user accepts a ghost-text

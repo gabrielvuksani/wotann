@@ -944,7 +944,12 @@ const RESULT_INJECTION_PATTERNS: readonly RegExp[] = [
 
 export const resultInjectionScanner: HookHandler = {
   name: "ResultInjectionScanner",
-  event: "PostToolUse",
+  // Session-5 architectural fix: ToolResultReceived fires on the raw
+  // tool_result chunk BEFORE the agent response text is assembled, so
+  // the scanner can block/sanitise before the model sees the injection.
+  // PostToolUse was the wrong layer — by the time it ran, the result
+  // had already entered the next-turn context.
+  event: "ToolResultReceived",
   profile: "standard",
   handler(payload: HookPayload): HookResult {
     const content = payload.content ?? "";

@@ -2105,50 +2105,50 @@ export class WotannRuntime {
               const url = String(input["url"] ?? "");
               const maxLength =
                 typeof input["maxLength"] === "number" ? (input["maxLength"] as number) : undefined;
+              let resultContent: string;
               try {
                 const result = await this.webFetchTool.fetch(url);
                 const text = maxLength ? result.markdown.slice(0, maxLength) : result.markdown;
-                yield {
-                  type: "text" as const,
-                  content: `\n[web_fetch] ${result.title ?? url} (${result.status}): ${text.slice(0, 200)}...\n`,
-                  provider: chunk.provider ?? responseProvider,
-                  model: chunk.model ?? responseModel,
-                };
+                resultContent = `\n[web_fetch] ${result.title ?? url} (${result.status}): ${text.slice(0, 200)}...\n`;
               } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : String(err);
-                yield {
-                  type: "text" as const,
-                  content: `\n[web_fetch] Error: ${msg}\n`,
-                  provider: chunk.provider ?? responseProvider,
-                  model: chunk.model ?? responseModel,
-                };
+                resultContent = `\n[web_fetch] Error: ${msg}\n`;
               }
+              // Session-5: fire ToolResultReceived so ResultInjectionScanner
+              // sees the raw tool output before the model does. Blocked
+              // results are replaced with a sanitised error notice.
+              const sanitised = await this.fireToolResultReceivedHook("web_fetch", resultContent);
+              yield {
+                type: "text" as const,
+                content: sanitised.content,
+                provider: chunk.provider ?? responseProvider,
+                model: chunk.model ?? responseModel,
+              };
             }
 
             if (toolName === "plan_create" && chunk.toolInput && this.planStore) {
               const input = chunk.toolInput as Record<string, unknown>;
               const title = String(input["title"] ?? "Untitled");
               const description = String(input["description"] ?? "");
+              let resultContent: string;
               try {
                 const plan = this.planStore.createPlan(title, description);
-                yield {
-                  type: "text" as const,
-                  content: `\n[plan_create] Created plan "${plan.title}" (${plan.id})\n`,
-                  provider: chunk.provider ?? responseProvider,
-                  model: chunk.model ?? responseModel,
-                };
+                resultContent = `\n[plan_create] Created plan "${plan.title}" (${plan.id})\n`;
               } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : String(err);
-                yield {
-                  type: "text" as const,
-                  content: `\n[plan_create] Error: ${msg}\n`,
-                  provider: chunk.provider ?? responseProvider,
-                  model: chunk.model ?? responseModel,
-                };
+                resultContent = `\n[plan_create] Error: ${msg}\n`;
               }
+              const sanitised = await this.fireToolResultReceivedHook("plan_create", resultContent);
+              yield {
+                type: "text" as const,
+                content: sanitised.content,
+                provider: chunk.provider ?? responseProvider,
+                model: chunk.model ?? responseModel,
+              };
             }
 
             if (toolName === "plan_list" && this.planStore) {
+              let resultContent: string;
               try {
                 const plans = this.planStore.listPlans();
                 const summary =
@@ -2160,43 +2160,41 @@ export class WotannRuntime {
                             `- ${p.title} (${p.planId}): ${p.completedTasks}/${p.taskCount} tasks`,
                         )
                         .join("\n");
-                yield {
-                  type: "text" as const,
-                  content: `\n[plan_list]\n${summary}\n`,
-                  provider: chunk.provider ?? responseProvider,
-                  model: chunk.model ?? responseModel,
-                };
+                resultContent = `\n[plan_list]\n${summary}\n`;
               } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : String(err);
-                yield {
-                  type: "text" as const,
-                  content: `\n[plan_list] Error: ${msg}\n`,
-                  provider: chunk.provider ?? responseProvider,
-                  model: chunk.model ?? responseModel,
-                };
+                resultContent = `\n[plan_list] Error: ${msg}\n`;
               }
+              const sanitised = await this.fireToolResultReceivedHook("plan_list", resultContent);
+              yield {
+                type: "text" as const,
+                content: sanitised.content,
+                provider: chunk.provider ?? responseProvider,
+                model: chunk.model ?? responseModel,
+              };
             }
 
             if (toolName === "plan_advance" && chunk.toolInput && this.planStore) {
               const input = chunk.toolInput as Record<string, unknown>;
               const planId = String(input["planId"] ?? "");
+              let resultContent: string;
               try {
                 const task = this.planStore.advanceTask(planId);
-                yield {
-                  type: "text" as const,
-                  content: `\n[plan_advance] Task "${task.title}" → ${task.status}\n`,
-                  provider: chunk.provider ?? responseProvider,
-                  model: chunk.model ?? responseModel,
-                };
+                resultContent = `\n[plan_advance] Task "${task.title}" → ${task.status}\n`;
               } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : String(err);
-                yield {
-                  type: "text" as const,
-                  content: `\n[plan_advance] Error: ${msg}\n`,
-                  provider: chunk.provider ?? responseProvider,
-                  model: chunk.model ?? responseModel,
-                };
+                resultContent = `\n[plan_advance] Error: ${msg}\n`;
               }
+              const sanitised = await this.fireToolResultReceivedHook(
+                "plan_advance",
+                resultContent,
+              );
+              yield {
+                type: "text" as const,
+                content: sanitised.content,
+                provider: chunk.provider ?? responseProvider,
+                model: chunk.model ?? responseModel,
+              };
             }
           }
 
@@ -3156,6 +3154,43 @@ export class WotannRuntime {
   }
   getMemoryStore(): MemoryStore | null {
     return this.memoryStore;
+  }
+
+  /**
+   * Fire ToolResultReceived for a runtime-handled tool's raw output,
+   * BEFORE the result is yielded to the agent's next-turn context.
+   * Returns the (possibly sanitised) content; if the hook blocked,
+   * content is replaced with a sanitised error notice so callers can
+   * yield a safe placeholder instead of the injection-laced output.
+   *
+   * Session-5 architectural fix: the prior ResultInjectionScanner
+   * fired on PostToolUse with `content: fullContent` (the agent's
+   * response text). By then the injection had already entered the
+   * model's context. ToolResultReceived fires at the tool-dispatch
+   * level so the scanner gates the raw result before the model sees it.
+   */
+  private async fireToolResultReceivedHook(
+    toolName: string,
+    rawContent: string,
+  ): Promise<{ content: string; blocked: boolean }> {
+    if (this.config.enableHooks === false) {
+      return { content: rawContent, blocked: false };
+    }
+    const result = await this.hookEngine.fire({
+      event: "ToolResultReceived",
+      toolName,
+      content: rawContent,
+      sessionId: this.session.id,
+      timestamp: Date.now(),
+    });
+    if (result.action === "block") {
+      const reason = result.message ?? "Tool result blocked";
+      return {
+        content: `\n[tool ${toolName} result blocked by ${result.hookName ?? "ResultInjectionScanner"}: ${reason}]\n`,
+        blocked: true,
+      };
+    }
+    return { content: rawContent, blocked: false };
   }
   getCanvasEditor(): CanvasEditor {
     return this.canvasEditor;

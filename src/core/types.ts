@@ -138,6 +138,14 @@ export type HookEvent =
   | "PreToolUse"
   | "PostToolUse"
   | "PostToolUseFailure"
+  // ToolResultReceived fires when a raw tool_result chunk arrives back
+  // from the tool layer, BEFORE it enters the model's next-turn context.
+  // PostToolUse fires once the agent's response text is assembled; by
+  // then any prompt-injection in the tool output is already visible
+  // to the model. Guards like ResultInjectionScanner need this earlier
+  // hook event so they can sanitise (or block) before the model sees
+  // the result. Session-5 §Tier-1 architectural fix.
+  | "ToolResultReceived"
   | "UserPromptSubmit"
   | "Stop"
   | "SubagentStop"
