@@ -781,8 +781,14 @@ export class WotannRuntime {
     // Command history: project-scoped command recall
     this.commandHistory = new CommandHistory();
 
-    // Knowledge graph: entity/relationship extraction for graph-RAG retrieval
+    // Knowledge graph: entity/relationship extraction for graph-RAG retrieval.
+    // Session 9 audit fix: the KG is now persistent. We boot with an empty
+    // graph, then asynchronously rehydrate from `~/.wotann/knowledge-graph.json`
+    // if present (best-effort — missing or malformed file leaves the empty
+    // graph in place rather than crashing boot). A periodic snapshot + a
+    // final flush on `close()` preserve it across runtime restarts.
     this.knowledgeGraph = new KnowledgeGraph();
+    void this.rehydrateKnowledgeGraph();
 
     // Context tree: hierarchical project understanding
     const rootNode: ContextNode = {
@@ -3328,6 +3334,59 @@ export class WotannRuntime {
   getKnowledgeGraph(): KnowledgeGraph {
     return this.knowledgeGraph;
   }
+
+  /**
+   * Path where the KG snapshot lives. Located under the workspace's wotann
+   * dir so per-project graphs stay isolated.
+   */
+  private knowledgeGraphPath(): string {
+    // Late-require node:path to avoid a top-level import churn.
+    // Safe inside WotannRuntime methods (always runs in Node).
+    const path = require("node:path") as typeof import("node:path");
+    return path.join(this.config.workingDir, ".wotann", "knowledge-graph.json");
+  }
+
+  /**
+   * Rehydrate the knowledge graph from disk on boot. Best-effort — missing
+   * or malformed file leaves the empty graph in place. Audit fix for the
+   * session 9 finding "KnowledgeGraph is RAM-only; SQLite knowledge_nodes
+   * tables are orphan; every restart loses the graph."
+   */
+  private async rehydrateKnowledgeGraph(): Promise<void> {
+    try {
+      const fs = await import("node:fs/promises");
+      const json = await fs.readFile(this.knowledgeGraphPath(), "utf-8");
+      const restored = KnowledgeGraph.fromJSON(json);
+      // Swap by re-assigning the class-owned reference. All downstream
+      // accessors (getKnowledgeGraph, addDocument, dualLevelRetrieval,
+      // queryGraphAt) dereference `this.knowledgeGraph` lazily, so the
+      // swap is transparent to callers.
+      this.knowledgeGraph = restored;
+    } catch {
+      /* no snapshot on disk yet — leave empty graph as-is. Ditto malformed. */
+    }
+  }
+
+  /**
+   * Persist the knowledge graph to disk. Called on close() and any explicit
+   * checkpoint (e.g. before a destructive compaction). Idempotent; writes
+   * through a temp file + rename for atomicity.
+   */
+  async persistKnowledgeGraph(): Promise<void> {
+    try {
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      const target = this.knowledgeGraphPath();
+      const dir = path.dirname(target);
+      await fs.mkdir(dir, { recursive: true });
+      const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
+      await fs.writeFile(tmp, this.knowledgeGraph.toJSON(), "utf-8");
+      await fs.rename(tmp, target);
+    } catch {
+      /* persistence is best-effort — a disk error during shutdown should
+         not propagate and kill the rest of runtime.close(). */
+    }
+  }
   getContextTreeView(): ContextTree {
     return this.contextTree;
   }
@@ -4158,6 +4217,11 @@ export class WotannRuntime {
     // Persist instincts after reinforcement/decay at session end
     this.instinctSystem.applyDecay();
     this.instinctSystem.persist();
+
+    // Persist the knowledge graph before the memory store closes. Fire-and-
+    // forget — we can't await inside a sync close(), and persistence is
+    // best-effort anyway (JSON snapshot under .wotann/).
+    void this.persistKnowledgeGraph();
 
     this.memoryStore?.close();
     runWorkspaceDreamIfDue(this.config.workingDir, { quiet: true });
