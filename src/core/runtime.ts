@@ -2452,7 +2452,40 @@ export class WotannRuntime {
           success: !fullContent.toLowerCase().startsWith("error"),
           tokensUsed: totalTokens,
         };
-        await this.pipeline.processAfter(middlewareCtx, agentResult);
+        const processedResult = await this.pipeline.processAfter(middlewareCtx, agentResult);
+        // Session-10 audit fix for the "memoryMiddleware producer with no
+        // consumer" dead-payload finding. memoryMiddleware attaches a
+        // `memoryCandidate` descriptor to the result after successful tool
+        // use; we persist it into `memory_entries` under the `working`
+        // layer so downstream dream / instinct / skill-forge stages have
+        // concrete tool-usage observations to consolidate. Best-effort —
+        // a failed insert never breaks the query path.
+        if (processedResult.memoryCandidate && this.memoryStore) {
+          try {
+            const mc = processedResult.memoryCandidate;
+            this.memoryStore.insert({
+              id: `tool-${mc.tool}-${mc.timestamp}`,
+              layer: "working",
+              blockType: "patterns",
+              key: `tool-use:${mc.tool}${mc.file ? `:${mc.file}` : ""}`,
+              value: JSON.stringify({
+                tool: mc.tool,
+                file: mc.file,
+                sessionId: mc.sessionId,
+                timestamp: mc.timestamp,
+                success: processedResult.success,
+              }),
+              sessionId: mc.sessionId,
+              verified: false,
+              freshnessScore: 1.0,
+              confidenceLevel: 0.7,
+              verificationStatus: "unverified",
+              tags: "auto-capture,tool-use",
+            });
+          } catch {
+            /* best-effort — don't let memory-capture failures break the query */
+          }
+        }
       }
       const queryDuration = Date.now() - queryStart;
       this.refreshContextTelemetry({

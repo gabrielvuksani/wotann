@@ -21,16 +21,42 @@ export interface FallbackEntry {
 export type RateLimitChecker = (provider: ProviderName) => boolean;
 
 /**
- * The ordered fallback chain. Paid/authenticated providers first,
- * free providers (ollama, free endpoints) always last.
+ * The ordered fallback chain. Paid/authenticated providers first, free
+ * providers (ollama, free endpoints) always last.
+ *
+ * Session-10 audit fix: the previous chain only enumerated 10 of the 18
+ * declared `ProviderName` variants. The nine API-key-authenticated
+ * third-party providers (`huggingface`, `mistral`, `deepseek`,
+ * `perplexity`, `xai`, `together`, `fireworks`, `sambanova`, `groq`)
+ * authenticated correctly at discovery time but were silently dropped
+ * from the chain walk — setting `MISTRAL_API_KEY` picked Mistral as the
+ * preferred provider but the harness never rotated through those
+ * providers on rate-limit or auth failure. Now every non-free provider
+ * participates in the rotation, ordered by typical cost / latency
+ * (lowest-cost third parties first) so falls through hit the cheapest
+ * authenticated option before Gemini / ollama / free.
  */
 const PAID_PROVIDERS: readonly ProviderName[] = [
-  "anthropic", "openai", "codex", "copilot", "azure", "bedrock", "vertex",
+  "anthropic",
+  "openai",
+  "codex",
+  "copilot",
+  "azure",
+  "bedrock",
+  "vertex",
+  // Third-party OpenAI-compatibles (cheapest / most-reliable first)
+  "groq",
+  "deepseek",
+  "mistral",
+  "together",
+  "fireworks",
+  "xai",
+  "perplexity",
+  "sambanova",
+  "huggingface",
 ];
 
-const FREE_PROVIDERS: readonly ProviderName[] = [
-  "gemini", "ollama", "free",
-];
+const FREE_PROVIDERS: readonly ProviderName[] = ["gemini", "ollama", "free"];
 
 /**
  * Build a complete fallback chain starting from the preferred provider.
@@ -89,9 +115,7 @@ export function buildFallbackChain(
  * Returns the first non-rate-limited provider, or null if ALL are exhausted
  * (which should never happen if free providers are configured).
  */
-export function resolveNextProvider(
-  chain: readonly FallbackEntry[],
-): ProviderName | null {
+export function resolveNextProvider(chain: readonly FallbackEntry[]): ProviderName | null {
   // First pass: find a non-rate-limited provider
   for (const entry of chain) {
     if (entry.available && !entry.rateLimited) {

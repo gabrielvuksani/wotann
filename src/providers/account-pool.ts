@@ -110,10 +110,10 @@ export class AccountPool {
 
         const healthA = this.health.get(a.id);
         const healthB = this.health.get(b.id);
-        const errorRateA = healthA && healthA.requestCount > 0
-          ? healthA.errorCount / healthA.requestCount : 0;
-        const errorRateB = healthB && healthB.requestCount > 0
-          ? healthB.errorCount / healthB.requestCount : 0;
+        const errorRateA =
+          healthA && healthA.requestCount > 0 ? healthA.errorCount / healthA.requestCount : 0;
+        const errorRateB =
+          healthB && healthB.requestCount > 0 ? healthB.errorCount / healthB.requestCount : 0;
         return errorRateA - errorRateB;
       });
 
@@ -189,9 +189,8 @@ export class AccountPool {
     const h = this.health.get(accountId);
     if (!h) return;
 
-    const currentBackoff = h.billingFailureUntil > Date.now()
-      ? h.billingFailureUntil - Date.now()
-      : 5 * 60 * 60 * 1000; // Start at 5 hours
+    const currentBackoff =
+      h.billingFailureUntil > Date.now() ? h.billingFailureUntil - Date.now() : 5 * 60 * 60 * 1000; // Start at 5 hours
 
     const nextBackoff = Math.min(currentBackoff * 2, 24 * 60 * 60 * 1000);
 
@@ -233,10 +232,24 @@ export class AccountPool {
    */
   discoverFromEnv(): number {
     let count = 0;
+    // Session-10 audit fix: previously only 3 providers (anthropic / openai /
+    // gemini) supported multi-key pool rotation. Callers setting MISTRAL_API_KEY
+    // or GROQ_API_KEY got a single authenticated account with no rotation.
+    // Now every API-key-authed provider in ProviderName participates — AWS /
+    // Vertex / Azure use compound env vars checked via `discoverFromCompoundEnv`.
     const providers: readonly { name: ProviderName; envPrefix: string }[] = [
       { name: "anthropic", envPrefix: "ANTHROPIC_API_KEY" },
       { name: "openai", envPrefix: "OPENAI_API_KEY" },
       { name: "gemini", envPrefix: "GEMINI_API_KEY" },
+      { name: "huggingface", envPrefix: "HF_TOKEN" },
+      { name: "mistral", envPrefix: "MISTRAL_API_KEY" },
+      { name: "deepseek", envPrefix: "DEEPSEEK_API_KEY" },
+      { name: "perplexity", envPrefix: "PERPLEXITY_API_KEY" },
+      { name: "xai", envPrefix: "XAI_API_KEY" },
+      { name: "together", envPrefix: "TOGETHER_API_KEY" },
+      { name: "fireworks", envPrefix: "FIREWORKS_API_KEY" },
+      { name: "sambanova", envPrefix: "SAMBANOVA_API_KEY" },
+      { name: "groq", envPrefix: "GROQ_API_KEY" },
     ];
 
     for (const { name, envPrefix } of providers) {
