@@ -135,34 +135,49 @@ export interface ToolDefinition {
 
 // ── Hook Types ──────────────────────────────────────────────
 
+/**
+ * All hook events the engine recognises. Session-10 audit: 9 of 19
+ * variants are actually fired by the runtime / daemon (PreToolUse,
+ * PostToolUse, ToolResultReceived, UserPromptSubmit, Stop, PreCompact,
+ * PostCompact, SessionStart, SessionEnd). The remaining 10 —
+ * `PostToolUseFailure`, `SubagentStart`, `SubagentStop`,
+ * `Notification`, `PermissionRequest`, `Setup`, `TeammateIdle`,
+ * `TaskCompleted`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`
+ * — are NEVER dispatched by any producer. They remain in the union so
+ * external plugins that register handlers against them typecheck, but
+ * are explicitly marked advisory-only: handlers registered against
+ * them will not fire unless / until a producer is wired. See
+ * `src/hooks/engine.ts` for the live dispatch table.
+ *
+ * Rule of thumb: if you are adding a new feature and reach for one of
+ * the ADVISORY events, you must ALSO add the producer call site in
+ * the same change. Otherwise the event stays dead letter.
+ */
 export type HookEvent =
+  // ── Fired by runtime.ts ──
   | "PreToolUse"
   | "PostToolUse"
-  | "PostToolUseFailure"
-  // ToolResultReceived fires when a raw tool_result chunk arrives back
-  // from the tool layer, BEFORE it enters the model's next-turn context.
-  // PostToolUse fires once the agent's response text is assembled; by
-  // then any prompt-injection in the tool output is already visible
-  // to the model. Guards like ResultInjectionScanner need this earlier
-  // hook event so they can sanitise (or block) before the model sees
-  // the result. Session-5 §Tier-1 architectural fix.
   | "ToolResultReceived"
   | "UserPromptSubmit"
   | "Stop"
-  | "SubagentStop"
   | "PreCompact"
   | "PostCompact"
-  | "Notification"
-  | "SubagentStart"
-  | "PermissionRequest"
   | "SessionStart"
   | "SessionEnd"
-  | "Setup"
-  | "TeammateIdle"
-  | "TaskCompleted"
-  | "ConfigChange"
-  | "WorktreeCreate"
-  | "WorktreeRemove";
+  // ── ADVISORY ONLY — no producer wired; handlers never fire ──
+  // Session-10 audit dead-letter list. Keep the variants so external
+  // plugins typecheck, but do not treat as real event surfaces.
+  | "PostToolUseFailure" // advisory — no producer
+  | "SubagentStop" // advisory — no producer
+  | "Notification" // advisory — no producer
+  | "SubagentStart" // advisory — no producer
+  | "PermissionRequest" // advisory — no producer
+  | "Setup" // advisory — no producer
+  | "TeammateIdle" // advisory — no producer
+  | "TaskCompleted" // advisory — no producer
+  | "ConfigChange" // advisory — no producer
+  | "WorktreeCreate" // advisory — no producer
+  | "WorktreeRemove"; // advisory — no producer
 
 export type HookProfile = "minimal" | "standard" | "strict";
 
