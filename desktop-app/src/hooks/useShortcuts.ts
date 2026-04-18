@@ -100,6 +100,13 @@ export function useShortcuts() {
         return;
       }
 
+      // Cmd+Shift+L: Toggle Focus Mode (conversation 3-line collapse)
+      if (meta && e.shiftKey && e.key === "L") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("wotann:toggle-focus-mode"));
+        return;
+      }
+
       // ── Standard shortcuts ──
 
       // Cmd+K: Command palette

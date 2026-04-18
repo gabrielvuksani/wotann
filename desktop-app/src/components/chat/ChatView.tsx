@@ -8,10 +8,11 @@
  * - Scroll-to-bottom floating circle FAB with arrow icon
  */
 
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useCallback, useState, useMemo } from "react";
 import { useStore } from "../../store";
 import { MessageBubble } from "./MessageBubble";
 import { ComposerInput, type ComposerChipValue } from "./ComposerInput";
+import { FocusView, type FocusMessage } from "./FocusView";
 import { useStreaming } from "../../hooks/useStreaming";
 // StreamingIndicator rendered inside MessageBubble — not needed here
 import type { ChatMode } from "../../types";
@@ -313,6 +314,27 @@ export function ChatView() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
 
+  /* Focus Mode — 3-line collapse of last prompt / tool summary / final
+     assistant reply (Claude Code /focus port). Toggled via ⌘⇧L binding
+     or palette "Focus mode" action. Session-10 activation: FocusView
+     previously defined but never imported — now reachable. */
+  const [focusMode, setFocusMode] = useState(false);
+  useEffect(() => {
+    const toggle = () => setFocusMode((prev) => !prev);
+    window.addEventListener("wotann:toggle-focus-mode", toggle);
+    return () => window.removeEventListener("wotann:toggle-focus-mode", toggle);
+  }, []);
+
+  const focusMessages = useMemo<readonly FocusMessage[]>(() => {
+    return messages.map((m, i) => ({
+      id: `${activeConversationId ?? "none"}-${i}`,
+      role: m.role === "user" ? "user" : m.role === "assistant" ? "assistant" : "tool",
+      content: typeof m.content === "string" ? m.content : "",
+      toolName: (m as { toolName?: string }).toolName,
+      createdAt: m.timestamp ?? Date.now(),
+    }));
+  }, [messages, activeConversationId]);
+
   /* Auto-scroll to bottom when new messages arrive or content streams */
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -386,7 +408,15 @@ export function ChatView() {
               </p>
             </div>
           )}
-          {messages.map((msg, i) => (
+          {focusMode && messages.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <FocusView
+                messages={focusMessages}
+                onExpand={() => setFocusMode(false)}
+              />
+            </div>
+          )}
+          {!focusMode && messages.map((msg, i) => (
             <div key={msg.id} style={{ marginBottom: 16 }}>
               <MessageBubble
                 message={msg}
@@ -401,6 +431,26 @@ export function ChatView() {
               />
             </div>
           ))}
+          {!focusMode && messages.length > 2 && (
+            <div style={{ textAlign: "center", marginTop: 16 }}>
+              <button
+                type="button"
+                onClick={() => setFocusMode(true)}
+                title="Collapse to focus view (⌘⇧L)"
+                style={{
+                  fontSize: 11,
+                  padding: "4px 10px",
+                  color: "var(--color-text-muted, #9FB1C8)",
+                  background: "transparent",
+                  border: "1px dashed var(--border-subtle, rgba(138,176,224,0.12))",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                Enter focus view
+              </button>
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
       </div>

@@ -13,6 +13,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ArtifactCard } from "../artifacts/ArtifactCard";
 import { DiffViewer } from "../artifacts/DiffViewer";
+import { CapabilityChips } from "../wotann/CapabilityChips";
 
 /** Inline keyframes for thinking brain pulse — avoids modifying globals.css */
 const BUBBLE_KEYFRAMES = `
@@ -215,6 +216,38 @@ export function MessageBubble({ message, conversationId, onRetry, onCopy }: Mess
     }
   }, [message.content, onCopy]);
 
+  // CapabilityChips provenance strip (session-10 activation): pulls real
+  // provider/model/cost metadata from the message payload when present,
+  // falls back to the store's current provider/model for in-flight
+  // streams that haven't stamped metadata yet.
+  const storeProvider = useStore((s) => s.provider);
+  const storeModel = useStore((s) => s.model);
+  const chipProps = useMemo(() => {
+    if (isUser) return null;
+    const metadata = (message as { metadata?: {
+      provider?: string;
+      model?: string;
+      localOrFree?: boolean;
+      contextWindow?: number;
+      native?: { vision?: boolean; thinking?: boolean; tools?: boolean };
+      augmentations?: { vision?: boolean; thinking?: boolean; tools?: boolean };
+      costUsd?: number;
+      shadowGitSha?: string;
+    } }).metadata ?? {};
+    const provider = metadata.provider ?? storeProvider ?? "anthropic";
+    const model = metadata.model ?? storeModel ?? "claude";
+    return {
+      provider,
+      model,
+      localOrFree: metadata.localOrFree ?? (provider === "ollama" || provider === "free"),
+      contextWindow: metadata.contextWindow,
+      augmentations: metadata.augmentations,
+      native: metadata.native,
+      costUsd: metadata.costUsd,
+      shadowGitSha: metadata.shadowGitSha,
+    };
+  }, [isUser, message, storeProvider, storeModel]);
+
   return (
     <div
       className={`flex ${isUser ? "justify-end" : "justify-start"} group`}
@@ -272,6 +305,17 @@ export function MessageBubble({ message, conversationId, onRetry, onCopy }: Mess
             <span className="animate-pulse" style={{ color: "var(--color-warning)" }} aria-live="polite">streaming</span>
           )}
         </div>
+
+        {/* Capability / provenance chips — only on assistant messages. Pulls
+            real provider/model/cost/augmentation metadata from the message
+            payload when present, falling back to the store's current
+            provider/model otherwise. Session-10 activation; component was
+            previously defined but never imported. */}
+        {chipProps && (
+          <div style={{ marginBottom: 8 }}>
+            <CapabilityChips {...chipProps} />
+          </div>
+        )}
 
         {/* Content */}
         <div style={{ fontSize: 15, lineHeight: 1.6, wordBreak: "break-word", color: "var(--color-text-primary)" }}>
