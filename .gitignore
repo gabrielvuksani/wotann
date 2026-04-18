@@ -22,6 +22,8 @@ desktop-app/postcss.config*2*.mjs
 .wotann/memory.db-*
 .wotann/plans.db
 .wotann/plans.db-*
+.wotann/knowledge-graph.json
+.wotann/knowledge-graph.json.tmp.*
 .wotann/sessions/
 .wotann/logs/
 .wotann/captures/
