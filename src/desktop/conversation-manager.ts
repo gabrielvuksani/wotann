@@ -1,14 +1,24 @@
 /**
- * Conversation Manager — multi-conversation management for the desktop app.
+ * Conversation Manager — in-memory session cache for the desktop app.
  *
- * Handles CRUD operations for conversations, persistence to disk,
- * search across all conversations, project grouping, auto-title
- * generation, and conversation forking (time-travel).
+ * Handles CRUD operations for conversations, search across the working
+ * set, project grouping, auto-title generation, and conversation
+ * forking (time-travel). All operations return new objects (immutable
+ * pattern).
  *
- * Persistence: conversations are stored as individual JSON files
- * under .wotann/desktop/conversations/{id}.json
+ * **This class is NOT a persistent store.** Session-10 audit fix: the
+ * prior docstring claimed "conversations are stored as individual JSON
+ * files under .wotann/desktop/conversations/{id}.json" but no code
+ * path ever wrote or read a file (no fs imports, grep-verified).
+ * The real persistence of conversation history lives in the daemon's
+ * `memoryStore` and is surfaced via the `conversations.list` /
+ * `conversations.get` RPC surface in `kairos-rpc.ts`. This manager is
+ * a pure in-memory cache that the AppShell populates on boot via
+ * those RPC calls and mutates optimistically while the user chats.
  *
- * All operations return new objects (immutable pattern).
+ * If workspace-scoped JSON mirror files ever become desirable (e.g.
+ * for offline browsing or conversation export), wire them in the
+ * `kairos-rpc.ts` conversations.* handlers — not here.
  */
 
 import type { WotannMode } from "../core/mode-cycling.js";

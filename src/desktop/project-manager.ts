@@ -1,5 +1,5 @@
 /**
- * Project Manager — project organization for the desktop app.
+ * Project Manager — in-memory project-grouping cache for the desktop app.
  *
  * Projects group conversations, knowledge files, and custom instructions
  * into workspaces (similar to Claude's Projects feature).
@@ -12,8 +12,16 @@
  * - Quick-switch between projects
  * - Pin/unpin projects for quick access
  *
- * Persistence: projects are stored as JSON files
- * under .wotann/desktop/projects/{id}.json
+ * **This class is NOT a persistent store.** Session-10 audit fix: the
+ * prior docstring claimed "projects are stored as JSON files under
+ * .wotann/desktop/projects/{id}.json" but no code path wrote or read
+ * a file (no fs imports, grep-verified). Persistence of project
+ * definitions lives on the daemon's `memoryStore` (one entry per
+ * project, block type `project`) and is surfaced via `project.list`
+ * / `project.get` / `project.save` RPC handlers. This manager is an
+ * in-memory cache the AppShell syncs on boot and mutates
+ * optimistically. Workspace-scoped JSON mirroring should be added to
+ * the RPC handlers rather than here.
  */
 
 // ── Types ──────────────────────────────────────────────
@@ -150,15 +158,12 @@ export function toProjectSummary(project: Project): ProjectSummary {
 /**
  * Get sorted project summaries with pinned projects first.
  */
-export function getSortedProjects(
-  projects: readonly Project[],
-): readonly ProjectSummary[] {
+export function getSortedProjects(projects: readonly Project[]): readonly ProjectSummary[] {
   const summaries = projects.map(toProjectSummary);
   const pinned = summaries.filter((s) => s.pinned);
   const unpinned = summaries.filter((s) => !s.pinned);
 
-  const byDate = (a: ProjectSummary, b: ProjectSummary) =>
-    b.updatedAt.localeCompare(a.updatedAt);
+  const byDate = (a: ProjectSummary, b: ProjectSummary) => b.updatedAt.localeCompare(a.updatedAt);
 
   return [...pinned.sort(byDate), ...unpinned.sort(byDate)];
 }
@@ -168,15 +173,11 @@ export function getSortedProjects(
 /**
  * Search projects by name or description (case-insensitive substring match).
  */
-export function searchProjects(
-  projects: readonly Project[],
-  query: string,
-): readonly Project[] {
+export function searchProjects(projects: readonly Project[], query: string): readonly Project[] {
   const lowerQuery = query.toLowerCase();
   return projects.filter(
     (p) =>
-      p.name.toLowerCase().includes(lowerQuery) ||
-      p.description.toLowerCase().includes(lowerQuery),
+      p.name.toLowerCase().includes(lowerQuery) || p.description.toLowerCase().includes(lowerQuery),
   );
 }
 
@@ -185,29 +186,20 @@ export function searchProjects(
 /**
  * Find a project by ID in a collection.
  */
-export function findProject(
-  projects: readonly Project[],
-  id: string,
-): Project | undefined {
+export function findProject(projects: readonly Project[], id: string): Project | undefined {
   return projects.find((p) => p.id === id);
 }
 
 /**
  * Replace a project in the collection (immutable).
  */
-export function replaceProject(
-  projects: readonly Project[],
-  updated: Project,
-): readonly Project[] {
+export function replaceProject(projects: readonly Project[], updated: Project): readonly Project[] {
   return projects.map((p) => (p.id === updated.id ? updated : p));
 }
 
 /**
  * Remove a project from the collection (immutable).
  */
-export function removeProject(
-  projects: readonly Project[],
-  id: string,
-): readonly Project[] {
+export function removeProject(projects: readonly Project[], id: string): readonly Project[] {
   return projects.filter((p) => p.id !== id);
 }

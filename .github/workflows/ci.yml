@@ -41,6 +41,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint
+        # Session-10 audit fix: ESLint 9 flat config exists in
+        # eslint.config.js but was not CI-enforced. Shard failures could
+        # silently slip lint regressions through. Now gated at the same
+        # tier as typecheck.
+        run: npm run lint
+
       - name: Build
         run: npm run build
 
