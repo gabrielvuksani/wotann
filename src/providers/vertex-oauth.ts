@@ -108,7 +108,8 @@ async function exchangeJwtForAccessToken(sa: ServiceAccountKey): Promise<string>
 }
 
 export function createVertexAdapter(auth: ProviderAuth): ProviderAdapter {
-  const defaultModel = auth.models?.[0] ?? "claude-sonnet-4-6@20260101";
+  // No hardcoded default model / vendor bias. The caller must pick.
+  const defaultModel = auth.models?.[0];
   const region = process.env["GOOGLE_CLOUD_REGION"] ?? "us-central1";
   const capabilities: ProviderCapabilities = {
     supportsComputerUse: false,
@@ -116,7 +117,9 @@ export function createVertexAdapter(auth: ProviderAuth): ProviderAdapter {
     supportsVision: true,
     supportsStreaming: true,
     supportsThinking: true,
-    maxContextWindow: 200_000,
+    // Conservative static capability ceiling — the runtime refines this
+    // per-query via getMaxContextWindow(provider, model).
+    maxContextWindow: 128_000,
   };
 
   async function* queryImpl(opts: UnifiedQueryOptions): AsyncGenerator<StreamChunk> {
@@ -146,7 +149,29 @@ export function createVertexAdapter(auth: ProviderAuth): ProviderAdapter {
     const project =
       process.env["GOOGLE_CLOUD_PROJECT"] ?? process.env["GCP_PROJECT"] ?? sa.project_id;
     const model = opts.model ?? defaultModel;
-    const publisher = model.toLowerCase().includes("claude") ? "anthropic" : "google";
+    if (!model) {
+      yield {
+        type: "error",
+        content:
+          "Vertex adapter requires an explicit model — supply via opts.model or configure ProviderAuth.models. No vendor-biased default.",
+        provider: "vertex",
+        stopReason: "error",
+      };
+      return;
+    }
+    // Publisher resolved from model prefix — callers pick the vendor via
+    // the model id rather than the adapter guessing. claude-…/gemini-…/
+    // mistral-… route to the matching publisher; anything else defaults
+    // to "google" (Vertex's home publisher) and lets the endpoint error
+    // honestly on an unknown model.
+    const lowered = model.toLowerCase();
+    const publisher = lowered.startsWith("claude")
+      ? "anthropic"
+      : lowered.startsWith("gemini")
+        ? "google"
+        : lowered.startsWith("mistral")
+          ? "mistralai"
+          : "google";
     const url =
       `https://${region}-aiplatform.googleapis.com/v1/projects/${project}` +
       `/locations/${region}/publishers/${publisher}/models/${model}:streamRawPredict`;
@@ -235,14 +260,11 @@ export function createVertexAdapter(auth: ProviderAuth): ProviderAdapter {
     transport: "chat_completions",
     capabilities,
     query: (opts) => queryImpl(opts),
-    listModels: async () =>
-      auth.models ?? [
-        "claude-sonnet-4-6@20260101",
-        "claude-opus-4-6@20260101",
-        "claude-haiku-4-5@20260101",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-      ],
+    // listModels returns exactly what discovery gave us. The Vertex
+    // model catalog is enumerable via publishers.models.list in the
+    // google-aiplatform API — callers who need the full list should
+    // query that endpoint. The adapter does not invent model names.
+    listModels: async () => auth.models ?? [],
     isAvailable: async () => loadServiceAccount() !== null,
   };
 }

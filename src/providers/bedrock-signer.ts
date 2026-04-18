@@ -107,14 +107,21 @@ function signBedrockRequest(creds: BedrockCredentials, path: string, body: strin
 // ── Adapter ────────────────────────────────────────────────────────
 
 export function createBedrockAdapter(auth: ProviderAuth): ProviderAdapter {
-  const defaultModel = auth.models?.[0] ?? "anthropic.claude-sonnet-4-6:0";
+  // No hardcoded default model / vendor bias: the caller must supply a
+  // model via auth.models or per-query opts.model. If neither is set,
+  // the adapter yields a clear error chunk instead of silently assuming
+  // a Claude model was intended.
+  const defaultModel = auth.models?.[0];
   const capabilities: ProviderCapabilities = {
     supportsComputerUse: false,
     supportsToolCalling: true,
     supportsVision: true,
     supportsStreaming: true,
     supportsThinking: true,
-    maxContextWindow: 200_000,
+    // Context window is set by the concrete model at dispatch time via
+    // getMaxContextWindow(provider, model); the static capability default
+    // is a conservative lower bound the runtime refines per-query.
+    maxContextWindow: 128_000,
   };
 
   async function* queryImpl(opts: UnifiedQueryOptions): AsyncGenerator<StreamChunk> {
@@ -130,6 +137,16 @@ export function createBedrockAdapter(auth: ProviderAuth): ProviderAdapter {
       return;
     }
     const model = opts.model ?? defaultModel;
+    if (!model) {
+      yield {
+        type: "error",
+        content:
+          "Bedrock adapter requires an explicit model — supply via opts.model or configure ProviderAuth.models. No vendor-biased default.",
+        provider: "bedrock",
+        stopReason: "error",
+      };
+      return;
+    }
     const body = JSON.stringify({
       messages: [{ role: "user", content: [{ text: opts.prompt }] }],
       inferenceConfig: {
@@ -196,13 +213,10 @@ export function createBedrockAdapter(auth: ProviderAuth): ProviderAdapter {
     transport: "chat_completions",
     capabilities,
     query: (opts) => queryImpl(opts),
-    listModels: async () =>
-      auth.models ?? [
-        "anthropic.claude-sonnet-4-6:0",
-        "anthropic.claude-opus-4-6:0",
-        "anthropic.claude-haiku-4-5:0",
-        "meta.llama4-70b-instruct",
-      ],
+    // listModels returns exactly what discovery gave us. If the caller
+    // wants Bedrock's actual catalog they should hit the ListFoundationModels
+    // API directly — the adapter does not invent a model list.
+    listModels: async () => auth.models ?? [],
     isAvailable: async () => resolveCredentials() !== null,
   };
 }

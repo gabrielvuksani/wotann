@@ -2463,10 +2463,32 @@ export class WotannRuntime {
         if (processedResult.memoryCandidate && this.memoryStore) {
           try {
             const mc = processedResult.memoryCandidate;
+            // Classify by tool name into the most fitting block type. We
+            // don't hardcode a single bucket because different tools carry
+            // different semantics: edits/writes become `patterns` (reusable
+            // coding technique), read/list/grep become `reference`
+            // (pointer to inspected material), bash/exec become `cases`
+            // (concrete problem-solution pairs). The runtime cost of the
+            // classification is trivial and keeps memory retrievable by
+            // block type instead of dumping everything into one bucket.
+            const toolLower = mc.tool.toLowerCase();
+            const blockType: "patterns" | "reference" | "cases" =
+              toolLower.includes("edit") ||
+              toolLower.includes("write") ||
+              toolLower.includes("create") ||
+              toolLower.includes("modify")
+                ? "patterns"
+                : toolLower.includes("read") ||
+                    toolLower.includes("list") ||
+                    toolLower.includes("grep") ||
+                    toolLower.includes("search") ||
+                    toolLower.includes("find")
+                  ? "reference"
+                  : "cases";
             this.memoryStore.insert({
               id: `tool-${mc.tool}-${mc.timestamp}`,
               layer: "working",
-              blockType: "patterns",
+              blockType,
               key: `tool-use:${mc.tool}${mc.file ? `:${mc.file}` : ""}`,
               value: JSON.stringify({
                 tool: mc.tool,
@@ -2478,7 +2500,10 @@ export class WotannRuntime {
               sessionId: mc.sessionId,
               verified: false,
               freshnessScore: 1.0,
-              confidenceLevel: 0.7,
+              // Confidence reflects the observation pipeline's trust in
+              // the tool's reported success: a successful result gives
+              // full confidence, a failure halves it. No magic number.
+              confidenceLevel: processedResult.success ? 1.0 : 0.5,
               verificationStatus: "unverified",
               tags: "auto-capture,tool-use",
             });

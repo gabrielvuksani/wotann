@@ -234,8 +234,13 @@ export function MessageBubble({ message, conversationId, onRetry, onCopy }: Mess
       costUsd?: number;
       shadowGitSha?: string;
     } }).metadata ?? {};
-    const provider = metadata.provider ?? storeProvider ?? "anthropic";
-    const model = metadata.model ?? storeModel ?? "claude";
+    // Resolve provider/model from the message's stamped metadata first,
+    // then the store's current selection. NO vendor-biased hardcoded
+    // fallback — if neither source knows, the chip is suppressed so we
+    // don't mislabel a response as coming from a specific vendor.
+    const provider = metadata.provider ?? storeProvider;
+    const model = metadata.model ?? storeModel;
+    if (!provider || !model) return null;
     return {
       provider,
       model,
