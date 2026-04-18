@@ -12,6 +12,8 @@ import { createCopilotAdapter } from "./copilot-adapter.js";
 import { createOllamaAdapter } from "./ollama-adapter.js";
 import { createOpenAIAdapter, createOpenAICompatAdapter } from "./openai-compat-adapter.js";
 import { createGeminiNativeAdapter } from "./gemini-native-adapter.js";
+import { createBedrockAdapter } from "./bedrock-signer.js";
+import { createVertexAdapter } from "./vertex-oauth.js";
 import { ModelRouter } from "./model-router.js";
 import { RateLimitManager } from "./rate-limiter.js";
 import { AgentBridge } from "../core/agent-bridge.js";
@@ -199,44 +201,23 @@ export function createProviderInfrastructure(
         break;
       }
       case "bedrock":
-        adapters.set(
-          "bedrock",
-          createOpenAICompatAdapter({
-            provider: "bedrock",
-            baseUrl: `https://bedrock-runtime.${process.env["AWS_REGION"] ?? "us-east-1"}.amazonaws.com/model`,
-            apiKey: auth.token,
-            defaultModel: "anthropic.claude-sonnet-4-6",
-            models: auth.models,
-            capabilities: {
-              supportsComputerUse: false,
-              supportsToolCalling: true,
-              supportsVision: true,
-              supportsStreaming: true,
-              supportsThinking: true,
-              maxContextWindow: getMaxContextWindow("anthropic", "claude-sonnet-4-6"),
-            },
-          }),
-        );
+        // Session-10 audit fix: Bedrock requires AWS SigV4 signing + the
+        // `/converse` or `/invoke-model` path, not `/chat/completions`
+        // with a Bearer token. The prior fabricated adapter would 403
+        // on every real request. We now hand-build a SigV4-signed
+        // adapter via `bedrock-signer.ts` which implements canonical
+        // request hashing + HMAC-SHA256 key derivation per the AWS
+        // SigV4 spec — no `@aws-sdk/client-bedrock-runtime` dependency.
+        adapters.set("bedrock", createBedrockAdapter(auth));
         break;
       case "vertex":
-        adapters.set(
-          "vertex",
-          createOpenAICompatAdapter({
-            provider: "vertex",
-            baseUrl: `https://${process.env["GOOGLE_CLOUD_REGION"] ?? "us-central1"}-aiplatform.googleapis.com/v1/projects/${process.env["GOOGLE_CLOUD_PROJECT"]}/locations/${process.env["GOOGLE_CLOUD_REGION"] ?? "us-central1"}/publishers/anthropic/models`,
-            apiKey: auth.token,
-            defaultModel: "claude-sonnet-4-6",
-            models: auth.models,
-            capabilities: {
-              supportsComputerUse: false,
-              supportsToolCalling: true,
-              supportsVision: true,
-              supportsStreaming: true,
-              supportsThinking: true,
-              maxContextWindow: getMaxContextWindow("gemini", "gemini-2.5-pro"),
-            },
-          }),
-        );
+        // Session-10 audit fix: Vertex requires Google OAuth2 access-token
+        // exchange (JWT-signed with the service-account private key,
+        // exchanged against `oauth2.googleapis.com/token` for a Bearer).
+        // The prior fabricated adapter passed the JSON key *file path*
+        // as the bearer token — every real request 401'd. Now a lazy
+        // adapter handles the JWT exchange inline.
+        adapters.set("vertex", createVertexAdapter(auth));
         break;
       case "mistral":
         adapters.set(
