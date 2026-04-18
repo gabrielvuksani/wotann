@@ -29,6 +29,20 @@ export interface UnifiedQueryOptions {
     readonly kvCacheType: string;
     readonly flashAttention: boolean;
   };
+  /**
+   * Per-query Gemini native-tool overrides. Each flag wins over the
+   * adapter-level default set at createGeminiNativeAdapter() time, so
+   * one query can turn off web search (for deterministic output) or
+   * turn on url_context (when the prompt references URLs the model
+   * should fetch). Non-Gemini adapters ignore this field — it's
+   * additive and optional so callers can route the same
+   * UnifiedQueryOptions to any provider without branching.
+   */
+  readonly geminiTools?: {
+    readonly webSearch?: boolean;
+    readonly codeExecution?: boolean;
+    readonly urlContext?: boolean;
+  };
 }
 
 export interface ToolSchema {

@@ -206,4 +206,52 @@ describe("wire-level tools serialization — every adapter family", () => {
     expect(Array.isArray(body.tools)).toBe(true);
     expect((body.tools?.[0]?.functionDeclarations ?? []).length).toBeGreaterThan(0);
   });
+
+  it("gemini-native: per-query geminiTools overrides win over adapter defaults", async () => {
+    // Adapter created with web-search ON by default; query disables it.
+    // Verifies the opts.geminiTools passthrough lives above the adapter
+    // defaults so a single call can opt out of grounding without having
+    // to re-create the adapter.
+    const adapter = createGeminiNativeAdapter("AIzaTest", {
+      enableWebSearch: true,
+      enableCodeExecution: true,
+      enableUrlContext: false,
+    });
+    const opts: UnifiedQueryOptions = {
+      prompt: "hi",
+      model: "gemini-2.5-pro",
+      geminiTools: { webSearch: false, codeExecution: false, urlContext: true },
+      stream: true,
+    };
+    await drain(adapter.query(opts) as AsyncGenerator<{ content: string }>).catch(() => {});
+    const body = captured.value as {
+      tools?: readonly Record<string, unknown>[];
+    };
+    const tools = body.tools ?? [];
+    const hasGoogleSearch = tools.some((t) => "googleSearch" in t);
+    const hasCodeExecution = tools.some((t) => "codeExecution" in t);
+    const hasUrlContext = tools.some((t) => "urlContext" in t);
+    expect(hasGoogleSearch).toBe(false);
+    expect(hasCodeExecution).toBe(false);
+    expect(hasUrlContext).toBe(true);
+  });
+
+  it("gemini-native: adapter defaults apply when no per-query override is given", async () => {
+    const adapter = createGeminiNativeAdapter("AIzaTest", {
+      enableWebSearch: true,
+      enableCodeExecution: false,
+      enableUrlContext: false,
+    });
+    const opts: UnifiedQueryOptions = {
+      prompt: "hi",
+      model: "gemini-2.5-pro",
+      stream: true,
+    };
+    await drain(adapter.query(opts) as AsyncGenerator<{ content: string }>).catch(() => {});
+    const body = captured.value as { tools?: readonly Record<string, unknown>[] };
+    const tools = body.tools ?? [];
+    expect(tools.some((t) => "googleSearch" in t)).toBe(true);
+    expect(tools.some((t) => "codeExecution" in t)).toBe(false);
+    expect(tools.some((t) => "urlContext" in t)).toBe(false);
+  });
 });

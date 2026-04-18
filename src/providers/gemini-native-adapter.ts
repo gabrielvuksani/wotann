@@ -246,6 +246,15 @@ export function createGeminiNativeAdapter(
 
     // tools[]: Gemini accepts a mix of user-defined functionDeclarations
     // and first-class tools like googleSearch, codeExecution, urlContext.
+    //
+    // Per-query overrides: opts.geminiTools can flip any of the three
+    // native tools on/off for a single call. Adapter-level defaults
+    // (enableWebSearch etc.) are the fallback when no override is set.
+    const perQuery = opts.geminiTools;
+    const wantWebSearch = perQuery?.webSearch ?? enableWebSearch;
+    const wantCodeExecution = perQuery?.codeExecution ?? enableCodeExecution;
+    const wantUrlContext = perQuery?.urlContext ?? enableUrlContext;
+
     const tools: Array<Record<string, unknown>> = [];
     if (opts.tools && opts.tools.length > 0) {
       tools.push({
@@ -256,9 +265,9 @@ export function createGeminiNativeAdapter(
         })),
       });
     }
-    if (enableWebSearch) tools.push({ googleSearch: {} });
-    if (enableCodeExecution) tools.push({ codeExecution: {} });
-    if (enableUrlContext) tools.push({ urlContext: {} });
+    if (wantWebSearch) tools.push({ googleSearch: {} });
+    if (wantCodeExecution) tools.push({ codeExecution: {} });
+    if (wantUrlContext) tools.push({ urlContext: {} });
 
     const systemInstruction = opts.systemPrompt
       ? { parts: [{ text: opts.systemPrompt }] }
