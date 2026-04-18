@@ -107,6 +107,15 @@ export function useShortcuts() {
         return;
       }
 
+      // Cmd+Shift+T: Toggle The Well — shadow-git timeline scrubber
+      // pinned to the editor footer. Matches the binding advertised in
+      // KeyboardShortcutsOverlay.
+      if (meta && e.shiftKey && e.key === "T") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("wotann:toggle-well"));
+        return;
+      }
+
       // ── Standard shortcuts ──
 
       // Cmd+K: Command palette

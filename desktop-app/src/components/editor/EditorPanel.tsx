@@ -10,6 +10,26 @@ import { FileTree } from "./FileTree";
 import { EditorTabs } from "./EditorTabs";
 import { MonacoEditor, getLanguageFromPath } from "./MonacoEditor";
 import { EditorTerminal } from "./EditorTerminal";
+import { Well, type WellCheckpoint, type WellEventKind } from "../wotann/Well";
+
+/**
+ * Coerce the daemon's free-form checkpoint kind into the Well's typed
+ * enum. Anything unrecognised becomes "milestone" so the timeline
+ * still renders something.
+ */
+function classifyKind(raw?: string): WellEventKind {
+  if (!raw) return "milestone";
+  const lowered = raw.toLowerCase();
+  if (lowered.includes("read")) return "read";
+  if (lowered.includes("create") || lowered.includes("new")) return "create";
+  if (lowered.includes("grant") || lowered.includes("permission")) return "grant";
+  if (lowered.includes("edit") || lowered.includes("modify")) return "edit";
+  if (lowered.includes("message") || lowered.includes("response")) return "message";
+  if (lowered.includes("write")) return "write";
+  if (lowered.includes("memory")) return "memory";
+  if (lowered.includes("branch") || lowered.includes("checkpoint")) return "branch";
+  return "milestone";
+}
 import { SearchReplace } from "./SearchReplace";
 import { DiffOverlay, useDiffActions } from "./DiffOverlay";
 import { SymbolOutline } from "./SymbolOutline";
@@ -44,6 +64,58 @@ export function EditorPanel() {
   const [designMode, setDesignMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeDiff, setActiveDiff] = useState<EditorDiff | null>(null);
+  const [wellOpen, setWellOpen] = useState(false);
+  const [wellCheckpoints, setWellCheckpoints] = useState<readonly WellCheckpoint[]>([]);
+
+  // Wire ⌘⇧T to toggle the shadow-git timeline scrubber. When it opens,
+  // fetch the checkpoint list from the daemon via shadow.checkpoints;
+  // on close we keep the last list around so re-opening is instant.
+  useEffect(() => {
+    const handler = () => setWellOpen((prev) => !prev);
+    window.addEventListener("wotann:toggle-well", handler);
+    return () => window.removeEventListener("wotann:toggle-well", handler);
+  }, []);
+
+  useEffect(() => {
+    if (!wellOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const mod = await import("../../hooks/useTauriCommand");
+        const raw = await mod.commands.sendMessage(
+          JSON.stringify({ method: "shadow.checkpoints", params: {} }),
+        );
+        if (cancelled || !raw) return;
+        const parsed: {
+          result?: {
+            checkpoints?: readonly {
+              sha?: string;
+              timestamp?: number;
+              kind?: string;
+              label?: string;
+            }[];
+          };
+        } = JSON.parse(raw);
+        const list = parsed.result?.checkpoints ?? [];
+        setWellCheckpoints(
+          list
+            .filter((c) => typeof c.sha === "string" && typeof c.timestamp === "number")
+            .map((c) => ({
+              sha: c.sha as string,
+              timestamp: c.timestamp as number,
+              kind: classifyKind(c.kind),
+              label: c.label,
+            })),
+        );
+      } catch {
+        /* shadow.checkpoints RPC unavailable — leave list empty; Well
+           renders its "no checkpoints yet" empty state honestly. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [wellOpen]);
 
   const activeFile = openFiles[activeIndex] ?? null;
 
@@ -273,6 +345,39 @@ export function EditorPanel() {
             </div>
           )}
         </div>
+
+        {/* Shadow-git timeline scrubber (The Well). Toggled via ⌘⇧T or the
+            palette. Session-10 activation: this component was previously
+            defined but never mounted. Checkpoints come from shadow.checkpoints
+            RPC; clicking a tick opens the Inspect / Restore confirm popover
+            inside the Well component itself. */}
+        {wellOpen && (
+          <div style={{ borderTop: "1px solid var(--border-subtle, rgba(138,176,224,0.08))" }}>
+            <Well
+              checkpoints={wellCheckpoints}
+              onInspect={async (sha) => {
+                try {
+                  const mod = await import("../../hooks/useTauriCommand");
+                  await mod.commands.sendMessage(
+                    JSON.stringify({ method: "shadow.inspect", params: { sha } }),
+                  );
+                } catch {
+                  /* best-effort — inspect is read-only, silent failure OK */
+                }
+              }}
+              onRestore={async (sha) => {
+                try {
+                  const mod = await import("../../hooks/useTauriCommand");
+                  await mod.commands.sendMessage(
+                    JSON.stringify({ method: "shadow.undo", params: { sha } }),
+                  );
+                } catch {
+                  /* surface failures via toast once that plumbing is in place */
+                }
+              }}
+            />
+          </div>
+        )}
 
         {/* Terminal Panel — uses real shell execution via Tauri */}
         {terminalOpen && (

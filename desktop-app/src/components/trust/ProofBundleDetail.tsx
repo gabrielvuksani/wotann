@@ -9,7 +9,7 @@
  * Fetches detail via `proofs.get`; falls back to the summary on failure.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   TRUST_COLORS as C,
   TRUST_FONT as F,
@@ -17,9 +17,16 @@ import {
   type ProofBundleFull,
   type ProofBundleSummary,
 } from "./TrustView";
+import { SealedScroll, type ProofSeal, type SealState } from "../wotann/SealedScroll";
 
 const MONO =
   "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+
+function mapEvidenceStatusToSealState(s: "pass" | "fail" | "partial"): SealState {
+  if (s === "pass") return "passed";
+  if (s === "fail") return "failed";
+  return "skipped";
+}
 
 export function ProofBundleDetail({
   bundle,
@@ -67,8 +74,42 @@ export function ProofBundleDetail({
     setRerunning(false);
   };
 
+  // SealedScroll seal strip synthesised from the bundle's `evidence[]`
+  // plus top-level verification status. Session-10 activation: this
+  // component was previously defined but never mounted. Now every
+  // proof bundle detail opens with its signature wax-seal strip.
+  const seals = useMemo<readonly ProofSeal[]>(() => {
+    const evidence = d.evidence ?? [];
+    // If we have evidence cards, map each one directly to a seal.
+    if (evidence.length > 0) {
+      return evidence.map((e) => ({
+        kind: e.kind,
+        state: mapEvidenceStatusToSealState(e.status),
+        detail: e.summary,
+      }));
+    }
+    // No evidence yet — fall back to the bundle-level verification to
+    // at least show a single summary seal rather than empty space.
+    return [
+      {
+        kind: "verification",
+        state:
+          d.verification === "pass"
+            ? "passed"
+            : d.verification === "fail"
+              ? "failed"
+              : rerunning
+                ? "running"
+                : "pending",
+        detail: rerunning ? "Re-verifying…" : undefined,
+      },
+    ];
+  }, [d.evidence, d.verification, rerunning]);
+
   return (
     <div style={{ padding: 16, fontFamily: F, display: "flex", flexDirection: "column", gap: 12 }}>
+      <SealedScroll seals={seals} bundleId={d.id} />
+
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <h2 style={titleStyle}>{d.action}</h2>
         <button
