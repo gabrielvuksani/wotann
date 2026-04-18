@@ -24,9 +24,13 @@ import type { WebFetchResult } from "../tools/web-fetch.js";
  * Keyed by tool_use_id (or tool name when id is unavailable).
  */
 export class ToolTimingTracker {
-  private readonly starts: Map<string, { readonly toolName: string; readonly startedAt: number }> = new Map();
+  private readonly starts: Map<string, { readonly toolName: string; readonly startedAt: number }> =
+    new Map();
   /** Completed timings, retained until a tool_result is annotated. */
-  private readonly completions: Map<string, { readonly toolName: string; readonly durationMs: number }> = new Map();
+  private readonly completions: Map<
+    string,
+    { readonly toolName: string; readonly durationMs: number }
+  > = new Map();
 
   /** Record that a tool call started. */
   markStart(key: string, toolName: string): void {
@@ -74,10 +78,7 @@ export function formatToolTimingAnnotation(toolName: string, durationMs: number)
  * Append a tool-timing annotation to a tool_result message's content.
  * Returns a new message (immutable) with the suffix appended.
  */
-export function annotateToolResultMessage(
-  msg: AgentMessage,
-  durationMs: number,
-): AgentMessage {
+export function annotateToolResultMessage(msg: AgentMessage, durationMs: number): AgentMessage {
   const name = msg.toolName ?? "unknown";
   const annotation = formatToolTimingAnnotation(name, durationMs);
   // Avoid double-annotation if already suffixed
@@ -108,7 +109,12 @@ export interface WebFetchDep {
 
 export interface PlanStoreDep {
   createPlan(title: string, description: string): { readonly title: string; readonly id: string };
-  listPlans(): readonly { readonly planId: string; readonly title: string; readonly completedTasks: number; readonly taskCount: number }[];
+  listPlans(): readonly {
+    readonly planId: string;
+    readonly title: string;
+    readonly completedTasks: number;
+    readonly taskCount: number;
+  }[];
   advanceTask(planId: string): { readonly title: string; readonly status: string };
 }
 
@@ -134,15 +140,11 @@ export async function dispatchWebFetch(
 ): Promise<ToolDispatchResult> {
   const url = String(input["url"] ?? "");
   const maxLength =
-    typeof input["maxLength"] === "number"
-      ? (input["maxLength"] as number)
-      : undefined;
+    typeof input["maxLength"] === "number" ? (input["maxLength"] as number) : undefined;
 
   try {
     const result = await webFetch.fetch(url);
-    const text = maxLength
-      ? result.markdown.slice(0, maxLength)
-      : result.markdown;
+    const text = maxLength ? result.markdown.slice(0, maxLength) : result.markdown;
     return {
       type: "text",
       content: `\n[web_fetch] ${result.title ?? url} (${result.status}): ${text.slice(0, 200)}...\n`,
@@ -209,10 +211,7 @@ export function dispatchPlanList(
       plans.length === 0
         ? "No active plans."
         : plans
-            .map(
-              (p) =>
-                `- ${p.title} (${p.planId}): ${p.completedTasks}/${p.taskCount} tasks`,
-            )
+            .map((p) => `- ${p.title} (${p.planId}): ${p.completedTasks}/${p.taskCount} tasks`)
             .join("\n");
     return {
       type: "text",
@@ -265,9 +264,35 @@ export function dispatchPlanAdvance(
 
 // ── Unified Dispatcher ──────────────────────────────────────
 
+/**
+ * Minimal LSPManager surface this dispatcher needs — kept narrow so
+ * runtime-tool-dispatch doesn't have to import the concrete class.
+ * The real LSPManager lives in `src/lsp/symbol-operations.ts`.
+ */
+export interface LSPManagerDep {
+  findSymbol(name: string): Promise<
+    readonly {
+      readonly uri: string;
+      readonly range: unknown;
+      readonly name: string;
+      readonly kind: string;
+    }[]
+  >;
+  findReferences(
+    uri: string,
+    position: { readonly line: number; readonly character: number },
+  ): Promise<readonly { readonly uri: string; readonly range: unknown }[]>;
+  rename(
+    uri: string,
+    position: { readonly line: number; readonly character: number },
+    newName: string,
+  ): Promise<{ readonly filesAffected: number; readonly editsApplied: number }>;
+}
+
 export interface ToolDispatchDeps {
   readonly webFetch: WebFetchDep;
   readonly planStore: PlanStoreDep | null;
+  readonly lsp?: LSPManagerDep | null;
 }
 
 /**
@@ -297,7 +322,133 @@ export async function dispatchRuntimeTool(
       if (!deps.planStore) return null;
       return dispatchPlanAdvance(input, deps.planStore, ctx);
 
+    case "find_symbol":
+      if (!deps.lsp) return null;
+      return dispatchFindSymbol(input, deps.lsp, ctx);
+
+    case "find_references":
+      if (!deps.lsp) return null;
+      return dispatchFindReferences(input, deps.lsp, ctx);
+
+    case "rename_symbol":
+      if (!deps.lsp) return null;
+      return dispatchRenameSymbol(input, deps.lsp, ctx);
+
     default:
       return null;
+  }
+}
+
+// ── Serena-style LSP symbol tool dispatchers ────────────────
+
+async function dispatchFindSymbol(
+  input: Record<string, unknown>,
+  lsp: LSPManagerDep,
+  ctx: ToolDispatchContext,
+): Promise<ToolDispatchResult> {
+  const name = typeof input["name"] === "string" ? (input["name"] as string) : "";
+  if (!name) {
+    return {
+      type: "text",
+      content: `\n[find_symbol] Error: missing \`name\` argument\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+  try {
+    const hits = await lsp.findSymbol(name);
+    const summary =
+      hits.length === 0
+        ? `No matches for "${name}"`
+        : hits
+            .slice(0, 20)
+            .map((h) => `  ${h.kind} ${h.name} — ${h.uri}`)
+            .join("\n");
+    return {
+      type: "text",
+      content: `\n[find_symbol] ${hits.length} match(es) for "${name}":\n${summary}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  } catch (err) {
+    return {
+      type: "text",
+      content: `\n[find_symbol] Error: ${err instanceof Error ? err.message : String(err)}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+}
+
+async function dispatchFindReferences(
+  input: Record<string, unknown>,
+  lsp: LSPManagerDep,
+  ctx: ToolDispatchContext,
+): Promise<ToolDispatchResult> {
+  const uri = typeof input["uri"] === "string" ? (input["uri"] as string) : "";
+  const line = typeof input["line"] === "number" ? (input["line"] as number) : -1;
+  const character = typeof input["character"] === "number" ? (input["character"] as number) : -1;
+  if (!uri || line < 0 || character < 0) {
+    return {
+      type: "text",
+      content: `\n[find_references] Error: requires uri + line + character\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+  try {
+    const refs = await lsp.findReferences(uri, { line, character });
+    const summary = refs
+      .slice(0, 20)
+      .map((r) => `  ${r.uri}`)
+      .join("\n");
+    return {
+      type: "text",
+      content: `\n[find_references] ${refs.length} reference(s):\n${summary}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  } catch (err) {
+    return {
+      type: "text",
+      content: `\n[find_references] Error: ${err instanceof Error ? err.message : String(err)}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+}
+
+async function dispatchRenameSymbol(
+  input: Record<string, unknown>,
+  lsp: LSPManagerDep,
+  ctx: ToolDispatchContext,
+): Promise<ToolDispatchResult> {
+  const uri = typeof input["uri"] === "string" ? (input["uri"] as string) : "";
+  const line = typeof input["line"] === "number" ? (input["line"] as number) : -1;
+  const character = typeof input["character"] === "number" ? (input["character"] as number) : -1;
+  const newName = typeof input["newName"] === "string" ? (input["newName"] as string) : "";
+  if (!uri || line < 0 || character < 0 || !newName) {
+    return {
+      type: "text",
+      content: `\n[rename_symbol] Error: requires uri + line + character + newName\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+  try {
+    const result = await lsp.rename(uri, { line, character }, newName);
+    return {
+      type: "text",
+      content: `\n[rename_symbol] Renamed: ${result.editsApplied} edit(s) across ${result.filesAffected} file(s)\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  } catch (err) {
+    return {
+      type: "text",
+      content: `\n[rename_symbol] Error: ${err instanceof Error ? err.message : String(err)}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
   }
 }

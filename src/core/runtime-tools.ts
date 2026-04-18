@@ -19,6 +19,10 @@ export interface ToolRegistryDeps {
   readonly computerUseEnabled: boolean;
   /** Whether plan tools should be registered (true when PlanStore is available). */
   readonly planStoreAvailable: boolean;
+  /** Whether LSP symbol tools should be registered (true when LSPManager
+   *  is available — usually always true; set false to suppress in minimal
+   *  deployments). Session-10 Serena port. */
+  readonly lspEnabled?: boolean;
 }
 
 // ── Tool Definition Builders ────────────────────────────────
@@ -120,6 +124,75 @@ function buildPlanAdvanceTool(): ToolDefinition {
   };
 }
 
+/**
+ * Build the find_symbol tool definition (Serena port).
+ * Exposes workspace-wide symbol search as a first-class agent tool so
+ * the model can target by name rather than reading whole files.
+ */
+function buildFindSymbolTool(): ToolDefinition {
+  return {
+    name: "find_symbol",
+    description:
+      "Find a symbol (function/class/method/variable) by name in the workspace. " +
+      "Returns matching definitions with file path and range. Vastly cheaper " +
+      "than reading files to locate symbols. Use before read_file for precision.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Symbol name (exact match preferred)" },
+      },
+      required: ["name"],
+    },
+  };
+}
+
+/**
+ * Build the find_references tool definition (Serena port).
+ * Lists every caller / user of a symbol across the workspace.
+ */
+function buildFindReferencesTool(): ToolDefinition {
+  return {
+    name: "find_references",
+    description:
+      "Find every location in the workspace that references the symbol at the " +
+      "given file/position. Returns an array of (uri, range) tuples. Use before " +
+      "modifying a function signature to understand its blast radius.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        uri: { type: "string", description: "File URI containing the symbol" },
+        line: { type: "number", description: "0-indexed line number" },
+        character: { type: "number", description: "0-indexed column" },
+      },
+      required: ["uri", "line", "character"],
+    },
+  };
+}
+
+/**
+ * Build the rename_symbol tool definition (Serena port).
+ * Applies a rename refactor across every reference atomically.
+ */
+function buildRenameSymbolTool(): ToolDefinition {
+  return {
+    name: "rename_symbol",
+    description:
+      "Rename a symbol across every reference in the workspace atomically. " +
+      "Safer than search-and-replace because it uses TypeScript's LanguageService " +
+      "to find bindings (not text matches). Returns the number of edits applied.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        uri: { type: "string", description: "File URI containing the symbol declaration" },
+        line: { type: "number", description: "0-indexed declaration line" },
+        character: { type: "number", description: "0-indexed declaration column" },
+        newName: { type: "string", description: "New symbol name (must be a valid identifier)" },
+      },
+      required: ["uri", "line", "character", "newName"],
+    },
+  };
+}
+
 // ── Public API ──────────────────────────────────────────────
 
 /**
@@ -132,6 +205,9 @@ export const RUNTIME_TOOL_NAMES = [
   "plan_create",
   "plan_list",
   "plan_advance",
+  "find_symbol",
+  "find_references",
+  "rename_symbol",
 ] as const;
 
 export type RuntimeToolName = (typeof RUNTIME_TOOL_NAMES)[number];
@@ -167,6 +243,14 @@ export function buildEffectiveTools(
   // plan tools: only when PlanStore is available
   if (deps.planStoreAvailable) {
     tools.push(buildPlanCreateTool(), buildPlanListTool(), buildPlanAdvanceTool());
+  }
+
+  // Serena-style symbol tools: registered by default unless explicitly
+  // suppressed. The LSPManager lives on the runtime and lazy-inits a
+  // TypeScript LanguageService on first use, so registering these tools
+  // unconditionally is cheap when the model doesn't call them.
+  if (deps.lspEnabled !== false) {
+    tools.push(buildFindSymbolTool(), buildFindReferencesTool(), buildRenameSymbolTool());
   }
 
   return tools;
