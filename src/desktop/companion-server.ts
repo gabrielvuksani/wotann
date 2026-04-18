@@ -570,7 +570,7 @@ export class CompanionServer {
   private readonly secureAuth: SecureAuthManager;
   private readonly conversationSync: ConversationSyncHandler;
   private readonly mobileVoice: MobileVoiceHandler;
-  private readonly taskMonitor: TaskMonitorHandler;
+  private taskMonitor: TaskMonitorHandler;
   private readonly quickAction: QuickActionHandler;
   private readonly fileShare: FileShareHandler;
   private readonly pushNotification: PushNotificationHandler;
@@ -679,13 +679,13 @@ export class CompanionServer {
           if (err.code === "EADDRINUSE") {
             if (attemptsLeft > 0) {
               const nextPort = port + 1;
-               
+
               console.error(`[companion-server] port ${port} in use; retrying on ${nextPort}`);
               (this.config as { port: number }).port = nextPort;
               tryListen(nextPort, attemptsLeft - 1);
             } else {
               this.running = false;
-               
+
               console.error(
                 `[companion-server] could not bind any port in range ${this.config.port}..${port}. ` +
                   `Is another WOTANN daemon running? Set WOTANN_COMPANION_PORT to override.`,
@@ -792,9 +792,32 @@ export class CompanionServer {
   /**
    * Set the WotannRuntime instance for real query routing.
    * When set, RPC handlers like `sync.send` and `enhance` call the real runtime.
+   *
+   * Session-10 audit fix: TaskMonitorHandler was constructed at line 606 with
+   * no `executeTask` callback, so iOS autonomous tasks dispatched via iOS
+   * Autopilot/Workshop/CarPlay stayed `status:"running"` forever (iOS call
+   * was non-blocking and no producer ever wrote a completion). We now bind
+   * a real `executeTask` callback that streams through the runtime's query
+   * pipeline — tasks resolve with { success, result } when the underlying
+   * stream ends, or { success:false, result:"error…" } on exception.
    */
   setRuntime(runtime: import("../core/runtime.js").WotannRuntime): void {
     this.runtime = runtime;
+    this.taskMonitor = new TaskMonitorHandler(async (prompt: string) => {
+      try {
+        let collected = "";
+        for await (const chunk of runtime.query({ prompt })) {
+          if (typeof chunk === "string") collected += chunk;
+          else if (chunk && typeof chunk === "object" && "content" in chunk) {
+            const c = (chunk as { content?: string }).content;
+            if (typeof c === "string") collected += c;
+          }
+        }
+        return { success: true, result: collected };
+      } catch (err) {
+        return { success: false, result: err instanceof Error ? err.message : String(err) };
+      }
+    });
   }
 
   setBridgeRPCHandler(handler: BridgeRPCHandler): void {
