@@ -159,14 +159,29 @@ export function createProviderInfrastructure(
           }),
         );
         break;
-      case "azure":
+      case "azure": {
+        // Azure uses /openai/deployments/{deployment}/chat/completions with
+        // `api-version` as a query param (not a header). The audit found
+        // that session-8's config used the endpoint verbatim + a header,
+        // which Azure rejects (expects path-level deployment + query
+        // param). Also surface a deployment name from env so the registry
+        // isn't hardcoded to gpt-4o.
+        const endpoint = (process.env["AZURE_OPENAI_ENDPOINT"] ?? "").replace(/\/+$/, "");
+        const deployment =
+          process.env["AZURE_OPENAI_DEPLOYMENT"] ??
+          process.env["AZURE_OPENAI_DEPLOYMENT_NAME"] ??
+          "gpt-4o";
+        const apiVersion = process.env["AZURE_OPENAI_API_VERSION"] ?? "2024-12-01-preview";
+        const baseUrl = endpoint
+          ? `${endpoint}/openai/deployments/${deployment}?api-version=${apiVersion}`
+          : "";
         adapters.set(
           "azure",
           createOpenAICompatAdapter({
             provider: "azure",
-            baseUrl: process.env["AZURE_OPENAI_ENDPOINT"] ?? "",
+            baseUrl,
             apiKey: auth.token,
-            defaultModel: "gpt-4o",
+            defaultModel: deployment,
             models: auth.models,
             capabilities: {
               supportsComputerUse: false,
@@ -176,10 +191,13 @@ export function createProviderInfrastructure(
               supportsThinking: true,
               maxContextWindow: getMaxContextWindow("openai", "gpt-4.1"),
             },
-            headers: { "api-version": "2024-12-01-preview" },
+            // Azure uses `api-key` header style instead of Bearer. api-version
+            // already lives in the query string above.
+            headers: { "api-key": auth.token },
           }),
         );
         break;
+      }
       case "bedrock":
         adapters.set(
           "bedrock",
