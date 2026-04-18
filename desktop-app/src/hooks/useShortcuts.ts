@@ -116,6 +116,19 @@ export function useShortcuts() {
         return;
       }
 
+      // Cmd+3 / Cmd+4: Workshop / Exploit (session-10 UX audit TD-8.1).
+      // Cmd+1 / Cmd+2 already bound to Chat / Editor further down.
+      if (meta && !e.shiftKey && e.key === "3") {
+        e.preventDefault();
+        setView("workshop");
+        return;
+      }
+      if (meta && !e.shiftKey && e.key === "4") {
+        e.preventDefault();
+        setView("exploit");
+        return;
+      }
+
       // ── Standard shortcuts ──
 
       // Cmd+K: Command palette

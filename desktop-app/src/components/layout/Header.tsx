@@ -16,10 +16,16 @@ import { NotificationCenter } from "../notifications/NotificationCenter";
 import { ModelPicker } from "../input/ModelPicker";
 import type { AppView } from "../../types";
 
-/** The two primary view pills. */
+/** The four primary view pills. Session-10 UX audit TD-3.1: Workshop
+ * and Exploit were only reachable from the palette / sidebar workerpill
+ * despite being peer-level "spaces". Adding them as top-pill gives
+ * first-time users a visible path and matches the ⌘1-⌘4 shortcut
+ * binding introduced in the same session. */
 const VIEW_PILLS: readonly { readonly id: AppView; readonly label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "editor", label: "Editor" },
+  { id: "workshop", label: "Workshop" },
+  { id: "exploit", label: "Exploit" },
 ];
 
 export function Header() {
