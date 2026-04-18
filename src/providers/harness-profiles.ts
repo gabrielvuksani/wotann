@@ -228,6 +228,8 @@ function hasCredentialsFor(provider: ProviderName, env: NodeJS.ProcessEnv): bool
       return !!env["FIREWORKS_API_KEY"];
     case "sambanova":
       return !!env["SAMBANOVA_API_KEY"];
+    case "groq":
+      return !!env["GROQ_API_KEY"];
     case "free":
       return true;
     case "azure":

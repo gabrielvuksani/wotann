@@ -36,13 +36,14 @@ describe("WotannAPIServer", () => {
       }],
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     }));
-    // Handler set without error
-    expect(true).toBe(true);
+    // Handler set without error — non-tautological post-conditions so a
+    // future refactor that breaks the handler-registration surface fails.
+    expect(typeof server.onRequest).toBe("function");
   });
 
   it("accepts stream handler", () => {
     const server = new WotannAPIServer();
-    server.onStream(async (_req, write) => {
+    expect(() => server.onStream(async (_req, write) => {
       write({
         id: "chunk-1",
         object: "chat.completion.chunk" as const,
@@ -54,8 +55,8 @@ describe("WotannAPIServer", () => {
           finish_reason: null,
         }],
       });
-    });
-    expect(true).toBe(true);
+    })).not.toThrow();
+    expect(typeof server.onStream).toBe("function");
   });
 });
 

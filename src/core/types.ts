@@ -23,7 +23,8 @@ export type ProviderName =
   | "xai"
   | "together"
   | "fireworks"
-  | "sambanova";
+  | "sambanova"
+  | "groq";
 
 export type TransportType = "anthropic" | "chat_completions" | "codex_responses";
 

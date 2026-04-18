@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { getCronJobs } from "../../store/engine";
 import type { CronJob } from "../../hooks/useTauriCommand";
+import { ValknutSpinner } from "../wotann/ValknutSpinner";
 
 const SCHEDULE_OPTIONS: readonly { readonly label: string; readonly cron: string }[] = [
   { label: "Every 5 minutes", cron: "*/5 * * * *" },
@@ -149,7 +150,7 @@ export function ScheduledTasks() {
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <div className="flex items-center gap-3 text-sm" style={{ color: "var(--color-text-muted)" }}>
-            <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-text-dim)", borderTopColor: "var(--color-primary)" }} />
+            <ValknutSpinner size={16} color="var(--color-primary)" label="Loading scheduled tasks" />
             Loading scheduled tasks...
           </div>
         </div>

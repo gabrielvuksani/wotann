@@ -271,7 +271,12 @@ export function createProviderInfrastructure(
             models: auth.models,
             capabilities: {
               supportsComputerUse: false,
-              supportsToolCalling: false,
+              // Sonar models support OpenAI-style `tools` parameter since
+              // 2026-Q1 (https://docs.perplexity.ai/guides/function-calling).
+              // Session 9 audit flipped this from false → true so Perplexity
+              // participates in tool-calling flows without going through the
+              // capability-augmenter's XML emulation.
+              supportsToolCalling: true,
               supportsVision: false,
               supportsStreaming: true,
               supportsThinking: true,
@@ -348,6 +353,32 @@ export function createProviderInfrastructure(
             baseUrl: "https://api.sambanova.ai/v1",
             apiKey: auth.token,
             defaultModel: "Meta-Llama-3.3-70B-Instruct",
+            models: auth.models,
+            capabilities: {
+              supportsComputerUse: false,
+              supportsToolCalling: true,
+              supportsVision: false,
+              supportsStreaming: true,
+              supportsThinking: false,
+              maxContextWindow: 131_072,
+            },
+          }),
+        );
+        break;
+      case "groq":
+        // Explicit Groq case (session 9 audit gap): previously Groq was only
+        // reachable via the `"free"` pseudo-provider branch, so a user who
+        // enabled the named "groq" provider but not the free-tier umbrella
+        // ended up with no adapter. Now we wire it directly whenever a
+        // GROQ_API_KEY auth record exists, mirroring the free-tier config
+        // so its models/capabilities are identical.
+        adapters.set(
+          "groq",
+          createOpenAICompatAdapter({
+            provider: "groq",
+            baseUrl: "https://api.groq.com/openai/v1",
+            apiKey: auth.token,
+            defaultModel: "llama-3.3-70b-versatile",
             models: auth.models,
             capabilities: {
               supportsComputerUse: false,

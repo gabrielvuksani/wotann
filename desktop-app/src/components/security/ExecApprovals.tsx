@@ -7,6 +7,7 @@ import type React from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { getApprovalRules } from "../../store/engine";
 import type { ApprovalRule } from "../../hooks/useTauriCommand";
+import { ValknutSpinner } from "../wotann/ValknutSpinner";
 
 const ACTION_STYLES: Record<string, React.CSSProperties> = {
   allow: { background: "var(--color-success-muted)", color: "var(--color-success)", borderColor: "rgba(16, 185, 129, 0.15)" },
@@ -144,7 +145,7 @@ export function ExecApprovals() {
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <div className="flex items-center gap-3 text-sm" style={{ color: "var(--color-text-muted)" }}>
-            <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-text-dim)", borderTopColor: "var(--color-primary)" }} />
+            <ValknutSpinner size={16} color="var(--color-primary)" label="Loading approval rules" />
             Loading approval rules...
           </div>
         </div>

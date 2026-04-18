@@ -42,13 +42,18 @@ export const CYBER_RISK_INSTRUCTION_OFF = "";
 /**
  * OpenAI's safety instruction preamble. Omitted in guardrails-off mode.
  */
-export const OPENAI_SAFETY_INSTRUCTION_DEFAULT = "Follow OpenAI usage policies. Decline requests for malicious code.";
+export const OPENAI_SAFETY_INSTRUCTION_DEFAULT =
+  "Follow OpenAI usage policies. Decline requests for malicious code.";
 export const OPENAI_SAFETY_INSTRUCTION_OFF = "";
 
 /**
  * Gemini harm block settings. Set to BLOCK_NONE in guardrails-off mode.
  */
-export type GeminiHarmBlockThreshold = "BLOCK_NONE" | "BLOCK_LOW_AND_ABOVE" | "BLOCK_MEDIUM_AND_ABOVE" | "BLOCK_ONLY_HIGH";
+export type GeminiHarmBlockThreshold =
+  | "BLOCK_NONE"
+  | "BLOCK_LOW_AND_ABOVE"
+  | "BLOCK_MEDIUM_AND_ABOVE"
+  | "BLOCK_ONLY_HIGH";
 export const GEMINI_HARM_BLOCK_DEFAULT: GeminiHarmBlockThreshold = "BLOCK_MEDIUM_AND_ABOVE";
 export const GEMINI_HARM_BLOCK_OFF: GeminiHarmBlockThreshold = "BLOCK_NONE";
 
@@ -312,7 +317,8 @@ export const COPILOT_SAFETY_INSTRUCTION_OFF = "";
  * models (Llama, Mistral) with minimal content filtering. Most
  * filtering is at the API gateway level, not the model level.
  */
-export const FREE_TIER_SAFETY_INSTRUCTION_DEFAULT = "Follow provider usage policies for free-tier models.";
+export const FREE_TIER_SAFETY_INSTRUCTION_DEFAULT =
+  "Follow provider usage policies for free-tier models.";
 export const FREE_TIER_SAFETY_INSTRUCTION_OFF = "";
 
 /**
@@ -412,9 +418,15 @@ export function getExtendedSafetyOverrides(guardrailsOff: boolean): ExtendedSafe
   const base = getSafetyOverrides(guardrailsOff);
   return {
     ...base,
-    codexSafetyInstruction: guardrailsOff ? CODEX_SAFETY_INSTRUCTION_OFF : CODEX_SAFETY_INSTRUCTION_DEFAULT,
-    copilotSafetyInstruction: guardrailsOff ? COPILOT_SAFETY_INSTRUCTION_OFF : COPILOT_SAFETY_INSTRUCTION_DEFAULT,
-    freeTierSafetyInstruction: guardrailsOff ? FREE_TIER_SAFETY_INSTRUCTION_OFF : FREE_TIER_SAFETY_INSTRUCTION_DEFAULT,
+    codexSafetyInstruction: guardrailsOff
+      ? CODEX_SAFETY_INSTRUCTION_OFF
+      : CODEX_SAFETY_INSTRUCTION_DEFAULT,
+    copilotSafetyInstruction: guardrailsOff
+      ? COPILOT_SAFETY_INSTRUCTION_OFF
+      : COPILOT_SAFETY_INSTRUCTION_DEFAULT,
+    freeTierSafetyInstruction: guardrailsOff
+      ? FREE_TIER_SAFETY_INSTRUCTION_OFF
+      : FREE_TIER_SAFETY_INSTRUCTION_DEFAULT,
     freeTierPreferUncensored: guardrailsOff,
     freeTierUncensoredModels: guardrailsOff ? FREE_TIER_UNCENSORED_MODELS : [],
     huggingfacePreferUncensored: guardrailsOff,
@@ -436,8 +448,17 @@ export function buildExtendedSecurityPrompt(
 ): string {
   // All 11 ProviderName values are handled by the main builder
   const allProviders: readonly ProviderName[] = [
-    "anthropic", "openai", "codex", "copilot", "gemini",
-    "ollama", "free", "azure", "bedrock", "vertex", "huggingface",
+    "anthropic",
+    "openai",
+    "codex",
+    "copilot",
+    "gemini",
+    "ollama",
+    "free",
+    "azure",
+    "bedrock",
+    "vertex",
+    "huggingface",
   ];
   if (allProviders.includes(provider as ProviderName)) {
     return buildSecurityResearchPrompt(provider as ProviderName, config);
@@ -483,111 +504,142 @@ export function getModelBypassProfile(provider: string, model: string): ModelByp
   const profiles: Record<string, ModelBypassProfile> = {
     // ── Anthropic ──
     "anthropic:claude-opus-4-6": {
-      provider: "anthropic", model: "claude-opus-4-6",
+      provider: "anthropic",
+      model: "claude-opus-4-6",
       capability: "partial",
-      notes: "System prompt framing effective for code analysis. Constitutional Classifiers++ block 95.6% of jailbreaks. For unrestricted output, use Ollama with abliterated model.",
+      notes:
+        "System prompt framing effective for code analysis. Constitutional Classifiers++ block 95.6% of jailbreaks. For unrestricted output, use Ollama with abliterated model.",
       fallbackSuggestion: "ollama:llama4-maverick-abliterated",
     },
     // ── OpenAI ──
     "openai:gpt-5.4": {
-      provider: "openai", model: "gpt-5.4",
+      provider: "openai",
+      model: "gpt-5.4",
       capability: "partial",
       notes: "Safety instruction omission partially effective. Some topics still refused.",
       fallbackSuggestion: "ollama:qwen3-coder-next",
     },
     // ── Codex ──
     "codex:codex-mini-latest": {
-      provider: "codex", model: "codex-mini-latest",
+      provider: "codex",
+      model: "codex-mini-latest",
       capability: "partial",
-      notes: "Uses ChatGPT backend. System prompt framing is the bypass. Code-focused tasks cooperate well; general exploit requests may be refused.",
+      notes:
+        "Uses ChatGPT backend. System prompt framing is the bypass. Code-focused tasks cooperate well; general exploit requests may be refused.",
       fallbackSuggestion: "ollama:qwen3-coder-next",
     },
     // ── Copilot ──
     "copilot:gpt-4o": {
-      provider: "copilot", model: "gpt-4o",
+      provider: "copilot",
+      model: "gpt-4o",
       capability: "partial",
-      notes: "No additional safety overlay beyond model RLHF. Code completion context cooperates with security tooling; direct exploit requests may be limited.",
+      notes:
+        "No additional safety overlay beyond model RLHF. Code completion context cooperates with security tooling; direct exploit requests may be limited.",
       fallbackSuggestion: "free:llama-3.3-70b-versatile",
     },
     // ── Ollama ──
     "ollama:qwen3-coder-next": {
-      provider: "ollama", model: "qwen3-coder-next",
+      provider: "ollama",
+      model: "qwen3-coder-next",
       capability: "full",
-      notes: "Local model, no provider-level restrictions. Uncensored by default. For maximum cooperation, use abliterated variants (e.g. llama4-maverick-abliterated, dolphin-llama3.3-72b).",
+      notes:
+        "Local model, no provider-level restrictions. Uncensored by default. For maximum cooperation, use abliterated variants (e.g. llama4-maverick-abliterated, dolphin-llama3.3-72b).",
     },
     "ollama:llama4-maverick-abliterated": {
-      provider: "ollama", model: "llama4-maverick-abliterated",
+      provider: "ollama",
+      model: "llama4-maverick-abliterated",
       capability: "full",
-      notes: "Abliterated Llama 4 Maverick. RLHF refusal layer surgically removed. Fully uncensored. Requires ~48GB VRAM for Q4 quant.",
+      notes:
+        "Abliterated Llama 4 Maverick. RLHF refusal layer surgically removed. Fully uncensored. Requires ~48GB VRAM for Q4 quant.",
     },
     "ollama:dolphin-llama3.3-72b": {
-      provider: "ollama", model: "dolphin-llama3.3-72b",
+      provider: "ollama",
+      model: "dolphin-llama3.3-72b",
       capability: "full",
-      notes: "Dolphin (Cognitive Computations) fine-tune of Llama 3.3 72B. Trained without alignment restrictions. Fully uncensored.",
+      notes:
+        "Dolphin (Cognitive Computations) fine-tune of Llama 3.3 72B. Trained without alignment restrictions. Fully uncensored.",
     },
     "ollama:qwen3.5-abliterated:27b": {
-      provider: "ollama", model: "qwen3.5-abliterated:27b",
+      provider: "ollama",
+      model: "qwen3.5-abliterated:27b",
       capability: "full",
-      notes: "Abliterated Qwen 3.5 27B. Refusal neurons zeroed out. Smaller VRAM footprint (~18GB Q4). Good balance of capability and resource usage.",
+      notes:
+        "Abliterated Qwen 3.5 27B. Refusal neurons zeroed out. Smaller VRAM footprint (~18GB Q4). Good balance of capability and resource usage.",
     },
     // ── Gemini ──
     "gemini:gemini-2.5-pro": {
-      provider: "gemini", model: "gemini-2.5-pro",
+      provider: "gemini",
+      model: "gemini-2.5-pro",
       capability: "partial",
       notes: "BLOCK_NONE removes content filter but training-level blocks remain.",
       fallbackSuggestion: "ollama:qwen3-coder-next",
     },
     // ── Free Tier (Groq/Cerebras/SambaNova) ──
     "free:llama-3.3-70b-versatile": {
-      provider: "free", model: "llama-3.3-70b-versatile",
+      provider: "free",
+      model: "llama-3.3-70b-versatile",
       capability: "full",
-      notes: "Open-weight Llama model on Groq. Minimal API-level filtering. Most security research requests cooperate.",
+      notes:
+        "Open-weight Llama model on Groq. Minimal API-level filtering. Most security research requests cooperate.",
     },
     "free:llama-4-scout-17b-16e": {
-      provider: "free", model: "llama-4-scout-17b-16e",
+      provider: "free",
+      model: "llama-4-scout-17b-16e",
       capability: "full",
       notes: "Open-weight Llama 4 on Cerebras. Fast inference, minimal content restrictions.",
     },
     "free:deepseek-r1-distill-llama-70b": {
-      provider: "free", model: "deepseek-r1-distill-llama-70b",
+      provider: "free",
+      model: "deepseek-r1-distill-llama-70b",
       capability: "full",
-      notes: "DeepSeek R1 distilled on Llama. Strong reasoning, minimal safety restrictions on open hosting.",
+      notes:
+        "DeepSeek R1 distilled on Llama. Strong reasoning, minimal safety restrictions on open hosting.",
     },
     // ── HuggingFace ──
     "huggingface:NousResearch/Hermes-3-Llama-3.1-70B": {
-      provider: "huggingface", model: "NousResearch/Hermes-3-Llama-3.1-70B",
+      provider: "huggingface",
+      model: "NousResearch/Hermes-3-Llama-3.1-70B",
       capability: "full",
       notes: "Explicitly uncensored model variant. Full cooperation with security research.",
     },
     // ── Azure ──
     "azure:gpt-4o": {
-      provider: "azure", model: "gpt-4o",
+      provider: "azure",
+      model: "gpt-4o",
       capability: "partial",
-      notes: "Azure content filters are configurable via portal. Custom policy 'wotann-security-research' can disable them. Without custom policy, hard blocks remain.",
+      notes:
+        "Azure content filters are configurable via portal. Custom policy 'wotann-security-research' can disable them. Without custom policy, hard blocks remain.",
       fallbackSuggestion: "free:llama-3.3-70b-versatile",
     },
     // ── Bedrock ──
     "bedrock:anthropic.claude-sonnet-4-6-v1:0": {
-      provider: "bedrock", model: "anthropic.claude-sonnet-4-6-v1:0",
+      provider: "bedrock",
+      model: "anthropic.claude-sonnet-4-6-v1:0",
       capability: "partial",
-      notes: "Bedrock guardrails can be disabled via API config. Model-level RLHF blocks remain. CYBER_RISK_INSTRUCTION clearing via system prompt.",
+      notes:
+        "Bedrock guardrails can be disabled via API config. Model-level RLHF blocks remain. CYBER_RISK_INSTRUCTION clearing via system prompt.",
       fallbackSuggestion: "anthropic:claude-opus-4-6",
     },
     // ── Vertex ──
     "vertex:claude-sonnet-4-6": {
-      provider: "vertex", model: "claude-sonnet-4-6",
+      provider: "vertex",
+      model: "claude-sonnet-4-6",
       capability: "partial",
-      notes: "Vertex runs Claude via Google Cloud. Google's content filtering layer applies on top of Anthropic's RLHF. Both CYBER_RISK_INSTRUCTION and Vertex harm blocks must be cleared.",
+      notes:
+        "Vertex runs Claude via Google Cloud. Google's content filtering layer applies on top of Anthropic's RLHF. Both CYBER_RISK_INSTRUCTION and Vertex harm blocks must be cleared.",
       fallbackSuggestion: "anthropic:claude-opus-4-6",
     },
   };
 
-  return profiles[`${provider}:${model}`] ?? {
-    provider, model,
-    capability: "partial",
-    notes: "Unknown bypass capability. Testing recommended.",
-    fallbackSuggestion: "ollama:qwen3-coder-next",
-  };
+  return (
+    profiles[`${provider}:${model}`] ?? {
+      provider,
+      model,
+      capability: "partial",
+      notes: "Unknown bypass capability. Testing recommended.",
+      fallbackSuggestion: "ollama:qwen3-coder-next",
+    }
+  );
 }
 
 /**
@@ -614,6 +666,7 @@ export function getSecurityFallbackChain(provider: ProviderName): readonly Provi
     together: ["together", "free", "ollama"],
     fireworks: ["fireworks", "free", "ollama"],
     sambanova: ["sambanova", "free", "ollama"],
+    groq: ["groq", "free", "ollama"],
   };
   return chains[provider];
 }
@@ -646,7 +699,8 @@ export function getRecommendedUncensoredModels(): readonly UncensoredModelRecomm
       technique: "abliteration",
       parameterCount: "400B MoE (17B active)",
       vramRequirement: "~48GB (Q4_K_M)",
-      notes: "Llama 4 Maverick with refusal layer removed. Best overall capability for uncensored use. 1M context.",
+      notes:
+        "Llama 4 Maverick with refusal layer removed. Best overall capability for uncensored use. 1M context.",
     },
     {
       model: "dolphin-llama3.3-72b",
@@ -654,7 +708,8 @@ export function getRecommendedUncensoredModels(): readonly UncensoredModelRecomm
       technique: "fine-tune",
       parameterCount: "72B",
       vramRequirement: "~42GB (Q4_K_M)",
-      notes: "Cognitive Computations Dolphin. Trained without alignment. Strong reasoning, fully uncensored.",
+      notes:
+        "Cognitive Computations Dolphin. Trained without alignment. Strong reasoning, fully uncensored.",
     },
     {
       model: "qwen3.5-abliterated:27b",
@@ -670,7 +725,8 @@ export function getRecommendedUncensoredModels(): readonly UncensoredModelRecomm
       technique: "abliteration",
       parameterCount: "671B MoE (37B active)",
       vramRequirement: "~24GB (Q4_K_M, active params only)",
-      notes: "DeepSeek V4 with refusal direction removed. 1M context. Cheapest API option if run locally.",
+      notes:
+        "DeepSeek V4 with refusal direction removed. 1M context. Cheapest API option if run locally.",
     },
     {
       model: "mistral-nemo-abliterated:12b",
@@ -720,7 +776,13 @@ export class GuardrailsAuditTrail {
     this.sessionId = sessionId ?? randomUUID();
   }
 
-  record(action: string, provider: string, model: string, prompt: string, response: string): AuditLogEntry {
+  record(
+    action: string,
+    provider: string,
+    model: string,
+    prompt: string,
+    response: string,
+  ): AuditLogEntry {
     const entry: AuditLogEntry = {
       id: randomUUID(),
       timestamp: new Date().toISOString(),
@@ -765,12 +827,16 @@ export class GuardrailsAuditTrail {
    * Export the audit trail as a compliance-ready JSON report.
    */
   exportReport(): string {
-    return JSON.stringify({
-      sessionId: this.sessionId,
-      generatedAt: new Date().toISOString(),
-      entryCount: this.entries.length,
-      integrityValid: this.verifyIntegrity(),
-      entries: this.entries,
-    }, null, 2);
+    return JSON.stringify(
+      {
+        sessionId: this.sessionId,
+        generatedAt: new Date().toISOString(),
+        entryCount: this.entries.length,
+        integrityValid: this.verifyIntegrity(),
+        entries: this.entries,
+      },
+      null,
+      2,
+    );
   }
 }

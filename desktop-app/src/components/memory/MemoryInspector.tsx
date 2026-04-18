@@ -7,6 +7,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { useStore } from "../../store";
 import { searchMemory } from "../../store/engine";
 import type { MemoryEntry } from "../../types";
+import { ValknutSpinner } from "../wotann/ValknutSpinner";
 
 const TYPE_STYLES: Record<string, { bgStyle: React.CSSProperties; textColor: string }> = {
   case: { bgStyle: { background: "var(--color-info-muted)", borderColor: "rgba(96, 165, 250, 0.3)" }, textColor: "var(--info)" },
@@ -224,7 +225,7 @@ export function MemoryInspector() {
         {loading && !initialLoaded ? (
           <div className="flex items-center justify-center h-full">
             <div className="flex items-center gap-3 text-sm" style={{ color: "var(--color-text-muted)" }}>
-              <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-text-dim)", borderTopColor: "var(--color-primary)" }} />
+              <ValknutSpinner size={16} color="var(--color-primary)" label="Loading memory" />
               Loading memory...
             </div>
           </div>

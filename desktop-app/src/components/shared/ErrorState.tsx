@@ -3,6 +3,8 @@
  * Also provides DisconnectedBanner and EmptyState.
  */
 
+import { useState, useEffect } from "react";
+
 interface ErrorStateProps {
   readonly title?: string;
   readonly message: string;
@@ -53,8 +55,55 @@ export function ErrorState({
   );
 }
 
-/** Disconnected banner for top of views */
-export function DisconnectedBanner({ onRetry }: { readonly onRetry?: () => void }) {
+/**
+ * Disconnected banner pinned to the top of every view.
+ *
+ * UX gap (SESSION_8 UX_AUDIT CHAT-2): the banner previously always took 32-40 px
+ * of vertical space across every screen. Users had no way to collapse it while
+ * they wait for a daemon restart, so it leached attention from real content.
+ *
+ * Fix: the banner is **dismissible**. Collapsed state is persisted in
+ * `localStorage` so it stays hidden across full-screen or tab switches, but
+ * *resets on reconnect* — the moment the engine comes back, the dismissal flag
+ * is cleared so the next disconnection re-surfaces the banner.
+ */
+const DISMISS_KEY = "wotann-disconnected-banner-dismissed";
+
+export function DisconnectedBanner({
+  onRetry,
+  engineConnected = false,
+}: {
+  readonly onRetry?: () => void;
+  readonly engineConnected?: boolean;
+}) {
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(DISMISS_KEY) === "1";
+  });
+
+  // Clear dismissal on reconnect so the next disconnect re-surfaces the banner.
+  useEffect(() => {
+    if (engineConnected) {
+      try {
+        localStorage.removeItem(DISMISS_KEY);
+      } catch {
+        /* storage unavailable — best-effort */
+      }
+      setDismissed(false);
+    }
+  }, [engineConnected]);
+
+  if (dismissed || engineConnected) return null;
+
+  const dismiss = () => {
+    try {
+      localStorage.setItem(DISMISS_KEY, "1");
+    } catch {
+      /* storage unavailable — fall back to in-memory */
+    }
+    setDismissed(true);
+  };
+
   return (
     <div
       className="flex items-center justify-between"
@@ -73,28 +122,50 @@ export function DisconnectedBanner({ onRetry }: { readonly onRetry?: () => void 
           Engine disconnected
         </span>
       </div>
-      {onRetry && (
+      <div className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="btn-press"
+            style={{
+              fontSize: "var(--font-size-xs)",
+              fontWeight: 600,
+              color: "var(--color-warning)",
+              background: "var(--color-warning-muted)",
+              border: "1px solid var(--color-warning-muted)",
+              borderRadius: "var(--radius-sm)",
+              padding: "4px 8px",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              transition: "var(--transition-fast)",
+            }}
+            aria-label="Attempt to reconnect to the engine"
+          >
+            Reconnect
+          </button>
+        )}
         <button
-          onClick={onRetry}
+          onClick={dismiss}
           className="btn-press"
           style={{
             fontSize: "var(--font-size-xs)",
-            fontWeight: 600,
-            color: "var(--color-warning)",
-            background: "var(--color-warning-muted)",
-            border: "1px solid var(--color-warning-muted)",
+            fontWeight: 500,
+            color: "var(--color-text-muted)",
+            background: "transparent",
+            border: "1px solid transparent",
             borderRadius: "var(--radius-sm)",
-            padding: "4px 8px",
+            padding: "4px 6px",
             cursor: "pointer",
-            flexShrink: 0,
             whiteSpace: "nowrap",
+            lineHeight: 1,
             transition: "var(--transition-fast)",
           }}
-          aria-label="Attempt to reconnect to the engine"
+          aria-label="Dismiss the disconnected banner until the engine reconnects"
+          title="Dismiss (reappears on next disconnect)"
         >
-          Reconnect
+          ✕
         </button>
-      )}
+      </div>
     </div>
   );
 }

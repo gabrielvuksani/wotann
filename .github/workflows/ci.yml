@@ -47,11 +47,10 @@ jobs:
   test:
     name: Test ${{ matrix.shard }}/2 (Node ${{ matrix.node-version }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Shard 1 sometimes hits a GH runner shutdown-signal preemption that we
-    # can't reproduce locally (3659/3660 always pass on dev machines). Keep
-    # the matrix running so we still see real failures, but don't fail the
-    # whole pipeline on infrastructure flake.
-    continue-on-error: ${{ matrix.shard == 1 }}
+    # Honest mode (session 9 adversarial audit): we removed a
+    # `continue-on-error: ${{ matrix.shard == 1 }}` line that was silently
+    # masking real regressions under a "runner-flake" excuse. If flakes
+    # recur, we fix the actual timeout instead of hiding failure.
     strategy:
       fail-fast: false
       matrix:

@@ -25,6 +25,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useStore } from "../../store";
 import { commands, type DependencyStatus } from "../../hooks/useTauriCommand";
+import { ValknutSpinner } from "../wotann/ValknutSpinner";
 
 /* Inject onboarding-specific keyframes once */
 const ONBOARDING_KEYFRAMES_ID = "wotann-onboarding-keyframes";
@@ -680,13 +681,16 @@ export function OnboardingView() {
                 {(engineStatus === "checking" || engineStatus === "installing" || engineStatus === "starting") && (
                   <div className="flex flex-col items-center gap-4">
                     <div
-                      className="w-12 h-12 border-2 border-t-transparent rounded-full animate-spin"
                       style={{
-                        borderColor: engineStatus === "installing" ? "var(--color-warning)" : "var(--color-primary)",
-                        borderTopColor: "transparent",
-                        boxShadow: "0 0 16px rgba(var(--accent-rgb, 10,132,255), 0.2)",
+                        filter: "drop-shadow(0 0 16px rgba(var(--accent-rgb, 10,132,255), 0.3))",
                       }}
-                    />
+                    >
+                      <ValknutSpinner
+                        size={48}
+                        color={engineStatus === "installing" ? "var(--color-warning)" : "var(--color-primary)"}
+                        label={engineStatus === "installing" ? "Installing" : engineStatus === "starting" ? "Starting" : "Checking"}
+                      />
+                    </div>
                     <div>
                       <div className="font-medium" style={{ color: engineStatus === "installing" ? "var(--color-warning)" : "var(--color-primary)", marginBottom: 4 }}>
                         {engineStatus === "checking" && "Checking engine status..."}
@@ -1140,10 +1144,7 @@ function DepRow({
       <div className="flex items-center gap-3">
         {/* Status icon: spinner for installing, checkmark for success, X for failed, dot for pending */}
         {isInstalling ? (
-          <div
-            className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin"
-            style={{ borderColor: "var(--color-primary)", borderTopColor: "transparent" }}
-          />
+          <ValknutSpinner size={24} color="var(--color-primary)" label="Installing" />
         ) : installed ? (
           <div
             className="w-6 h-6 rounded-full flex items-center justify-center"

@@ -226,6 +226,8 @@ export function ProviderConfig(): JSX.Element {
       )}
       {loading && providers.length === 0 ? (
         <Skeleton />
+      ) : providers.length === 0 ? (
+        <EmptyProviders loading={loading} onRefresh={onRefresh} />
       ) : (
         <div className="flex flex-col gap-3">
           {providers.map((p) => (
@@ -478,6 +480,53 @@ function Skeleton(): JSX.Element {
           className="h-24 animate-pulse rounded-2xl border border-white/10 bg-[#1C1C1E]/60"
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * Empty providers CTA — replaces the bare "Run discovery to populate the list"
+ * hint with an actionable card so users have a clear next step when KAIROS is
+ * down or environment keys haven't been discovered yet.
+ */
+function EmptyProviders(props: {
+  loading: boolean;
+  onRefresh: () => void | Promise<void>;
+}): JSX.Element {
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-white/10 bg-[#1C1C1E]/40 p-8 text-center"
+      role="status"
+    >
+      <svg
+        width="42"
+        height="42"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        style={{ color: "rgba(255,255,255,0.35)" }}
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 3" />
+      </svg>
+      <div className="flex flex-col gap-1">
+        <h3 className="text-[15px] font-semibold text-white">No providers discovered yet</h3>
+        <p className="max-w-sm text-[13px] text-[#EBEBF5]/60">
+          WOTANN scans your environment for API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, GROQ_API_KEY…) and probes localhost for Ollama. Set a key or start Ollama, then discover.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => void props.onRefresh()}
+        disabled={props.loading}
+        className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2 text-[13px] font-medium text-white transition-colors hover:bg-white/10 disabled:opacity-50"
+      >
+        {props.loading ? "Discovering…" : "Run discovery"}
+      </button>
     </div>
   );
 }

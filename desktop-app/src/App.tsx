@@ -12,6 +12,8 @@ import { useEngine } from "./hooks/useEngine";
 import { useStreamListener } from "./hooks/useStreaming";
 import { AppShell } from "./components/layout/AppShell";
 import { NotificationToast, type ToastData } from "./components/notifications/NotificationToast";
+import { Runering } from "./components/wotann/Runering";
+import { KeyboardShortcutsOverlay } from "./components/shared/KeyboardShortcutsOverlay";
 
 export function App() {
   useShortcuts();
@@ -39,6 +41,10 @@ export function App() {
     <>
       <AppShell />
       <NotificationToast toasts={toasts} onDismiss={dismissToast} />
+      {/* Signature WOTANN UI layers — global overlays. Each is self-contained
+          and renders null when idle so they cost nothing when unused. */}
+      <Runering />
+      <KeyboardShortcutsOverlay />
     </>
   );
 }

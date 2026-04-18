@@ -276,26 +276,27 @@ export function AppShell() {
         >
           <Header />
 
-          {/* Disconnected banner */}
-          {!engineConnected && (
-            <DisconnectedBanner
-              onRetry={async () => {
-                // Previous wiring just re-ran initializeFromEngine() which
-                // queries the daemon but never respawns it. When the daemon
-                // was dead (socket missing / stale), Reconnect did nothing
-                // visible. Now: ask Rust to actually restart the sidecar,
-                // then refresh state once the socket is up.
-                try {
-                  const { invoke } = await import("@tauri-apps/api/core");
-                  await invoke("restart_engine");
-                } catch {
-                  /* fall through to init — worst case the watchdog
-                     eventually catches up on its next tick */
-                }
-                await initializeFromEngine();
-              }}
-            />
-          )}
+          {/* Disconnected banner. Rendered unconditionally so the component can
+              reset its dismissed-flag in localStorage when the engine reconnects
+              — otherwise a user who dismissed once stays dismissed forever. */}
+          <DisconnectedBanner
+            engineConnected={engineConnected}
+            onRetry={async () => {
+              // Previous wiring just re-ran initializeFromEngine() which
+              // queries the daemon but never respawns it. When the daemon
+              // was dead (socket missing / stale), Reconnect did nothing
+              // visible. Now: ask Rust to actually restart the sidecar,
+              // then refresh state once the socket is up.
+              try {
+                const { invoke } = await import("@tauri-apps/api/core");
+                await invoke("restart_engine");
+              } catch {
+                /* fall through to init — worst case the watchdog
+                   eventually catches up on its next tick */
+              }
+              await initializeFromEngine();
+            }}
+          />
 
           {/* Content + panels area */}
           <div className="flex-1 flex min-h-0">

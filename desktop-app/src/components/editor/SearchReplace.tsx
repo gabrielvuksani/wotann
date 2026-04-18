@@ -7,6 +7,7 @@
 import { useState, useCallback } from "react";
 import { executeCommand } from "../../store/engine";
 import { useStore } from "../../store";
+import { ValknutSpinner } from "../wotann/ValknutSpinner";
 
 interface SearchResult {
   readonly file: string;
@@ -175,7 +176,7 @@ export function SearchReplace() {
       <div className="flex-1 overflow-y-auto">
         {searching ? (
           <div className="flex items-center justify-center h-full text-xs gap-2" style={{ color: "var(--color-text-muted)" }}>
-            <div className="w-3 h-3 border rounded-full animate-spin" style={{ borderColor: "var(--color-text-muted)", borderTopColor: "transparent" }} aria-hidden="true" />
+            <ValknutSpinner size={12} color="var(--color-text-muted)" label="Searching" />
             Searching...
           </div>
         ) : searchError ? (

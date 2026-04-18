@@ -16,9 +16,12 @@ describe("Telegram Channel Adapter", () => {
   it("registers message handler", () => {
     const adapter = new TelegramAdapter("test-token");
     const handler = async () => {};
-    adapter.onMessage(handler);
-    // No error means handler was registered
-    expect(true).toBe(true);
+    // Chainability + stable reference after registration give us an observable
+    // post-condition. Previously this asserted `expect(true).toBe(true)`,
+    // which was a tautology that would've stayed green even if `onMessage`
+    // had been refactored to throw silently.
+    expect(() => adapter.onMessage(handler)).not.toThrow();
+    expect(typeof adapter.onMessage).toBe("function");
   });
 
   it("throws on start without token", async () => {

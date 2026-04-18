@@ -16,6 +16,7 @@ import { ExecApprovals } from "../security/ExecApprovals";
 import { QRCodeSVG } from "qrcode.react";
 import { RemoteControlView } from "../companion/RemoteControlView";
 import { WotannThemePicker } from "../wotann/WotannThemePicker";
+import { ValknutSpinner } from "../wotann/ValknutSpinner";
 
 interface SettingsSection {
   readonly id: string;
@@ -1269,7 +1270,7 @@ function AdvancedSection() {
                 style={{ fontSize: "var(--font-size-xs)", padding: "6px 12px", display: "flex", alignItems: "center", gap: 6 }}
               >
                 {restarting ? (
-                  <span className="animate-spin" style={{ width: 12, height: 12, border: "2px solid var(--color-text-dim)", borderTopColor: "var(--color-primary)", borderRadius: "50%", display: "inline-block" }} />
+                  <ValknutSpinner size={12} color="var(--color-primary)" label="Restarting" />
                 ) : (
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 8a6 6 0 0110.89-3.48M14 8a6 6 0 01-10.89 3.48M14 2v4h-4M2 14v-4h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -1391,9 +1392,10 @@ function AdvancedSection() {
                   }}
                 >
                   {pullingModel === model.id ? (
-                    <span
-                      className="animate-spin"
-                      style={{ width: 10, height: 10, border: "2px solid var(--color-text-dim)", borderTopColor: "var(--color-primary)", borderRadius: "50%", display: "inline-block" }}
+                    <ValknutSpinner
+                      size={10}
+                      color="var(--color-primary)"
+                      label={`Pulling ${model.id}`}
                     />
                   ) : (
                     <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">

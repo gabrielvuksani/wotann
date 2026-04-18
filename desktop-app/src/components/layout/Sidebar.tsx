@@ -17,6 +17,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useStore } from "../../store";
 import type { ConversationSummary } from "../../types";
 import { WorkerPill } from "./WorkerPill";
+import { ValknutSpinner } from "../wotann/ValknutSpinner";
 
 // ── Relative time formatting ───────────────────────────
 
@@ -334,7 +335,7 @@ export function Sidebar() {
             {searchQuery ? "No conversations match" : (
               engineConnected && !initialLoadDone ? (
                 <div className="flex flex-col items-center gap-2 py-4">
-                  <span className="w-3 h-3 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-text-dim)", borderTopColor: "var(--color-primary)" }} />
+                  <ValknutSpinner size={14} color="var(--color-primary)" label="Loading" />
                   <span>Loading...</span>
                 </div>
               ) : "No conversations yet"

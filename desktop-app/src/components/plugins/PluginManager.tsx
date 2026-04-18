@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from "react";
 import { getPlugins } from "../../store/engine";
 import type { PluginInfo } from "../../hooks/useTauriCommand";
 import { commands } from "../../hooks/useTauriCommand";
+import { ValknutSpinner } from "../wotann/ValknutSpinner";
 
 export function PluginManager() {
   const [plugins, setPlugins] = useState<readonly PluginInfo[]>([]);
@@ -113,7 +114,7 @@ export function PluginManager() {
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <div className="flex items-center gap-3 text-sm" style={{ color: "var(--color-text-muted)" }}>
-            <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-text-dim)", borderTopColor: "var(--color-primary)" }} />
+            <ValknutSpinner size={16} color="var(--color-primary)" label="Loading plugins" />
             Loading plugins...
           </div>
         </div>
