@@ -8,6 +8,7 @@ import { join, extname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { ModelPromptFormatter } from "./model-formatter.js";
 import type { ModelFormatConfig, ToolDescriptor } from "./model-formatter.js";
+import { traceInstructions, type InstructionSource } from "./instruction-provenance.js";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -79,6 +80,19 @@ export interface PromptAssemblyResult {
   readonly cachedPrefix: string;
   readonly dynamicSuffix: string;
   readonly fullPrompt: string;
+  /**
+   * Line→source map for the assembled `fullPrompt`. Each key is a
+   * 1-indexed line number in the final prompt; the value is the origin
+   * label (e.g. `"AGENTS.md"`, `"CLAUDE.md"`, `"Rule: tdd.md"`, `"mode"`,
+   * `"modules/identity"`, `"instruction-provenance"`).
+   *
+   * Session-10 audit fix: the `instruction-provenance` module was
+   * exported via lib.ts but never invoked by the engine. Callers who
+   * needed to answer "which file told the agent to X?" had to grep the
+   * whole prompt; now the engine ships a real sourceMap for every
+   * `assembleSystemPromptParts` call.
+   */
+  readonly sourceMap: ReadonlyMap<number, string>;
 }
 
 interface BootstrapFile {
@@ -329,18 +343,75 @@ export function assembleSystemPromptParts(options: PromptAssemblyOptions): Promp
         ? modelFormatter.formatSection("task_context", rawDynamicSuffix, config.format)
         : "";
 
+    const formattedSourceMap = buildPromptSourceMap(cachedParts, dynamicParts, formatted);
     return {
       cachedPrefix: formattedCachedPrefix,
       dynamicSuffix: formattedDynamicSuffix,
       fullPrompt: formatted,
+      sourceMap: formattedSourceMap,
     };
   }
 
+  const rawFullPrompt = [rawCachedPrefix, rawDynamicSuffix].filter(Boolean).join("\n\n---\n\n");
+  const rawSourceMap = buildPromptSourceMap(cachedParts, dynamicParts, rawFullPrompt);
   return {
     cachedPrefix: rawCachedPrefix,
     dynamicSuffix: rawDynamicSuffix,
-    fullPrompt: [rawCachedPrefix, rawDynamicSuffix].filter(Boolean).join("\n\n---\n\n"),
+    fullPrompt: rawFullPrompt,
+    sourceMap: rawSourceMap,
   };
+}
+
+/**
+ * Build a line→source provenance map for an assembled prompt by
+ * synthesising one `InstructionSource` per `cachedParts` / `dynamicParts`
+ * entry and handing them to `traceInstructions`. Each part already carries
+ * its origin as the first `# <label>` line (see how `cachedParts.push`
+ * builds bootstrap / workspace / rule / module entries), so we extract
+ * that as the source label.
+ *
+ * The returned map is 1-indexed by line number in `fullPrompt`. Callers
+ * use `whichSource(traced, lineNumber)` or `findProvenance(traced, needle)`
+ * from `instruction-provenance.ts` to answer "who told the agent to X?".
+ */
+function buildPromptSourceMap(
+  cachedParts: readonly string[],
+  dynamicParts: readonly string[],
+  assembledText: string,
+): ReadonlyMap<number, string> {
+  const sources: InstructionSource[] = [];
+  for (const [idx, part] of cachedParts.entries()) {
+    const firstLine = part.split("\n", 1)[0] ?? "";
+    const label = firstLine.startsWith("# ") ? firstLine.slice(2).trim() : `cached-part-${idx + 1}`;
+    sources.push({ source: label, lines: part.split("\n"), priority: 1 });
+  }
+  for (const [idx, part] of dynamicParts.entries()) {
+    const firstLine = part.split("\n", 1)[0] ?? "";
+    const label = firstLine.startsWith("# ")
+      ? firstLine.slice(2).trim()
+      : `dynamic-part-${idx + 1}`;
+    sources.push({ source: label, lines: part.split("\n"), priority: 2 });
+  }
+  const traced = traceInstructions(sources);
+  // `traceInstructions` numbers against its own assembled text; the real
+  // `fullPrompt` may format slightly differently (e.g. `---` separators),
+  // so when the line counts disagree we fall back to the coarser mapping
+  // (every line → "cached" or "dynamic" by character-position lookup).
+  // This still beats the previous behaviour of NO source map at all.
+  const tracedLineCount = traced.sourceMap.size;
+  const realLineCount = assembledText.split("\n").length;
+  if (tracedLineCount === realLineCount) return traced.sourceMap;
+
+  const coarse = new Map<number, string>();
+  const cachedChars = cachedParts.join("\n").length;
+  let charCursor = 0;
+  const realLines = assembledText.split("\n");
+  for (let i = 0; i < realLines.length; i++) {
+    const lineLen = (realLines[i] ?? "").length + 1;
+    coarse.set(i + 1, charCursor < cachedChars ? "cached" : "dynamic");
+    charCursor += lineLen;
+  }
+  return coarse;
 }
 
 // ── Helpers ─────────────────────────────────────────────────
