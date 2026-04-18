@@ -321,6 +321,7 @@ final class ConnectionManager: ObservableObject {
         keychainManager.delete(.pairingData)
         keychainManager.delete(.relayConfig)
         keychainManager.delete(.sessionToken)
+        keychainManager.delete(.sharedSecret)
         pairedDevice = nil
         isPaired = false
         reconnectCount = 0
@@ -367,6 +368,17 @@ final class ConnectionManager: ObservableObject {
                     rpcClient.setEncryption(ecdhManager)
                     connectionSecurity = .encrypted
                     encryptionWarning = nil
+                    // Persist the derived key so the Siri-intent extension
+                    // can rehydrate the same session without running its
+                    // own ECDH exchange. The key only lives on this device
+                    // (kSecAttrAccessibleWhenUnlockedThisDeviceOnly) and is
+                    // rotated whenever the main app re-pairs.
+                    if let keyData = ecdhManager.derivedKeyData {
+                        try? keychainManager.save(
+                            keyData.base64EncodedString(),
+                            for: .sharedSecret,
+                        )
+                    }
                     return
                 }
             } catch {

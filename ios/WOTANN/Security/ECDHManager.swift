@@ -102,6 +102,31 @@ final class ECDHManager {
         derivedKey != nil
     }
 
+    /// Expose the derived symmetric key as raw bytes so callers (e.g. the
+    /// main app) can persist it in the shared Keychain for the intent
+    /// extension to rehydrate. Returns nil before `completeKeyExchange`.
+    var derivedKeyData: Data? {
+        guard let key = derivedKey else { return nil }
+        return key.withUnsafeBytes { Data($0) }
+    }
+
+    /// Rehydrate a previously-persisted symmetric key without running a
+    /// new ECDH exchange. Used by the Siri intent extension so intents
+    /// can reuse the main app's session key instead of running a 30-second
+    /// ECDH negotiation on every invocation (which would be impossible
+    /// anyway since the intent extension can't reach the desktop's
+    /// peer-public-key endpoint before the intent deadline fires).
+    ///
+    /// - Parameter keyData: Exactly 32 bytes (256 bits) matching the
+    ///   AES-GCM key size. Rejects other lengths so a corrupted
+    ///   keychain value can't silently downgrade the cipher strength.
+    func loadDerivedKey(_ keyData: Data) throws {
+        guard keyData.count == Self.keyByteCount else {
+            throw ECDHError.keyDerivationFailed
+        }
+        derivedKey = SymmetricKey(data: keyData)
+    }
+
     // MARK: - Encryption
 
     /// Encrypt plaintext data using AES-GCM with the derived symmetric key.

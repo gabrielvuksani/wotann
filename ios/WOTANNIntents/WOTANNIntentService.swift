@@ -33,7 +33,28 @@ final class WOTANNIntentService {
 
         // Wait briefly for WebSocket handshake
         try? await Task.sleep(nanoseconds: 1_000_000_000)
-        return rpcClient.isConnected
+        guard rpcClient.isConnected else { return false }
+
+        // Rehydrate the ECDH-derived key the main app saved when it
+        // paired. Siri intent extensions have a tight deadline and
+        // cannot run a fresh 30-second ECDH negotiation — but the main
+        // app already did that and persisted the 32-byte symmetric key
+        // to the shared keychain. Without this step, intent traffic
+        // would travel in plaintext while the main app's traffic is
+        // encrypted — a silent downgrade the user never asked for.
+        if let secretBase64 = readKeychain("shared_secret"),
+           let keyData = Data(base64Encoded: secretBase64) {
+            let ecdh = ECDHManager()
+            do {
+                try ecdh.loadDerivedKey(keyData)
+                rpcClient.setEncryption(ecdh)
+            } catch {
+                // Corrupted or wrong-length key — fall through to
+                // unencrypted. RPCClient already logs this path.
+            }
+        }
+
+        return true
     }
 
     private func readKeychain(_ account: String) -> String? {
