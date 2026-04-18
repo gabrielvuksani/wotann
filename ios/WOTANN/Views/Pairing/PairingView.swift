@@ -54,10 +54,13 @@ struct PairingView: View {
 
                     Spacer()
 
-                    // Step indicator
+                    // Step indicator — labels kept short so all three fit
+                    // without truncation on the narrow 3-chip row (session-10
+                    // empirical audit found "Scan or discover" clipping to
+                    // "Scan or disc…" on iPhone 17 Pro).
                     HStack(spacing: WTheme.Spacing.sm) {
-                        StepPill(number: 1, label: "Open desktop", isActive: !isPairing)
-                        StepPill(number: 2, label: "Scan or discover", isActive: !isPairing)
+                        StepPill(number: 1, label: "Open Mac", isActive: !isPairing)
+                        StepPill(number: 2, label: "Pair", isActive: !isPairing)
                         StepPill(number: 3, label: "Connected", isActive: connectionManager.isPaired)
                     }
                     .padding(.horizontal, WTheme.Spacing.xl)

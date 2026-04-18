@@ -1,6 +1,16 @@
 /**
  * Identity prompt module — loads WOTANN's identity, soul, and capabilities.
- * Sources: ~/.wotann/IDENTITY.md, ~/.wotann/SOUL.md, and inline context.
+ *
+ * Sources, in precedence order (first hit wins):
+ *   1. `<workspace>/.wotann/{name}` — committed workspace-scoped persona
+ *      (this is where the 52-line SOUL.md lives in the WOTANN repo itself).
+ *   2. `~/.wotann/{name}` — user-global fallback for thin-client shells
+ *      that have no workspace.
+ *
+ * Session-10 audit fix: previously this module ONLY read from homedir,
+ * silently dropping the rich workspace-scoped SOUL/IDENTITY/AGENTS/USER
+ * files. The identity payload was effectively its 1-line constructor
+ * fallback. Readers now get the true committed persona.
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -8,14 +18,19 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PromptContext, PromptModuleEntry } from "../engine.js";
 
-function loadBootstrapFile(name: string): string | null {
-  const path = join(homedir(), ".wotann", name);
-  if (!existsSync(path)) return null;
-  try {
-    return readFileSync(path, "utf-8").trim();
-  } catch {
-    return null;
+function loadBootstrapFile(name: string, workingDir?: string): string | null {
+  const workspacePath = workingDir ? join(workingDir, ".wotann", name) : null;
+  const homePath = join(homedir(), ".wotann", name);
+  for (const path of [workspacePath, homePath]) {
+    if (!path) continue;
+    if (!existsSync(path)) continue;
+    try {
+      return readFileSync(path, "utf-8").trim();
+    } catch {
+      /* fall through to next candidate */
+    }
   }
+  return null;
 }
 
 export const identityPromptModule: PromptModuleEntry = {
@@ -31,8 +46,8 @@ export const identityPromptModule: PromptModuleEntry = {
       "You are the most capable multi-provider agent harness. You amplify any model through harness engineering: middleware, skills, memory, and autonomous workflows.",
     );
 
-    // Load SOUL.md for behavioral principles
-    const soul = loadBootstrapFile("SOUL.md");
+    // Load SOUL.md for behavioral principles — workspace first, homedir fallback
+    const soul = loadBootstrapFile("SOUL.md", ctx.workingDir);
     if (soul) {
       const valuesMatch = soul.match(/## (?:Core Values|What You Value)\n([\s\S]*?)(?=\n## |$)/);
       if (valuesMatch?.[1]) {

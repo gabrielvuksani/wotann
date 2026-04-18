@@ -303,7 +303,10 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
             message: "Convening multi-model review…",
           });
           await runCouncil("Review the current project state");
-          setView("compare");
+          // Session-10 fix: previously routed to "compare" (arena) — wrong
+          // destination, since Council renders its own CouncilView with
+          // structured multi-model deliberation output.
+          setView("council");
         },
       },
 
