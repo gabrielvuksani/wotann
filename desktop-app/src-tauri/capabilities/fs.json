@@ -1,0 +1,35 @@
+{
+  "identifier": "fs-scoped",
+  "description": "Filesystem access — scoped to WOTANN workspace + config dirs. Replaces the blanket fs:default. Paths are resolved against the frontend-provided base via $APPCONFIG / $APPDATA / $HOME aliases so no command can escape above the user's WOTANN directories.",
+  "windows": ["main"],
+  "permissions": [
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-read-dir",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$APPCONFIG/**",
+        "$APPDATA/**",
+        "$APPLOCALDATA/**",
+        "$HOME/.wotann/**",
+        "$HOME/.wotann",
+        "$HOME/Library/Application Support/WOTANN/**",
+        "$HOME/Library/Logs/WOTANN/**"
+      ],
+      "deny": [
+        "$HOME/.ssh/**",
+        "$HOME/.aws/**",
+        "$HOME/.kube/**",
+        "$HOME/.gnupg/**",
+        "$HOME/.netrc",
+        "$HOME/.env",
+        "$HOME/.config/gcloud/**",
+        "$HOME/Library/Keychains/**",
+        "$HOME/Library/Cookies/**"
+      ]
+    }
+  ]
+}

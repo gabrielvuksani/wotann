@@ -1,0 +1,8 @@
+{
+  "identifier": "shell-scoped",
+  "description": "Shell open() for URLs + external-app handoff. Execute() is intentionally NOT granted — any subprocess has to go through the daemon sidecar so we preserve a single audit trail. Replaces shell:default.",
+  "windows": ["main"],
+  "permissions": [
+    "shell:allow-open"
+  ]
+}

@@ -1,13 +1,8 @@
 {
   "identifier": "default",
-  "description": "Default capability set for WOTANN Desktop",
+  "description": "Core WOTANN Desktop capabilities — window, app lifecycle, and path utilities only. Scoped I/O capabilities live in separate files (fs.json, shell.json, ui.json) so each grant is audited independently.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "notification:default",
-    "shell:default",
-    "dialog:default",
-    "global-shortcut:default",
-    "fs:default"
+    "core:default"
   ]
 }

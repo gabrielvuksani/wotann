@@ -113,7 +113,7 @@ import { NotificationManager } from "../desktop/notification-manager.js";
 import { ContextSourceInspector } from "../context/inspector.js";
 import { PersonaManager } from "../identity/persona.js";
 import { SelfHealingPipeline } from "../orchestration/self-healing-pipeline.js";
-import { LSPManager } from "../lsp/symbol-operations.js";
+import { LSPManager, SymbolOperations } from "../lsp/symbol-operations.js";
 import {
   applyHashEdit,
   type HashEditOperation,
@@ -406,6 +406,8 @@ export class WotannRuntime {
   private personaManager: PersonaManager;
   private selfHealingPipeline: SelfHealingPipeline;
   private lspManager: LSPManager;
+  // TypeScript-LanguageService-backed symbol ops (find_symbol / find_references / rename_symbol tools)
+  private symbolOperations: SymbolOperations;
   private dispatchPlane: UnifiedDispatchPlane;
   private arenaLeaderboard: ArenaLeaderboard;
   private councilLeaderboard: CouncilLeaderboard;
@@ -729,8 +731,11 @@ export class WotannRuntime {
     // Self-healing pipeline: graduated error recovery (prompt-fix → rollback → strategy-change → escalation)
     this.selfHealingPipeline = new SelfHealingPipeline();
 
-    // LSP manager: language-aware symbol operations (rename, find-references, type-info)
+    // LSP manager: language-aware server lifecycle (pyright, rust-analyzer, etc.)
     this.lspManager = new LSPManager();
+    // SymbolOperations: TypeScript LanguageService with fallback regex scans for
+    // find_symbol / find_references / rename_symbol runtime tools (Serena port).
+    this.symbolOperations = new SymbolOperations({ workspaceRoot: config.workingDir });
 
     // Unified dispatch plane: single entry point for all channel communication
     this.dispatchPlane = new UnifiedDispatchPlane();
@@ -2222,6 +2227,114 @@ export class WotannRuntime {
               }
               const sanitised = await this.fireToolResultReceivedHook(
                 "plan_advance",
+                resultContent,
+              );
+              yield {
+                type: "text" as const,
+                content: sanitised.content,
+                provider: chunk.provider ?? responseProvider,
+                model: chunk.model ?? responseModel,
+              };
+            }
+
+            // ── Serena-style symbol tools (session-10 port) ──
+            // Exposes workspace-wide symbol search / reference lookup /
+            // rename refactor as first-class agent tools backed by the
+            // TypeScript LanguageService via this.lspManager.
+            if (toolName === "find_symbol" && chunk.toolInput) {
+              const input = chunk.toolInput as Record<string, unknown>;
+              const name = typeof input["name"] === "string" ? (input["name"] as string) : "";
+              let resultContent: string;
+              if (!name) {
+                resultContent = `\n[find_symbol] Error: missing \`name\` argument\n`;
+              } else {
+                try {
+                  const hits = await this.symbolOperations.findSymbol(name);
+                  const summary =
+                    hits.length === 0
+                      ? `No matches for "${name}"`
+                      : hits
+                          .slice(0, 20)
+                          .map((h) => `  ${h.kind} ${h.name} — ${h.uri}`)
+                          .join("\n");
+                  resultContent = `\n[find_symbol] ${hits.length} match(es) for "${name}":\n${summary}\n`;
+                } catch (err: unknown) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  resultContent = `\n[find_symbol] Error: ${msg}\n`;
+                }
+              }
+              const sanitised = await this.fireToolResultReceivedHook("find_symbol", resultContent);
+              yield {
+                type: "text" as const,
+                content: sanitised.content,
+                provider: chunk.provider ?? responseProvider,
+                model: chunk.model ?? responseModel,
+              };
+            }
+
+            if (toolName === "find_references" && chunk.toolInput) {
+              const input = chunk.toolInput as Record<string, unknown>;
+              const uri = typeof input["uri"] === "string" ? (input["uri"] as string) : "";
+              const line = typeof input["line"] === "number" ? (input["line"] as number) : -1;
+              const character =
+                typeof input["character"] === "number" ? (input["character"] as number) : -1;
+              let resultContent: string;
+              if (!uri || line < 0 || character < 0) {
+                resultContent = `\n[find_references] Error: requires uri + line + character\n`;
+              } else {
+                try {
+                  const refs = await this.symbolOperations.findReferences(uri, {
+                    line,
+                    character,
+                  });
+                  const summary = refs
+                    .slice(0, 20)
+                    .map((r: { readonly uri: string }) => `  ${r.uri}`)
+                    .join("\n");
+                  resultContent = `\n[find_references] ${refs.length} reference(s):\n${summary}\n`;
+                } catch (err: unknown) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  resultContent = `\n[find_references] Error: ${msg}\n`;
+                }
+              }
+              const sanitised = await this.fireToolResultReceivedHook(
+                "find_references",
+                resultContent,
+              );
+              yield {
+                type: "text" as const,
+                content: sanitised.content,
+                provider: chunk.provider ?? responseProvider,
+                model: chunk.model ?? responseModel,
+              };
+            }
+
+            if (toolName === "rename_symbol" && chunk.toolInput) {
+              const input = chunk.toolInput as Record<string, unknown>;
+              const uri = typeof input["uri"] === "string" ? (input["uri"] as string) : "";
+              const line = typeof input["line"] === "number" ? (input["line"] as number) : -1;
+              const character =
+                typeof input["character"] === "number" ? (input["character"] as number) : -1;
+              const newName =
+                typeof input["newName"] === "string" ? (input["newName"] as string) : "";
+              let resultContent: string;
+              if (!uri || line < 0 || character < 0 || !newName) {
+                resultContent = `\n[rename_symbol] Error: requires uri + line + character + newName\n`;
+              } else {
+                try {
+                  const result = await this.symbolOperations.rename(
+                    uri,
+                    { line, character },
+                    newName,
+                  );
+                  resultContent = `\n[rename_symbol] Renamed: ${result.editsApplied} edit(s) across ${result.filesAffected} file(s)\n`;
+                } catch (err: unknown) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  resultContent = `\n[rename_symbol] Error: ${msg}\n`;
+                }
+              }
+              const sanitised = await this.fireToolResultReceivedHook(
+                "rename_symbol",
                 resultContent,
               );
               yield {

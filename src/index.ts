@@ -1800,6 +1800,31 @@ skillsCmd
     }
   });
 
+skillsCmd
+  .command("export-agentskills <out>")
+  .description("Emit an agentskills.io-compatible registry (SKILL.md per skill + manifest.json)")
+  .option("--source <dir>", "Source skills directory", "skills")
+  .action(async (out: string, options: { source: string }) => {
+    const { exportToAgentSkills } = await import("./skills/agentskills-registry.js");
+    const sourceDir = options.source.startsWith("/")
+      ? options.source
+      : join(process.cwd(), options.source);
+    const outDir = out.startsWith("/") ? out : join(process.cwd(), out);
+    const result = exportToAgentSkills(sourceDir, outDir, { producer: "wotann" });
+    console.log(chalk.bold("\nagentskills.io export\n"));
+    console.log(`  Source:     ${chalk.dim(sourceDir)}`);
+    console.log(`  Output:     ${chalk.dim(outDir)}`);
+    console.log(`  Skills:     ${chalk.green(result.skillsWritten)}`);
+    console.log(`  Manifest:   ${chalk.dim(result.manifestPath)}`);
+    if (result.errors.length > 0) {
+      console.log(chalk.yellow(`  Errors:     ${result.errors.length}`));
+      for (const e of result.errors.slice(0, 10)) {
+        console.log(chalk.dim(`    ${e.path}: ${e.problems.join("; ")}`));
+      }
+    }
+    console.log();
+  });
+
 // ── wotann cost ──────────────────────────────────────────────
 
 program
@@ -3501,6 +3526,47 @@ program
       }
       console.log();
     }
+  });
+
+// ── wotann acp ─────────────────────────────────────────────
+// Agent Client Protocol host — speaks ACP 0.2 over stdio so IDE hosts
+// (Zed, Goose, Air, Kiro) can drive WOTANN as their agent backend.
+
+program
+  .command("acp")
+  .description("Start an Agent Client Protocol server over stdio")
+  .option("--reference", "Use canned reference handlers (no runtime, for smoke-testing)", false)
+  .action(async (opts: { reference?: boolean }) => {
+    const { startAcpStdio, referenceHandlers } = await import("./acp/stdio.js");
+
+    if (opts.reference) {
+      const handle = startAcpStdio({ handlers: referenceHandlers() });
+      await new Promise<void>((resolve) => {
+        process.stdin.once("close", () => {
+          void handle.stop().then(resolve);
+        });
+      });
+      return;
+    }
+
+    const { createRuntime } = await import("./core/runtime.js");
+    const { createRuntimeAcpHandlers } = await import("./acp/runtime-handlers.js");
+    const runtime = await createRuntime(process.cwd());
+    const handle = startAcpStdio({
+      handlers: createRuntimeAcpHandlers({ runtime }),
+      onError: (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[acp] ${msg}\n`);
+      },
+    });
+    await new Promise<void>((resolve) => {
+      process.stdin.once("close", () => {
+        void handle
+          .stop()
+          .then(() => runtime.close())
+          .then(resolve);
+      });
+    });
   });
 
 // ── Parse ───────────────────────────────────────────────────

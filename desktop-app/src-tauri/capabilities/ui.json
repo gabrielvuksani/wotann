@@ -1,0 +1,10 @@
+{
+  "identifier": "ui-scoped",
+  "description": "UI affordances — native dialog, notifications, global shortcut hotkeys. Each plugin exposes default permissions that only surface user-visible UI (no I/O). Split out so auditors can trace each grant independently.",
+  "windows": ["main"],
+  "permissions": [
+    "dialog:default",
+    "notification:default",
+    "global-shortcut:default"
+  ]
+}
