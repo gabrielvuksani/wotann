@@ -325,6 +325,247 @@ describe("AcpServer.handleFrame — session/cancel", () => {
   });
 });
 
+describe("AcpServer.handleFrame — thread/* routing via threadDeps", () => {
+  it("dispatches thread/list through threadDeps when wired", async () => {
+    const bus = createRecordingBus();
+    let asked = "";
+    const server = new AcpServer({
+      handlers: mkHandlers(),
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+      threadDeps: {
+        getManager: (sid: string) => {
+          asked = sid;
+          return null;
+        },
+      },
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    // getManager returns null -> dispatchThreadMethod throws -> InternalError
+    const res = await server.handleFrame(
+      encodeJsonRpc(makeRequest(10, ACP_METHODS.ThreadList, { sessionId: "s1" })),
+    );
+    expect(asked).toBe("s1");
+    expect(res?.error?.code).toBe(JSON_RPC_ERROR_CODES.InternalError);
+  });
+
+  it("returns MethodNotFound for thread/* when threadDeps is omitted", async () => {
+    const bus = createRecordingBus();
+    const server = new AcpServer({
+      handlers: mkHandlers(),
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    const res = await server.handleFrame(
+      encodeJsonRpc(makeRequest(10, ACP_METHODS.ThreadList, { sessionId: "s1" })),
+    );
+    expect(res?.error?.code).toBe(JSON_RPC_ERROR_CODES.MethodNotFound);
+  });
+});
+
+describe("AcpServer.handleFrame — tools/list + tools/invoke (Zed 0.3 parity)", () => {
+  it("tools/list returns MethodNotFound when handler is not implemented", async () => {
+    const bus = createRecordingBus();
+    const server = new AcpServer({
+      handlers: mkHandlers(),
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    const res = await server.handleFrame(
+      encodeJsonRpc(makeRequest(20, ACP_METHODS.ToolsList, {})),
+    );
+    expect(res?.error?.code).toBe(JSON_RPC_ERROR_CODES.MethodNotFound);
+  });
+
+  it("tools/list returns the handler's tool list when wired", async () => {
+    const bus = createRecordingBus();
+    const handlers = mkHandlers();
+    handlers.toolsList = async () => ({
+      tools: [
+        {
+          name: "memory_search",
+          description: "search memory",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "read_file",
+          description: "read a file",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+    });
+    const server = new AcpServer({
+      handlers,
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    const res = await server.handleFrame(
+      encodeJsonRpc(makeRequest(20, ACP_METHODS.ToolsList, {})),
+    );
+    const result = res?.result as { tools: readonly { name: string }[] };
+    expect(result.tools).toHaveLength(2);
+    expect(result.tools[0]?.name).toBe("memory_search");
+  });
+
+  it("tools/list accepts an optional sessionId scope", async () => {
+    const bus = createRecordingBus();
+    const handlers = mkHandlers();
+    let observed: string | undefined;
+    handlers.toolsList = async (params) => {
+      observed = params.sessionId;
+      return { tools: [] };
+    };
+    const server = new AcpServer({
+      handlers,
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(20, ACP_METHODS.ToolsList, { sessionId: "s42" })),
+    );
+    expect(observed).toBe("s42");
+  });
+
+  it("tools/list rejects non-string sessionId with InvalidParams", async () => {
+    const bus = createRecordingBus();
+    const handlers = mkHandlers();
+    handlers.toolsList = async () => ({ tools: [] });
+    const server = new AcpServer({
+      handlers,
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    const res = await server.handleFrame(
+      encodeJsonRpc(makeRequest(20, ACP_METHODS.ToolsList, { sessionId: 42 })),
+    );
+    expect(res?.error?.code).toBe(JSON_RPC_ERROR_CODES.InvalidParams);
+  });
+
+  it("tools/invoke dispatches to the handler with validated args", async () => {
+    const bus = createRecordingBus();
+    const handlers = mkHandlers();
+    let invoked: { name: string; args?: Record<string, unknown> } | null = null;
+    handlers.toolsInvoke = async (params) => {
+      invoked = { name: params.name, args: params.arguments };
+      return {
+        content: [{ type: "text", text: "ok" }],
+      };
+    };
+    const server = new AcpServer({
+      handlers,
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    const res = await server.handleFrame(
+      encodeJsonRpc(
+        makeRequest(21, ACP_METHODS.ToolsInvoke, {
+          name: "memory_search",
+          arguments: { query: "recent bugs" },
+        }),
+      ),
+    );
+    expect(invoked).not.toBeNull();
+    expect(invoked!.name).toBe("memory_search");
+    expect(invoked!.args).toEqual({ query: "recent bugs" });
+    const result = res?.result as { content: readonly { text: string }[] };
+    expect(result.content[0]?.text).toBe("ok");
+  });
+
+  it("tools/invoke rejects missing name with InvalidParams", async () => {
+    const bus = createRecordingBus();
+    const handlers = mkHandlers();
+    handlers.toolsInvoke = async () => ({ content: [] });
+    const server = new AcpServer({
+      handlers,
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    const res = await server.handleFrame(
+      encodeJsonRpc(makeRequest(21, ACP_METHODS.ToolsInvoke, { arguments: {} })),
+    );
+    expect(res?.error?.code).toBe(JSON_RPC_ERROR_CODES.InvalidParams);
+  });
+
+  it("tools/invoke rejects non-object arguments with InvalidParams", async () => {
+    const bus = createRecordingBus();
+    const handlers = mkHandlers();
+    handlers.toolsInvoke = async () => ({ content: [] });
+    const server = new AcpServer({
+      handlers,
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    const res = await server.handleFrame(
+      encodeJsonRpc(
+        makeRequest(21, ACP_METHODS.ToolsInvoke, { name: "x", arguments: "not an object" }),
+      ),
+    );
+    expect(res?.error?.code).toBe(JSON_RPC_ERROR_CODES.InvalidParams);
+  });
+
+  it("tools/invoke returns MethodNotFound when handler is not implemented", async () => {
+    const bus = createRecordingBus();
+    const server = new AcpServer({
+      handlers: mkHandlers(),
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    await server.handleFrame(
+      encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams())),
+    );
+    const res = await server.handleFrame(
+      encodeJsonRpc(makeRequest(21, ACP_METHODS.ToolsInvoke, { name: "anything" })),
+    );
+    expect(res?.error?.code).toBe(JSON_RPC_ERROR_CODES.MethodNotFound);
+  });
+
+  it("tools/list / tools/invoke fail with ServerNotInitialized before initialize", async () => {
+    const bus = createRecordingBus();
+    const handlers = mkHandlers();
+    handlers.toolsList = async () => ({ tools: [] });
+    handlers.toolsInvoke = async () => ({ content: [] });
+    const server = new AcpServer({
+      handlers,
+      serverInfo: SERVER_INFO,
+      emit: bus.send,
+    });
+    const listRes = await server.handleFrame(
+      encodeJsonRpc(makeRequest(20, ACP_METHODS.ToolsList, {})),
+    );
+    const invokeRes = await server.handleFrame(
+      encodeJsonRpc(makeRequest(21, ACP_METHODS.ToolsInvoke, { name: "x" })),
+    );
+    expect(listRes?.error?.code).toBe(JSON_RPC_ERROR_CODES.ServerNotInitialized);
+    expect(invokeRes?.error?.code).toBe(JSON_RPC_ERROR_CODES.ServerNotInitialized);
+  });
+});
+
 describe("AcpServer.handleFrame — misc", () => {
   it("MethodNotFound for unknown methods", async () => {
     const bus = createRecordingBus();

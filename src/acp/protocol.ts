@@ -179,10 +179,35 @@ export interface AcpMcpSseConfig {
 
 // ── Initialize ───────────────────────────────────────────────
 
+/**
+ * Client-provided MCP server bundle (ACP v1 additive — Zed 0.3 parity).
+ *
+ * Attached to `initialize` so an IDE host can advertise its own MCP
+ * servers at connection-handshake time rather than per-session. The
+ * agent inherits the editor's tool catalogue automatically, which is
+ * the "zero-config" path Zed uses to make MCP tools available to any
+ * agent it spawns without forcing the user to duplicate configuration.
+ *
+ * Per-session `mcpServers` (on `session/new`) remains the preferred
+ * channel when the client wants session-scoped servers; `clientProvidedMcp`
+ * is the connection-scoped analogue that survives session changes.
+ */
+export interface AcpClientProvidedMcp {
+  readonly servers: readonly AcpMcpServerConfig[];
+}
+
 export interface AcpInitializeParams {
   readonly protocolVersion: AcpProtocolVersion;
   readonly clientCapabilities?: AcpClientCapabilities;
   readonly clientInfo?: AcpImplementation;
+  /**
+   * Client-provided MCP servers advertised at handshake time. Hosts like
+   * Zed 0.3+ use this so the agent inherits the editor's MCP catalogue
+   * without per-session re-registration. The agent registers them once
+   * per connection; individual sessions can still pass `mcpServers` on
+   * `session/new` for session-scoped overrides.
+   */
+  readonly clientProvidedMcp?: AcpClientProvidedMcp;
   readonly _meta?: Record<string, unknown>;
 }
 
@@ -351,12 +376,67 @@ export const ACP_METHODS = {
   SessionPrompt: "session/prompt",
   SessionCancel: "session/cancel", // notification
   SessionUpdate: "session/update", // notification (agent→client)
+  // Zed 0.3 parity — tool discovery + invocation over ACP.
+  ToolsList: "tools/list",
+  ToolsInvoke: "tools/invoke",
   // WOTANN-specific thread ops — additive, namespaced away from spec.
   ThreadFork: "thread/fork",
   ThreadRollback: "thread/rollback",
   ThreadList: "thread/list",
   ThreadSwitch: "thread/switch",
 } as const;
+
+// ── tools/list + tools/invoke (Zed 0.3 reference parity) ─────
+
+/**
+ * ACP-shaped tool definition. Mirrors the MCP + Zed shape so the same
+ * registry can round-trip between protocols without lossy conversion.
+ * The `inputSchema` is a JSON-Schema draft-07 object — kept as
+ * `Record<string, unknown>` here so the codec stays schema-agnostic;
+ * validators live in the caller.
+ */
+export interface AcpToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: Record<string, unknown>;
+  /** Extension point — hosts may annotate tools (tags, category, etc.). */
+  readonly _meta?: Record<string, unknown>;
+}
+
+export interface AcpToolsListParams {
+  /**
+   * Optional session scope. When absent the server returns its global
+   * tool catalogue; when present the server may filter to tools
+   * available in that session (e.g., permission-gated).
+   */
+  readonly sessionId?: string;
+  readonly _meta?: Record<string, unknown>;
+}
+
+export interface AcpToolsListResult {
+  readonly tools: readonly AcpToolDefinition[];
+  readonly _meta?: Record<string, unknown>;
+}
+
+export interface AcpToolsInvokeParams {
+  readonly name: string;
+  readonly arguments?: Record<string, unknown>;
+  readonly sessionId?: string;
+  readonly _meta?: Record<string, unknown>;
+}
+
+export interface AcpToolsInvokeResult {
+  /**
+   * Structured content blocks for the tool output. `isError: true`
+   * indicates a tool-level failure that the agent should surface to
+   * the user rather than retry silently. For JSON-RPC transport errors
+   * (invalid params, method not found, etc.) the dispatcher returns
+   * a JSON-RPC error envelope instead.
+   */
+  readonly content: readonly AcpContentBlock[];
+  readonly isError?: boolean;
+  readonly _meta?: Record<string, unknown>;
+}
 
 // ── WOTANN thread-op params/results (unchanged shape) ────────
 

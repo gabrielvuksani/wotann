@@ -44,6 +44,10 @@ import {
   type AcpPromptResult,
   type AcpSessionUpdateNotification,
   type AcpImplementation,
+  type AcpToolsListParams,
+  type AcpToolsListResult,
+  type AcpToolsInvokeParams,
+  type AcpToolsInvokeResult,
   type JsonRpcId,
   type JsonRpcNotification,
   type JsonRpcRequest,
@@ -67,6 +71,20 @@ export interface AcpHandlers {
     onUpdate: (n: AcpSessionUpdateNotification) => void,
   ): Promise<AcpPromptResult>;
   sessionCancel(params: AcpCancelParams): Promise<void>;
+  /**
+   * Zed 0.3 parity — return the runtime's tool registry shaped as ACP
+   * ToolDefinitions. Optional; hosts that don't implement tools fall
+   * back to the existing session/prompt surface. When omitted the
+   * dispatcher returns `MethodNotFound` for tools/list.
+   */
+  toolsList?(params: AcpToolsListParams): Promise<AcpToolsListResult>;
+  /**
+   * Zed 0.3 parity — invoke a tool by name with validated arguments.
+   * The handler is responsible for validating `arguments` against the
+   * tool's inputSchema; the dispatcher only performs shape checks
+   * (name present, arguments is an object).
+   */
+  toolsInvoke?(params: AcpToolsInvokeParams): Promise<AcpToolsInvokeResult>;
 }
 
 export type AcpServerInfo = AcpImplementation;
@@ -168,6 +186,10 @@ export class AcpServer {
           // send it as a request. Honour it and respond `{ok:true}`
           // so the host doesn't block on the reply.
           return await this.onSessionCancelAsRequest(req);
+        case ACP_METHODS.ToolsList:
+          return await this.onToolsList(req);
+        case ACP_METHODS.ToolsInvoke:
+          return await this.onToolsInvoke(req);
         default:
           return makeError(
             req.id,
@@ -245,6 +267,72 @@ export class AcpServer {
     }
     await this.handlers.sessionCancel(params);
     return makeResponse(req.id, { cancelled: true });
+  }
+
+  private async onToolsList(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    if (!this.initialized) return this.notInitialized(req.id);
+    if (!this.handlers.toolsList) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.MethodNotFound,
+        "tools/list: handler not implemented by this agent",
+      );
+    }
+    // Shape-check only — a plain {} is a valid request (no session scope).
+    const raw = (req.params ?? {}) as Record<string, unknown>;
+    if (raw.sessionId !== undefined && typeof raw.sessionId !== "string") {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "tools/list: sessionId must be a string when provided",
+      );
+    }
+    const params: AcpToolsListParams =
+      typeof raw.sessionId === "string" ? { sessionId: raw.sessionId } : {};
+    const result = await this.handlers.toolsList(params);
+    return makeResponse(req.id, result);
+  }
+
+  private async onToolsInvoke(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    if (!this.initialized) return this.notInitialized(req.id);
+    if (!this.handlers.toolsInvoke) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.MethodNotFound,
+        "tools/invoke: handler not implemented by this agent",
+      );
+    }
+    const raw = (req.params ?? {}) as Record<string, unknown>;
+    if (typeof raw.name !== "string" || raw.name.length === 0) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "tools/invoke: missing or empty `name`",
+      );
+    }
+    if (raw.arguments !== undefined && (typeof raw.arguments !== "object" || raw.arguments === null || Array.isArray(raw.arguments))) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "tools/invoke: `arguments` must be an object when provided",
+      );
+    }
+    if (raw.sessionId !== undefined && typeof raw.sessionId !== "string") {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "tools/invoke: sessionId must be a string when provided",
+      );
+    }
+    const params: AcpToolsInvokeParams = {
+      name: raw.name,
+      ...(raw.arguments !== undefined
+        ? { arguments: raw.arguments as Record<string, unknown> }
+        : {}),
+      ...(typeof raw.sessionId === "string" ? { sessionId: raw.sessionId } : {}),
+    };
+    const result = await this.handlers.toolsInvoke(params);
+    return makeResponse(req.id, result);
   }
 
   private notInitialized(id: JsonRpcId): JsonRpcResponse {
