@@ -1,18 +1,31 @@
 /**
- * Aider Polyglot benchmark runner — Phase 4 Sprint B1 item 5.
+ * Aider Polyglot benchmark runner — enhanced for 225-problem full corpus +
+ * 2-attempt scoring as specified by Aider's leaderboard rules.
  *
  * Aider's Polyglot leaderboard (https://aider.chat/docs/leaderboards/)
- * measures coding-task pass-rate across ~5 languages (Python, JavaScript,
+ * measures coding-task pass-rate across ~6 languages (Python, JavaScript,
  * Rust, Go, C++, Java) with per-language test-harness pass/fail verdicts.
- * The benchmark values: diff-edit correctness, per-language idiom,
- * compile-before-submit safety, whole-file fallback after N diff-edit
- * failures.
+ * Parity target: Refact.ai leads at 92.9% (2-attempt) as of Apr 2026.
  *
- * This runner ships the wire-format shell: loadAiderPolyglotTasks +
- * runAiderPolyglot + the shared RunnerRuntime interface. Real integration
- * with the `aider-chat` pip package + per-language compile is gated
- * behind WOTANN_AIDER_REAL=1 so the module loads without the heavy
- * Python dep.
+ * Scoring rules (per Aider spec):
+ *   - Each problem gets at most 2 attempts
+ *   - Attempt 1: diff-edit (compact, targeted)
+ *   - On attempt-1 failure: whole-file fallback (attempt 2)
+ *   - Task passes iff either attempt passes the test harness
+ *   - pass@1 = attempt-1-only passes / total
+ *   - pass@2 (Aider-official) = ANY attempt passes / total
+ *
+ * This runner ships:
+ *   - loadAiderPolyglotTasks + BlockedCorpusError for the 225-task corpus
+ *   - runAiderPolyglot with configurable diffEditAttempts (default 1 — i.e.
+ *     single diff-edit before fallback, matching Aider's 2-attempt spec)
+ *   - Per-task + per-language breakdown in the report
+ *   - Trajectory JSONL emit
+ *   - Dry-run validation
+ *
+ * Real integration with the `aider-chat` pip package is deferred behind
+ * WOTANN_AIDER_REAL=1 — currently falls through to simple-mode with mode:
+ * "simple" in the report (never silent lies).
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -20,6 +33,15 @@ import { join } from "node:path";
 import type { StreamChunk } from "../../providers/types.js";
 import type { WotannQueryOptions } from "../../core/types.js";
 import type { CompletionCriterion, VerificationEvidence } from "../../autopilot/types.js";
+import {
+  BlockedCorpusError,
+  type DryRunReport,
+  type DryRunCheck,
+  makeDryRunReport,
+  openTrajectoryWriter,
+  seededShuffle,
+  type TaskScoreEnvelope,
+} from "./shared.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -45,6 +67,8 @@ export interface AiderPolyglotTaskResult {
   readonly durationMs: number;
   readonly usedWholeFileFallback: boolean;
   readonly diffEditAttempts: number;
+  /** Did the FIRST diff-edit attempt pass? (drives pass@1 vs pass@2 scoring). */
+  readonly passedFirstAttempt: boolean;
   readonly error?: string;
 }
 
@@ -54,10 +78,16 @@ export interface AiderPolyglotReport {
   readonly finishedAt: number;
   readonly totalTasks: number;
   readonly completedTasks: number;
+  /** pass@1 — first attempt only. */
   readonly passAt1: number;
+  /** pass@2 — ANY of the 2 attempts (Aider-official headline metric). */
+  readonly passAt2: number;
   readonly byLanguage: Readonly<Record<AiderLanguage, { total: number; completed: number }>>;
   readonly results: readonly AiderPolyglotTaskResult[];
   readonly mode: "real" | "simple";
+  readonly trajectoryPath: string;
+  /** Parity target (Refact.ai leads at 92.9% pass@2 as of Apr 2026). */
+  readonly parityTargetPassAt2: number;
 }
 
 export interface RunnerRuntime {
@@ -76,15 +106,45 @@ export interface RunnerRuntime {
   }>;
 }
 
+// ── Constants ─────────────────────────────────────────
+
+/** Refact.ai on Aider Polyglot pass@2 — the parity line the runner targets. */
+export const AIDER_POLYGLOT_PARITY_PASS_AT_2 = 0.929;
+
+/** Expected full-corpus size. */
+export const AIDER_POLYGLOT_FULL_CORPUS_SIZE = 225;
+
+const AIDER_POLYGLOT_CORPUS_FETCH_COMMAND = [
+  "mkdir -p .wotann/benchmarks/aider-polyglot",
+  "git clone --depth 1 https://github.com/Aider-AI/polyglot-benchmark .wotann/benchmarks/aider-polyglot/src",
+  "node scripts/aider-polyglot-extract.mjs  # produces aider-polyglot-tasks.jsonl",
+].join(" && ");
+
 // ── Task loading ──────────────────────────────────────
+
+export interface LoadTasksOptions {
+  readonly limit?: number;
+  readonly seed?: number;
+  readonly languages?: readonly AiderLanguage[];
+  readonly requireCorpus?: boolean;
+}
 
 export function loadAiderPolyglotTasks(
   workingDir: string,
-  opts: { limit?: number; seed?: number; languages?: readonly AiderLanguage[] } = {},
+  opts: LoadTasksOptions = {},
 ): readonly AiderPolyglotTask[] {
-  const path = join(workingDir, ".wotann", "benchmarks", "aider-polyglot-tasks.jsonl");
+  const primary = join(
+    workingDir,
+    ".wotann",
+    "benchmarks",
+    "aider-polyglot",
+    "aider-polyglot-tasks.jsonl",
+  );
+  const legacy = join(workingDir, ".wotann", "benchmarks", "aider-polyglot-tasks.jsonl");
+  const path = existsSync(primary) ? primary : existsSync(legacy) ? legacy : null;
+
   let tasks: AiderPolyglotTask[];
-  if (existsSync(path)) {
+  if (path !== null) {
     const lines = readFileSync(path, "utf-8")
       .split("\n")
       .map((l) => l.trim())
@@ -97,6 +157,12 @@ export function loadAiderPolyglotTasks(
           typeof t.prompt === "string" &&
           typeof t.language === "string",
       );
+  } else if (opts.requireCorpus) {
+    throw new BlockedCorpusError({
+      benchmark: "aider-polyglot",
+      corpusPath: primary,
+      fetchCommand: AIDER_POLYGLOT_CORPUS_FETCH_COMMAND,
+    });
   } else {
     tasks = [...SMOKE_CORPUS];
   }
@@ -106,13 +172,87 @@ export function loadAiderPolyglotTasks(
     tasks = tasks.filter((t) => allowed.has(t.language));
   }
 
-  if (typeof opts.seed === "number") {
-    tasks = seededShuffle(tasks, opts.seed);
-  }
-  if (typeof opts.limit === "number" && opts.limit > 0) {
-    tasks = tasks.slice(0, opts.limit);
-  }
+  if (typeof opts.seed === "number") tasks = seededShuffle(tasks, opts.seed);
+  if (typeof opts.limit === "number" && opts.limit > 0) tasks = tasks.slice(0, opts.limit);
   return tasks;
+}
+
+// ── Dry-run ───────────────────────────────────────────
+
+export function dryRunAiderPolyglot(
+  runtime: RunnerRuntime | null,
+  workingDir: string,
+  opts: { requireCorpus?: boolean } = {},
+): DryRunReport {
+  const checks: DryRunCheck[] = [];
+
+  const primary = join(
+    workingDir,
+    ".wotann",
+    "benchmarks",
+    "aider-polyglot",
+    "aider-polyglot-tasks.jsonl",
+  );
+  const legacy = join(workingDir, ".wotann", "benchmarks", "aider-polyglot-tasks.jsonl");
+  const hasCorpus = existsSync(primary) || existsSync(legacy);
+  checks.push({
+    name: "corpus",
+    ok: hasCorpus || !opts.requireCorpus,
+    detail: hasCorpus
+      ? `found at ${existsSync(primary) ? primary : legacy}`
+      : opts.requireCorpus
+        ? `missing — need full ${AIDER_POLYGLOT_FULL_CORPUS_SIZE}-problem corpus`
+        : `not found, will fall back to smoke corpus`,
+  });
+
+  if (runtime === null) {
+    checks.push({
+      name: "runtime",
+      ok: true,
+      detail: "skipped (runtime not provided — dry-run mode)",
+    });
+  } else {
+    const runtimeOk =
+      typeof runtime.query === "function" && typeof runtime.verifyCompletion === "function";
+    checks.push({
+      name: "runtime",
+      ok: runtimeOk,
+      detail: runtimeOk ? "runtime satisfies RunnerRuntime shape" : "runtime is incomplete",
+    });
+  }
+
+  let corpusSize = 0;
+  let blockedReason: string | undefined;
+  try {
+    const loadOpts: { requireCorpus?: boolean } = {};
+    if (opts.requireCorpus !== undefined) loadOpts.requireCorpus = opts.requireCorpus;
+    corpusSize = loadAiderPolyglotTasks(workingDir, loadOpts).length;
+  } catch (e) {
+    blockedReason = e instanceof Error ? e.message : String(e);
+  }
+
+  // Warn if on-disk corpus is smaller than the official 225 problems
+  // (likely a partial extract or outdated checkout).
+  if (corpusSize > 0 && corpusSize < AIDER_POLYGLOT_FULL_CORPUS_SIZE && hasCorpus) {
+    checks.push({
+      name: "corpus-size",
+      ok: false,
+      detail: `corpus has ${corpusSize} tasks, official is ${AIDER_POLYGLOT_FULL_CORPUS_SIZE} — rerun the extract script`,
+    });
+  }
+
+  const report: {
+    benchmark: string;
+    checks: readonly DryRunCheck[];
+    corpusSize: number;
+    blockedReason?: string;
+  } = {
+    benchmark: "aider-polyglot",
+    checks,
+    corpusSize,
+  };
+  if (blockedReason !== undefined) report.blockedReason = blockedReason;
+  return makeDryRunReport(report);
 }
 
 // ── Runner ────────────────────────────────────────────
@@ -125,8 +265,14 @@ export interface RunAiderPolyglotOptions {
   readonly threshold?: number;
   readonly totalBudgetMs?: number;
   readonly perTaskBudgetMs?: number;
-  /** Max diff-edit attempts before whole-file fallback kicks in. */
+  /**
+   * Number of diff-edit attempts before whole-file fallback.
+   * Aider's official 2-attempt spec = `diffEditAttempts: 1` (one diff
+   * then one whole-file fallback). Default 1 to match the leaderboard.
+   * Set higher for research / ablation runs.
+   */
   readonly diffEditAttempts?: number;
+  readonly requireCorpus?: boolean;
 }
 
 /**
@@ -135,8 +281,13 @@ export interface RunAiderPolyglotOptions {
  * This runner simulates that pattern at the prompt level — the first
  * attempt instructs the agent to respond with a diff-edit hunk; if the
  * verifier fails, retry instructs the agent to respond with the full
- * revised file. Real integration with the aider-chat pip package is
- * deferred (WOTANN_AIDER_REAL=1).
+ * revised file.
+ *
+ * Tracks passedFirstAttempt per task so pass@1 vs pass@2 breakdowns are
+ * accurate (Aider's headline is pass@2 — any attempt passing). Real
+ * integration with the aider-chat pip package is gated via
+ * WOTANN_AIDER_REAL=1 and currently falls through to simple mode with
+ * mode: "simple" in the report (no silent lies).
  */
 export async function runAiderPolyglot(
   runtime: RunnerRuntime,
@@ -145,18 +296,40 @@ export async function runAiderPolyglot(
 ): Promise<AiderPolyglotReport> {
   const startedAt = Date.now();
   const runId = `aider-${startedAt}-${Math.random().toString(36).slice(2, 8)}`;
-  const mode: "real" | "simple" = process.env["WOTANN_AIDER_REAL"] === "1" ? "real" : "simple";
-  const diffEditBudget = opts.diffEditAttempts ?? 3;
+  // Always "simple" until real aider-chat integration lands (spec honesty).
+  const mode: "real" | "simple" = "simple";
+  const diffEditBudget = opts.diffEditAttempts ?? 1; // Aider spec = 1 diff + 1 fallback = 2 attempts
 
-  const loadOpts: Parameters<typeof loadAiderPolyglotTasks>[1] = {};
+  const loadOpts: {
+    limit?: number;
+    seed?: number;
+    languages?: readonly AiderLanguage[];
+    requireCorpus?: boolean;
+  } = {};
   if (opts.limit !== undefined) loadOpts.limit = opts.limit;
   if (opts.seed !== undefined) loadOpts.seed = opts.seed;
   if (opts.languages !== undefined) loadOpts.languages = opts.languages;
+  if (opts.requireCorpus !== undefined) loadOpts.requireCorpus = opts.requireCorpus;
   const tasks = loadAiderPolyglotTasks(workingDir, loadOpts);
+
+  const trajectory = openTrajectoryWriter(runId);
+  trajectory.write({
+    type: "run-start",
+    runId,
+    benchmark: "aider-polyglot",
+    startedAt,
+    totalTasks: tasks.length,
+    diffEditBudget,
+    mode,
+  });
+
   const results: AiderPolyglotTaskResult[] = [];
 
   for (const task of tasks) {
-    if (opts.totalBudgetMs !== undefined && Date.now() - startedAt > opts.totalBudgetMs) break;
+    if (opts.totalBudgetMs !== undefined && Date.now() - startedAt > opts.totalBudgetMs) {
+      trajectory.write({ type: "budget-exhausted", runId, elapsedMs: Date.now() - startedAt });
+      break;
+    }
     const taskStart = Date.now();
     const budget = opts.perTaskBudgetMs ?? task.timeBudgetMs ?? 300_000;
 
@@ -164,6 +337,7 @@ export async function runAiderPolyglot(
     let error: string | undefined;
     let usedWholeFileFallback = false;
     let diffEditAttempts = 0;
+    let passedFirstAttempt = false;
     let verdict = { completed: false, score: 0, evidence: [] as readonly VerificationEvidence[] };
 
     try {
@@ -193,7 +367,10 @@ export async function runAiderPolyglot(
         if (task.criteria !== undefined) verifyOpts.criteria = task.criteria;
         if (opts.threshold !== undefined) verifyOpts.threshold = opts.threshold;
         verdict = await runtime.verifyCompletion(task.prompt, verifyOpts);
-        if (verdict.completed) break;
+        if (verdict.completed) {
+          if (attempt === 0) passedFirstAttempt = true;
+          break;
+        }
       }
 
       // Whole-file fallback if diff-edits all failed
@@ -234,13 +411,32 @@ export async function runAiderPolyglot(
       durationMs,
       usedWholeFileFallback,
       diffEditAttempts,
+      passedFirstAttempt,
       ...(error !== undefined ? { error } : {}),
     };
     results.push(result);
+
+    const envelope: TaskScoreEnvelope = {
+      task_id: task.id,
+      passed: verdict.completed,
+      durationMs,
+      cost: 0,
+      score: verdict.score,
+      trajectory: transcript.slice(-20),
+      meta: {
+        language: task.language,
+        usedWholeFileFallback,
+        diffEditAttempts,
+        passedFirstAttempt,
+        ...(error !== undefined ? { error } : {}),
+      },
+    };
+    trajectory.write({ type: "task-result", ...envelope });
   }
 
   const finishedAt = Date.now();
   const completedTasks = results.filter((r) => r.completed).length;
+  const firstAttemptPasses = results.filter((r) => r.passedFirstAttempt).length;
   const byLanguage: Record<AiderLanguage, { total: number; completed: number }> = {
     python: { total: 0, completed: 0 },
     javascript: { total: 0, completed: 0 },
@@ -254,16 +450,35 @@ export async function runAiderPolyglot(
     if (r.completed) byLanguage[r.task.language].completed += 1;
   }
 
+  const passAt1 = results.length > 0 ? firstAttemptPasses / results.length : 0;
+  const passAt2 = results.length > 0 ? completedTasks / results.length : 0;
+
+  trajectory.write({
+    type: "run-end",
+    runId,
+    finishedAt,
+    totalTasks: results.length,
+    completedTasks,
+    passAt1,
+    passAt2,
+    byLanguage,
+    parityTargetPassAt2: AIDER_POLYGLOT_PARITY_PASS_AT_2,
+    mode,
+  });
+
   return {
     runId,
     startedAt,
     finishedAt,
     totalTasks: results.length,
     completedTasks,
-    passAt1: results.length > 0 ? completedTasks / results.length : 0,
+    passAt1,
+    passAt2,
     byLanguage,
     results,
     mode,
+    trajectoryPath: trajectory.path,
+    parityTargetPassAt2: AIDER_POLYGLOT_PARITY_PASS_AT_2,
   };
 }
 
@@ -284,23 +499,6 @@ function languagePreamble(language: AiderLanguage): string {
     case "java":
       return "Write modern Java 21. Prefer records for data classes, Optional for nullables, streams for collections.";
   }
-}
-
-function seededShuffle<T>(arr: readonly T[], seed: number): T[] {
-  const out = [...arr];
-  let state = seed | 0;
-  const next = (): number => {
-    state = (state + 0x6d2b79f5) | 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(next() * (i + 1));
-    [out[i], out[j]] = [out[j] as T, out[i] as T];
-  }
-  return out;
 }
 
 // ── Smoke Corpus ──────────────────────────────────────
