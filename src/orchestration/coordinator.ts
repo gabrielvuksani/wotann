@@ -7,6 +7,13 @@ import { existsSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { GraphBuilder, executeGraph, type ExecutionGraph } from "./graph-dsl.js";
+import {
+  coordinateParallel,
+  defaultSynthesizer,
+  type AgentTask as ParallelAgentTask,
+  type CoordinatedOutcome,
+  type Synthesizer,
+} from "./parallel-coordinator.js";
 
 export interface CoordinatorTask {
   readonly id: string;
@@ -22,6 +29,11 @@ export interface CoordinatorConfig {
   readonly useWorktrees: boolean;
   readonly verifyAfterEach: boolean;
   readonly worktreeRoot?: string;
+  /**
+   * Execution strategy: "graph" (default — phased DAG via executeWithGraph) or
+   * "parallel" (N-agent fan-out + synthesis via ParallelCoordinator).
+   */
+  readonly strategy?: "graph" | "parallel";
 }
 
 export interface CoordinatorWorktree {
@@ -41,6 +53,8 @@ export class Coordinator {
       maxSubagents: config.maxSubagents ?? 3,
       useWorktrees: config.useWorktrees ?? true,
       verifyAfterEach: config.verifyAfterEach ?? true,
+      strategy: config.strategy ?? "graph",
+      ...(config.worktreeRoot !== undefined ? { worktreeRoot: config.worktreeRoot } : {}),
     };
   }
 
@@ -95,9 +109,7 @@ export class Coordinator {
   }
 
   isComplete(): boolean {
-    return [...this.tasks.values()].every(
-      (t) => t.status === "completed" || t.status === "failed",
-    );
+    return [...this.tasks.values()].every((t) => t.status === "completed" || t.status === "failed");
   }
 
   getProgress(): { total: number; completed: number; failed: number; running: number } {
@@ -224,7 +236,10 @@ export class Coordinator {
    * in an isolated git worktree that is cleaned up after completion.
    */
   async executeWithGraph(
-    taskExecutor: (taskId: string, worktreePath?: string) => Promise<{ success: boolean; output: string }>,
+    taskExecutor: (
+      taskId: string,
+      worktreePath?: string,
+    ) => Promise<{ success: boolean; output: string }>,
     repoRoot?: string,
   ): Promise<{ success: boolean; completedCount: number; failedCount: number }> {
     const graph = this.buildExecutionGraph();
@@ -269,5 +284,41 @@ export class Coordinator {
       completedCount: progress.completed,
       failedCount: progress.failed,
     };
+  }
+
+  /**
+   * Strategy dispatcher — when `config.strategy === "parallel"` this method
+   * fans pending tasks through `ParallelCoordinator.coordinateParallel` and
+   * synthesises the outputs. Unlike `executeWithGraph` (phase-chained DAG),
+   * every task runs in parallel and the synthesiser fuses results.
+   */
+  async executeParallel(
+    executor: (taskId: string, description: string) => Promise<string>,
+    synthesize: Synthesizer = defaultSynthesizer,
+  ): Promise<CoordinatedOutcome> {
+    const parallelTasks: readonly ParallelAgentTask[] = this.getPendingTasks().map((t) => ({
+      id: t.id,
+      prompt: t.description,
+    }));
+    return coordinateParallel(
+      parallelTasks,
+      async (task) => {
+        this.startTask(task.id, `parallel-${task.id}`);
+        try {
+          const out = await executor(task.id, task.prompt);
+          this.completeTask(task.id);
+          return out;
+        } catch (err) {
+          this.failTask(task.id);
+          throw err;
+        }
+      },
+      synthesize,
+      { concurrency: this.config.maxSubagents },
+    );
+  }
+
+  getStrategy(): "graph" | "parallel" {
+    return this.config.strategy ?? "graph";
   }
 }
