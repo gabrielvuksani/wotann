@@ -27,8 +27,14 @@ schemes:
     build:
       targets:
         WOTANN: all
+        WOTANNUITests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - WOTANNUITests
     profile:
       config: Release
     archive:
@@ -192,3 +198,24 @@ targets:
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: 1
         WATCHOS_DEPLOYMENT_TARGET: "11.0"
+
+  # ── UI Smoke Tests ───────────────────────────
+  # Lightweight XCTest UI tests that can run on simulator for launch +
+  # tab smoke, and on device for the broader flow. Device-only scenarios
+  # call `XCTSkip` instead of silently passing (see SmokeTests.swift).
+  WOTANNUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/Automation
+        type: group
+    settings:
+      base:
+        SUPPORTED_PLATFORMS: "iphonesimulator iphoneos"
+        PRODUCT_BUNDLE_IDENTIFIER: com.wotann.ios.uitests
+        GENERATE_INFOPLIST_FILE: true
+        TEST_TARGET_NAME: WOTANN
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+    dependencies:
+      - target: WOTANN

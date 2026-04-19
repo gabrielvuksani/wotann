@@ -82,6 +82,7 @@
 		69AA718A3EE4FBB9F5AAF1C1 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F7B412897DC8242A5AFD9E6 /* SettingsViewModel.swift */; };
 		6D9FCB29B376C6AA94E19C01 /* DispatchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEFC64EE4247F9862FA794C1 /* DispatchViewModel.swift */; };
 		73266E624343026C5AFC3C3A /* PairingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6AFCFB793FD11DF147F9C3 /* PairingState.swift */; };
+		73CCE1EF3B766BB743E56723 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0625D6594E4FEF9E54366AA6 /* SmokeTests.swift */; };
 		7406720F1DD784F12A86D3E2 /* RecentConversationsStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A5B0DA01EDFD98EBDCCBD6 /* RecentConversationsStrip.swift */; };
 		774728664F1587E846DC9A5B /* VoiceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E83842536E65E46408B77A0 /* VoiceService.swift */; };
 		7796BA68CC5B47E97805AC83 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CCBB631AFE4063CE846F87 /* QRScannerView.swift */; };
@@ -183,6 +184,13 @@
 			remoteGlobalIDString = E84547DFBB1E22DB65F26E2F;
 			remoteInfo = WOTANNIntents;
 		};
+		5ACE0A773165A7B4FFCE03CF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2C087ECC97BEADD530602CB3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8D63C446098A941773904477;
+			remoteInfo = WOTANN;
+		};
 		770095FEBCCC011C10618659 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 2C087ECC97BEADD530602CB3 /* Project object */;
@@ -219,6 +227,7 @@
 		004B1EA5CCD16314B7069723 /* CostModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostModels.swift; sourceTree = "<group>"; };
 		0179DCE406DE010D855EF594 /* CodePlaygroundView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodePlaygroundView.swift; sourceTree = "<group>"; };
 		050C9F8CBB29129367DC8BF4 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		0625D6594E4FEF9E54366AA6 /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
 		06A6206442D42B7BB2585617 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		08D3A7144D5D2C2E6EB4EF9D /* ECDHManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ECDHManager.swift; sourceTree = "<group>"; };
 		094D0FF0F115935B7CDBF190 /* SupabaseRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseRelay.swift; sourceTree = "<group>"; };
@@ -245,6 +254,7 @@
 		2B13E4DA73820D9FCF4970BD /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
 		2E75044FBE1D670D8A9CC7A8 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
 		2E83842536E65E46408B77A0 /* VoiceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceService.swift; sourceTree = "<group>"; };
+		2EADFE9D5682ED5AE7E73229 /* WOTANNUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = WOTANNUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2ED3CBAA2B0A59B353A07492 /* ArenaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArenaView.swift; sourceTree = "<group>"; };
 		2F185871EFBC6630B7745D21 /* TaskListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListView.swift; sourceTree = "<group>"; };
 		3061F59CE68677C13F467CDB /* TaskProgressActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressActivity.swift; sourceTree = "<group>"; };
@@ -369,7 +379,7 @@
 		FC4279027D915B49348FAA83 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
 		FD4FCFB6760540EF97A7DA40 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FF2C467534932F2AF3DCB79A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		"TEMP_12B0ED07-FE90-45FB-BD5C-D7C4BF95C6F1" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+		"TEMP_534202F9-4A8F-4C48-92A2-711B63A86DC1" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -618,6 +628,7 @@
 				43A84DF0B729ED60922A2B55 /* WOTANN.app */,
 				57CF1DDF537E4D151BB26FD0 /* WOTANNIntents.appex */,
 				EE06820BB3F570376F5A8042 /* WOTANNShareExtension.appex */,
+				2EADFE9D5682ED5AE7E73229 /* WOTANNUITests.xctest */,
 				C3FD1D51374D9D7EBDC14002 /* WOTANNWatch.app */,
 				0C79EAE15678770DA497F0A0 /* WOTANNWidgets.appex */,
 			);
@@ -652,6 +663,7 @@
 		4E824B935976B75AE0E0CCCA /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				5332B962DCF2BDAE00226CB9 /* Automation */,
 				4465EA6C81CB94B6022E8121 /* Infrastructure */,
 			);
 			path = Tests;
@@ -694,6 +706,14 @@
 				614A3CF377AB282F4EC259AA /* WebSocketClient.swift */,
 			);
 			path = Networking;
+			sourceTree = "<group>";
+		};
+		5332B962DCF2BDAE00226CB9 /* Automation */ = {
+			isa = PBXGroup;
+			children = (
+				0625D6594E4FEF9E54366AA6 /* SmokeTests.swift */,
+			);
+			path = Automation;
 			sourceTree = "<group>";
 		};
 		6668B4CD798E30B5590A7175 /* DesignSystem */ = {
@@ -932,10 +952,10 @@
 			path = Dashboard;
 			sourceTree = "<group>";
 		};
-		"TEMP_0FD43814-8586-4EBA-AFBA-C3A119BA223D" /* ios */ = {
+		"TEMP_B0678ED7-FB62-47F7-9B29-48BC8ED331F5" /* ios */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_12B0ED07-FE90-45FB-BD5C-D7C4BF95C6F1" /* Local.xcconfig */,
+				"TEMP_534202F9-4A8F-4C48-92A2-711B63A86DC1" /* Local.xcconfig */,
 			);
 			path = ios;
 			sourceTree = "<group>";
@@ -1015,6 +1035,24 @@
 			productReference = EE06820BB3F570376F5A8042 /* WOTANNShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		D81F79A382113BD7EBEA0648 /* WOTANNUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 903A5F9B59F71CAEF4ACE044 /* Build configuration list for PBXNativeTarget "WOTANNUITests" */;
+			buildPhases = (
+				CB1FE84B4A5C5E13C0A37FB7 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BE405B01D69B6D2328D04963 /* PBXTargetDependency */,
+			);
+			name = WOTANNUITests;
+			packageProductDependencies = (
+			);
+			productName = WOTANNUITests;
+			productReference = 2EADFE9D5682ED5AE7E73229 /* WOTANNUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		E84547DFBB1E22DB65F26E2F /* WOTANNIntents */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = D6DD2843D6BFD1C35C8329F0 /* Build configuration list for PBXNativeTarget "WOTANNIntents" */;
@@ -1057,6 +1095,11 @@
 						DevelopmentTeam = NR4NKYBZ95;
 						ProvisioningStyle = Automatic;
 					};
+					D81F79A382113BD7EBEA0648 = {
+						DevelopmentTeam = NR4NKYBZ95;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 8D63C446098A941773904477;
+					};
 					E84547DFBB1E22DB65F26E2F = {
 						DevelopmentTeam = NR4NKYBZ95;
 						ProvisioningStyle = Automatic;
@@ -1080,6 +1123,7 @@
 				8D63C446098A941773904477 /* WOTANN */,
 				E84547DFBB1E22DB65F26E2F /* WOTANNIntents */,
 				9994611A4FEA35394C416EF1 /* WOTANNShareExtension */,
+				D81F79A382113BD7EBEA0648 /* WOTANNUITests */,
 				4FD20671B55D4180CA6C9C38 /* WOTANNWatch */,
 				4AA05FB79F11644DCEF35297 /* WOTANNWidgets */,
 			);
@@ -1285,6 +1329,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CB1FE84B4A5C5E13C0A37FB7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				73CCE1EF3B766BB743E56723 /* SmokeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -1302,6 +1354,11 @@
 			isa = PBXTargetDependency;
 			target = 4AA05FB79F11644DCEF35297 /* WOTANNWidgets */;
 			targetProxy = 770095FEBCCC011C10618659 /* PBXContainerItemProxy */;
+		};
+		BE405B01D69B6D2328D04963 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8D63C446098A941773904477 /* WOTANN */;
+			targetProxy = 5ACE0A773165A7B4FFCE03CF /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1411,7 +1468,7 @@
 		};
 		35715A6A8931B13D7362B776 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_12B0ED07-FE90-45FB-BD5C-D7C4BF95C6F1" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_534202F9-4A8F-4C48-92A2-711B63A86DC1" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -1484,6 +1541,46 @@
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = 4;
 				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		3FFCFE4EEE7C12D5CFE89A9B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.uitests;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = WOTANN;
+			};
+			name = Debug;
+		};
+		4BB7E18D5C435212B3816105 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wotann.ios.uitests;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = WOTANN;
 			};
 			name = Release;
 		};
@@ -1588,7 +1685,7 @@
 		};
 		E96B011291432A6F1F017F8B /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_12B0ED07-FE90-45FB-BD5C-D7C4BF95C6F1" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_534202F9-4A8F-4C48-92A2-711B63A86DC1" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -1694,6 +1791,15 @@
 			buildConfigurations = (
 				E96B011291432A6F1F017F8B /* Debug */,
 				35715A6A8931B13D7362B776 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		903A5F9B59F71CAEF4ACE044 /* Build configuration list for PBXNativeTarget "WOTANNUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3FFCFE4EEE7C12D5CFE89A9B /* Debug */,
+				4BB7E18D5C435212B3816105 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
