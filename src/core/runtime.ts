@@ -136,6 +136,8 @@ import { RulesOfEngagement } from "../security/rules-of-engagement.js";
 import { TrainingPipeline } from "../training/pipeline.js";
 import { AutoresearchEngine } from "../training/autoresearch.js";
 import { createLlmModificationGenerator } from "../training/llm-modification-generator.js";
+import { evaluateCompletion, getDefaultCriteria } from "../autopilot/completion-oracle.js";
+import type { CompletionCriterion, VerificationEvidence } from "../autopilot/types.js";
 import { TaskDelegationManager } from "../orchestration/task-delegation.js";
 
 // Phase E: Auto-features
@@ -3617,6 +3619,103 @@ export class WotannRuntime {
   // Training (wired)
   getAutoresearchEngine(): AutoresearchEngine {
     return this.autoresearchEngine;
+  }
+
+  /**
+   * Verifier-gated task completion (Phase 4 Tier-1 unlock).
+   *
+   * Wraps the CompletionOracle with runtime-supplied callbacks:
+   *   - llmJudge routes through this.query so the judge runs on whatever
+   *     provider the runtime is currently bound to
+   *   - runCommand + captureScreenshot are left undefined so the oracle
+   *     falls back to its built-in sandboxed execFileSync and native
+   *     screencapture(1) paths
+   *
+   * Callers pass a task description and either explicit criteria or a
+   * taskType for sensible defaults (code|ui|docs|test). Returns the
+   * weighted completion score, a completed flag, and per-criterion
+   * evidence — ready to feed into autopilot loop control or
+   * benchmark-runner pass/fail gating.
+   */
+  async verifyCompletion(
+    task: string,
+    options: {
+      criteria?: readonly CompletionCriterion[];
+      taskType?: "code" | "ui" | "docs" | "test";
+      threshold?: number;
+    } = {},
+  ): Promise<{
+    completed: boolean;
+    score: number;
+    evidence: readonly VerificationEvidence[];
+  }> {
+    const criteria = options.criteria ?? getDefaultCriteria(options.taskType ?? "code");
+    const threshold = options.threshold ?? 0.75;
+
+    const llmJudge = async (
+      judgeTask: string,
+      evidence: string,
+    ): Promise<{ passed: boolean; reasoning: string }> => {
+      const judgePrompt = [
+        `ORIGINAL TASK: ${judgeTask}`,
+        ``,
+        `EVIDENCE COLLECTED:`,
+        evidence,
+        ``,
+        `Given the evidence above, does the task appear COMPLETE?`,
+        `Reply with a single JSON object: {"passed": boolean, "reasoning": "<one sentence>"}`,
+      ].join("\n");
+      const judgeSystem =
+        "You are a strict verifier. Only answer PASS if every required criterion was " +
+        "satisfied by the evidence. Treat ambiguity as FAIL. Return a single JSON object, " +
+        "no surrounding prose.";
+
+      let accumulated = "";
+      try {
+        for await (const chunk of this.query({
+          prompt: judgePrompt,
+          systemPrompt: judgeSystem,
+          maxTokens: 400,
+          temperature: 0,
+        })) {
+          if (chunk.type === "text") accumulated += chunk.content;
+          if (accumulated.length > 4096) break;
+        }
+      } catch (err) {
+        return {
+          passed: false,
+          reasoning: `LLM judge transport failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+
+      const match = accumulated.match(/\{[\s\S]*?"passed"\s*:\s*(true|false)[\s\S]*?\}/);
+      if (!match) {
+        return {
+          passed: false,
+          reasoning: `LLM judge returned no parseable JSON: ${accumulated.slice(0, 200)}`,
+        };
+      }
+      try {
+        const parsed = JSON.parse(match[0]) as { passed?: unknown; reasoning?: unknown };
+        return {
+          passed: parsed.passed === true,
+          reasoning:
+            typeof parsed.reasoning === "string" ? parsed.reasoning : accumulated.slice(0, 200),
+        };
+      } catch {
+        return {
+          passed: false,
+          reasoning: `LLM judge JSON parse failed: ${accumulated.slice(0, 200)}`,
+        };
+      }
+    };
+
+    return evaluateCompletion(
+      task,
+      criteria,
+      { workingDir: this.config.workingDir, threshold },
+      { llmJudge },
+    );
   }
 
   // Orchestration (wired)
