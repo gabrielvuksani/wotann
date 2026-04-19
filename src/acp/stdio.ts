@@ -18,6 +18,9 @@ import {
   ACP_PROTOCOL_VERSION,
   type AcpAgentCapabilities,
   type AcpContentBlock,
+  type AcpClientProvidedMcp,
+  type AcpInitializeParams,
+  type AcpInitializeResult,
 } from "./protocol.js";
 
 export interface AcpStdioOptions {
@@ -26,6 +29,18 @@ export interface AcpStdioOptions {
   readonly input?: Readable;
   readonly output?: Writable;
   readonly onError?: (err: unknown, rawFrame: string | undefined) => void;
+  /**
+   * Zed 0.3 parity — zero-config MCP inheritance. Called once per
+   * initialize with the `clientProvidedMcp` payload (if present). Wire
+   * this to your runtime's MCP registry so WOTANN inherits the client
+   * editor's MCP servers automatically at handshake time.
+   *
+   * The callback is awaited BEFORE the initialize response is returned
+   * to the client, so the MCP servers are registered before the host
+   * issues session/new. Errors thrown from the callback propagate as
+   * JSON-RPC InternalError via the dispatcher.
+   */
+  readonly onClientProvidedMcp?: (mcp: AcpClientProvidedMcp) => void | Promise<void>;
 }
 
 export interface AcpStdioHandle {
@@ -60,8 +75,17 @@ export function startAcpStdio(options: AcpStdioOptions): AcpStdioHandle {
     }
   };
 
+  // Wrap the handler's `initialize` so clientProvidedMcp is forwarded to
+  // the registration callback before the response goes back to the client.
+  // The host relies on the agent having the MCP servers registered BEFORE
+  // it issues session/new, so ordering matters: await the callback first,
+  // then call the real handler.
+  const wrappedHandlers: AcpHandlers = options.onClientProvidedMcp
+    ? wrapHandlersWithMcpInheritance(options.handlers, options.onClientProvidedMcp)
+    : options.handlers;
+
   const server = new AcpServer({
-    handlers: options.handlers,
+    handlers: wrappedHandlers,
     serverInfo,
     emit: write,
   });
@@ -107,6 +131,29 @@ export function startAcpStdio(options: AcpStdioOptions): AcpStdioHandle {
       closed = true;
       rl?.close();
       await closed$;
+    },
+  };
+}
+
+/**
+ * Wrap an AcpHandlers so its `initialize` invokes `onClientProvidedMcp`
+ * when the client advertises MCP servers on the handshake. The callback
+ * is awaited before the wrapped handler runs so the registration is in
+ * place by the time any subsequent session/new arrives.
+ *
+ * Immutable — returns a new handlers object, never mutates the original.
+ */
+function wrapHandlersWithMcpInheritance(
+  handlers: AcpHandlers,
+  onClientProvidedMcp: (mcp: AcpClientProvidedMcp) => void | Promise<void>,
+): AcpHandlers {
+  return {
+    ...handlers,
+    async initialize(params: AcpInitializeParams): Promise<AcpInitializeResult> {
+      if (params.clientProvidedMcp && Array.isArray(params.clientProvidedMcp.servers)) {
+        await onClientProvidedMcp(params.clientProvidedMcp);
+      }
+      return handlers.initialize(params);
     },
   };
 }

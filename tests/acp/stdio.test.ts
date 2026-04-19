@@ -121,6 +121,81 @@ describe("startAcpStdio", () => {
   });
 });
 
+describe("startAcpStdio — clientProvidedMcp (Zed 0.3 parity)", () => {
+  async function runWithMcpCallback(
+    initParamsWithMcp: Record<string, unknown>,
+  ): Promise<{ captured: Array<{ servers: ReadonlyArray<unknown> }>; lines: string[] }> {
+    const input = new PassThrough();
+    const output = new CapturingWritable();
+    const captured: Array<{ servers: ReadonlyArray<unknown> }> = [];
+    const handle = startAcpStdio({
+      handlers: referenceHandlers(),
+      input,
+      output,
+      serverInfo: { name: "wotann-test", version: "0.0.0" },
+      onClientProvidedMcp: async (mcp) => {
+        captured.push({ servers: mcp.servers });
+      },
+    });
+    const req = encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParamsWithMcp));
+    input.write(req + "\n");
+    input.end();
+    await new Promise<void>((resolve) => {
+      const deadline = Date.now() + 2_000;
+      const poll = (): void => {
+        if (output.lines().length >= 1) return resolve();
+        if (Date.now() > deadline) return resolve();
+        setTimeout(poll, 10);
+      };
+      poll();
+    });
+    await handle.stop();
+    return { captured, lines: output.lines() };
+  }
+
+  it("calls onClientProvidedMcp callback when servers are present on initialize", async () => {
+    const params = {
+      protocolVersion: ACP_PROTOCOL_VERSION,
+      clientInfo: { name: "zed", version: "0.3.0" },
+      clientProvidedMcp: {
+        servers: [
+          { transport: "stdio", name: "fs-mcp", command: "/usr/bin/mcp-fs", args: ["--stdio"] },
+          { transport: "http", name: "http-mcp", url: "https://tools.example.com/mcp" },
+        ],
+      },
+    };
+    const { captured, lines } = await runWithMcpCallback(params);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.servers).toHaveLength(2);
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]!) as { result?: { protocolVersion: number } };
+    expect(parsed.result?.protocolVersion).toBe(ACP_PROTOCOL_VERSION);
+  });
+
+  it("does not call the callback when clientProvidedMcp is omitted", async () => {
+    const params = {
+      protocolVersion: ACP_PROTOCOL_VERSION,
+      clientInfo: { name: "zed", version: "0.3.0" },
+    };
+    const { captured } = await runWithMcpCallback(params);
+    expect(captured).toHaveLength(0);
+  });
+
+  it("preserves initialize result shape when callback is wired", async () => {
+    const params = {
+      protocolVersion: ACP_PROTOCOL_VERSION,
+      clientInfo: { name: "zed", version: "0.3.0" },
+      clientProvidedMcp: { servers: [] },
+    };
+    const { lines } = await runWithMcpCallback(params);
+    const parsed = JSON.parse(lines[0]!) as {
+      result?: { protocolVersion: number; agentInfo?: { name: string } };
+    };
+    expect(parsed.result?.protocolVersion).toBe(ACP_PROTOCOL_VERSION);
+    expect(parsed.result?.agentInfo).toBeDefined();
+  });
+});
+
 describe("referenceHandlers", () => {
   it("initialize returns an integer protocol version and agentInfo", async () => {
     const h = referenceHandlers();
