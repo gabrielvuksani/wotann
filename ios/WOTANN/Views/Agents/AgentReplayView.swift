@@ -202,7 +202,7 @@ struct AgentReplayView: View {
                 VStack(spacing: 0) {
                     // Status icon
                     Image(systemName: step.status.iconName)
-                        .font(.system(size: 18))
+                        .font(.wotannScaled(size: 18))
                         .foregroundColor(step.status.color)
 
                     // Connecting line (except last step)

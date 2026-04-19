@@ -60,7 +60,7 @@ struct VoiceInlineSheet: View {
         HStack {
             Button(action: cancel) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.wotannScaled(size: 16, weight: .bold))
                     .foregroundColor(WTheme.Colors.textSecondary)
                     .frame(width: 36, height: 36)
                     .background(Circle().fill(WTheme.Colors.surface))
@@ -71,11 +71,11 @@ struct VoiceInlineSheet: View {
 
             VStack(spacing: 2) {
                 Text(isRecording ? "Listening" : "Voice")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 14, weight: .semibold, design: .rounded))
                     .foregroundColor(WTheme.Colors.textPrimary)
                 if isRecording {
                     Text(formattedDuration)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.wotannScaled(size: 11, design: .monospaced))
                         .foregroundColor(WTheme.Colors.error)
                         .contentTransition(.numericText())
                 }
@@ -94,7 +94,7 @@ struct VoiceInlineSheet: View {
             if let error = permissionError ?? voiceService.error?.localizedDescription {
                 VStack(spacing: WTheme.Spacing.sm) {
                     Image(systemName: "mic.slash.fill")
-                        .font(.system(size: 32))
+                        .font(.wotannScaled(size: 32))
                         .foregroundColor(WTheme.Colors.error)
                     Text(error)
                         .font(WTheme.Typography.subheadline)
@@ -104,14 +104,14 @@ struct VoiceInlineSheet: View {
                 }
             } else if transcription.isEmpty {
                 Text(isRecording ? "Speak freely..." : "Tap the mic to begin")
-                    .font(.system(size: 18, weight: .regular, design: .rounded))
+                    .font(.wotannScaled(size: 18, weight: .regular, design: .rounded))
                     .foregroundColor(WTheme.Colors.textTertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, WTheme.Spacing.xl)
             } else {
                 ScrollView {
                     Text(transcription)
-                        .font(.system(size: 20, weight: .regular))
+                        .font(.wotannScaled(size: 20, weight: .regular))
                         .foregroundColor(WTheme.Colors.textPrimary)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -165,7 +165,7 @@ struct VoiceInlineSheet: View {
                         y: 4
                     )
                 Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 32, weight: .medium))
+                    .font(.wotannScaled(size: 32, weight: .medium))
                     .foregroundColor(.white)
                     .contentTransition(.symbolEffect(.replace))
             }
@@ -181,9 +181,9 @@ struct VoiceInlineSheet: View {
             Button(action: cancel) {
                 VStack(spacing: 4) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 24))
+                        .font(.wotannScaled(size: 24))
                     Text("Cancel")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(.wotannScaled(size: 11, weight: .medium, design: .rounded))
                 }
                 .foregroundColor(WTheme.Colors.textTertiary)
             }
@@ -191,9 +191,9 @@ struct VoiceInlineSheet: View {
             Button(action: submitTranscript) {
                 VStack(spacing: 4) {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 28))
+                        .font(.wotannScaled(size: 28))
                     Text("Send")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .font(.wotannScaled(size: 11, weight: .semibold, design: .rounded))
                 }
                 .foregroundColor(canSend ? WTheme.Colors.primary : WTheme.Colors.textTertiary)
             }

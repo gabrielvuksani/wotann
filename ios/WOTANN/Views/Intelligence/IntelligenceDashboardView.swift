@@ -65,7 +65,7 @@ private extension IntelligenceDashboardView {
         VStack(spacing: WTheme.Spacing.md) {
             Spacer(minLength: 100)
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 40))
+                .font(.wotannScaled(size: 40))
                 .foregroundColor(WTheme.Colors.warning)
             Text("Could not load data")
                 .font(WTheme.Typography.headline)
@@ -122,7 +122,7 @@ private extension IntelligenceDashboardView {
 
                 VStack(alignment: .leading, spacing: WTheme.Spacing.xs) {
                     Text(healthScoreLabel)
-                        .font(.system(size: 18, weight: .bold))
+                        .font(.wotannScaled(size: 18, weight: .bold))
                         .tracking(WTheme.Tracking.tighter)
                         .foregroundColor(healthScoreColor)
 
@@ -162,10 +162,10 @@ private extension IntelligenceDashboardView {
                 // Velocity indicator
                 HStack(spacing: WTheme.Spacing.xs) {
                     Image(systemName: "gauge.with.dots.needle.33percent")
-                        .font(.system(size: 12))
+                        .font(.wotannScaled(size: 12))
                         .foregroundColor(WTheme.Colors.primary)
                     Text("Velocity: \(String(format: "%.1f", flowVelocity)) actions/hr")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.wotannScaled(size: 12, design: .monospaced))
                         .foregroundColor(WTheme.Colors.textSecondary)
                 }
 
@@ -214,7 +214,7 @@ private extension IntelligenceDashboardView {
                 // Phase badge
                 HStack(spacing: WTheme.Spacing.sm) {
                     Text(pwrPhase.uppercased())
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .font(.wotannScaled(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
                         .padding(.horizontal, WTheme.Spacing.sm)
                         .padding(.vertical, WTheme.Spacing.xs)
@@ -224,7 +224,7 @@ private extension IntelligenceDashboardView {
                     Spacer()
 
                     Text("\(Int(pwrProgress * 100))%")
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .font(.wotannScaled(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundColor(WTheme.Colors.textSecondary)
                 }
 
@@ -246,7 +246,7 @@ private extension IntelligenceDashboardView {
                 HStack {
                     ForEach(pwrPhases, id: \.self) { phase in
                         Text(phase.prefix(3).uppercased())
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .font(.wotannScaled(size: 8, weight: .medium, design: .monospaced))
                             .foregroundColor(
                                 phase == pwrPhase
                                     ? WTheme.Colors.textPrimary
@@ -303,17 +303,17 @@ private extension IntelligenceDashboardView {
                     )
                     Spacer()
                     Text("\(ambientSignalCount)")
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.wotannScaled(size: 22, weight: .bold))
                         .foregroundColor(WTheme.Colors.textPrimary)
                     Text("signals")
-                        .font(.system(size: 11))
+                        .font(.wotannScaled(size: 11))
                         .foregroundColor(WTheme.Colors.textTertiary)
                 }
 
                 if !ambientLatestSuggestion.isEmpty {
                     HStack(spacing: WTheme.Spacing.xs) {
                         Image(systemName: "lightbulb.fill")
-                            .font(.system(size: 10))
+                            .font(.wotannScaled(size: 10))
                             .foregroundColor(WTheme.Colors.warning)
                         Text(ambientLatestSuggestion)
                             .font(WTheme.Typography.caption)
@@ -337,7 +337,7 @@ private extension IntelligenceDashboardView {
         SectionCard(title: "Triggers", icon: "bolt.fill") {
             HStack(spacing: WTheme.Spacing.sm) {
                 Text("\(triggerCount)")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.wotannScaled(size: 28, weight: .bold))
                     .foregroundColor(WTheme.Colors.textPrimary)
 
                 VStack(alignment: .leading, spacing: WTheme.Spacing.xxs) {
@@ -352,7 +352,7 @@ private extension IntelligenceDashboardView {
                 Spacer()
 
                 Image(systemName: triggerCount > 0 ? "bolt.circle.fill" : "bolt.slash.circle")
-                    .font(.system(size: 24))
+                    .font(.wotannScaled(size: 24))
                     .foregroundColor(
                         triggerCount > 0
                             ? WTheme.Colors.primary
@@ -493,10 +493,10 @@ private struct SectionCard<Content: View>: View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.md) {
             HStack(spacing: WTheme.Spacing.xs) {
                 Image(systemName: icon)
-                    .font(.system(size: 12))
+                    .font(.wotannScaled(size: 12))
                     .foregroundColor(WTheme.Colors.primary)
                 Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.wotannScaled(size: 10, weight: .semibold))
                     .foregroundColor(WTheme.Colors.textSecondary)
                     .tracking(1.2)
             }
@@ -555,10 +555,10 @@ private struct HealthGauge: View {
             // Score text
             VStack(spacing: 0) {
                 Text("\(score)")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .font(.wotannScaled(size: 22, weight: .bold, design: .rounded))
                     .foregroundColor(gaugeColor)
                 Text("/ 100")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(.wotannScaled(size: 8, weight: .medium))
                     .foregroundColor(WTheme.Colors.textTertiary)
             }
         }
@@ -578,7 +578,7 @@ private struct FlowActionRow: View {
                 .frame(width: 6, height: 6)
 
             Text(action["type"]?.stringValue ?? action["action"]?.stringValue ?? "Action")
-                .font(.system(size: 13, weight: .medium))
+                .font(.wotannScaled(size: 13, weight: .medium))
                 .foregroundColor(WTheme.Colors.textPrimary)
                 .lineLimit(1)
 
@@ -586,7 +586,7 @@ private struct FlowActionRow: View {
 
             if let ts = action["timestamp"]?.stringValue {
                 Text(ts.suffix(8))
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.wotannScaled(size: 10, design: .monospaced))
                     .foregroundColor(WTheme.Colors.textTertiary)
             }
         }
@@ -603,7 +603,7 @@ private struct DecisionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.xxs) {
             Text(decision["title"]?.stringValue ?? decision["summary"]?.stringValue ?? "Decision")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.wotannScaled(size: 13, weight: .semibold))
                 .foregroundColor(WTheme.Colors.textPrimary)
                 .lineLimit(1)
 
@@ -629,10 +629,10 @@ private struct SignalBadge: View {
     var body: some View {
         VStack(spacing: WTheme.Spacing.xxs) {
             Image(systemName: icon)
-                .font(.system(size: 14))
+                .font(.wotannScaled(size: 14))
                 .foregroundColor(isActive ? WTheme.Colors.primary : WTheme.Colors.textTertiary)
             Text(label)
-                .font(.system(size: 8, weight: .medium))
+                .font(.wotannScaled(size: 8, weight: .medium))
                 .foregroundColor(WTheme.Colors.textTertiary)
         }
     }
@@ -650,7 +650,7 @@ private struct DeviceDot: View {
         VStack(spacing: WTheme.Spacing.xs) {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: icon)
-                    .font(.system(size: 20))
+                    .font(.wotannScaled(size: 20))
                     .foregroundColor(
                         isConnected
                             ? WTheme.Colors.textPrimary
@@ -677,7 +677,7 @@ private struct DeviceDot: View {
             }
 
             Text(label)
-                .font(.system(size: 9, weight: .medium))
+                .font(.wotannScaled(size: 9, weight: .medium))
                 .foregroundColor(WTheme.Colors.textTertiary)
                 .lineLimit(1)
         }

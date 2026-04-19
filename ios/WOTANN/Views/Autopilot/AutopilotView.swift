@@ -53,7 +53,7 @@ struct AutopilotView: View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
             HStack(spacing: WTheme.Spacing.sm) {
                 Image(systemName: "bolt.circle.fill")
-                    .font(.system(size: 28))
+                    .font(.wotannScaled(size: 28))
                     .foregroundStyle(WTheme.Gradients.primary)
                 Text("Autonomous Execution")
                     .font(WTheme.Typography.title3)

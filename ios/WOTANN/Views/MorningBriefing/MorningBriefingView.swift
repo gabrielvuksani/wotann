@@ -149,7 +149,7 @@ struct MorningBriefingView: View {
     private func statCell(icon: String, value: String, label: String, color: Color) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .font(.wotannScaled(size: 16))
                 .foregroundColor(color)
 
             Text(value)

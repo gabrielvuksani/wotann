@@ -60,11 +60,11 @@ struct ArtifactEditorView: View {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 1) {
                         Text(artifact.title ?? "Artifact")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .font(.wotannScaled(size: 13, weight: .semibold, design: .rounded))
                             .foregroundColor(WTheme.Colors.textPrimary)
                         if let lang = artifact.language {
                             Text(lang)
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .font(.wotannScaled(size: 10, weight: .medium, design: .monospaced))
                                 .foregroundColor(WTheme.Colors.textTertiary)
                         }
                     }
@@ -80,7 +80,7 @@ struct ArtifactEditorView: View {
         VStack(alignment: .trailing, spacing: 0) {
             ForEach(Array(lines.enumerated()), id: \.offset) { idx, _ in
                 Text("\(idx + 1)")
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .font(.wotannScaled(size: 12, weight: .regular, design: .monospaced))
                     .foregroundColor(WTheme.Colors.textQuaternary)
                     .frame(height: 18)
             }
@@ -94,7 +94,7 @@ struct ArtifactEditorView: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                 Text(line.isEmpty ? " " : line)
-                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .font(.wotannScaled(size: 13, weight: .regular, design: .monospaced))
                     .foregroundColor(WTheme.Colors.textPrimary)
                     .frame(height: 18, alignment: .leading)
                     .fixedSize(horizontal: true, vertical: false)

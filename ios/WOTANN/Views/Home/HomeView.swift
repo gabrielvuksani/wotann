@@ -137,7 +137,7 @@ private struct WhereYouLeftOffCard: View {
             }
             Spacer()
             Image(systemName: "arrow.forward.circle.fill")
-                .font(.system(size: 28))
+                .font(.wotannScaled(size: 28))
                 .foregroundColor(WTheme.Colors.primary)
         }
         .padding(WTheme.Spacing.md)

@@ -71,7 +71,7 @@ struct PairedDevicesView: View {
                 Section {
                     VStack(spacing: WTheme.Spacing.md) {
                         Image(systemName: "link.circle")
-                            .font(.system(size: 48))
+                            .font(.wotannScaled(size: 48))
                             .foregroundColor(WTheme.Colors.textTertiary)
                         Text("No devices paired")
                             .font(WTheme.Typography.headline)

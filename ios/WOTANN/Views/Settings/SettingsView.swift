@@ -118,7 +118,7 @@ struct SettingsView: View {
                 .accessibilityHint("Automatically connect to your desktop when on the same network")
         } header: {
             Text("Connection")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         }
@@ -180,7 +180,7 @@ struct SettingsView: View {
             }
         } header: {
             Text("Remote Bridge")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         } footer: {
@@ -272,7 +272,7 @@ struct SettingsView: View {
             }
         } header: {
             Text("Tools & Services")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         }
@@ -302,7 +302,7 @@ struct SettingsView: View {
             }
         } header: {
             Text("Health Insights")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         } footer: {
@@ -385,7 +385,7 @@ struct SettingsView: View {
             }
         } header: {
             Text("File Sharing")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         } footer: {
@@ -423,7 +423,7 @@ struct SettingsView: View {
             }
         } header: {
             Text("Appearance")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         }
@@ -457,7 +457,7 @@ struct SettingsView: View {
             .accessibilityHint("Enable or disable vibration feedback for interactions")
         } header: {
             Text("Privacy & Security")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         }
@@ -479,7 +479,7 @@ struct SettingsView: View {
             }
         } header: {
             Text("Notifications")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         }
@@ -501,12 +501,12 @@ struct SettingsView: View {
 
             LabeledContent("Cache Size") {
                 Text(cacheSize)
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(.wotannScaled(size: 14, design: .monospaced))
                     .foregroundColor(WTheme.Colors.textSecondary)
             }
         } header: {
             Text("Data")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         }
@@ -523,12 +523,12 @@ struct SettingsView: View {
 
             LabeledContent("Version") {
                 Text(appVersionString)
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(.wotannScaled(size: 14, design: .monospaced))
                     .foregroundColor(WTheme.Colors.textSecondary)
             }
         } header: {
             Text("About")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         }

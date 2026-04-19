@@ -33,7 +33,7 @@ struct SkillsBrowserView: View {
                     Spacer()
                     VStack(spacing: WTheme.Spacing.md) {
                         Image(systemName: "sparkles")
-                            .font(.system(size: 40))
+                            .font(.wotannScaled(size: 40))
                             .foregroundColor(WTheme.Colors.textTertiary)
                         Text("No skills available")
                             .font(WTheme.Typography.headline)
@@ -139,7 +139,7 @@ struct SkillRow: View {
     var body: some View {
         HStack(spacing: WTheme.Spacing.md) {
             Image(systemName: "sparkle")
-                .font(.system(size: 16))
+                .font(.wotannScaled(size: 16))
                 .foregroundColor(WTheme.Colors.primary)
                 .frame(width: 32, height: 32)
                 .background(WTheme.Colors.primary.opacity(0.1))
@@ -186,7 +186,7 @@ struct SkillDetailSheet: View {
                     // Skill header
                     HStack(spacing: WTheme.Spacing.md) {
                         Image(systemName: "sparkle")
-                            .font(.system(size: 24))
+                            .font(.wotannScaled(size: 24))
                             .foregroundColor(WTheme.Colors.primary)
                             .frame(width: 48, height: 48)
                             .background(WTheme.Colors.primary.opacity(0.1))

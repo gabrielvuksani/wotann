@@ -84,7 +84,7 @@ struct FloatingAsk: View {
                 .frame(width: 56, height: 56)
 
             Image(systemName: "sparkles")
-                .font(.system(size: 24, weight: .semibold))
+                .font(.wotannScaled(size: 24, weight: .semibold))
                 .foregroundColor(.white)
                 .accessibilityHidden(true)
         }

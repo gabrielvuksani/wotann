@@ -55,7 +55,7 @@ struct DispatchView: View {
     private var headerSection: some View {
         VStack(spacing: WTheme.Spacing.md) {
             Image(systemName: "paperplane.fill")
-                .font(.system(size: 40))
+                .font(.wotannScaled(size: 40))
                 .foregroundStyle(WTheme.Gradients.accent)
                 .wSlideUp()
 

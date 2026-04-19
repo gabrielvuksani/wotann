@@ -75,7 +75,7 @@ struct AmbientCrossDeviceView: View {
                 .font(WTheme.Typography.captionStd)
                 .foregroundColor(connectionManager.isConnected ? WTheme.Colors.success : WTheme.Colors.textTertiary)
             Text("\(devices.count) devices")
-                .font(.system(size: 10))
+                .font(.wotannScaled(size: 10))
                 .foregroundColor(WTheme.Colors.textTertiary)
         }
     }
@@ -104,7 +104,7 @@ private struct DeviceAvatar: View {
                         .fill(WTheme.Colors.surfaceAlt)
                         .frame(width: 40, height: 40)
                     Image(systemName: device.icon)
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.wotannScaled(size: 18, weight: .semibold))
                         .foregroundColor(WTheme.Colors.textPrimary)
                 }
                 Circle()
@@ -114,7 +114,7 @@ private struct DeviceAvatar: View {
                     .offset(x: 2, y: 2)
             }
             Text(device.label)
-                .font(.system(size: 10))
+                .font(.wotannScaled(size: 10))
                 .foregroundColor(WTheme.Colors.textSecondary)
                 .lineLimit(1)
                 .frame(maxWidth: 70)

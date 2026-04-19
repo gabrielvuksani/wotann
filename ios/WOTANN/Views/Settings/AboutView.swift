@@ -17,7 +17,7 @@ struct AboutView: View {
                         .scaleEffect(logoScale)
 
                     Text("WOTANN")
-                        .font(.system(size: 36, weight: .black, design: .rounded))
+                        .font(.wotannScaled(size: 36, weight: .black, design: .rounded))
                         .foregroundColor(WTheme.Colors.textPrimary)
 
                     Text("The All-Father of AI")

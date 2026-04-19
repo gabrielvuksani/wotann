@@ -13,7 +13,7 @@ struct PINEntryView: View {
         VStack(spacing: WTheme.Spacing.xl) {
             // Icon
             Image(systemName: "lock.shield.fill")
-                .font(.system(size: 48))
+                .font(.wotannScaled(size: 48))
                 .foregroundStyle(
                     LinearGradient(
                         colors: [WTheme.Colors.primary, .wotannCyan],
@@ -38,7 +38,7 @@ struct PINEntryView: View {
             HStack(spacing: WTheme.Spacing.sm) {
                 ForEach(Array(pin.enumerated()), id: \.offset) { index, character in
                     Text(String(character))
-                        .font(.system(size: 32, weight: .bold, design: .monospaced))
+                        .font(.wotannScaled(size: 32, weight: .bold, design: .monospaced))
                         .foregroundColor(WTheme.Colors.textPrimary)
                         .frame(width: 44, height: 56)
                         .background(WTheme.Colors.surface)

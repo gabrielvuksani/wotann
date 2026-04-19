@@ -19,7 +19,7 @@ struct QuickActionCard: View {
             VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
                 // Icon in tinted container (Vercel-style)
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.wotannScaled(size: 16, weight: .semibold))
                     .foregroundColor(color)
                     .frame(width: 32, height: 32)
                     .background(color.opacity(0.12))

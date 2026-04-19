@@ -157,7 +157,7 @@ struct WorkAgentRow: View {
                     // Title + subtitle.
                     VStack(alignment: .leading, spacing: 4) {
                         Text(agent.title)
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.wotannScaled(size: 17, weight: .semibold))
                             .foregroundColor(WTheme.Colors.textPrimary)
                             .lineLimit(1)
 
@@ -168,7 +168,7 @@ struct WorkAgentRow: View {
                             Text("·").foregroundColor(WTheme.Colors.textTertiary)
                             Text(relativeTimeText)
                         }
-                        .font(.system(size: 13))
+                        .font(.wotannScaled(size: 13))
                         .foregroundColor(WTheme.Colors.textSecondary)
                         .lineLimit(1)
                     }
@@ -178,7 +178,7 @@ struct WorkAgentRow: View {
                     // Right accessories.
                     HStack(spacing: WTheme.Spacing.sm) {
                         Text(costLabelText)
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .font(.wotannScaled(size: 14, weight: .medium, design: .monospaced))
                             .foregroundColor(WTheme.Colors.textSecondary)
                             .monospacedDigit()
 
@@ -187,13 +187,13 @@ struct WorkAgentRow: View {
                                 .frame(width: 24, height: 24)
                         } else {
                             statusGlyph(for: agent.status)
-                                .font(.system(size: 18, weight: .semibold))
+                                .font(.wotannScaled(size: 18, weight: .semibold))
                                 .foregroundColor(statusTint)
                                 .frame(width: 24, height: 24)
                         }
 
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.wotannScaled(size: 13, weight: .semibold))
                             .foregroundColor(WTheme.Colors.textTertiary)
                     }
                 }
@@ -218,7 +218,7 @@ struct WorkAgentRow: View {
         Group {
             if let label = priority(for: agent).label {
                 Text(label)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .font(.wotannScaled(size: 11, weight: .bold, design: .rounded))
                     .foregroundColor(priority(for: agent).tint)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)

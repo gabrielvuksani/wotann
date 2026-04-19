@@ -140,7 +140,7 @@ struct AskComposer: View {
                     Text(compareMode || councilMode ? "Dispatch" : "Send")
                         .font(WTheme.Typography.roundedHeadline)
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.wotannScaled(size: 15, weight: .bold))
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity, minHeight: 52)

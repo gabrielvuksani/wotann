@@ -37,7 +37,7 @@ struct CodePlaygroundView: View {
                         if isRunning {
                             ProgressView().scaleEffect(0.7)
                         } else {
-                            Image(systemName: "play.fill").font(.system(size: 12))
+                            Image(systemName: "play.fill").font(.wotannScaled(size: 12))
                         }
                         Text(isRunning ? "Running..." : "Run")
                             .font(WTheme.Typography.caption)

@@ -38,7 +38,7 @@ struct WorkflowsView: View {
             } label: {
                 HStack(spacing: WTheme.Spacing.md) {
                     Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 16))
+                        .font(.wotannScaled(size: 16))
                         .foregroundColor(WTheme.Colors.primary)
                         .frame(width: 32, height: 32)
                         .background(WTheme.Colors.primary.opacity(0.1))

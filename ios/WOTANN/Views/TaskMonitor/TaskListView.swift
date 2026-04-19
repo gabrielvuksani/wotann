@@ -124,7 +124,7 @@ struct TaskListView: View {
     private var noResultsView: some View {
         VStack(spacing: WTheme.Spacing.md) {
             Image(systemName: "line.3.horizontal.decrease.circle")
-                .font(.system(size: 36))
+                .font(.wotannScaled(size: 36))
                 .foregroundColor(WTheme.Colors.textTertiary)
             Text("No \(filterState?.displayName.lowercased() ?? "") tasks")
                 .font(WTheme.Typography.subheadline)
@@ -253,7 +253,7 @@ struct TaskRow: View {
 
                 HStack(spacing: WTheme.Spacing.xxs) {
                     Image(systemName: "clock")
-                        .font(.system(size: 10))
+                        .font(.wotannScaled(size: 10))
                     Text(task.formattedDuration)
                         .font(WTheme.Typography.caption2)
                 }
@@ -266,7 +266,7 @@ struct TaskRow: View {
     private var statusBadge: some View {
         HStack(spacing: WTheme.Spacing.xxs) {
             Image(systemName: task.status.iconName)
-                .font(.system(size: 10))
+                .font(.wotannScaled(size: 10))
             Text(task.status.displayName)
                 .font(WTheme.Typography.caption2)
                 .fontWeight(.medium)

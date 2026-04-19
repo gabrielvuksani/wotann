@@ -217,7 +217,7 @@ private struct RemoteDesktopContent: View {
     private var emptyScreenPlaceholder: some View {
         VStack(spacing: WTheme.Spacing.md) {
             Image(systemName: "desktopcomputer")
-                .font(.system(size: 48))
+                .font(.wotannScaled(size: 48))
                 .foregroundColor(WTheme.Colors.textTertiary)
             Text("No screen captured")
                 .font(WTheme.Typography.headline)
@@ -458,7 +458,7 @@ private struct RemoteDesktopContent: View {
                     viewModel.sendKeyboardText()
                 } label: {
                     Image(systemName: "paperplane.fill")
-                        .font(.system(size: 18))
+                        .font(.wotannScaled(size: 18))
                         .foregroundColor(viewModel.keyboardText.isEmpty ? WTheme.Colors.textTertiary : WTheme.Colors.primary)
                 }
                 .disabled(viewModel.keyboardText.isEmpty)
@@ -573,7 +573,7 @@ private extension RemoteDesktopContent {
 
             // Current zoom percentage
             Text("\(Int(viewModel.zoomScale * 100))%")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.wotannScaled(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundColor(WTheme.Colors.textTertiary)
                 .frame(width: 44)
 
@@ -586,7 +586,7 @@ private extension RemoteDesktopContent {
                 }
             } label: {
                 Image(systemName: "minus.magnifyingglass")
-                    .font(.system(size: 14))
+                    .font(.wotannScaled(size: 14))
                     .foregroundColor(WTheme.Colors.textSecondary)
                     .frame(width: 32, height: 32)
             }
@@ -600,7 +600,7 @@ private extension RemoteDesktopContent {
                 }
             } label: {
                 Image(systemName: "plus.magnifyingglass")
-                    .font(.system(size: 14))
+                    .font(.wotannScaled(size: 14))
                     .foregroundColor(WTheme.Colors.textSecondary)
                     .frame(width: 32, height: 32)
             }
@@ -729,9 +729,9 @@ private struct ShortcutPill: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 11))
+                    .font(.wotannScaled(size: 11))
                 Text(label)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.wotannScaled(size: 11, weight: .medium))
             }
             .foregroundColor(WTheme.Colors.textPrimary)
             .padding(.horizontal, WTheme.Spacing.sm)

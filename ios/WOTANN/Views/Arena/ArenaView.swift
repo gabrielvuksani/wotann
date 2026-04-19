@@ -77,7 +77,7 @@ struct ArenaView: View {
     private var emptyState: some View {
         VStack(spacing: WTheme.Spacing.lg) {
             Image(systemName: "square.split.2x1.fill")
-                .font(.system(size: 56))
+                .font(.wotannScaled(size: 56))
                 .foregroundStyle(
                     LinearGradient(
                         colors: [WTheme.Colors.primary, .wotannCyan],
@@ -542,7 +542,7 @@ private struct StatPill: View {
     var body: some View {
         HStack(spacing: WTheme.Spacing.xxs) {
             Image(systemName: icon)
-                .font(.system(size: 10))
+                .font(.wotannScaled(size: 10))
             Text(label)
                 .font(WTheme.Typography.caption2)
         }

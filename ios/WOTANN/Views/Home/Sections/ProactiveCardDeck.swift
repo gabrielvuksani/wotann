@@ -136,7 +136,7 @@ private struct ProactiveCardView: View {
     var body: some View {
         HStack(spacing: WTheme.Spacing.md) {
             Image(systemName: card.icon)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.wotannScaled(size: 22, weight: .semibold))
                 .foregroundColor(card.color)
                 .frame(width: 40, height: 40)
                 .background(card.color.opacity(0.15))

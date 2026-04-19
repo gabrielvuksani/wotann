@@ -75,7 +75,7 @@ struct AgentDetailView: View {
     private var statusHeader: some View {
         VStack(spacing: WTheme.Spacing.md) {
             Image(systemName: agent.status.iconName)
-                .font(.system(size: 40))
+                .font(.wotannScaled(size: 40))
                 .foregroundColor(statusColor)
 
             Text(agent.title)

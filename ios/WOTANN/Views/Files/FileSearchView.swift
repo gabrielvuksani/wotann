@@ -36,7 +36,7 @@ struct FileSearchView: View {
                     Spacer()
                     VStack(spacing: WTheme.Spacing.md) {
                         Image(systemName: "doc.text.magnifyingglass")
-                            .font(.system(size: 40))
+                            .font(.wotannScaled(size: 40))
                             .foregroundColor(WTheme.Colors.textTertiary)
                         Text("No files found")
                             .font(WTheme.Typography.headline)
@@ -47,7 +47,7 @@ struct FileSearchView: View {
                     Spacer()
                     VStack(spacing: WTheme.Spacing.md) {
                         Image(systemName: "folder")
-                            .font(.system(size: 40))
+                            .font(.wotannScaled(size: 40))
                             .foregroundColor(WTheme.Colors.textTertiary)
                         Text("Search your project files")
                             .font(WTheme.Typography.headline)
@@ -99,7 +99,7 @@ private struct FileResultRow: View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.xs) {
             HStack(spacing: WTheme.Spacing.sm) {
                 Image(systemName: fileIcon)
-                    .font(.system(size: 14))
+                    .font(.wotannScaled(size: 14))
                     .foregroundColor(WTheme.Colors.primary)
 
                 Text(file["name"]?.stringValue ?? file["path"]?.stringValue ?? "Unknown")

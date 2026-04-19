@@ -97,7 +97,7 @@ struct FilterPillBar: View {
                         .foregroundColor(isActive ? WTheme.Colors.textPrimary : WTheme.Colors.textSecondary)
 
                     Text("\(count)")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .font(.wotannScaled(size: 11, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(isActive ? .white : filter.tint)
                         .padding(.horizontal, 6)

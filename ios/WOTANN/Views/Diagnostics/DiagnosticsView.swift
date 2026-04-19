@@ -38,7 +38,7 @@ struct DiagnosticsView: View {
             } label: {
                 HStack(spacing: WTheme.Spacing.sm) {
                     Image(systemName: "stethoscope")
-                        .font(.system(size: 16))
+                        .font(.wotannScaled(size: 16))
                         .foregroundColor(WTheme.Colors.primary)
                         .frame(width: 28)
 

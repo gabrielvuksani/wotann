@@ -87,7 +87,7 @@ private struct AgentCard: View {
             Spacer(minLength: 0)
 
             Text(agent.provider.capitalized)
-                .font(.system(size: 10, weight: .medium))
+                .font(.wotannScaled(size: 10, weight: .medium))
                 .foregroundColor(WTheme.Colors.provider(agent.provider))
         }
         .padding(WTheme.Spacing.sm)

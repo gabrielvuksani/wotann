@@ -69,7 +69,7 @@ struct HealthInsightsSettingsView: View {
             }
         } header: {
             Text("HealthKit Access")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         } footer: {
@@ -142,7 +142,7 @@ struct HealthInsightsSettingsView: View {
             }
         } header: {
             Text("Insights (Last 14 Days)")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
         }

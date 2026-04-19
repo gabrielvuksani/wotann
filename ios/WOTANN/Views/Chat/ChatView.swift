@@ -160,7 +160,7 @@ struct ChatViewContent: View {
         ToolbarItem(placement: .principal) {
             VStack(spacing: 0) {
                 Text(viewModel.conversation?.title ?? "Chat")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 15, weight: .semibold, design: .rounded))
                     .foregroundColor(WTheme.Colors.textPrimary)
                 if let conv = viewModel.conversation {
                     ProviderBadge(provider: conv.provider, size: .small)
@@ -279,11 +279,11 @@ struct ChatViewContent: View {
             Spacer(minLength: 40)
             WLogo(size: 44, glowRadius: 20)
             Text("What can I help with?")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .font(.wotannScaled(size: 22, weight: .bold, design: .rounded))
                 .tracking(-0.4)
                 .foregroundColor(WTheme.Colors.textPrimary)
             Text("Type a message or tap the mic to begin")
-                .font(.system(size: 13))
+                .font(.wotannScaled(size: 13))
                 .foregroundColor(WTheme.Colors.textSecondary)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
@@ -322,13 +322,13 @@ struct ChatViewContent: View {
         }) {
             VStack(alignment: .leading, spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.wotannScaled(size: 16, weight: .semibold))
                     .foregroundColor(color)
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 14, weight: .semibold, design: .rounded))
                     .foregroundColor(WTheme.Colors.textPrimary)
                 Text(subtitle)
-                    .font(.system(size: 11))
+                    .font(.wotannScaled(size: 11))
                     .foregroundColor(WTheme.Colors.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -417,7 +417,7 @@ struct CameraInputSheet: View {
                 if cameraService.isStreaming {
                     VStack(spacing: WTheme.Spacing.md) {
                         Image(systemName: "camera.viewfinder")
-                            .font(.system(size: 48))
+                            .font(.wotannScaled(size: 48))
                             .foregroundColor(WTheme.Colors.primary)
 
                         Text("Camera Active")
@@ -450,7 +450,7 @@ struct CameraInputSheet: View {
                 } else {
                     VStack(spacing: WTheme.Spacing.md) {
                         Image(systemName: "camera")
-                            .font(.system(size: 48))
+                            .font(.wotannScaled(size: 48))
                             .foregroundColor(WTheme.Colors.textTertiary)
 
                         Text("Start Camera")

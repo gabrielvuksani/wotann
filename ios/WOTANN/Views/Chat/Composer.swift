@@ -73,7 +73,7 @@ struct Composer: View {
                 .fill(WTheme.Colors.provider(currentProvider))
                 .frame(width: 6, height: 6)
             Text(currentModel)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .font(.wotannScaled(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(WTheme.Colors.textSecondary)
                 .lineLimit(1)
         }
@@ -88,10 +88,10 @@ struct Composer: View {
     private var costPill: some View {
         HStack(spacing: 3) {
             Image(systemName: "creditcard.fill")
-                .font(.system(size: 9))
+                .font(.wotannScaled(size: 9))
                 .foregroundColor(WTheme.Colors.textTertiary)
             Text(estimatedCost == 0 ? "~$0.00" : String(format: "~$%.3f", estimatedCost))
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.wotannScaled(size: 10, weight: .medium, design: .monospaced))
                 .foregroundColor(WTheme.Colors.textTertiary)
         }
         .padding(.horizontal, 7)
@@ -106,9 +106,9 @@ struct Composer: View {
         Button(action: onToggleAutopilot) {
             HStack(spacing: 4) {
                 Image(systemName: autopilotOn ? "airplane" : "airplane.circle")
-                    .font(.system(size: 11))
+                    .font(.wotannScaled(size: 11))
                 Text("Autopilot")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 11, weight: .semibold, design: .rounded))
             }
             .foregroundColor(autopilotOn ? .white : WTheme.Colors.textSecondary)
             .padding(.horizontal, 9)
@@ -130,10 +130,10 @@ struct Composer: View {
                 .frame(width: 2)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Replying to")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 10, weight: .semibold, design: .rounded))
                     .foregroundColor(WTheme.Colors.primary)
                 Text(quoted)
-                    .font(.system(size: 12))
+                    .font(.wotannScaled(size: 12))
                     .foregroundColor(WTheme.Colors.textSecondary)
                     .lineLimit(2)
             }
@@ -141,7 +141,7 @@ struct Composer: View {
             if let onClearQuote {
                 Button(action: onClearQuote) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
+                        .font(.wotannScaled(size: 14))
                         .foregroundColor(WTheme.Colors.textTertiary)
                 }
                 .accessibilityLabel("Clear reply")
@@ -162,7 +162,7 @@ struct Composer: View {
 
             TextField("Message WOTANN...", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 16))
+                .font(.wotannScaled(size: 16))
                 .foregroundColor(WTheme.Colors.textPrimary)
                 .tint(WTheme.Colors.primary)
                 .focused($isFocused)
@@ -201,7 +201,7 @@ struct Composer: View {
             onPlus()
         }) {
             Image(systemName: "plus")
-                .font(.system(size: 18, weight: .medium))
+                .font(.wotannScaled(size: 18, weight: .medium))
                 .foregroundColor(WTheme.Colors.textSecondary)
                 .frame(width: 32, height: 32)
                 .background(Circle().fill(WTheme.Colors.surfaceAlt.opacity(0.4)))
@@ -215,7 +215,7 @@ struct Composer: View {
         if isStreaming {
             Button(action: onCancel) {
                 Image(systemName: "stop.fill")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.wotannScaled(size: 14, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 36, height: 36)
                     .background(Circle().fill(WTheme.Colors.error))
@@ -227,7 +227,7 @@ struct Composer: View {
                 onSend()
             }) {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.wotannScaled(size: 16, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: 32, height: 32)
                     .background(Circle().fill(WTheme.Colors.primary))
@@ -244,7 +244,7 @@ struct Composer: View {
             onVoicePressHold()
         }) {
             Image(systemName: "mic.fill")
-                .font(.system(size: 22, weight: .medium))
+                .font(.wotannScaled(size: 22, weight: .medium))
                 .foregroundColor(.white)
                 .frame(width: 56, height: 56)
                 .background(Circle().fill(WTheme.Colors.primary))
@@ -292,9 +292,9 @@ struct Composer: View {
                 Button(action: onCancel) {
                     HStack(spacing: 4) {
                         Image(systemName: "stop.fill")
-                            .font(.system(size: 10))
+                            .font(.wotannScaled(size: 10))
                         Text("Stop")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .font(.wotannScaled(size: 11, weight: .semibold, design: .rounded))
                     }
                     .foregroundColor(WTheme.Colors.error)
                     .padding(.horizontal, 9)
@@ -321,9 +321,9 @@ struct Composer: View {
         }) {
             HStack(spacing: 3) {
                 Image(systemName: systemIcon)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.wotannScaled(size: 10, weight: .semibold))
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 11, weight: .semibold, design: .rounded))
             }
             .foregroundColor(WTheme.Colors.textSecondary)
             .padding(.horizontal, 9)

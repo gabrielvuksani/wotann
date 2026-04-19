@@ -43,7 +43,7 @@ struct PairingView: View {
                             .opacity(logoOpacity)
 
                         Text("WOTANN")
-                            .font(.system(size: 40, weight: .black, design: .rounded))
+                            .font(.wotannScaled(size: 40, weight: .black, design: .rounded))
                             .tracking(WTheme.Tracking.tighter)
                             .foregroundColor(WTheme.Colors.textPrimary)
 

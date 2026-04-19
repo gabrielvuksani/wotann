@@ -52,7 +52,7 @@ struct ArtifactView: View {
     private var header: some View {
         HStack(spacing: WTheme.Spacing.sm) {
             Image(systemName: artifactIcon)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.wotannScaled(size: 11, weight: .semibold))
                 .foregroundColor(artifactColor)
                 .frame(width: 22, height: 22)
                 .background(
@@ -61,7 +61,7 @@ struct ArtifactView: View {
                 )
 
             Text(artifact.title ?? artifact.type.rawValue.capitalized)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(.wotannScaled(size: 13, weight: .semibold, design: .rounded))
                 .foregroundColor(WTheme.Colors.textPrimary)
                 .lineLimit(1)
 
@@ -69,7 +69,7 @@ struct ArtifactView: View {
 
             if let lang = artifact.language, !lang.isEmpty {
                 Text(lang.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .font(.wotannScaled(size: 9, weight: .bold, design: .monospaced))
                     .tracking(0.5)
                     .foregroundColor(artifactColor)
                     .padding(.horizontal, 6)
@@ -90,7 +90,7 @@ struct ArtifactView: View {
     private var previewBody: some View {
         ZStack(alignment: .bottom) {
             Text(preview)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.wotannScaled(size: 12, design: .monospaced))
                 .foregroundColor(WTheme.Colors.textPrimary)
                 .lineSpacing(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,9 +123,9 @@ struct ArtifactView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.wotannScaled(size: 11, weight: .semibold))
                     Text("Open editor")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .font(.wotannScaled(size: 12, weight: .semibold, design: .rounded))
                 }
                 .foregroundColor(WTheme.Colors.primary)
                 .padding(.horizontal, 10)

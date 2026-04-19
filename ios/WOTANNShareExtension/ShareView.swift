@@ -52,17 +52,17 @@ struct ShareView: View {
     private var header: some View {
         HStack {
             Button("Cancel", action: onCancel)
-                .font(.system(size: 17, weight: .regular))
+                .font(.wotannScaled(size: 17, weight: .regular))
                 .foregroundColor(ShareTheme.textSecondary)
 
             Spacer()
 
             HStack(spacing: 6) {
                 Image(systemName: "w.circle.fill")
-                    .font(.system(size: 14))
+                    .font(.wotannScaled(size: 14))
                     .foregroundColor(ShareTheme.primary)
                 Text("Send to WOTANN")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.wotannScaled(size: 17, weight: .semibold))
                     .foregroundColor(ShareTheme.textPrimary)
             }
 
@@ -70,7 +70,7 @@ struct ShareView: View {
 
             // Balance width
             Text("Cancel")
-                .font(.system(size: 17))
+                .font(.wotannScaled(size: 17))
                 .hidden()
         }
         .padding(.horizontal, ShareTheme.spacingMd)
@@ -83,21 +83,21 @@ struct ShareView: View {
         VStack(alignment: .leading, spacing: ShareTheme.spacingSm) {
             HStack(spacing: 4) {
                 Image(systemName: "doc.on.clipboard")
-                    .font(.system(size: 10))
+                    .font(.wotannScaled(size: 10))
                     .foregroundColor(ShareTheme.primary)
                 Text("Shared Content")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.wotannScaled(size: 12, weight: .bold))
                     .foregroundColor(ShareTheme.textSecondary)
             }
 
             if sharedText.isEmpty {
                 Text("No text content shared.")
-                    .font(.system(size: 15))
+                    .font(.wotannScaled(size: 15))
                     .foregroundColor(ShareTheme.textTertiary)
                     .italic()
             } else {
                 Text(sharedText)
-                    .font(.system(size: 15))
+                    .font(.wotannScaled(size: 15))
                     .foregroundColor(ShareTheme.textPrimary)
                     .lineLimit(8)
             }
@@ -113,12 +113,12 @@ struct ShareView: View {
     private var additionalPromptField: some View {
         VStack(alignment: .leading, spacing: ShareTheme.spacingSm) {
             Text("Add instructions (optional)")
-                .font(.system(size: 12, weight: .bold))
+                .font(.wotannScaled(size: 12, weight: .bold))
                 .foregroundColor(ShareTheme.textSecondary)
 
             TextField("e.g. Summarize this, explain the key points...", text: $additionalText, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15))
+                .font(.wotannScaled(size: 15))
                 .foregroundColor(ShareTheme.textPrimary)
                 .lineLimit(2...5)
                 .padding(ShareTheme.spacingSm)
@@ -132,7 +132,7 @@ struct ShareView: View {
     private var conversationPicker: some View {
         VStack(alignment: .leading, spacing: ShareTheme.spacingSm) {
             Text("Destination")
-                .font(.system(size: 12, weight: .bold))
+                .font(.wotannScaled(size: 12, weight: .bold))
                 .foregroundColor(ShareTheme.textSecondary)
 
             ForEach(conversationOptions, id: \.self) { option in
@@ -141,23 +141,23 @@ struct ShareView: View {
                 } label: {
                     HStack {
                         Image(systemName: option == "New Conversation" ? "plus.bubble" : "bubble.left")
-                            .font(.system(size: 14))
+                            .font(.wotannScaled(size: 14))
                             .foregroundColor(ShareTheme.primary)
                             .frame(width: 24)
 
                         Text(option)
-                            .font(.system(size: 15))
+                            .font(.wotannScaled(size: 15))
                             .foregroundColor(ShareTheme.textPrimary)
 
                         Spacer()
 
                         if selectedConversation == option {
                             Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 18))
+                                .font(.wotannScaled(size: 18))
                                 .foregroundColor(ShareTheme.primary)
                         } else {
                             Image(systemName: "circle")
-                                .font(.system(size: 18))
+                                .font(.wotannScaled(size: 18))
                                 .foregroundColor(ShareTheme.textTertiary)
                         }
                     }
@@ -180,10 +180,10 @@ struct ShareView: View {
                         .scaleEffect(0.8)
                 } else {
                     Image(systemName: "paperplane.fill")
-                        .font(.system(size: 14))
+                        .font(.wotannScaled(size: 14))
                 }
                 Text(isSending ? "Sending..." : "Send to WOTANN")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.wotannScaled(size: 17, weight: .semibold))
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)

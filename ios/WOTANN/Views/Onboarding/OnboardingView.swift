@@ -98,7 +98,7 @@ private struct WelcomeScreen: View {
 
             // 96pt runic "W" glowing glyph
             Image(systemName: "w.square.fill")
-                .font(.system(size: 96, weight: .bold))
+                .font(.wotannScaled(size: 96, weight: .bold))
                 .foregroundStyle(WTheme.Colors.primary)
                 .shadow(color: WTheme.Colors.primary.opacity(0.7), radius: 30)
                 .shadow(color: WTheme.Colors.primary.opacity(0.4), radius: 60)
@@ -113,13 +113,13 @@ private struct WelcomeScreen: View {
             VStack(spacing: WTheme.Spacing.md) {
                 // Title: 34pt rounded bold
                 Text("WOTANN")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .font(.wotannScaled(size: 34, weight: .bold, design: .rounded))
                     .tracking(WTheme.Tracking.displayLarge)
                     .foregroundStyle(.white)
 
                 // Tagline
                 Text("The All-Father's companion for every model.")
-                    .font(.system(size: 17, weight: .regular, design: .rounded))
+                    .font(.wotannScaled(size: 17, weight: .regular, design: .rounded))
                     .foregroundStyle(WTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, WTheme.Spacing.xl)
@@ -130,7 +130,7 @@ private struct WelcomeScreen: View {
             // Continue button — 44pt primary blue
             Button(action: onContinue) {
                 Text("Continue")
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(WTheme.Colors.primary)
@@ -162,12 +162,12 @@ private struct PermissionsScreen: View {
 
             VStack(spacing: WTheme.Spacing.sm) {
                 Text("Quick Setup")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.wotannScaled(size: 28, weight: .bold, design: .rounded))
                     .tracking(WTheme.Tracking.displaySmall)
                     .foregroundStyle(.white)
 
                 Text("Grant access to unlock WOTANN's features.")
-                    .font(.system(size: 15, weight: .regular, design: .rounded))
+                    .font(.wotannScaled(size: 15, weight: .regular, design: .rounded))
                     .foregroundStyle(WTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, WTheme.Spacing.xl)
@@ -206,7 +206,7 @@ private struct PermissionsScreen: View {
 
             Button(action: onContinue) {
                 Text("Continue")
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(WTheme.Colors.primary)
@@ -216,7 +216,7 @@ private struct PermissionsScreen: View {
 
             Button(action: onSkip) {
                 Text("Skip for now")
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .font(.wotannScaled(size: 15, weight: .medium, design: .rounded))
                     .foregroundStyle(WTheme.Colors.textTertiary)
             }
             .padding(.bottom, WTheme.Spacing.lg)
@@ -308,7 +308,7 @@ private struct PermissionRow: View {
     var body: some View {
         HStack(spacing: WTheme.Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 22, weight: .medium))
+                .font(.wotannScaled(size: 22, weight: .medium))
                 .foregroundStyle(WTheme.Colors.primary)
                 .frame(width: 44, height: 44)
                 .background(WTheme.Colors.primary.opacity(0.12))
@@ -316,11 +316,11 @@ private struct PermissionRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
 
                 Text(subtitle)
-                    .font(.system(size: 13, weight: .regular, design: .rounded))
+                    .font(.wotannScaled(size: 13, weight: .regular, design: .rounded))
                     .foregroundStyle(WTheme.Colors.textTertiary)
                     .lineLimit(1)
             }
@@ -346,13 +346,13 @@ private struct PermissionRow: View {
                 .transition(.scale.combined(with: .opacity))
         case .some(false):
             Text("Denied")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .font(.wotannScaled(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(WTheme.Colors.textTertiary)
                 .frame(minHeight: 44)
         case .none:
             Button(action: onEnable) {
                 Text("Enable")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, WTheme.Spacing.md)
                     .frame(minHeight: 44)
@@ -377,18 +377,18 @@ private struct FirstPairingScreen: View {
             Spacer()
 
             Image(systemName: "link.circle.fill")
-                .font(.system(size: 80, weight: .regular))
+                .font(.wotannScaled(size: 80, weight: .regular))
                 .foregroundStyle(WTheme.Colors.primary)
                 .shadow(color: WTheme.Colors.primary.opacity(0.5), radius: 24)
 
             VStack(spacing: WTheme.Spacing.md) {
                 Text("Link your Mac")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.wotannScaled(size: 28, weight: .bold, design: .rounded))
                     .tracking(WTheme.Tracking.displaySmall)
                     .foregroundStyle(.white)
 
                 Text("Pair WOTANN on your Mac to start commanding your AI agents.")
-                    .font(.system(size: 15, weight: .regular, design: .rounded))
+                    .font(.wotannScaled(size: 15, weight: .regular, design: .rounded))
                     .foregroundStyle(WTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, WTheme.Spacing.xl)
@@ -400,7 +400,7 @@ private struct FirstPairingScreen: View {
                 showWizard = true
             } label: {
                 Text("Start Pairing")
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(WTheme.Colors.primary)

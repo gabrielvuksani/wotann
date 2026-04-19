@@ -74,7 +74,7 @@ struct StatusBadge: View {
     var body: some View {
         HStack(spacing: WTheme.Spacing.xs) {
             statusGlyph(for: state)
-                .font(.system(size: 10, weight: .bold))
+                .font(.wotannScaled(size: 10, weight: .bold))
             Text(state.displayName)
                 .font(WTheme.Typography.captionStd)
         }

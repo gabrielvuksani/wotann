@@ -30,13 +30,13 @@ struct ConversationRow: View {
                 HStack(alignment: .firstTextBaseline) {
                     if conversation.isStarred {
                         Image(systemName: "star.fill")
-                            .font(.system(size: 10))
+                            .font(.wotannScaled(size: 10))
                             .foregroundColor(WTheme.Colors.warning)
                     }
 
                     if conversation.isIncognito {
                         Image(systemName: "eye.slash.fill")
-                            .font(.system(size: 10))
+                            .font(.wotannScaled(size: 10))
                             .foregroundColor(WTheme.Colors.textTertiary)
                     }
 
@@ -51,7 +51,7 @@ struct ConversationRow: View {
 
                     // Refined time display with monospaced digits
                     Text(conversation.updatedAt, style: .relative)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.wotannScaled(size: 11, design: .monospaced))
                         .foregroundColor(WTheme.Colors.textTertiary)
                 }
 
@@ -75,7 +75,7 @@ struct ConversationRow: View {
 
                     HStack(spacing: 2) {
                         Image(systemName: "bubble.left.fill")
-                            .font(.system(size: 8))
+                            .font(.wotannScaled(size: 8))
                         Text("\(conversation.messageCount)")
                             .font(WTheme.Typography.caption2)
                     }

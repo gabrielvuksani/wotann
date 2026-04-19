@@ -50,7 +50,7 @@ struct CodeBlockView: View {
         HStack(spacing: WTheme.Spacing.sm) {
             if let language, !language.isEmpty {
                 Text(language.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .font(.wotannScaled(size: 9, weight: .bold, design: .monospaced))
                     .tracking(0.5)
                     .foregroundColor(WTheme.Colors.primary)
                     .padding(.horizontal, 6)
@@ -61,7 +61,7 @@ struct CodeBlockView: View {
                     )
             } else if let title {
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(WTheme.Colors.textSecondary)
             }
 
@@ -72,9 +72,9 @@ struct CodeBlockView: View {
             } label: {
                 HStack(spacing: 3) {
                     Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.wotannScaled(size: 10, weight: .semibold))
                     Text(isCopied ? "Copied" : "Copy")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .font(.wotannScaled(size: 10, weight: .semibold, design: .rounded))
                 }
                 .foregroundColor(isCopied ? WTheme.Colors.success : WTheme.Colors.textSecondary)
                 .padding(.horizontal, 7)

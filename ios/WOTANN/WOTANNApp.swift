@@ -45,6 +45,12 @@ struct WOTANNApp: App {
                         .environmentObject(onDeviceModelService)
                         .preferredColorScheme(resolvedColorScheme)
                         .tint(WTheme.Colors.primary)
+                        // S4-13: clamp Dynamic Type bounds at the root. Dense
+                        // UI surfaces rely on fixed call-site sizes (now
+                        // wotannScaled) that already scale relative to the
+                        // user's preferred category — this bound prevents
+                        // the upper Accessibility Sizes from breaking layout.
+                        .wotannDynamicType()
                         .onOpenURL { url in
                             handleDeepLink(url)
                         }
@@ -357,7 +363,7 @@ struct LockedView: View {
 
             VStack(spacing: WTheme.Spacing.xl) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 64))
+                    .font(.wotannScaled(size: 64))
                     .foregroundStyle(
                         LinearGradient(
                             colors: [WTheme.Colors.primary, .wotannCyan],

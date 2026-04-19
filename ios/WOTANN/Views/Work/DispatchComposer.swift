@@ -52,7 +52,7 @@ struct DispatchComposer: View {
                 TextField("Dispatch a task…", text: $promptText)
                     .textFieldStyle(.plain)
                     .foregroundColor(WTheme.Colors.textPrimary)
-                    .font(.system(size: 15))
+                    .font(.wotannScaled(size: 15))
                     .focused($isFocused)
                     .submitLabel(.send)
                     .onSubmit { send() }
@@ -61,7 +61,7 @@ struct DispatchComposer: View {
                     cycleModel()
                 } label: {
                     Text(modelChipLabel)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .font(.wotannScaled(size: 11, weight: .semibold, design: .rounded))
                         .foregroundColor(WTheme.Colors.textPrimary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -97,7 +97,7 @@ struct DispatchComposer: View {
                             .tint(.white)
                     } else {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.wotannScaled(size: 16, weight: .semibold))
                             .foregroundColor(.white)
                     }
                 }

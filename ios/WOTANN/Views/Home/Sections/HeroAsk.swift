@@ -20,7 +20,7 @@ struct HeroAsk: View {
         }) {
             HStack(spacing: WTheme.Spacing.md) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.wotannScaled(size: 22, weight: .semibold))
                     .foregroundColor(WTheme.Colors.primary)
                     .frame(width: 40, height: 40)
                     .background(WTheme.Colors.primary.opacity(0.15))
@@ -43,7 +43,7 @@ struct HeroAsk: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: "arrow.up.right")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.wotannScaled(size: 20, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 40, height: 40)
                     .background(WTheme.Colors.primary)

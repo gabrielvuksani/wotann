@@ -87,7 +87,7 @@ struct VoiceInputView: View {
             if let error = permissionError ?? voiceService.error?.localizedDescription {
                 VStack(spacing: WTheme.Spacing.sm) {
                     Image(systemName: "mic.slash.fill")
-                        .font(.system(size: 40))
+                        .font(.wotannScaled(size: 40))
                         .foregroundColor(WTheme.Colors.error)
                     Text(error)
                         .font(WTheme.Typography.subheadline)
@@ -98,7 +98,7 @@ struct VoiceInputView: View {
             } else if transcription.isEmpty && !isRecording {
                 VStack(spacing: WTheme.Spacing.sm) {
                     Image(systemName: "waveform.and.mic")
-                        .font(.system(size: 40))
+                        .font(.wotannScaled(size: 40))
                         .foregroundColor(WTheme.Colors.textTertiary)
                     Text("Speak your prompt and WOTANN will transcribe it.")
                         .font(WTheme.Typography.subheadline)
@@ -208,7 +208,7 @@ struct VoiceInputView: View {
                         )
 
                     Image(systemName: isRecording ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 32, weight: .medium))
+                        .font(.wotannScaled(size: 32, weight: .medium))
                         .foregroundColor(.white)
                         .contentTransition(.symbolEffect(.replace))
                 }
@@ -240,7 +240,7 @@ struct VoiceInputView: View {
             Button(action: sendTranscription) {
                 VStack(spacing: WTheme.Spacing.xs) {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 28))
+                        .font(.wotannScaled(size: 28))
                         .foregroundColor(
                             canSend
                                 ? WTheme.Colors.primary

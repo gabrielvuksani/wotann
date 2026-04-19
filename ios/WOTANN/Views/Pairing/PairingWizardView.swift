@@ -57,7 +57,7 @@ struct PairingWizardView: View {
 
                         if let message = errorMessage {
                             Text(message)
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .font(.wotannScaled(size: 13, weight: .medium, design: .rounded))
                                 .foregroundStyle(WTheme.Colors.error)
                                 .padding(WTheme.Spacing.md)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,17 +112,17 @@ struct PairingWizardView: View {
     private var header: some View {
         VStack(spacing: WTheme.Spacing.sm) {
             Image(systemName: "w.square.fill")
-                .font(.system(size: 48, weight: .bold))
+                .font(.wotannScaled(size: 48, weight: .bold))
                 .foregroundStyle(WTheme.Colors.primary)
                 .shadow(color: WTheme.Colors.primary.opacity(0.5), radius: 20)
 
             Text("Link your Mac")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .font(.wotannScaled(size: 28, weight: .bold, design: .rounded))
                 .tracking(WTheme.Tracking.displaySmall)
                 .foregroundStyle(.white)
 
             Text("Pick the fastest way to connect.")
-                .font(.system(size: 15, weight: .regular, design: .rounded))
+                .font(.wotannScaled(size: 15, weight: .regular, design: .rounded))
                 .foregroundStyle(WTheme.Colors.textSecondary)
         }
         .frame(maxWidth: .infinity)
@@ -134,17 +134,17 @@ struct PairingWizardView: View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
             Label {
                 Text("Magic link")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
             } icon: {
                 Image(systemName: "link")
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.wotannScaled(size: 15, weight: .medium))
                     .foregroundStyle(WTheme.Colors.primary)
             }
 
             VStack(spacing: WTheme.Spacing.sm) {
                 TextField("wotann://pair?...", text: $magicLink)
-                    .font(.system(size: 15, weight: .regular, design: .rounded))
+                    .font(.wotannScaled(size: 15, weight: .regular, design: .rounded))
                     .foregroundStyle(.white)
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
@@ -158,9 +158,9 @@ struct PairingWizardView: View {
                     Button(action: pasteFromClipboard) {
                         HStack(spacing: 6) {
                             Image(systemName: "doc.on.clipboard")
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.wotannScaled(size: 13, weight: .medium))
                             Text("Paste from clipboard")
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .font(.wotannScaled(size: 13, weight: .semibold, design: .rounded))
                         }
                         .foregroundStyle(WTheme.Colors.primary)
                         .padding(.horizontal, WTheme.Spacing.md)
@@ -174,7 +174,7 @@ struct PairingWizardView: View {
                     Button("Connect") {
                         connectFromMagicLink()
                     }
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, WTheme.Spacing.md)
                     .frame(minHeight: 44)
@@ -201,7 +201,7 @@ struct PairingWizardView: View {
         } label: {
             HStack(spacing: WTheme.Spacing.md) {
                 Image(systemName: "qrcode.viewfinder")
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.wotannScaled(size: 22, weight: .medium))
                     .foregroundStyle(WTheme.Colors.primary)
                     .frame(width: 44, height: 44)
                     .background(WTheme.Colors.primary.opacity(0.12))
@@ -209,17 +209,17 @@ struct PairingWizardView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Scan QR code")
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .font(.wotannScaled(size: 17, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                     Text("Shown by `wotann link`")
-                        .font(.system(size: 13, weight: .regular, design: .rounded))
+                        .font(.wotannScaled(size: 13, weight: .regular, design: .rounded))
                         .foregroundStyle(WTheme.Colors.textTertiary)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.wotannScaled(size: 14, weight: .semibold))
                     .foregroundStyle(WTheme.Colors.textTertiary)
             }
             .padding(WTheme.Spacing.md)
@@ -236,13 +236,13 @@ struct PairingWizardView: View {
         Link(destination: URL(string: "https://wotann.com/download")!) {
             HStack(spacing: WTheme.Spacing.xs) {
                 Text("No Mac?")
-                    .font(.system(size: 13, weight: .regular, design: .rounded))
+                    .font(.wotannScaled(size: 13, weight: .regular, design: .rounded))
                     .foregroundStyle(WTheme.Colors.textTertiary)
                 Text("Download for desktop")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(WTheme.Colors.primary)
                 Image(systemName: "arrow.up.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.wotannScaled(size: 11, weight: .semibold))
                     .foregroundStyle(WTheme.Colors.primary)
             }
             .frame(maxWidth: .infinity)

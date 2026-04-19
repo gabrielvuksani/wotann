@@ -86,15 +86,15 @@ struct MessageRow: View {
     private var assistantHeader: some View {
         HStack(spacing: 6) {
             Image(systemName: "sparkle")
-                .font(.system(size: 10, weight: .bold))
+                .font(.wotannScaled(size: 10, weight: .bold))
                 .foregroundColor(WTheme.Colors.primary)
             Text("WOTANN")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .font(.wotannScaled(size: 11, weight: .bold, design: .rounded))
                 .tracking(0.3)
                 .foregroundColor(WTheme.Colors.primary)
             if let model = message.model {
                 Text(model)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.wotannScaled(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(WTheme.Colors.textTertiary)
             }
         }
@@ -114,7 +114,7 @@ struct MessageRow: View {
 
     private var userBubble: some View {
         Text(message.content)
-            .font(.system(size: 16))
+            .font(.wotannScaled(size: 16))
             .foregroundColor(.white)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -146,12 +146,12 @@ struct MessageRow: View {
             if isUser { Spacer() }
 
             Text(message.timestamp, style: .time)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.wotannScaled(size: 10, weight: .medium, design: .monospaced))
                 .foregroundColor(WTheme.Colors.textTertiary)
 
             if let tokens = message.tokensUsed {
                 Text("\(tokens) tok")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.wotannScaled(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(WTheme.Colors.textTertiary)
             }
 
@@ -161,7 +161,7 @@ struct MessageRow: View {
 
             if isCopied {
                 Text("Copied")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 10, weight: .semibold, design: .rounded))
                     .foregroundColor(WTheme.Colors.success)
                     .transition(.opacity)
             }
@@ -201,7 +201,7 @@ struct MessageRow: View {
     private var replyIndicator: some View {
         if dragOffset > 10 {
             Image(systemName: "arrowshape.turn.up.left.fill")
-                .font(.system(size: 14, weight: .bold))
+                .font(.wotannScaled(size: 14, weight: .bold))
                 .foregroundColor(
                     dragOffset >= replyThreshold
                         ? WTheme.Colors.primary

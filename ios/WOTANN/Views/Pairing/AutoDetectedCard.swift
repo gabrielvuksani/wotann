@@ -24,7 +24,7 @@ struct AutoDetectedCard: View {
                     .fill(WTheme.Colors.primary.opacity(0.12))
 
                 Image(systemName: "desktopcomputer")
-                    .font(.system(size: 26, weight: .medium))
+                    .font(.wotannScaled(size: 26, weight: .medium))
                     .foregroundStyle(WTheme.Colors.primary)
             }
             .frame(width: 56, height: 56)
@@ -44,14 +44,14 @@ struct AutoDetectedCard: View {
                         )
 
                     Text(isPairing ? "Pairing…" : "Detected on LAN")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.wotannScaled(size: 12, weight: .medium, design: .rounded))
                         .tracking(WTheme.Tracking.caption)
                         .foregroundStyle(WTheme.Colors.textSecondary)
                         .lineLimit(1)
                 }
 
                 Text("Mac '\(deviceName)'")
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .lineLimit(1)
             }
@@ -61,7 +61,7 @@ struct AutoDetectedCard: View {
             // 44pt one-tap CTA
             Button(action: onConnect) {
                 Text("Connect")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, WTheme.Spacing.md)
                     .frame(minHeight: 44)

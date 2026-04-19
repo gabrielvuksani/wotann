@@ -32,7 +32,7 @@ struct OnDeviceAIView: View {
             VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
                 HStack(spacing: WTheme.Spacing.sm) {
                     Image(systemName: "cpu.fill")
-                        .font(.system(size: 24))
+                        .font(.wotannScaled(size: 24))
                         .foregroundStyle(WTheme.Gradients.primary)
                     Text("Local AI Inference")
                         .font(WTheme.Typography.title3)
@@ -210,7 +210,7 @@ private struct TierRow: View {
     var body: some View {
         HStack(spacing: WTheme.Spacing.sm) {
             Text("\(number)")
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .font(.wotannScaled(size: 11, weight: .bold, design: .monospaced))
                 .foregroundColor(.white)
                 .frame(width: 20, height: 20)
                 .background(available ? WTheme.Colors.primary : WTheme.Colors.textTertiary)

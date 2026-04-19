@@ -86,11 +86,11 @@ private struct RecentRow: View {
             }
             Spacer(minLength: WTheme.Spacing.sm)
             Text(relativeTime)
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                .font(.wotannScaled(size: 11, weight: .regular, design: .monospaced))
                 .foregroundColor(WTheme.Colors.textTertiary)
             if conversation.isStarred {
                 Image(systemName: "star.fill")
-                    .font(.system(size: 10))
+                    .font(.wotannScaled(size: 10))
                     .foregroundColor(WTheme.Colors.warning)
             }
         }
@@ -114,7 +114,7 @@ private struct RecentRow: View {
     private var glyph: some View {
         let state = derivedState
         return statusGlyph(for: state)
-            .font(.system(size: 14, weight: .bold))
+            .font(.wotannScaled(size: 14, weight: .bold))
             .foregroundColor(statusColor(for: state))
     }
 

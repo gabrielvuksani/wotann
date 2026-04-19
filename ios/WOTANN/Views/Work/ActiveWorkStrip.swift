@@ -63,11 +63,11 @@ struct ActiveWorkStrip: View {
                 // Summary + cost
                 VStack(alignment: .leading, spacing: 2) {
                     Text(summaryText)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.wotannScaled(size: 13, weight: .semibold))
                         .foregroundColor(WTheme.Colors.textPrimary)
                         .lineLimit(1)
                     Text(formattedCost)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(.wotannScaled(size: 12, weight: .medium, design: .monospaced))
                         .monospacedDigit()
                         .foregroundColor(WTheme.Colors.textSecondary)
                         .lineLimit(1)
@@ -85,9 +85,9 @@ struct ActiveWorkStrip: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.wotannScaled(size: 12, weight: .bold))
                             Text("Approve All")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.wotannScaled(size: 13, weight: .semibold))
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal, 10)
@@ -107,9 +107,9 @@ struct ActiveWorkStrip: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "stop.fill")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.wotannScaled(size: 11, weight: .bold))
                         Text("Kill All")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.wotannScaled(size: 13, weight: .semibold))
                     }
                     .foregroundColor(WTheme.Colors.error)
                     .padding(.horizontal, 10)

@@ -49,7 +49,7 @@ struct FirstRunSuccessView: View {
 
                 // Animated checkmark
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 96, weight: .regular))
+                    .font(.wotannScaled(size: 96, weight: .regular))
                     .foregroundStyle(WTheme.Colors.success)
                     .shadow(color: WTheme.Colors.success.opacity(0.6), radius: 24)
                     .scaleEffect(checkScale)
@@ -57,12 +57,12 @@ struct FirstRunSuccessView: View {
 
                 VStack(spacing: WTheme.Spacing.sm) {
                     Text("You're linked.")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .font(.wotannScaled(size: 34, weight: .bold, design: .rounded))
                         .tracking(WTheme.Tracking.displayLarge)
                         .foregroundStyle(.white)
 
                     Text("Try one of these to get started.")
-                        .font(.system(size: 15, weight: .regular, design: .rounded))
+                        .font(.wotannScaled(size: 15, weight: .regular, design: .rounded))
                         .foregroundStyle(WTheme.Colors.textSecondary)
                 }
                 .opacity(textOpacity)
@@ -83,7 +83,7 @@ struct FirstRunSuccessView: View {
 
                 Button(action: onDone) {
                     Text("Explore on my own")
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .font(.wotannScaled(size: 15, weight: .medium, design: .rounded))
                         .foregroundStyle(WTheme.Colors.textTertiary)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
@@ -161,14 +161,14 @@ private struct SuggestionCard: View {
         Button(action: onTap) {
             HStack(spacing: WTheme.Spacing.md) {
                 Image(systemName: suggestion.icon)
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.wotannScaled(size: 22, weight: .medium))
                     .foregroundStyle(WTheme.Colors.primary)
                     .frame(width: 44, height: 44)
                     .background(WTheme.Colors.primary.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm, style: .continuous))
 
                 Text(suggestion.title)
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
@@ -176,7 +176,7 @@ private struct SuggestionCard: View {
                 Spacer()
 
                 Image(systemName: "arrow.up.right")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.wotannScaled(size: 14, weight: .semibold))
                     .foregroundStyle(WTheme.Colors.primary)
             }
             .padding(WTheme.Spacing.md)

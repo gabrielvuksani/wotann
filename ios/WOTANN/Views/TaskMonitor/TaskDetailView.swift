@@ -93,12 +93,12 @@ struct TaskDetailView: View {
 
             VStack(spacing: WTheme.Spacing.xxs) {
                 Text("\(Int(liveTask.progress * 100))%")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.wotannScaled(size: 28, weight: .bold, design: .rounded))
                     .foregroundColor(WTheme.Colors.textPrimary)
                     .contentTransition(.numericText())
 
                 Image(systemName: liveTask.status.iconName)
-                    .font(.system(size: 14))
+                    .font(.wotannScaled(size: 14))
                     .foregroundColor(statusColor)
             }
         }
@@ -328,7 +328,7 @@ private struct ProofMetric: View {
         VStack(spacing: WTheme.Spacing.xs) {
             HStack(spacing: WTheme.Spacing.xxs) {
                 Image(systemName: icon)
-                    .font(.system(size: 12))
+                    .font(.wotannScaled(size: 12))
                     .foregroundColor(color)
                 Text(value)
                     .font(WTheme.Typography.headline)
@@ -389,7 +389,7 @@ private struct LogRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: WTheme.Spacing.sm) {
             Image(systemName: log.level.iconName)
-                .font(.system(size: 10))
+                .font(.wotannScaled(size: 10))
                 .foregroundColor(logColor)
                 .frame(width: 14, alignment: .center)
 

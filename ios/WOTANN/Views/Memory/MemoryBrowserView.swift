@@ -36,7 +36,7 @@ struct MemoryBrowserView: View {
                     Spacer()
                     VStack(spacing: WTheme.Spacing.md) {
                         Image(systemName: "brain.head.profile")
-                            .font(.system(size: 40))
+                            .font(.wotannScaled(size: 40))
                             .foregroundColor(WTheme.Colors.textTertiary)
                         Text("Memory builds over time")
                             .font(WTheme.Typography.headline)

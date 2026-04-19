@@ -40,7 +40,7 @@ struct DaemonOfflineView: View {
                     .frame(width: 96, height: 96)
 
                 Image(systemName: "desktopcomputer.trianglebadge.exclamationmark")
-                    .font(.system(size: 36, weight: .light))
+                    .font(.wotannScaled(size: 36, weight: .light))
                     .foregroundStyle(WTheme.Colors.warning)
             }
             .padding(.bottom, WTheme.Spacing.sm)

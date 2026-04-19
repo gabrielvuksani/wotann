@@ -54,7 +54,7 @@ struct EmptyState: View {
     var body: some View {
         VStack(spacing: WTheme.Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 64, weight: .regular))
+                .font(.wotannScaled(size: 64, weight: .regular))
                 .foregroundColor(WTheme.Colors.textTertiary)
                 .accessibilityHidden(true)
 
@@ -64,7 +64,7 @@ struct EmptyState: View {
                 .multilineTextAlignment(.center)
 
             Text(subtitle)
-                .font(.system(size: 15, weight: .regular))
+                .font(.wotannScaled(size: 15, weight: .regular))
                 .foregroundColor(WTheme.Colors.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, WTheme.Spacing.xl)

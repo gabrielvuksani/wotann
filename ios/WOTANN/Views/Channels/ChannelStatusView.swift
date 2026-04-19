@@ -20,7 +20,7 @@ struct ChannelStatusView: View {
                     Spacer()
                     VStack(spacing: WTheme.Spacing.md) {
                         Image(systemName: "bubble.left.and.bubble.right")
-                            .font(.system(size: 40))
+                            .font(.wotannScaled(size: 40))
                             .foregroundColor(WTheme.Colors.textTertiary)
                         Text("No channels connected")
                             .font(WTheme.Typography.headline)
@@ -82,7 +82,7 @@ struct ChannelRow: View {
     var body: some View {
         HStack(spacing: WTheme.Spacing.md) {
             Image(systemName: channelIcon)
-                .font(.system(size: 16))
+                .font(.wotannScaled(size: 16))
                 .foregroundColor(WTheme.Colors.primary)
                 .frame(width: 32, height: 32)
                 .background(WTheme.Colors.primary.opacity(0.1))

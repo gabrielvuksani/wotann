@@ -100,10 +100,10 @@ struct ReactionBar: View {
                     } label: {
                         HStack(spacing: 3) {
                             Text(emoji)
-                                .font(.system(size: 12))
+                                .font(.wotannScaled(size: 12))
                             if count > 1 {
                                 Text("\(count)")
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .font(.wotannScaled(size: 10, weight: .semibold, design: .rounded))
                                     .foregroundColor(WTheme.Colors.textSecondary)
                             }
                         }

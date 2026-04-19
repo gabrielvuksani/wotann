@@ -40,18 +40,18 @@ struct ToolCallCapsule: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "wrench.and.screwdriver.fill")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.wotannScaled(size: 11, weight: .medium))
                     .foregroundColor(WTheme.Colors.primary)
                 Text(call.name)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.wotannScaled(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(WTheme.Colors.textPrimary)
                 Text(formattedDuration)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(.wotannScaled(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(WTheme.Colors.textTertiary)
                 Spacer(minLength: 4)
                 statusIcon
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.wotannScaled(size: 10, weight: .bold))
                     .foregroundColor(WTheme.Colors.textTertiary)
                     .rotationEffect(.degrees(expanded ? 180 : 0))
             }
@@ -72,11 +72,11 @@ struct ToolCallCapsule: View {
                 .tint(WTheme.Colors.primary)
         case .success:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 11))
+                .font(.wotannScaled(size: 11))
                 .foregroundColor(WTheme.Colors.success)
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
+                .font(.wotannScaled(size: 11))
                 .foregroundColor(WTheme.Colors.error)
         }
     }
@@ -104,11 +104,11 @@ struct ToolCallCapsule: View {
     private func labeledBlock(title: String, text: String, tint: Color? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .font(.wotannScaled(size: 10, weight: .bold, design: .rounded))
                 .tracking(0.4)
                 .foregroundColor(tint ?? WTheme.Colors.textSecondary)
             Text(text)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.wotannScaled(size: 11, design: .monospaced))
                 .foregroundColor(WTheme.Colors.textPrimary)
                 .textSelection(.enabled)
                 .padding(8)

@@ -94,7 +94,7 @@ private extension DashboardView {
                 settingsDestination
             } label: {
                 Image(systemName: "gearshape.fill")
-                    .font(.system(size: 20))
+                    .font(.wotannScaled(size: 20))
                     .foregroundColor(WTheme.Colors.textSecondary)
                     .frame(width: 44, height: 44)
                     .background(WTheme.Colors.surface)
@@ -373,7 +373,7 @@ private struct DashboardActionCard: View {
             HStack(spacing: WTheme.Spacing.sm) {
                 // Icon container with tinted background
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.wotannScaled(size: 16, weight: .semibold))
                     .foregroundColor(color)
                     .frame(width: 36, height: 36)
                     .background(color.opacity(0.12))
@@ -466,7 +466,7 @@ private extension DashboardView {
     var emptyConversationsPlaceholder: some View {
         HStack(spacing: WTheme.Spacing.sm) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 20))
+                .font(.wotannScaled(size: 20))
                 .foregroundColor(WTheme.Colors.textTertiary)
 
             VStack(alignment: .leading, spacing: WTheme.Spacing.xxs) {

@@ -138,7 +138,7 @@ struct ActiveMeetingView: View {
                     viewModel.toggleRecording()
                 } label: {
                     Image(systemName: viewModel.isRecording ? "pause.circle.fill" : "record.circle")
-                        .font(.system(size: 56))
+                        .font(.wotannScaled(size: 56))
                         .foregroundColor(viewModel.isRecording ? WTheme.Colors.warning : WTheme.Colors.error)
                 }
 
