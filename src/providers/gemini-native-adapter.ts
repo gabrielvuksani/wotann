@@ -152,6 +152,34 @@ export interface GeminiNativeOptions {
  * `string` — callers can encode images as data URLs and they reach the
  * model intact instead of being stringified to "[image]".
  */
+// Allow-list of data-URL MIME types Gemini natively supports as inlineData.
+// Anything outside this list is treated as plain text and the raw content
+// string is preserved so the model still sees something, but no inlineData
+// part is created (which prevents an injection path where a crafted data:
+// URL with a fake mimeType would be relayed verbatim to Google).
+const ALLOWED_INLINE_MIME_TYPES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+  "application/pdf",
+  "audio/mp3",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/aac",
+  "audio/ogg",
+  "audio/flac",
+  "video/mp4",
+  "video/webm",
+  "video/mpeg",
+  "video/mov",
+  "video/x-msvideo",
+  "video/quicktime",
+]);
+
 function toGeminiContents(
   messages: readonly { role: string; content: string; toolCallId?: string }[],
 ): GeminiContent[] {
@@ -161,12 +189,18 @@ function toGeminiContents(
       const role: "user" | "model" = m.role === "assistant" ? "model" : "user";
       const dataUrlMatch = m.content.match(/^data:([^;]+);base64,(.+)$/);
       if (dataUrlMatch) {
+        const rawMime = (dataUrlMatch[1] ?? "").trim().toLowerCase();
+        // Only permit vetted MIME types — a data URL may claim any content
+        // type and we must not relay an unverified value to Gemini.
+        if (!ALLOWED_INLINE_MIME_TYPES.has(rawMime)) {
+          return { role, parts: [{ text: m.content }] };
+        }
         return {
           role,
           parts: [
             {
               inlineData: {
-                mimeType: dataUrlMatch[1] ?? "application/octet-stream",
+                mimeType: rawMime,
                 data: dataUrlMatch[2] ?? "",
               },
             },
