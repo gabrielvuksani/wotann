@@ -85,9 +85,15 @@ interface CachedCopilotAuth {
   baseUrl: string;
 }
 
-let cachedCopilotToken: CachedCopilotAuth | null = null;
-let cachedModelList: readonly string[] | null = null;
-let modelListFetchedAt = 0;
+interface CopilotCache {
+  token: CachedCopilotAuth | null;
+  models: readonly string[] | null;
+  modelsFetchedAt: number;
+}
+
+function createCopilotCache(): CopilotCache {
+  return { token: null, models: null, modelsFetchedAt: 0 };
+}
 
 /**
  * Exchange a GitHub PAT/OAuth token for a short-lived Copilot API token.
@@ -98,12 +104,20 @@ let modelListFetchedAt = 0;
  *
  * The response includes an `endpoints` field with the actual API base URL
  * to use (it may be a regional proxy). We cache this for reuse.
+ *
+ * `cache` is per-adapter-instance so multiple GitHub identities (test
+ * fixtures, multi-tenant daemons, concurrent sessions) never share token
+ * state.
  */
-async function getCopilotToken(ghToken: string): Promise<CachedCopilotAuth | null> {
-  // Return cached token if still valid (with 60s buffer)
-  if (cachedCopilotToken && cachedCopilotToken.expiresAt > Date.now() / 1000 + 60) {
-    return cachedCopilotToken;
+async function getCopilotToken(
+  ghToken: string,
+  cache: CopilotCache,
+  opts: { forceRefresh?: boolean } = {},
+): Promise<CachedCopilotAuth | null> {
+  if (!opts.forceRefresh && cache.token && cache.token.expiresAt > Date.now() / 1000 + 60) {
+    return cache.token;
   }
+  if (opts.forceRefresh) cache.token = null;
 
   // Try each known token endpoint
   const endpoints = [
@@ -132,12 +146,12 @@ async function getCopilotToken(ghToken: string): Promise<CachedCopilotAuth | nul
         const proxyEp = data.endpoints?.["proxy-ep"] ?? data.endpoints?.api;
         const baseUrl = proxyEp ? proxyEp.replace(/\/$/, "") : "https://api.githubcopilot.com";
 
-        cachedCopilotToken = {
+        cache.token = {
           token: data.token,
           expiresAt: data.expires_at,
           baseUrl,
         };
-        return cachedCopilotToken;
+        return cache.token;
       }
     } catch {
       continue;
@@ -150,12 +164,14 @@ async function getCopilotToken(ghToken: string): Promise<CachedCopilotAuth | nul
 /**
  * Fetch the actual model catalog from the Copilot API.
  * This reflects the user's subscription tier — Pro+ gets more models.
- * Caches for 10 minutes to avoid excessive API calls.
+ * Caches for 10 minutes in a per-adapter `cache` object.
  */
-async function fetchCopilotModels(auth: CachedCopilotAuth): Promise<readonly string[]> {
-  // Return cached list if recent enough (10 min)
-  if (cachedModelList && Date.now() - modelListFetchedAt < 600_000) {
-    return cachedModelList;
+async function fetchCopilotModels(
+  auth: CachedCopilotAuth,
+  cache: CopilotCache,
+): Promise<readonly string[]> {
+  if (cache.models && Date.now() - cache.modelsFetchedAt < 600_000) {
+    return cache.models;
   }
 
   try {
@@ -179,8 +195,8 @@ async function fetchCopilotModels(auth: CachedCopilotAuth): Promise<readonly str
       .filter((id): id is string => typeof id === "string" && id.length > 0);
 
     if (models.length > 0) {
-      cachedModelList = models;
-      modelListFetchedAt = Date.now();
+      cache.models = models;
+      cache.modelsFetchedAt = Date.now();
       return models;
     }
   } catch {
@@ -243,8 +259,14 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
     maxContextWindow: 128_000,
   };
 
+  // Per-adapter cache. Holds the exchanged Copilot token + fetched model
+  // catalog. Scoped to this adapter instance (not module-global) so tests,
+  // multi-tenant daemons, or concurrent sessions with different GitHub
+  // identities never observe each other's bearer tokens.
+  const cache: CopilotCache = createCopilotCache();
+
   async function* query(options: UnifiedQueryOptions): AsyncGenerator<StreamChunk> {
-    const auth = await getCopilotToken(ghToken);
+    const auth = await getCopilotToken(ghToken, cache);
     if (!auth) {
       yield {
         type: "error",
@@ -318,45 +340,56 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
           }))
         : undefined;
 
+    const body = JSON.stringify({
+      model,
+      messages,
+      max_tokens: options.maxTokens ?? 4096,
+      temperature: options.temperature ?? 0.7,
+      stream: true,
+      stream_options: { include_usage: true },
+      ...(copilotTools ? { tools: copilotTools, tool_choice: "auto" } : {}),
+    });
+    const buildHeaders = (bearer: string): Record<string, string> => ({
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${bearer}`,
+      "X-GitHub-Api-Version": "2025-04-01",
+      "Copilot-Integration-Id": "wotann-cli",
+      "Editor-Version": "WOTANN/0.1.0",
+    });
+
     try {
-      const response = await fetch(url, {
+      let currentAuth = auth;
+      let response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${auth.token}`,
-          "X-GitHub-Api-Version": "2025-04-01",
-          "Copilot-Integration-Id": "wotann-cli",
-          "Editor-Version": "WOTANN/0.1.0",
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          max_tokens: options.maxTokens ?? 4096,
-          temperature: options.temperature ?? 0.7,
-          stream: true,
-          stream_options: { include_usage: true },
-          ...(copilotTools ? { tools: copilotTools, tool_choice: "auto" } : {}),
-        }),
+        headers: buildHeaders(currentAuth.token),
+        body,
       });
+
+      // Transparent single retry on 401: refresh the Copilot token (the
+      // cached one likely expired in-flight or GitHub rotated it) and
+      // re-send. Previous behavior was to yield a "Retrying…" message and
+      // return without actually retrying — a false-honest stub.
+      if (response.status === 401) {
+        const refreshed = await getCopilotToken(ghToken, cache, { forceRefresh: true });
+        if (refreshed) {
+          currentAuth = refreshed;
+          response = await fetch(url, {
+            method: "POST",
+            headers: buildHeaders(currentAuth.token),
+            body,
+          });
+        }
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
-
-        // If 401, the token may have expired — clear cache and suggest retry
-        if (response.status === 401) {
-          cachedCopilotToken = null;
-          yield {
-            type: "error",
-            content: "Copilot token expired. Retrying with fresh token...",
-            model,
-            provider: "copilot",
-          };
-          return;
-        }
-
+        const hint =
+          response.status === 401
+            ? " (token refresh also failed — check GH_TOKEN has active Copilot entitlement)"
+            : "";
         yield {
           type: "error",
-          content: `Copilot error (${response.status}): ${errorText.slice(0, 300)}`,
+          content: `Copilot error (${response.status}): ${errorText.slice(0, 300)}${hint}`,
           model,
           provider: "copilot",
         };
@@ -485,13 +518,13 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
   }
 
   async function listModels(): Promise<readonly string[]> {
-    const auth = await getCopilotToken(ghToken);
+    const auth = await getCopilotToken(ghToken, cache);
     if (!auth) return FALLBACK_MODELS;
-    return fetchCopilotModels(auth);
+    return fetchCopilotModels(auth, cache);
   }
 
   async function isAvailable(): Promise<boolean> {
-    const auth = await getCopilotToken(ghToken);
+    const auth = await getCopilotToken(ghToken, cache);
     return auth !== null;
   }
 
