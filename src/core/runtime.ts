@@ -138,6 +138,7 @@ import {
   type HandoffInputData,
   type HandoffResult,
 } from "./handoff.js";
+import { ProviderBrain } from "../providers/provider-brain.js";
 import {
   applyHashEdit,
   type HashEditOperation,
@@ -646,6 +647,12 @@ export class WotannRuntime {
   // the model sees. Defaults to `virtualPathsEnabled = true`.
   private readonly virtualPathsEnabled: boolean;
   private readonly sandboxVirtualPathConfig: VirtualPathsConfig;
+
+  // ── Session-13: Provider Brain (unified provider intelligence) ──
+  // Learns latency/error/cost per provider so subsequent queries can
+  // route to the healthiest candidate. The brain is consulted before
+  // dispatch (via `route()`) and updated after (via `updateHealth()`).
+  private providerBrain: ProviderBrain | null = null;
 
   constructor(config: RuntimeConfig) {
     this.config = config;
@@ -1201,6 +1208,34 @@ export class WotannRuntime {
   }
 
   /**
+   * Session-13: access the ProviderBrain for learning-based routing.
+   * Returns null if the brain failed to initialise. Callers use
+   * `brain.route()` before dispatch and `recordProviderResponse()` after.
+   */
+  getProviderBrain(): ProviderBrain | null {
+    return this.providerBrain;
+  }
+
+  /**
+   * Session-13: record a provider response into the ProviderBrain so
+   * subsequent `route()` calls can favour healthier providers. No-op
+   * when the brain is unavailable.
+   */
+  recordProviderResponse(opts: {
+    readonly provider: ProviderName;
+    readonly durationMs: number;
+    readonly success: boolean;
+    readonly cost: number;
+  }): void {
+    if (!this.providerBrain) return;
+    try {
+      this.providerBrain.updateHealth(opts.provider, opts.durationMs, opts.success, opts.cost);
+    } catch (err) {
+      console.warn(`[WOTANN] provider-brain updateHealth failed: ${(err as Error).message}`);
+    }
+  }
+
+  /**
    * Session-13: capture a file edit and push into a Visual Diff Theater
    * session so the user can review hunks before a final merge. Reads
    * current on-disk content for the `oldContent` side (empty string if
@@ -1286,6 +1321,18 @@ export class WotannRuntime {
       console.warn(`[WOTANN] mcp tool-loader init failed: ${(err as Error).message}`);
       this.mcpTools = [];
       this.mcpTier = null;
+    }
+
+    // Session-13 Provider Brain — unified provider intelligence for
+    // learning-based routing. Per-runtime instance; populated via
+    // recordProviderResponse() at the end of every query cycle. Honest:
+    // on init failure we leave the field null so callers fall back to
+    // the legacy router.
+    try {
+      this.providerBrain = new ProviderBrain();
+    } catch (err) {
+      console.warn(`[WOTANN] provider-brain init failed: ${(err as Error).message}`);
+      this.providerBrain = null;
     }
 
     // Session-13 Visual Diff Theater — hunk-level diff review surface.
@@ -3262,6 +3309,15 @@ export class WotannRuntime {
         costEntry.cost,
         querySuccess ? 0.8 : 0.3,
       );
+
+      // Session-13: feed ProviderBrain so learning-based routing can
+      // favour healthier providers on subsequent queries.
+      this.recordProviderResponse({
+        provider: responseProvider,
+        durationMs: queryDuration,
+        success: querySuccess,
+        cost: costEntry.cost,
+      });
 
       // ErrorPatternLearner: record successful fix when a query succeeds after recent errors
       if (querySuccess && this.recentErrors.length > 0) {
