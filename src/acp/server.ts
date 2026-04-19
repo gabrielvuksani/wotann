@@ -49,6 +49,7 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse,
 } from "./protocol.js";
+import { dispatchThreadMethod, type ThreadHandlerDeps } from "./thread-handlers.js";
 
 // ── Handler interface ────────────────────────────────────────
 
@@ -79,6 +80,13 @@ export interface AcpServerOptions {
    * stdout/socket send.
    */
   readonly emit: (frame: string) => void;
+  /**
+   * Optional — wires WOTANN's thread/fork, thread/rollback, thread/list,
+   * thread/switch additive RPC routes. Omit to leave them unhandled
+   * (JSON-RPC MethodNotFound), include to enable conversation-branch
+   * control for hosts that speak it.
+   */
+  readonly threadDeps?: ThreadHandlerDeps;
 }
 
 export class AcpServer {
@@ -86,11 +94,13 @@ export class AcpServer {
   private readonly handlers: AcpHandlers;
   private readonly serverInfo: AcpServerInfo;
   private readonly emit: (frame: string) => void;
+  private readonly threadDeps: ThreadHandlerDeps | null;
 
   constructor(options: AcpServerOptions) {
     this.handlers = options.handlers;
     this.serverInfo = options.serverInfo;
     this.emit = options.emit;
+    this.threadDeps = options.threadDeps ?? null;
   }
 
   /**
@@ -134,6 +144,17 @@ export class AcpServer {
   }
 
   private async handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    // WOTANN additive thread/* routes — only wired when threadDeps is supplied.
+    if (this.threadDeps && typeof req.method === "string" && req.method.startsWith("thread/")) {
+      try {
+        const result = dispatchThreadMethod(req.method, req.params, this.threadDeps);
+        if (result !== null) return makeResponse(req.id, result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "unknown thread error";
+        return makeError(req.id, JSON_RPC_ERROR_CODES.InternalError, message);
+      }
+    }
+
     try {
       switch (req.method) {
         case ACP_METHODS.Initialize:
