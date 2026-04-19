@@ -33,11 +33,26 @@ log "version: $VERSION"
 log "output:  $DIST"
 
 # ── Step 1: TypeScript build ──────────────────────────────────────
-log "step 1/3: TypeScript build (npm run build)"
+# tsc validates types and emits dist/index.js (ESM). Needed as a preflight
+# even though the SEA input is produced by esbuild-cjs directly from the
+# TypeScript source — tsc catches type errors before we spend time bundling.
+log "step 1/4: TypeScript build (npm run build)"
 npm run build || fail "npm run build failed" 1
 
-# ── Step 2: SEA bundle ────────────────────────────────────────────
-log "step 2/3: SEA bundle via sea-bundle.sh"
+# ── Step 2: ESM → CJS bundle via esbuild ──────────────────────────
+# Node SEA requires a CommonJS main script. esbuild-cjs.mjs bundles
+# src/index.ts into dist-cjs/index.cjs with TLA wrapped in an async IIFE.
+# sea-bundle.sh also runs this step defensively, but invoking it here
+# explicitly keeps the pipeline stages readable in CI logs and surfaces
+# bundling failures before the heavier SEA step kicks in.
+log "step 2/4: ESM → CJS bundle (esbuild-cjs.mjs)"
+if [ ! -f "$SCRIPT_DIR/esbuild-cjs.mjs" ]; then
+  fail "missing: $SCRIPT_DIR/esbuild-cjs.mjs" 1
+fi
+node "$SCRIPT_DIR/esbuild-cjs.mjs" || fail "esbuild-cjs.mjs failed — CJS bundle not produced" $?
+
+# ── Step 3: SEA bundle ────────────────────────────────────────────
+log "step 3/4: SEA bundle via sea-bundle.sh"
 if [ ! -x "$SCRIPT_DIR/sea-bundle.sh" ]; then
   fail "missing or non-executable: $SCRIPT_DIR/sea-bundle.sh" 1
 fi
@@ -64,8 +79,8 @@ if [ ! -f "$ART" ]; then
   fail "expected SEA binary missing after sea-bundle: $ART" 1
 fi
 
-# ── Step 3: Archive + checksum ────────────────────────────────────
-log "step 3/3: archive + checksum"
+# ── Step 4: Archive + checksum ────────────────────────────────────
+log "step 4/4: archive + checksum"
 (
   cd "$DIST"
   BASENAME="$(basename "$ART")"
