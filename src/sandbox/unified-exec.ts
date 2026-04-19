@@ -14,6 +14,10 @@
  * pwd/env) in-process without spawning a shell, and spawns /bin/sh -c
  * for everything else WITH the tracked env + cwd forwarded.
  *
+ * Phase-D extension: `shellSnapshot()` / `fromSnapshot()` /
+ * `serializeShellSnapshot` capture + rehydrate state across sessions
+ * so a crashed or timed-out session can resume at its last cwd/env.
+ *
  * Security posture: this module is NOT a sandbox boundary. Callers
  * responsible for untrusted code should wrap this with
  * src/sandbox/executor.ts + a seatbelt profile. This module uses
@@ -56,6 +60,24 @@ export interface SessionSnapshot {
     readonly ranAt: number;
   }>;
 }
+
+/**
+ * Codex `shell_snapshot` parity — same shape as SessionSnapshot, plus a
+ * version tag so serialised snapshots can be migrated when the shape
+ * changes. Callers writing snapshots to disk should prefer this over
+ * plain SessionSnapshot.
+ */
+export interface ShellSnapshot extends SessionSnapshot {
+  /**
+   * Snapshot schema version. v1 = cwd + env + history only. Bumped when
+   * we add fields (e.g. aliases, shell-options).
+   */
+  readonly version: 1;
+  /** Unix ms when this snapshot was captured — for stale-snapshot warnings. */
+  readonly capturedAt: number;
+}
+
+export const SHELL_SNAPSHOT_VERSION = 1 as const;
 
 // ── Parser ─────────────────────────────────────────────
 
@@ -140,10 +162,45 @@ export class UnifiedExecSession {
     };
   }
 
-  restore(snapshot: SessionSnapshot): void {
+  restore(snapshot: SessionSnapshot | ShellSnapshot): void {
     this.currentCwd = snapshot.cwd;
     this.currentEnv = { ...snapshot.env };
     this.history = [...snapshot.history];
+  }
+
+  /**
+   * Codex `shell_snapshot` — capture cwd, env, and the last N commands
+   * with a schema version for cross-version migration. Callers that
+   * want to serialize to disk or hand the state across to a fresh
+   * session should prefer this over plain `snapshot()`.
+   */
+  shellSnapshot(): ShellSnapshot {
+    return {
+      version: SHELL_SNAPSHOT_VERSION,
+      capturedAt: Date.now(),
+      cwd: this.currentCwd,
+      env: { ...this.currentEnv },
+      history: [...this.history],
+    };
+  }
+
+  /**
+   * Build a fresh session pre-loaded with a snapshot's state. Useful
+   * when a prior session has ended (timeout, crash, intentional
+   * shutdown) and the caller wants to resume from its last known
+   * position — the equivalent of Codex's "attach to snapshot" flow.
+   */
+  static fromSnapshot(
+    snapshot: SessionSnapshot | ShellSnapshot,
+    options: UnifiedExecOptions = {},
+  ): UnifiedExecSession {
+    const session = new UnifiedExecSession({
+      ...options,
+      cwd: snapshot.cwd,
+      env: { ...snapshot.env },
+    });
+    session.restore(snapshot);
+    return session;
   }
 
   async run(command: string): Promise<ExecResult> {
@@ -315,4 +372,102 @@ export function extractInlineEnv(
   }
   if (Object.keys(vars).length === 0) return null;
   return { vars, remainder: rest };
+}
+
+// ── Shell-snapshot serialization ───────────────────────
+
+/**
+ * Serialize a snapshot to a JSON string safe to persist on disk.
+ * Tolerates both SessionSnapshot and the richer ShellSnapshot; the
+ * output is always the versioned ShellSnapshot shape so deserializers
+ * can safely branch on `version`.
+ */
+export function serializeShellSnapshot(snapshot: SessionSnapshot | ShellSnapshot): string {
+  const shell: ShellSnapshot = isShellSnapshot(snapshot)
+    ? snapshot
+    : {
+        version: SHELL_SNAPSHOT_VERSION,
+        capturedAt: Date.now(),
+        cwd: snapshot.cwd,
+        env: { ...snapshot.env },
+        history: [...snapshot.history],
+      };
+  return JSON.stringify(shell);
+}
+
+/**
+ * Parse a serialized shell snapshot. Throws on malformed input; returns
+ * a strongly-typed ShellSnapshot on success. Unknown/newer versions
+ * throw so callers can surface a migration prompt instead of silently
+ * loading bad state.
+ */
+export function deserializeShellSnapshot(json: string): ShellSnapshot {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch (err) {
+    throw new Error(`deserializeShellSnapshot: invalid JSON (${(err as Error).message})`);
+  }
+  if (!raw || typeof raw !== "object") {
+    throw new Error("deserializeShellSnapshot: expected an object");
+  }
+  const obj = raw as Record<string, unknown>;
+  const version = obj["version"];
+  if (version !== SHELL_SNAPSHOT_VERSION) {
+    throw new Error(
+      `deserializeShellSnapshot: unsupported version ${String(version)} (expected ${SHELL_SNAPSHOT_VERSION})`,
+    );
+  }
+  const cwd = obj["cwd"];
+  const env = obj["env"];
+  const history = obj["history"];
+  const capturedAt = obj["capturedAt"];
+  if (typeof cwd !== "string") throw new Error("deserializeShellSnapshot: missing cwd");
+  if (!env || typeof env !== "object" || Array.isArray(env)) {
+    throw new Error("deserializeShellSnapshot: env must be an object");
+  }
+  if (!Array.isArray(history)) {
+    throw new Error("deserializeShellSnapshot: history must be an array");
+  }
+  if (typeof capturedAt !== "number") {
+    throw new Error("deserializeShellSnapshot: missing capturedAt");
+  }
+  // Validate history entries; reject anything malformed so a corrupt
+  // snapshot file doesn't silently load partial state.
+  const safeHistory = history.map((entry, idx) => {
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`deserializeShellSnapshot: history[${idx}] not an object`);
+    }
+    const h = entry as Record<string, unknown>;
+    if (typeof h["command"] !== "string") {
+      throw new Error(`deserializeShellSnapshot: history[${idx}].command must be a string`);
+    }
+    if (typeof h["exitCode"] !== "number") {
+      throw new Error(`deserializeShellSnapshot: history[${idx}].exitCode must be a number`);
+    }
+    if (typeof h["ranAt"] !== "number") {
+      throw new Error(`deserializeShellSnapshot: history[${idx}].ranAt must be a number`);
+    }
+    return {
+      command: h["command"] as string,
+      exitCode: h["exitCode"] as number,
+      ranAt: h["ranAt"] as number,
+    };
+  });
+  // env values should all be strings; drop non-string entries defensively.
+  const safeEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+    if (typeof v === "string") safeEnv[k] = v;
+  }
+  return {
+    version: SHELL_SNAPSHOT_VERSION,
+    capturedAt,
+    cwd,
+    env: safeEnv,
+    history: safeHistory,
+  };
+}
+
+function isShellSnapshot(x: SessionSnapshot | ShellSnapshot): x is ShellSnapshot {
+  return typeof (x as ShellSnapshot).version === "number";
 }

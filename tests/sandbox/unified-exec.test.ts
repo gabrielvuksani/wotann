@@ -3,6 +3,10 @@ import {
   UnifiedExecSession,
   parseBuiltin,
   extractInlineEnv,
+  SHELL_SNAPSHOT_VERSION,
+  serializeShellSnapshot,
+  deserializeShellSnapshot,
+  type ShellSnapshot,
 } from "../../src/sandbox/unified-exec.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -179,5 +183,136 @@ describe("UnifiedExecSession — history", () => {
     const snap = session.snapshot();
     expect(snap.history).toHaveLength(3);
     expect(snap.history[0]?.command).toBe("echo 2");
+  });
+});
+
+describe("UnifiedExecSession — shell_snapshot (Codex parity)", () => {
+  it("shellSnapshot() carries version + capturedAt + state", async () => {
+    const session = new UnifiedExecSession();
+    await session.run("cd /tmp");
+    await session.run("export PHASE_D_TEST=1");
+    const snap = session.shellSnapshot();
+    expect(snap.version).toBe(SHELL_SNAPSHOT_VERSION);
+    expect(typeof snap.capturedAt).toBe("number");
+    expect(snap.cwd).toBe("/tmp");
+    expect(snap.env["PHASE_D_TEST"]).toBe("1");
+  });
+
+  it("fromSnapshot() rehydrates cwd + env into a NEW session", async () => {
+    // Task spec: "start session, run `cd /tmp && export X=1`, snapshot,
+    //   create new session, restore → new session at /tmp with X=1."
+    const producer = new UnifiedExecSession();
+    await producer.run("cd /tmp");
+    await producer.run("export X=1");
+    const snap = producer.shellSnapshot();
+
+    const consumer = UnifiedExecSession.fromSnapshot(snap);
+    expect(consumer).not.toBe(producer);
+    expect(consumer.cwd).toBe("/tmp");
+    expect(consumer.env["X"]).toBe("1");
+
+    // Prove env persists into the next child spawn in the NEW session.
+    const r = await consumer.run("echo $X");
+    expect(r.stdout.trim()).toBe("1");
+  });
+
+  it("fromSnapshot() accepts a plain SessionSnapshot too", async () => {
+    const producer = new UnifiedExecSession();
+    await producer.run("cd /tmp");
+    const plain = producer.snapshot(); // SessionSnapshot, no version
+    const consumer = UnifiedExecSession.fromSnapshot(plain);
+    expect(consumer.cwd).toBe("/tmp");
+  });
+
+  it("restore() on an existing session accepts ShellSnapshot", async () => {
+    const a = new UnifiedExecSession();
+    await a.run("cd /tmp");
+    const snap = a.shellSnapshot();
+    const b = new UnifiedExecSession();
+    expect(b.cwd).not.toBe("/tmp");
+    b.restore(snap);
+    expect(b.cwd).toBe("/tmp");
+  });
+});
+
+describe("serializeShellSnapshot / deserializeShellSnapshot", () => {
+  it("round-trips a ShellSnapshot via JSON", async () => {
+    const session = new UnifiedExecSession();
+    await session.run("cd /tmp");
+    await session.run("export ROUND_TRIP=ok");
+    const snap = session.shellSnapshot();
+
+    const json = serializeShellSnapshot(snap);
+    expect(typeof json).toBe("string");
+    const restored = deserializeShellSnapshot(json);
+    expect(restored.version).toBe(SHELL_SNAPSHOT_VERSION);
+    expect(restored.cwd).toBe("/tmp");
+    expect(restored.env["ROUND_TRIP"]).toBe("ok");
+  });
+
+  it("wraps a plain SessionSnapshot into versioned JSON", async () => {
+    const session = new UnifiedExecSession();
+    await session.run("cd /tmp");
+    const plain = session.snapshot();
+    const json = serializeShellSnapshot(plain);
+    const parsed = JSON.parse(json) as { version?: number };
+    expect(parsed.version).toBe(SHELL_SNAPSHOT_VERSION);
+  });
+
+  it("rejects malformed JSON", () => {
+    expect(() => deserializeShellSnapshot("{not-json")).toThrow(/invalid JSON/);
+  });
+
+  it("rejects unsupported version", () => {
+    const bad = JSON.stringify({
+      version: 99,
+      capturedAt: 0,
+      cwd: "/tmp",
+      env: {},
+      history: [],
+    });
+    expect(() => deserializeShellSnapshot(bad)).toThrow(/unsupported version/);
+  });
+
+  it("rejects missing cwd", () => {
+    const bad = JSON.stringify({
+      version: SHELL_SNAPSHOT_VERSION,
+      capturedAt: 0,
+      env: {},
+      history: [],
+    });
+    expect(() => deserializeShellSnapshot(bad)).toThrow(/missing cwd/);
+  });
+
+  it("rejects malformed history entry", () => {
+    const bad = JSON.stringify({
+      version: SHELL_SNAPSHOT_VERSION,
+      capturedAt: 0,
+      cwd: "/tmp",
+      env: {},
+      history: [{ command: "x" }], // missing exitCode + ranAt
+    });
+    expect(() => deserializeShellSnapshot(bad)).toThrow(/exitCode must be a number/);
+  });
+
+  it("drops non-string env values defensively", () => {
+    const bad = JSON.stringify({
+      version: SHELL_SNAPSHOT_VERSION,
+      capturedAt: 0,
+      cwd: "/tmp",
+      env: { OK: "yes", BAD: 123 }, // number should be dropped
+      history: [],
+    });
+    const out = deserializeShellSnapshot(bad);
+    expect(out.env["OK"]).toBe("yes");
+    expect(out.env["BAD"]).toBeUndefined();
+  });
+
+  it("a deserialized snapshot is assignable to ShellSnapshot", async () => {
+    const session = new UnifiedExecSession();
+    await session.run("cd /tmp");
+    const json = serializeShellSnapshot(session.shellSnapshot());
+    const typed: ShellSnapshot = deserializeShellSnapshot(json);
+    expect(typed.version).toBe(SHELL_SNAPSHOT_VERSION);
   });
 });
