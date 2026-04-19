@@ -12,6 +12,9 @@
  *   optional — callers treat a missing field as "use default".
  */
 
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import YAML from "yaml";
 
 // ── Schema ───────────────────────────────────────────────────
@@ -327,4 +330,81 @@ function unionStrings(
     }
   }
   return out;
+}
+
+// ── Startup loader — project + personal override merge ──────
+
+export const PROJECT_CONFIG_FILENAMES: readonly string[] = [".wotann.yml", ".wotann.yaml"];
+export const PERSONAL_OVERRIDE_PATH = join(".wotann", "overrides.yml");
+
+export interface LoadWotannYamlResult {
+  readonly config: WotannYamlV1;
+  readonly sources: readonly string[];
+  readonly problems: readonly string[];
+}
+
+/**
+ * Load `.wotann.yml` from `projectDir` (checking both `.yml` and
+ * `.yaml` extensions) and merge with the personal override at
+ * `~/.wotann/overrides.yml`. Missing files are not errors — callers
+ * pass the returned config unchanged even when every source file was
+ * absent. Problems from the parser bubble up but do not replace the
+ * partial config that came with them.
+ *
+ * Merge precedence: PERSONAL override > PROJECT config. Both reference
+ * the version-1 schema; unknown keys are preserved verbatim in
+ * parseWotannYaml / renderWotannYaml so this function is
+ * schema-stable across minor upgrades.
+ */
+export function loadWotannYaml(
+  projectDir: string = process.cwd(),
+  home: string = homedir(),
+): LoadWotannYamlResult {
+  const sources: string[] = [];
+  const problems: string[] = [];
+  let merged: WotannYamlV1 = { version: 1 };
+
+  // Project file — first extension wins.
+  for (const fn of PROJECT_CONFIG_FILENAMES) {
+    const path = join(projectDir, fn);
+    if (existsSync(path)) {
+      try {
+        const raw = readFileSync(path, "utf-8");
+        const parsed = parseWotannYaml(raw);
+        merged = mergeConfigs(merged, parsed.config);
+        sources.push(path);
+        for (const p of parsed.problems) problems.push(`${path}: ${p}`);
+      } catch (err) {
+        problems.push(`${path}: read error: ${err instanceof Error ? err.message : "unknown"}`);
+      }
+      break;
+    }
+  }
+
+  // Personal overrides — layer on top of project config.
+  const overridePath = join(home, PERSONAL_OVERRIDE_PATH);
+  if (existsSync(overridePath)) {
+    try {
+      const raw = readFileSync(overridePath, "utf-8");
+      const parsed = parseWotannYaml(raw);
+      merged = mergeConfigs(merged, parsed.config);
+      sources.push(overridePath);
+      for (const p of parsed.problems) problems.push(`${overridePath}: ${p}`);
+    } catch (err) {
+      problems.push(
+        `${overridePath}: read error: ${err instanceof Error ? err.message : "unknown"}`,
+      );
+    }
+  }
+
+  return { config: merged, sources, problems };
+}
+
+/**
+ * Pure merge helper for callers that already have parsed configs in
+ * hand (e.g. tests, onboarding wizard). Thin alias for mergeConfigs
+ * that makes the "base + overrides" direction explicit.
+ */
+export function applyOverrides(project: WotannYamlV1, personal: WotannYamlV1): WotannYamlV1 {
+  return mergeConfigs(project, personal);
 }

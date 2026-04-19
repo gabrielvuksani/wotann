@@ -2,8 +2,13 @@
  * C27 — .wotann.yml parser / validator / merger tests.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  applyOverrides,
+  loadWotannYaml,
   mergeConfigs,
   parseWotannYaml,
   renderWotannYaml,
@@ -169,5 +174,93 @@ describe("mergeConfigs", () => {
       { version: 1, team: { requiredCLIs: ["gh"] } },
     );
     expect(merged.team?.requiredCLIs).toEqual(["gh"]);
+  });
+});
+
+describe("loadWotannYaml", () => {
+  const tmpRoots: string[] = [];
+
+  afterEach(() => {
+    for (const root of tmpRoots) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    tmpRoots.length = 0;
+  });
+
+  const makeTmpDir = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "wotann-yml-test-"));
+    tmpRoots.push(dir);
+    return dir;
+  };
+
+  it("returns empty config when no files exist", () => {
+    const projectDir = makeTmpDir();
+    const home = makeTmpDir();
+    const result = loadWotannYaml(projectDir, home);
+    expect(result.sources).toHaveLength(0);
+    expect(result.problems).toHaveLength(0);
+    expect(result.config.version).toBe(1);
+  });
+
+  it("loads .wotann.yml from project dir", () => {
+    const projectDir = makeTmpDir();
+    const home = makeTmpDir();
+    writeFileSync(
+      join(projectDir, ".wotann.yml"),
+      "version: 1\nproviders:\n  primary: anthropic\n",
+    );
+    const result = loadWotannYaml(projectDir, home);
+    expect(result.sources).toHaveLength(1);
+    expect(result.config.providers?.primary).toBe("anthropic");
+  });
+
+  it("also accepts .wotann.yaml extension", () => {
+    const projectDir = makeTmpDir();
+    const home = makeTmpDir();
+    writeFileSync(
+      join(projectDir, ".wotann.yaml"),
+      "version: 1\nproviders:\n  primary: openai\n",
+    );
+    const result = loadWotannYaml(projectDir, home);
+    expect(result.sources[0]).toContain(".wotann.yaml");
+    expect(result.config.providers?.primary).toBe("openai");
+  });
+
+  it("merges personal override on top of project config", () => {
+    const projectDir = makeTmpDir();
+    const home = makeTmpDir();
+    writeFileSync(
+      join(projectDir, ".wotann.yml"),
+      "version: 1\nproviders:\n  primary: anthropic\n",
+    );
+    mkdirSync(join(home, ".wotann"), { recursive: true });
+    writeFileSync(
+      join(home, ".wotann", "overrides.yml"),
+      "version: 1\nproviders:\n  primary: openai\n",
+    );
+    const result = loadWotannYaml(projectDir, home);
+    expect(result.sources).toHaveLength(2);
+    expect(result.config.providers?.primary).toBe("openai");
+  });
+
+  it("collects problems from malformed configs", () => {
+    const projectDir = makeTmpDir();
+    const home = makeTmpDir();
+    writeFileSync(join(projectDir, ".wotann.yml"), "providers: not-an-object\n");
+    const result = loadWotannYaml(projectDir, home);
+    expect(result.problems.length).toBeGreaterThan(0);
+  });
+});
+
+describe("applyOverrides alias", () => {
+  it("layers personal on top of project config", () => {
+    const project: WotannYamlV1 = { version: 1, providers: { primary: "anthropic" } };
+    const personal: WotannYamlV1 = { version: 1, providers: { primary: "openai" } };
+    const merged = applyOverrides(project, personal);
+    expect(merged.providers?.primary).toBe("openai");
   });
 });
