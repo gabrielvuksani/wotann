@@ -1,0 +1,58 @@
+name: review-pr
+description: Multi-dimension PR review — security, performance, testing, architecture, in parallel.
+version: "1.0"
+nodes:
+  - id: fetch-diff
+    kind: bash
+    bash: git diff main...HEAD
+
+  - id: parallel-review
+    kind: parallel
+    depends_on: [fetch-diff]
+    children:
+      - id: security-review
+        kind: prompt
+        prompt: |
+          Review this diff for security issues:
+          ${results.fetch-diff.output}
+
+          Focus: input validation, secret leakage, injection flaws,
+          auth bypasses, data exposure. Report findings with file:line.
+
+      - id: performance-review
+        kind: prompt
+        prompt: |
+          Review this diff for performance concerns:
+          ${results.fetch-diff.output}
+
+          Focus: N+1 queries, unbounded loops, blocking I/O in hot paths,
+          memory leaks, unnecessary re-computation.
+
+      - id: architecture-review
+        kind: prompt
+        prompt: |
+          Review this diff for architectural concerns:
+          ${results.fetch-diff.output}
+
+          Focus: layer violations, circular deps, premature abstractions,
+          missing separation of concerns.
+
+      - id: test-review
+        kind: prompt
+        prompt: |
+          Review this diff for testing coverage:
+          ${results.fetch-diff.output}
+
+          Focus: missing edge cases, missing error-path tests, untested
+          public API, over-mocked integration points.
+
+  - id: synthesise
+    kind: prompt
+    depends_on: [parallel-review]
+    prompt: |
+      Synthesise the four reviews:
+      ${results.parallel-review.output}
+
+      Produce a single consolidated report. Group findings by severity
+      (CRITICAL / HIGH / MEDIUM / LOW). For each, name file:line + fix
+      suggestion. End with: APPROVE / REQUEST_CHANGES / COMMENT.

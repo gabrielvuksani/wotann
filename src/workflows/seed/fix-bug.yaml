@@ -1,0 +1,55 @@
+name: fix-bug
+description: Systematic bug-fix workflow — reproduce, diagnose, patch, verify, regression-test.
+version: "1.0"
+nodes:
+  - id: reproduce
+    kind: prompt
+    prompt: |
+      Reproduce the reported bug. Write a minimal failing test that
+      captures the observed behavior. If the bug already has a test that
+      fails, reuse it — do NOT duplicate. Report the test command that
+      demonstrates the failure.
+
+  - id: capture_failure
+    kind: bash
+    depends_on: [reproduce]
+    bash: npm test 2>&1 | tail -50
+    continue_on_error: true
+
+  - id: diagnose
+    kind: prompt
+    depends_on: [capture_failure]
+    prompt: |
+      Given the failing test output:
+      ${results.capture_failure.output}
+
+      Identify the root cause. Name the specific file:line where the bug
+      originates. Explain WHY the bug manifests, not just WHERE.
+
+  - id: patch
+    kind: prompt
+    depends_on: [diagnose]
+    prompt: |
+      Apply the minimal patch to fix the root cause identified:
+      ${results.diagnose.output}
+
+      Constraints:
+      - Fix ONLY the root cause, no incidental cleanup
+      - Do not touch the reproducer test
+      - Preserve the existing public API unless the bug is in it
+
+  - id: verify-patch
+    kind: loop-until
+    depends_on: [patch]
+    condition: results.run-tests.exitCode == 0
+    max_iterations: 3
+    children:
+      - id: run-tests
+        kind: bash
+        bash: npm test
+        continue_on_error: true
+
+  - id: regression-check
+    kind: bash
+    depends_on: [verify-patch]
+    bash: npm run typecheck && npm run lint

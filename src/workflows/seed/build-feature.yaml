@@ -1,0 +1,53 @@
+name: build-feature
+description: End-to-end feature build — research, plan, TDD implement, review, commit.
+version: "1.0"
+nodes:
+  - id: research
+    kind: prompt
+    prompt: |
+      You are building a new feature. Before writing any code:
+      1. Search the codebase for similar features.
+      2. Identify the extension points (files to modify).
+      3. Check for existing utilities that can be reused.
+      Report findings as a short bulleted list.
+
+  - id: plan
+    kind: prompt
+    depends_on: [research]
+    prompt: |
+      Given this research:
+      ${results.research.output}
+
+      Produce a 3-phase implementation plan:
+      1. Types + interfaces (schema-first)
+      2. Core logic + unit tests (TDD: write tests first, then implement)
+      3. Wiring into existing runtime
+      For each phase, name the files you'll touch.
+
+  - id: implement
+    kind: prompt
+    depends_on: [plan]
+    prompt: |
+      Execute the plan:
+      ${results.plan.output}
+
+      Constraints:
+      - TDD — red/green/refactor cycle per unit
+      - Never mutate existing interfaces; extend them
+      - Every function gets a docstring explaining WHY (not what)
+
+  - id: verify
+    kind: bash
+    depends_on: [implement]
+    bash: npm run typecheck && npm test
+
+  - id: review
+    kind: prompt
+    depends_on: [verify]
+    prompt: |
+      Review the implementation for:
+      - Correctness (edge cases covered?)
+      - Code quality (naming, structure)
+      - Security (input validation, no secrets)
+      - Performance (obvious N^2 traps?)
+      Output: ACCEPT or REQUEST_CHANGES with a list of concerns.
