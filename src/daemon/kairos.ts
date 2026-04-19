@@ -67,6 +67,7 @@ import {
   createLlmPromptMutator,
   buildBasicEvaluator,
 } from "../skills/skill-optimizer.js";
+import { bootstrapFewShot } from "../learning/miprov2-optimizer.js";
 // S5-3: MCPMarketplace removed — hardcoded 5 entries + fake registry URL
 // (`registry.wotann.com` never existed). The real integration is
 // MCPRegistry in ../marketplace/registry.ts, which actually imports MCP
@@ -1649,18 +1650,62 @@ export class KairosDaemon {
     try {
       const registry = this.runtime.getSkillRegistry();
       const summaries = registry.getSummaries().slice(0, 3);
-      const mode = process.env["WOTANN_SKILL_OPT"] === "gepa" ? "gepa" : "dry";
+      // Phase-13 wire: `WOTANN_OPTIMIZER=miprov2` swaps GEPA for DSPy
+      // MIPROv2 bootstrap-fewshot. Both respect the `WOTANN_SKILL_OPT`
+      // gate. Dry-enumeration stays the default.
+      const optimizer = process.env["WOTANN_OPTIMIZER"] === "miprov2" ? "miprov2" : "gepa";
+      const mode = process.env["WOTANN_SKILL_OPT"] === "gepa" ? optimizer : "dry";
       this.appendLog({
         type: "heartbeat",
         message: `Nightly skill-optimizer ${mode}: picked top ${summaries.length} skills (no invocation-count source yet)`,
         data: { skills: summaries.map((s) => s.name), mode },
       });
       if (mode === "gepa") void this.runSkillOptimizationGepa(summaries.map((s) => s.name));
+      if (mode === "miprov2") void this.runSkillOptimizationMiprov2(summaries.map((s) => s.name));
     } catch (err) {
       this.appendLog({
         type: "error",
         message: `Skill optimization failed: ${err instanceof Error ? err.message : String(err)}`,
       });
+    }
+  }
+
+  /**
+   * Phase-13 wire: MIPROv2 bootstrap-fewshot optimizer. Alternative to
+   * GEPA's genetic loop — collects successful demos from the training
+   * set and rebuilds the prompt with exemplars. Honest: on any failure
+   * we log and continue to the next skill rather than silent skip.
+   */
+  private async runSkillOptimizationMiprov2(skillNames: readonly string[]): Promise<void> {
+    if (!this.runtime) return;
+    const rt = this.runtime;
+    const runAgent = async (prompt: string, _input: string): Promise<string> => {
+      let accum = "";
+      for await (const chunk of rt.query({ prompt })) {
+        if (chunk.type === "text") accum += chunk.content;
+      }
+      return accum;
+    };
+    for (const name of skillNames) {
+      const loaded = rt.getSkillRegistry().loadSkill(name);
+      if (!loaded) continue;
+      try {
+        const result = await bootstrapFewShot({
+          instruction: loaded.content,
+          trainingSet: [{ input: "ping", expectedOutput: "pong" }],
+          runAgent,
+          maxDemos: 2,
+        });
+        this.appendLog({
+          type: "heartbeat",
+          message: `Skill-optimizer(miprov2): ${name} baseline=${result.baselineScore.toFixed(2)} optimized=${result.optimizedScore.toFixed(2)}, demos=${result.demosCollected}`,
+        });
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `Miprov2 failed for ${name}: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     }
   }
 
