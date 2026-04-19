@@ -178,6 +178,30 @@ export class SemanticCache<V> {
 
 // ── Helpers ────────────────────────────────────────────
 
+/**
+ * Phase 13 Wave-3C — char-bigram surrogate embedding for self-contained
+ * semantic cache dedup. 128-dim by default, L2-normalized so cosine is
+ * well-defined. Not a real semantic embedding but detects near-duplicate
+ * prompts without requiring an ML dep. Deterministic — same input
+ * always produces the same vector.
+ */
+export function bigramEmbedding(text: string, dim: number = 128): readonly number[] {
+  const vec = new Float32Array(dim);
+  const normalized = text.toLowerCase();
+  for (let i = 0; i < normalized.length - 1; i++) {
+    const bg = normalized.charCodeAt(i) * 256 + normalized.charCodeAt(i + 1);
+    const idx = Math.abs(bg) % dim;
+    vec[idx] = (vec[idx] ?? 0) + 1;
+  }
+  let mag = 0;
+  for (const v of vec) mag += v * v;
+  mag = Math.sqrt(mag);
+  if (mag === 0) return Array.from(vec);
+  const out: number[] = new Array(dim);
+  for (let i = 0; i < dim; i++) out[i] = (vec[i] ?? 0) / mag;
+  return out;
+}
+
 function cosine(a: readonly number[], b: readonly number[]): number {
   if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
   let dot = 0;

@@ -4,6 +4,7 @@ import type { AgentMessage } from "./types.js";
 import type { CompactionStage, ContextWindowIntelligence } from "../context/window-intelligence.js";
 import type { MemoryStore } from "../memory/store.js";
 import type { SkillRegistry } from "../skills/loader.js";
+import { compactByImportance, type Turn } from "../context/importance-compactor.js";
 
 export interface SkillActivationResult {
   readonly names: readonly string[];
@@ -41,9 +42,7 @@ export function extractReferencedPaths(prompt: string, workingDir: string): read
     const candidate = match[1]?.trim();
     if (!candidate) continue;
 
-    const resolved = isAbsolute(candidate)
-      ? resolve(candidate)
-      : resolve(workingDir, candidate);
+    const resolved = isAbsolute(candidate) ? resolve(candidate) : resolve(workingDir, candidate);
 
     if (!existsSync(resolved)) continue;
     matches.add(relative(workingDir, resolved) || basename(resolved));
@@ -53,7 +52,10 @@ export function extractReferencedPaths(prompt: string, workingDir: string): read
 }
 
 export function buildSkillActivationPrompt(
-  skillRegistry: Pick<SkillRegistry, "detectRelevant" | "getAlwaysActive" | "getSummaries" | "loadSkill">,
+  skillRegistry: Pick<
+    SkillRegistry,
+    "detectRelevant" | "getAlwaysActive" | "getSummaries" | "loadSkill"
+  >,
   prompt: string,
   workingDir: string,
 ): SkillActivationResult {
@@ -82,35 +84,36 @@ export function buildSkillActivationPrompt(
   for (const skill of detected) pushName(skill.name);
   for (const name of keywordMatches) pushName(name);
 
-  const alwaysSummary = alwaysActive.length > 0
-    ? [
-      "Passive always-on skills:",
-      ...alwaysActive.slice(0, 5).map((skill) => `- ${skill.name}: ${skill.description}`),
-    ].join("\n")
-    : "";
+  const alwaysSummary =
+    alwaysActive.length > 0
+      ? [
+          "Passive always-on skills:",
+          ...alwaysActive.slice(0, 5).map((skill) => `- ${skill.name}: ${skill.description}`),
+        ].join("\n")
+      : "";
 
   const loadedSections = selectedNames
     .map((name) => skillRegistry.loadSkill(name))
     .filter((skill): skill is NonNullable<typeof skill> => skill !== null)
     .map((skill) => {
       const content = stripFrontmatter(skill.content).trim().slice(0, MAX_SKILL_CHARS);
-      return [
-        `### Skill: ${skill.metadata.name}`,
-        skill.metadata.description,
-        content,
-      ].filter(Boolean).join("\n");
+      return [`### Skill: ${skill.metadata.name}`, skill.metadata.description, content]
+        .filter(Boolean)
+        .join("\n");
     });
 
   const promptText = [
     alwaysSummary,
     loadedSections.length > 0
       ? [
-        "## Active Skill Guidance",
-        "Use the following harness skills as hard guidance for this query:",
-        ...loadedSections,
-      ].join("\n\n")
+          "## Active Skill Guidance",
+          "Use the following harness skills as hard guidance for this query:",
+          ...loadedSections,
+        ].join("\n\n")
       : "",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   return {
     names: selectedNames,
@@ -120,7 +123,10 @@ export function buildSkillActivationPrompt(
 }
 
 export function buildMemoryActivationPrompt(
-  memoryStore: Pick<MemoryStore, "skepticalSearch" | "getProactiveContext" | "getWorkingMemory"> | null,
+  memoryStore: Pick<
+    MemoryStore,
+    "skepticalSearch" | "getProactiveContext" | "getWorkingMemory"
+  > | null,
   sessionId: string,
   prompt: string,
   currentFile?: string,
@@ -169,26 +175,18 @@ export function buildMemoryActivationPrompt(
     });
 
   const promptText = [
-    workingLines.length > 0
-      ? [
-        "## Working Memory",
-        ...workingLines,
-      ].join("\n")
-      : "",
+    workingLines.length > 0 ? ["## Working Memory", ...workingLines].join("\n") : "",
     recalledLines.length > 0
       ? [
-        "## Relevant Memory Recall",
-        "Use trusted recollections directly. Treat `verify` entries as hints that still need confirmation.",
-        ...recalledLines,
-      ].join("\n")
+          "## Relevant Memory Recall",
+          "Use trusted recollections directly. Treat `verify` entries as hints that still need confirmation.",
+          ...recalledLines,
+        ].join("\n")
       : "",
-    proactiveLines.length > 0
-      ? [
-        "## Proactive Context",
-        ...proactiveLines,
-      ].join("\n")
-      : "",
-  ].filter(Boolean).join("\n\n");
+    proactiveLines.length > 0 ? ["## Proactive Context", ...proactiveLines].join("\n") : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   return {
     prompt: promptText,
@@ -211,7 +209,9 @@ export function buildContextBudgetPrompt(
     latestCompaction
       ? `<system_warning>Latest compaction: ${latestCompaction.stage}; reclaimed=${latestCompaction.tokensReclaimed}</system_warning>`
       : "",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function compactConversationHistory(
@@ -220,14 +220,53 @@ export function compactConversationHistory(
 ): ConversationCompactionResult | null {
   const systemMessages = messages.filter((message) => message.role === "system");
   const conversational = messages.filter((message) => message.role !== "system");
-  const keepCount = stage === "aggressive-summarize"
-    ? 4
-    : stage === "memory-offload"
-      ? 6
-      : 8;
+  const keepCount = stage === "aggressive-summarize" ? 4 : stage === "memory-offload" ? 6 : 8;
 
   if (conversational.length <= keepCount) {
     return null;
+  }
+
+  // Phase 13 Wave-3C: opt-in score-weighted compaction. When
+  // CONTEXT_COMPACT_STRATEGY=importance, select kept turns by signal
+  // score (tool-calls, decisions, questions, bookends) rather than
+  // strictly by recency. Falls back to FIFO when unset — no regression.
+  if (process.env["CONTEXT_COMPACT_STRATEGY"] === "importance") {
+    const turns: Turn[] = conversational.map((msg, idx) => ({
+      id: msg.id ?? `turn-${idx}`,
+      role: msg.role === "tool" ? "tool" : msg.role,
+      content: msg.content,
+      timestamp: idx,
+    }));
+    const scored = compactByImportance(turns, { maxTurns: keepCount });
+    if (scored.dropped.length > 0) {
+      const keptIds = new Set(scored.kept.map((t) => t.id));
+      const keptMessages: AgentMessage[] = [];
+      const removedMessages: AgentMessage[] = [];
+      for (let i = 0; i < conversational.length; i++) {
+        const turnId = turns[i]?.id ?? "";
+        const msg = conversational[i]!;
+        if (keptIds.has(turnId)) keptMessages.push(msg);
+        else removedMessages.push(msg);
+      }
+      const summary = removedMessages
+        .map(
+          (message, index) =>
+            `${index + 1}. ${message.role}: ${truncate(message.content.replace(/\s+/g, " ").trim(), 220)}`,
+        )
+        .join("\n")
+        .slice(0, MAX_COMPACTION_SUMMARY_CHARS);
+      const summaryMessage: AgentMessage = {
+        role: "system",
+        content: [`Conversation summary (${stage} compaction, importance-scored):`, summary].join(
+          "\n",
+        ),
+      };
+      return {
+        messages: [...systemMessages, summaryMessage, ...keptMessages],
+        summary,
+        removedMessages: removedMessages.length,
+      };
+    }
   }
 
   const removed = conversational.slice(0, Math.max(0, conversational.length - keepCount));
@@ -237,16 +276,16 @@ export function compactConversationHistory(
   }
 
   const summary = removed
-    .map((message, index) => `${index + 1}. ${message.role}: ${truncate(message.content.replace(/\s+/g, " ").trim(), 220)}`)
+    .map(
+      (message, index) =>
+        `${index + 1}. ${message.role}: ${truncate(message.content.replace(/\s+/g, " ").trim(), 220)}`,
+    )
     .join("\n")
     .slice(0, MAX_COMPACTION_SUMMARY_CHARS);
 
   const summaryMessage: AgentMessage = {
     role: "system",
-    content: [
-      `Conversation summary (${stage} compaction):`,
-      summary,
-    ].join("\n"),
+    content: [`Conversation summary (${stage} compaction):`, summary].join("\n"),
   };
 
   return {
@@ -311,7 +350,5 @@ function normalizeMemoryQuery(prompt: string, currentFile?: string): string {
 }
 
 function truncate(value: string, length: number): string {
-  return value.length <= length
-    ? value
-    : `${value.slice(0, Math.max(0, length - 1)).trimEnd()}…`;
+  return value.length <= length ? value : `${value.slice(0, Math.max(0, length - 1)).trimEnd()}…`;
 }
