@@ -28,6 +28,15 @@ import {
   type RunnerRuntime as CodeEvalRunnerRuntime,
   type CodeEvalFlavour,
 } from "./benchmark-runners/code-eval.js";
+import {
+  runSweBench,
+  type RunnerRuntime as SweBenchRunnerRuntime,
+} from "./benchmark-runners/swe-bench.js";
+import {
+  runTauBench,
+  type RunnerRuntime as TauBenchRunnerRuntime,
+  type TauBenchDomain,
+} from "./benchmark-runners/tau-bench.js";
 
 // -- Types -------------------------------------------------------------------
 
@@ -46,7 +55,9 @@ export type RealBenchmarkType =
   | "aider-polyglot"
   | "humaneval-plus"
   | "mbpp-plus"
-  | "livecodebench";
+  | "livecodebench"
+  | "swe-bench-verified"
+  | "tau-bench";
 
 /**
  * Structural subset of WotannRuntime needed by the real runners.
@@ -54,7 +65,9 @@ export type RealBenchmarkType =
  */
 export type BenchmarkRunnerRuntime = TerminalBenchRunnerRuntime &
   AiderRunnerRuntime &
-  CodeEvalRunnerRuntime;
+  CodeEvalRunnerRuntime &
+  SweBenchRunnerRuntime &
+  TauBenchRunnerRuntime;
 
 export interface BenchmarkDetail {
   readonly testId: string;
@@ -214,9 +227,14 @@ const TEST_SUITES: ReadonlyMap<BenchmarkType, readonly TestCase[]> = new Map([
 // -- Implementation ----------------------------------------------------------
 
 export class BenchmarkHarness {
+  /** Directory the harness persists runs into (.wotann/benchmarks). */
   private readonly baseDir: string;
+  /** Original working directory; passed to runners so they resolve corpora
+   *  relative to the project root rather than double-nesting under baseDir. */
+  private readonly workingDir: string;
 
   constructor(storageDir: string) {
+    this.workingDir = storageDir;
     this.baseDir = join(storageDir, ".wotann", "benchmarks");
     ensureDir(this.baseDir);
   }
@@ -286,30 +304,45 @@ export class BenchmarkHarness {
       seed?: number;
       threshold?: number;
       totalBudgetMs?: number;
+      /** SWE-bench / TerminalBench / τ-bench / Aider / code-eval: require real corpus (no smoke fallback). */
+      requireCorpus?: boolean;
+      /** τ-bench: restrict to specific domains. */
+      domains?: readonly TauBenchDomain[];
+      /** τ-bench: enable/disable policy injection (ablation). */
+      injectPolicy?: boolean;
+      /** code-eval LCB: model training cutoff (ISO date). */
+      modelCutoff?: string;
+      /** code-eval LCB: filter tasks released after this ISO date. */
+      releasedAfter?: string;
     },
   ): Promise<BenchmarkRun> {
+    // All coding-style benchmarks persist under "open-swe" in the storage layout
+    // because terminal-bench is the only one with its own type; the harness
+    // history/trend functions operate on this normalized set.
     const storageType: BenchmarkType = type === "terminal-bench" ? "terminal-bench" : "open-swe";
     const start = Date.now();
 
-    let rawReport: unknown;
-    let passAt1: number;
-    let totalTasks: number;
-    let completedTasks: number;
+    let rawReport: unknown = null;
+    let passAt1 = 0;
+    let totalTasks = 0;
+    let completedTasks = 0;
 
     const runnerOpts: {
       limit?: number;
       seed?: number;
       threshold?: number;
       totalBudgetMs?: number;
+      requireCorpus?: boolean;
     } = {};
     if (opts.limit !== undefined) runnerOpts.limit = opts.limit;
     if (opts.seed !== undefined) runnerOpts.seed = opts.seed;
     if (opts.threshold !== undefined) runnerOpts.threshold = opts.threshold;
     if (opts.totalBudgetMs !== undefined) runnerOpts.totalBudgetMs = opts.totalBudgetMs;
+    if (opts.requireCorpus !== undefined) runnerOpts.requireCorpus = opts.requireCorpus;
 
     switch (type) {
       case "terminal-bench": {
-        const report = await runTerminalBench(runtime, this.baseDir, runnerOpts);
+        const report = await runTerminalBench(runtime, this.workingDir, runnerOpts);
         rawReport = report;
         passAt1 = report.passAt1;
         totalTasks = report.totalTasks;
@@ -317,9 +350,9 @@ export class BenchmarkHarness {
         break;
       }
       case "aider-polyglot": {
-        const report = await runAiderPolyglot(runtime, this.baseDir, runnerOpts);
+        const report = await runAiderPolyglot(runtime, this.workingDir, runnerOpts);
         rawReport = report;
-        passAt1 = report.passAt1;
+        passAt1 = report.passAt2 ?? report.passAt1;
         totalTasks = report.totalTasks;
         completedTasks = report.completedTasks;
         break;
@@ -328,7 +361,45 @@ export class BenchmarkHarness {
       case "mbpp-plus":
       case "livecodebench": {
         const flavour: CodeEvalFlavour = type;
-        const report = await runCodeEval(runtime, this.baseDir, flavour, runnerOpts);
+        const codeEvalOpts: {
+          limit?: number;
+          seed?: number;
+          threshold?: number;
+          totalBudgetMs?: number;
+          requireCorpus?: boolean;
+          modelCutoff?: string;
+          releasedAfter?: string;
+        } = { ...runnerOpts };
+        if (opts.modelCutoff !== undefined) codeEvalOpts.modelCutoff = opts.modelCutoff;
+        if (opts.releasedAfter !== undefined) codeEvalOpts.releasedAfter = opts.releasedAfter;
+        const report = await runCodeEval(runtime, this.workingDir, flavour, codeEvalOpts);
+        rawReport = report;
+        passAt1 = report.passAt1;
+        totalTasks = report.totalTasks;
+        completedTasks = report.completedTasks;
+        break;
+      }
+      case "swe-bench-verified": {
+        const report = await runSweBench(runtime, this.workingDir, runnerOpts);
+        rawReport = report;
+        passAt1 = report.passAt1;
+        totalTasks = report.totalTasks;
+        completedTasks = report.completedTasks;
+        break;
+      }
+      case "tau-bench": {
+        const tauOpts: {
+          limit?: number;
+          seed?: number;
+          threshold?: number;
+          totalBudgetMs?: number;
+          requireCorpus?: boolean;
+          domains?: readonly TauBenchDomain[];
+          injectPolicy?: boolean;
+        } = { ...runnerOpts };
+        if (opts.domains !== undefined) tauOpts.domains = opts.domains;
+        if (opts.injectPolicy !== undefined) tauOpts.injectPolicy = opts.injectPolicy;
+        const report = await runTauBench(runtime, this.workingDir, tauOpts);
         rawReport = report;
         passAt1 = report.passAt1;
         totalTasks = report.totalTasks;
@@ -362,6 +433,54 @@ export class BenchmarkHarness {
       // best-effort
     }
     return run;
+  }
+
+  /**
+   * Validate setup for a given real benchmark without executing it.
+   * Dispatches to the runner's dry-run fn. Returns a DryRunReport with
+   * per-check ok/detail so operators can triage missing corpus / docker /
+   * runtime issues before paying for a real run.
+   */
+  async dryRunBenchmark(
+    type: RealBenchmarkType,
+    runtime: BenchmarkRunnerRuntime | null,
+    opts: {
+      requireCorpus?: boolean;
+      domains?: readonly TauBenchDomain[];
+      releasedAfter?: string;
+    } = {},
+  ): Promise<import("./benchmark-runners/shared.js").DryRunReport> {
+    const tbMod = await import("./benchmark-runners/terminal-bench.js");
+    const aiderMod = await import("./benchmark-runners/aider-polyglot.js");
+    const codeMod = await import("./benchmark-runners/code-eval.js");
+    const sweMod = await import("./benchmark-runners/swe-bench.js");
+    const tauMod = await import("./benchmark-runners/tau-bench.js");
+    switch (type) {
+      case "terminal-bench":
+        return tbMod.dryRunTerminalBench(runtime, this.workingDir, {
+          ...(opts.requireCorpus !== undefined ? { requireCorpus: opts.requireCorpus } : {}),
+        });
+      case "aider-polyglot":
+        return aiderMod.dryRunAiderPolyglot(runtime, this.workingDir, {
+          ...(opts.requireCorpus !== undefined ? { requireCorpus: opts.requireCorpus } : {}),
+        });
+      case "humaneval-plus":
+      case "mbpp-plus":
+      case "livecodebench":
+        return codeMod.dryRunCodeEval(runtime, this.workingDir, type, {
+          ...(opts.requireCorpus !== undefined ? { requireCorpus: opts.requireCorpus } : {}),
+          ...(opts.releasedAfter !== undefined ? { releasedAfter: opts.releasedAfter } : {}),
+        });
+      case "swe-bench-verified":
+        return sweMod.dryRunSweBench(runtime, this.workingDir, {
+          ...(opts.requireCorpus !== undefined ? { requireCorpus: opts.requireCorpus } : {}),
+        });
+      case "tau-bench":
+        return tauMod.dryRunTauBench(runtime, this.workingDir, {
+          ...(opts.requireCorpus !== undefined ? { requireCorpus: opts.requireCorpus } : {}),
+          ...(opts.domains !== undefined ? { domains: opts.domains } : {}),
+        });
+    }
   }
 
   /**

@@ -3805,7 +3805,7 @@ program
 program
   .command("bench <flavour>")
   .description(
-    "Run a benchmark (terminal-bench | aider-polyglot | humaneval-plus | mbpp-plus | livecodebench | longmemeval)",
+    "Run a benchmark (terminal-bench | swe-bench-verified | tau-bench | aider-polyglot | humaneval-plus | mbpp-plus | livecodebench | longmemeval)",
   )
   .option("-n, --limit <number>", "Max tasks to run (default: all)", (v) => parseInt(v, 10))
   .option("-s, --seed <number>", "Deterministic shuffle seed", (v) => parseInt(v, 10))
@@ -3816,6 +3816,24 @@ program
   .option("-b, --budget <ms>", "Total wall-clock budget across all tasks (ms)", (v) =>
     parseInt(v, 10),
   )
+  .option(
+    "--require-corpus",
+    "Fail with BLOCKED-NEEDS-CORPUS-DOWNLOAD if official corpus is absent (disables smoke fallback)",
+  )
+  .option(
+    "--dry-run",
+    "Validate setup without executing (also: LongMemEval alias for --skip-download)",
+  )
+  .option("--domains <list>", "τ-bench: comma-separated domains (retail,airline). Default both.")
+  .option("--no-inject-policy", "τ-bench: disable policy injection (ablation — baseline mode)")
+  .option(
+    "--model-cutoff <date>",
+    "LiveCodeBench: ISO training cutoff; pre-cutoff tasks get contamination bumped",
+  )
+  .option(
+    "--released-after <date>",
+    "LiveCodeBench: exclude tasks with releaseDate <= this ISO date",
+  )
   // LongMemEval-specific options (ignored by other flavours)
   .option("--variant <variant>", "LongMemEval variant: s | m | oracle (default: s)")
   .option("--top-k <number>", "LongMemEval retrieval top-K (default: 10)", (v) => parseInt(v, 10))
@@ -3823,7 +3841,6 @@ program
     "--skip-download",
     "LongMemEval: use built-in 10-instance smoke corpus instead of the downloaded dataset",
   )
-  .option("--dry-run", "LongMemEval: alias for --skip-download; runs end-to-end on smoke corpus")
   .option(
     "--runtime",
     "LongMemEval: route retrieved context through runtime.query (default: memory-stack only)",
@@ -3837,10 +3854,15 @@ program
         model?: string;
         threshold?: number;
         budget?: number;
+        requireCorpus?: boolean;
+        dryRun?: boolean;
+        domains?: string;
+        injectPolicy?: boolean; // --no-inject-policy sets this false
+        modelCutoff?: string;
+        releasedAfter?: string;
         variant?: string;
         topK?: number;
         skipDownload?: boolean;
-        dryRun?: boolean;
         runtime?: boolean;
       },
     ) => {
@@ -3856,6 +3878,8 @@ program
         "humaneval-plus",
         "mbpp-plus",
         "livecodebench",
+        "swe-bench-verified",
+        "tau-bench",
       ] as const;
       type Flavour = (typeof validFlavours)[number];
       if (!(validFlavours as readonly string[]).includes(flavour)) {
@@ -3869,6 +3893,44 @@ program
       const typedFlavour = flavour as Flavour;
 
       const { BenchmarkHarness } = await import("./intelligence/benchmark-harness.js");
+      const { isBlockedCorpusError } = await import("./intelligence/benchmark-runners/shared.js");
+
+      // ── Dry-run path: validate without executing ────────
+      if (cliOpts.dryRun) {
+        console.log(chalk.bold(`\nWOTANN Bench — ${typedFlavour} [dry-run]\n`));
+        const harness = new BenchmarkHarness(process.cwd());
+        const dryOpts: {
+          requireCorpus?: boolean;
+          domains?: readonly ("retail" | "airline")[];
+          releasedAfter?: string;
+        } = {};
+        if (cliOpts.requireCorpus) dryOpts.requireCorpus = true;
+        if (cliOpts.domains) {
+          dryOpts.domains = cliOpts.domains
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s): s is "retail" | "airline" => s === "retail" || s === "airline");
+        }
+        if (cliOpts.releasedAfter) dryOpts.releasedAfter = cliOpts.releasedAfter;
+        // Runtime not needed for dry-run; pass null so we don't pay the
+        // cost of spinning up providers just to validate setup.
+        const report = await harness.dryRunBenchmark(typedFlavour, null, dryOpts);
+        console.log(chalk.dim(`  Benchmark:   ${report.benchmark}`));
+        console.log(chalk.dim(`  Corpus size: ${report.corpusSize}`));
+        console.log(chalk.dim(`  Ready:       ${report.ready ? "yes" : "no"}`));
+        console.log(chalk.bold("\n  Checks:"));
+        for (const c of report.checks) {
+          const mark = c.ok ? chalk.green("ok ") : chalk.red("no ");
+          console.log(`    ${mark} ${c.name}${c.detail ? chalk.dim(` — ${c.detail}`) : ""}`);
+        }
+        if (report.blockedReason) {
+          console.log();
+          console.log(chalk.yellow(report.blockedReason));
+        }
+        console.log();
+        process.exit(report.ready ? 0 : 1);
+      }
+
       const { createRuntime } = await import("./core/runtime.js");
       // createRuntime already calls initialize() internally.
       const runtime = await createRuntime(process.cwd());
@@ -3880,6 +3942,15 @@ program
       console.log(chalk.dim(`  Model:     ${cliOpts.model ?? "runtime-default"}`));
       console.log(chalk.dim(`  Threshold: ${cliOpts.threshold ?? 0.75}`));
       if (cliOpts.budget !== undefined) console.log(chalk.dim(`  Budget:    ${cliOpts.budget} ms`));
+      if (cliOpts.requireCorpus)
+        console.log(chalk.dim(`  Corpus:    required (no smoke fallback)`));
+      if (flavour === "tau-bench") {
+        console.log(
+          chalk.dim(
+            `  Policy:    ${cliOpts.injectPolicy === false ? "off (baseline)" : "on (injected)"}`,
+          ),
+        );
+      }
       console.log();
       console.log(chalk.dim("  Running...\n"));
 
@@ -3889,6 +3960,11 @@ program
         seed?: number;
         threshold?: number;
         totalBudgetMs?: number;
+        requireCorpus?: boolean;
+        domains?: readonly ("retail" | "airline")[];
+        injectPolicy?: boolean;
+        modelCutoff?: string;
+        releasedAfter?: string;
       } = {
         modelId: cliOpts.model ?? "default",
       };
@@ -3896,15 +3972,33 @@ program
       if (cliOpts.seed !== undefined) runOpts.seed = cliOpts.seed;
       if (cliOpts.threshold !== undefined) runOpts.threshold = cliOpts.threshold;
       if (cliOpts.budget !== undefined) runOpts.totalBudgetMs = cliOpts.budget;
+      if (cliOpts.requireCorpus) runOpts.requireCorpus = true;
+      if (cliOpts.domains) {
+        runOpts.domains = cliOpts.domains
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s): s is "retail" | "airline" => s === "retail" || s === "airline");
+      }
+      if (cliOpts.injectPolicy === false) runOpts.injectPolicy = false;
+      if (cliOpts.modelCutoff) runOpts.modelCutoff = cliOpts.modelCutoff;
+      if (cliOpts.releasedAfter) runOpts.releasedAfter = cliOpts.releasedAfter;
 
-      const run = await harness.runRealBenchmark(typedFlavour, runtime, runOpts);
-
-      console.log(chalk.bold("  Results:\n"));
-      console.log(chalk.dim(`  Run ID:      ${run.id}`));
-      console.log(chalk.dim(`  Score:       ${run.score}/${run.maxScore}`));
-      console.log(chalk.dim(`  Pass rate:   ${run.percentile}%`));
-      console.log(chalk.dim(`  Wall clock:  ${(run.durationMs / 1000).toFixed(1)}s`));
-      console.log();
+      try {
+        const run = await harness.runRealBenchmark(typedFlavour, runtime, runOpts);
+        console.log(chalk.bold("  Results:\n"));
+        console.log(chalk.dim(`  Run ID:      ${run.id}`));
+        console.log(chalk.dim(`  Score:       ${run.score}/${run.maxScore}`));
+        console.log(chalk.dim(`  Pass rate:   ${run.percentile}%`));
+        console.log(chalk.dim(`  Wall clock:  ${(run.durationMs / 1000).toFixed(1)}s`));
+        console.log();
+      } catch (err) {
+        if (isBlockedCorpusError(err)) {
+          console.error(chalk.yellow(err.message));
+          process.exit(2); // distinct exit code for blocked-corpus vs other errors
+        }
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
     },
   );
 
