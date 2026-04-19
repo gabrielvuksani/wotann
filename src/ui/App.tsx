@@ -40,7 +40,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { KeybindingManager } from "./keybindings.js";
-import { ThemeManager } from "./themes.js";
+import { ThemeManager, cycleNorseTheme } from "./themes.js";
 import { TUIVoiceController } from "./voice-controller.js";
 import {
   buildPrimaryAgentStatuses,
@@ -353,6 +353,47 @@ export function WotannApp({
         case "voice-capture":
           void handleVoiceCapture();
           break;
+        // ── Wave 3G additions ─────────────────────────────
+        case "command-palette":
+          // Ctrl+P: quick jump — fills the prompt with "/" so the
+          // PromptInput's slash-command autocomplete becomes the
+          // palette surface (Ink TUI equivalent of Cmd+K).
+          setPromptValue("/");
+          break;
+        case "clear-conversation":
+          // Ctrl+K: clear the conversation (mirrors /clear).
+          setMessages([]);
+          setShowStartup(true);
+          setTurnCount(0);
+          setPromptValue("");
+          setStats({ cost: 0, contextPercent: 0, reads: 0, edits: 0, bashCalls: 0 });
+          break;
+        case "last-response": {
+          // Ctrl+L: copy the last assistant response to the clipboard.
+          const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+          if (lastAssistant) {
+            try {
+              execFileSync("pbcopy", [], { input: lastAssistant.content, timeout: 2000 });
+              appendSystemMessage("Last response copied to clipboard.");
+            } catch {
+              appendSystemMessage(
+                `Last response preview: ${lastAssistant.content.slice(0, 200)}${lastAssistant.content.length > 200 ? "..." : ""}`,
+              );
+            }
+          } else {
+            appendSystemMessage("No assistant response to jump to.");
+          }
+          break;
+        }
+        case "theme-cycle": {
+          // Ctrl+Y: cycle through the 5 Norse themes and persist.
+          const next = cycleNorseTheme(themeName);
+          if (themeManagerRef.current.setTheme(next)) {
+            setThemeName(themeManagerRef.current.getCurrent().name);
+            appendSystemMessage(`Theme switched to: ${next}`);
+          }
+          break;
+        }
       }
     },
     {

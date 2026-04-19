@@ -298,6 +298,13 @@ export class UnifiedExecSession {
     startedAt: number,
     originalCommand: string,
   ): Promise<ExecResult> {
+    // Session-6 security: this module spawns `/bin/sh -c` by design
+    // (Codex parity — pipes/globs/redirects) but the module header
+    // states "NOT a sandbox boundary". Callers with untrusted input
+    // must wrap via `src/sandbox/executor.ts` + a seatbelt profile.
+    // The runtime warning below walks the stack and surfaces misuse
+    // in logs when `runShell` is invoked outside the sandbox wrapper.
+    warnIfOutsideSandbox();
     return new Promise((resolvePromise) => {
       const child = spawn(this.shell, ["-c", cmdToRun], {
         cwd: this.currentCwd,
@@ -358,6 +365,33 @@ export class UnifiedExecSession {
 }
 
 // ── Helpers ────────────────────────────────────────────
+
+/**
+ * Runtime guard: warn when `runShell` is invoked from a caller that is
+ * NOT `src/sandbox/executor.ts`. The module header declares unified-exec
+ * is NOT a sandbox boundary — commands flow through `/bin/sh -c` with
+ * full shell metacharacter interpretation. Any untrusted input must
+ * therefore be wrapped by the seatbelt-backed executor.
+ *
+ * Advisory (console.warn), not throwing, so existing Codex-parity call
+ * paths (interactive TUI, test fixtures) keep working — but the misuse
+ * surfaces during audits. Gated behind `WOTANN_UNIFIED_EXEC_ALLOW_BARE=1`
+ * so legitimate test harnesses don't spam stderr.
+ */
+function warnIfOutsideSandbox(): void {
+  if (process.env["WOTANN_UNIFIED_EXEC_ALLOW_BARE"] === "1") return;
+  const probe: { stack?: string } = {};
+  Error.captureStackTrace(probe, warnIfOutsideSandbox);
+  const stack = probe.stack ?? "";
+  // sandbox/executor is the canonical wrapper (seatbelt-backed).
+  if (/[\\/]sandbox[\\/]executor\./.test(stack)) return;
+  // Allow the module's own unit tests to exercise the bare session.
+  if (/[\\/]unified-exec\.test\./.test(stack)) return;
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[SECURITY] unified-exec called without sandbox wrapper — caller must ensure input is trusted",
+  );
+}
 
 export function extractInlineEnv(
   command: string,
