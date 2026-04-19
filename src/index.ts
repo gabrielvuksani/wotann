@@ -4532,6 +4532,67 @@ program
     process.exit(0);
   });
 
+// ── wotann loop ─────────────────────────────────────────────
+// Session-13 Claude Code parity: `wotann loop <interval> <command>`
+// runs the command on a recurring schedule via LoopManager. Honours
+// `--max-iterations` and `--stop-on-failure`. Ctrl-C gracefully stops.
+program
+  .command("loop <interval> <command>")
+  .description("Run a command on a recurring interval (e.g. `wotann loop 5m 'npm test'`)")
+  .option("--max-iterations <n>", "Stop after N iterations (0 = unlimited)", "0")
+  .option("--stop-on-failure", "Stop the loop on the first failing iteration", false)
+  .action(
+    async (
+      interval: string,
+      command: string,
+      opts: {
+        maxIterations?: string;
+        stopOnFailure?: boolean;
+      },
+    ) => {
+      const { LoopManager, parseInterval } = await import("./cli/loop-command.js");
+      try {
+        parseInterval(interval);
+      } catch (err) {
+        console.error(chalk.red(`Invalid interval: ${(err as Error).message}`));
+        process.exit(2);
+      }
+      const manager = new LoopManager();
+      const maxIter = parseInt(opts.maxIterations ?? "0", 10);
+      const executor = async (cmd: string): Promise<boolean> => {
+        return new Promise<boolean>((resolvePromise) => {
+          const child = spawn("sh", ["-c", cmd], {
+            stdio: "inherit",
+            cwd: process.cwd(),
+            env: process.env,
+          });
+          child.on("exit", (code) => resolvePromise(code === 0));
+          child.on("error", () => resolvePromise(false));
+        });
+      };
+      const state = manager.start(
+        {
+          interval,
+          command,
+          ...(maxIter > 0 ? { maxIterations: maxIter } : {}),
+          ...(opts.stopOnFailure ? { stopOnFailure: true } : {}),
+        },
+        executor,
+      );
+      console.log(chalk.green(`✓ Loop ${state.id} started — every ${interval}: ${command}`));
+      console.log(chalk.dim(`  Press Ctrl-C to stop.`));
+      const onSignal = (): void => {
+        manager.stopAll();
+        console.log(chalk.yellow("\n✓ Loop stopped."));
+        process.exit(0);
+      };
+      process.on("SIGINT", onSignal);
+      process.on("SIGTERM", onSignal);
+      // Keep the event loop alive while loops run.
+      await new Promise(() => undefined);
+    },
+  );
+
 // ── Parse ───────────────────────────────────────────────────
 
 // Deep-link fast path — if the first positional arg is a `wotann://` URL,
