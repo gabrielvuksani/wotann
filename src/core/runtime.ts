@@ -1737,42 +1737,49 @@ export class WotannRuntime {
 
       const compactionPlan = this.contextIntelligence.shouldCompact();
       if (compactionPlan.needed && !options.context) {
-        const compacted = compactConversationHistory(
-          this.session.messages,
-          compactionPlan.stage ?? "old-messages",
-        );
-        if (compacted) {
-          await this.hookEngine.fire({
-            event: "PreCompact",
-            content: `${compactionPlan.stage}:${compacted.removedMessages}`,
-            sessionId: this.session.id,
-          });
-
-          this.session = {
-            ...this.session,
-            messages: compacted.messages,
-          };
-          this.syncMessageIndex();
-          conversationContext = [...compacted.messages];
-          this.contextIntelligence.compact(compactionPlan.stage ?? "old-messages");
-          this.memoryStore?.setWorkingMemory(
-            this.session.id,
-            `compaction-${Date.now()}`,
-            compacted.summary,
-            0.8,
+        // Phase 8 Context-Mode parity: fire PreCompact BEFORE running the
+        // actual compaction so handlers can block it (e.g. "I'm mid-task,
+        // don't compact now"). Previously PreCompact fired after compaction,
+        // which made the "pre" prefix a lie — handlers couldn't prevent data
+        // loss, only react to it. Now: block → skip; modify → pass through;
+        // allow/warn → proceed.
+        const preCompactResult = await this.hookEngine.fire({
+          event: "PreCompact",
+          content: `${compactionPlan.stage}:${this.session.messages.length}`,
+          sessionId: this.session.id,
+        });
+        if (preCompactResult.action !== "block") {
+          const compacted = compactConversationHistory(
+            this.session.messages,
+            compactionPlan.stage ?? "old-messages",
           );
-          this.memoryStore?.captureEvent(
-            "context_compaction",
-            compacted.summary,
-            compactionPlan.stage ?? undefined,
-            this.session.id,
-          );
+          if (compacted) {
+            this.session = {
+              ...this.session,
+              messages: compacted.messages,
+            };
+            this.syncMessageIndex();
+            conversationContext = [...compacted.messages];
+            this.contextIntelligence.compact(compactionPlan.stage ?? "old-messages");
+            this.memoryStore?.setWorkingMemory(
+              this.session.id,
+              `compaction-${Date.now()}`,
+              compacted.summary,
+              0.8,
+            );
+            this.memoryStore?.captureEvent(
+              "context_compaction",
+              compacted.summary,
+              compactionPlan.stage ?? undefined,
+              this.session.id,
+            );
 
-          await this.hookEngine.fire({
-            event: "PostCompact",
-            content: `${compactionPlan.stage}:${compacted.removedMessages}`,
-            sessionId: this.session.id,
-          });
+            await this.hookEngine.fire({
+              event: "PostCompact",
+              content: `${compactionPlan.stage}:${compacted.removedMessages}`,
+              sessionId: this.session.id,
+            });
+          }
         }
       }
 
