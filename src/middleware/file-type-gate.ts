@@ -427,25 +427,58 @@ declare module "./types.js" {
 }
 
 /**
- * Map a FileHandler to the trust boundary that controls downstream
- * routing. Executable formats land in `quarantine` so the Exploit tab
- * can review them; opaque binaries route to typed handlers; text /
- * code / markup are considered `safe`.
+ * Specific Magika labels that designate a SCRIPT (shell / ps1 / bat) —
+ * these map to the coarse handler "code" by default but they differ
+ * from ordinary source files (.ts, .py) in one critical way: they are
+ * INTERPRETED by shells that honor every byte. An attacker uploading a
+ * .txt that's actually a .sh can get code execution if the pipeline
+ * ever passes the bytes to `chmod +x && ./file`. Quarantine them until
+ * a human reviews — identical policy to executable binaries.
  */
-function boundaryForHandler(handler: FileHandler): UploadTrustBoundary {
+const SCRIPT_LABELS: ReadonlySet<string> = new Set([
+  "shell",
+  "bash",
+  "zsh",
+  "powershell",
+  "ps1",
+  "batch",
+  "bat",
+  "cmd",
+  "vbscript",
+]);
+
+/**
+ * Map a FileHandler (and optionally the Magika label) to the trust
+ * boundary that controls downstream routing.
+ *
+ * Wave-3E policy (spec priority #3):
+ *   - `binary` (pebin/elf/macho/dex/…) → quarantine
+ *   - `archive` (zip/tar/rar/7z/xz/…) → quarantine (upgraded from binary)
+ *   - `code` with a script label (shell/ps1/bat) → quarantine (new)
+ *   - `image/video/audio/data/pdf/docx/xlsx` → binary
+ *   - `code` (non-script) / `markup` / `text` → safe
+ *   - `unknown` → unknown (conservative)
+ *
+ * Archives move to quarantine because a malicious archive can pack an
+ * executable + payload chain; automated extraction in the sandbox stage
+ * must be gated by explicit user approval. Scripts move to quarantine
+ * because bash/ps1/bat are executable artefacts, not passive data.
+ */
+function boundaryForHandler(handler: FileHandler, label: string = ""): UploadTrustBoundary {
   switch (handler) {
     case "binary":
+    case "archive":
       return "quarantine";
+    case "code":
+      return SCRIPT_LABELS.has(label.toLowerCase()) ? "quarantine" : "safe";
     case "image":
     case "video":
     case "audio":
-    case "archive":
     case "data":
     case "pdf":
     case "docx":
     case "xlsx":
       return "binary";
-    case "code":
     case "markup":
     case "text":
       return "safe";
@@ -491,7 +524,9 @@ async function classifyUpload(upload: FileUpload): Promise<{
 
   try {
     const result = await detectFileType(upload.bytes, upload.filename);
-    const boundary = boundaryForHandler(result.handler);
+    // Pass the Magika label so shell/ps1/bat get quarantined even though
+    // their coarse handler is "code". Source files (.ts/.py) stay safe.
+    const boundary = boundaryForHandler(result.handler, result.label);
     const stamped: FileUpload = {
       ...upload,
       handler: result.handler,
