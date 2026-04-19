@@ -84,7 +84,11 @@ export class ConversationBranchManager {
   }
 
   /** Add a turn to the active branch */
-  addTurn(role: "user" | "assistant" | "system" | "tool", content: string, metadata?: Record<string, string>): ConversationTurn {
+  addTurn(
+    role: "user" | "assistant" | "system" | "tool",
+    content: string,
+    metadata?: Record<string, string>,
+  ): ConversationTurn {
     const branch = this.getActiveBranch();
     const lastTurn = branch.turns[branch.turns.length - 1];
 
@@ -116,9 +120,7 @@ export class ConversationBranchManager {
       : currentBranch.turns.length - 1;
 
     // Copy turns up to fork point
-    const inheritedTurns = forkIdx >= 0
-      ? currentBranch.turns.slice(0, forkIdx + 1)
-      : [];
+    const inheritedTurns = forkIdx >= 0 ? currentBranch.turns.slice(0, forkIdx + 1) : [];
 
     const branchId = randomUUID().slice(0, 8);
     const newBranch: ConversationBranch = {
@@ -139,6 +141,45 @@ export class ConversationBranchManager {
     if (!branch) return false;
     this.activeBranchId = branch.id;
     return true;
+  }
+
+  /**
+   * Rollback the active branch by N turns — drops the N most-recent
+   * turns in place, preserving the branch identity. Returns the turns
+   * that were dropped (in chronological order) so callers can re-send
+   * them elsewhere or present a diff.
+   *
+   * Codex-parity: equivalent to Codex's `thread/rollback(n)` RPC. Unlike
+   * fork(), rollback MUTATES the active branch — intended for "undo my
+   * last bad reply" workflows rather than "explore alternatives".
+   *
+   * Invariants:
+   *   - Never drops below 0 turns (clamps n to branch.turns.length)
+   *   - Returns [] when nothing to drop (n<=0 or empty branch)
+   *   - Preserves branch.id, name, forkPoint, createdAt, metadata
+   */
+  rollback(n: number): readonly ConversationTurn[] {
+    if (!Number.isFinite(n) || n <= 0) return [];
+    const branch = this.getActiveBranch();
+    if (branch.turns.length === 0) return [];
+    const dropCount = Math.min(n, branch.turns.length);
+    const keepCount = branch.turns.length - dropCount;
+    const dropped = branch.turns.slice(keepCount);
+    const kept = branch.turns.slice(0, keepCount);
+    this.branches.set(branch.id, { ...branch, turns: kept });
+    return dropped;
+  }
+
+  /**
+   * Rollback to a specific turn ID (exclusive — the turn itself is
+   * kept, anything after it is dropped). Returns dropped turns, or
+   * null if the turn ID isn't in the active branch.
+   */
+  rollbackToTurn(turnId: string): readonly ConversationTurn[] | null {
+    const branch = this.getActiveBranch();
+    const idx = branch.turns.findIndex((t) => t.id === turnId);
+    if (idx < 0) return null;
+    return this.rollback(branch.turns.length - idx - 1);
   }
 
   /** Delete a branch (cannot delete main or active) */
@@ -173,7 +214,7 @@ export class ConversationBranchManager {
       commonTurns: commonCount,
       divergentTurnsA: a.turns.length - commonCount,
       divergentTurnsB: b.turns.length - commonCount,
-      forkPointId: commonCount > 0 ? a.turns[commonCount - 1]?.id ?? null : null,
+      forkPointId: commonCount > 0 ? (a.turns[commonCount - 1]?.id ?? null) : null,
     };
   }
 
