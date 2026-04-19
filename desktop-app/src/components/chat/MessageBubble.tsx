@@ -14,6 +14,7 @@ import { ThinkingBlock } from "./ThinkingBlock";
 import { ArtifactCard } from "../artifacts/ArtifactCard";
 import { DiffViewer } from "../artifacts/DiffViewer";
 import { CapabilityChips } from "../wotann/CapabilityChips";
+import { Block, type BlockStatus } from "../wotann/Block";
 
 /** Inline keyframes for thinking brain pulse — avoids modifying globals.css */
 const BUBBLE_KEYFRAMES = `
@@ -33,6 +34,89 @@ interface MessageBubbleProps {
 function formatTime(ts: number): string {
   const date = new Date(ts);
   return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+// ── Shell / bash tool detection ────────────────────────────
+// A small subset of tools emit shell-style command output that benefits from
+// the Warp-style Block treatment. Anything else falls back to ToolCallCard.
+
+const SHELL_TOOL_NAMES = new Set([
+  "bash",
+  "shell",
+  "run_shell_command",
+  "shell-exec",
+  "terminal",
+  "execute_command",
+]);
+
+function isShellTool(name: string): boolean {
+  return SHELL_TOOL_NAMES.has(name.toLowerCase());
+}
+
+interface ParsedToolSegment {
+  readonly name: string;
+  readonly input: unknown;
+  readonly id?: string;
+}
+
+function parseToolSegment(raw: string): ParsedToolSegment {
+  try {
+    if (raw.startsWith("{")) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const name =
+        typeof parsed["name"] === "string"
+          ? (parsed["name"] as string)
+          : typeof parsed["tool"] === "string"
+            ? (parsed["tool"] as string)
+            : "tool_call";
+      const input = parsed["arguments"] ?? parsed["input"] ?? undefined;
+      const id = typeof parsed["id"] === "string" ? (parsed["id"] as string) : undefined;
+      return { name, input, id };
+    }
+    const match = raw.match(/\[tool_call:([^\]]+)\]/);
+    return { name: match?.[1] ?? "tool_call", input: undefined };
+  } catch {
+    return { name: "tool_call", input: undefined };
+  }
+}
+
+function extractShellCommand(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const obj = input as Record<string, unknown>;
+  const candidates = ["command", "cmd", "script", "input"];
+  for (const key of candidates) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function extractShellOutput(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const obj = input as Record<string, unknown>;
+  const candidates = ["output", "stdout", "result", "response"];
+  for (const key of candidates) {
+    const value = obj[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function extractShellExitCode(input: unknown): number | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const obj = input as Record<string, unknown>;
+  const candidates = ["exitCode", "exit_code", "exit", "status"];
+  for (const key of candidates) {
+    const value = obj[key];
+    if (typeof value === "number" && Number.isInteger(value)) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 interface ExtractedArtifact {
@@ -377,36 +461,58 @@ export function MessageBubble({ message, conversationId, onRetry, onCopy }: Mess
                   />
                 )}
 
-                {/* Render content segments — text through markdown, tool calls as collapsible blocks */}
-                {contentSegments.map((seg, idx) =>
-                  seg.kind === "tool" ? (
+                {/* Render content segments — text through markdown, tool calls
+                    as collapsible blocks. Shell/bash tool calls get the
+                    Warp-style Block primitive (command + output + status +
+                    copy/rerun actions) instead of the generic ToolCallCard. */}
+                {contentSegments.map((seg, idx) => {
+                  if (seg.kind !== "tool") {
+                    return seg.value.trim()
+                      ? <MarkdownRenderer key={`seg-${idx}`} content={seg.value} />
+                      : null;
+                  }
+                  const parsed = parseToolSegment(seg.value);
+                  const isShell = isShellTool(parsed.name);
+                  if (isShell) {
+                    const commandText = extractShellCommand(parsed.input) ?? parsed.name;
+                    const outputText = extractShellOutput(parsed.input);
+                    const exitCode = extractShellExitCode(parsed.input);
+                    const blockStatus: BlockStatus = isStreaming
+                      ? "running"
+                      : exitCode !== undefined && exitCode !== 0
+                        ? "error"
+                        : "success";
+                    return (
+                      <Block
+                        key={`seg-${idx}`}
+                        command={commandText}
+                        output={outputText}
+                        status={blockStatus}
+                        onRerun={() => {
+                          // Re-send the command back through the engine.
+                          void import("../../store/engine").then(({ sendMessage }) => {
+                            sendMessage(commandText);
+                          });
+                        }}
+                        onShare={() => {
+                          // Copy a permalink placeholder to clipboard; real
+                          // permalinks will resolve in a future session when
+                          // conversation export is wired (Phase E).
+                          const permalink = `wotann://block/${parsed.id ?? "unknown"}`;
+                          void navigator.clipboard?.writeText(permalink).catch(() => {});
+                        }}
+                      />
+                    );
+                  }
+                  return (
                     <ToolCallCard
                       key={`seg-${idx}`}
-                      toolName={(() => {
-                        try {
-                          if (seg.value.startsWith("{")) {
-                            const parsed = JSON.parse(seg.value);
-                            return parsed.name ?? parsed.tool ?? "tool_call";
-                          }
-                          const m = seg.value.match(/\[tool_call:([^\]]+)\]/);
-                          return m?.[1] ?? "tool_call";
-                        } catch { return "tool_call"; }
-                      })()}
-                      toolInput={(() => {
-                        try {
-                          if (seg.value.startsWith("{")) {
-                            const parsed = JSON.parse(seg.value);
-                            return parsed.arguments ?? parsed.input ?? undefined;
-                          }
-                        } catch { /* ignore */ }
-                        return undefined;
-                      })()}
+                      toolName={parsed.name}
+                      toolInput={parsed.input as Record<string, unknown> | undefined}
                       status={isStreaming ? "running" : "complete"}
                     />
-                  ) : seg.value.trim() ? (
-                    <MarkdownRenderer key={`seg-${idx}`} content={seg.value} />
-                  ) : null,
-                )}
+                  );
+                })}
               </>
             )
           ) : isStreaming ? (

@@ -2,10 +2,17 @@
  * Embedded Terminal — panel below editor for running commands.
  * In production, uses xterm.js for a real terminal emulator.
  * Executes real shell commands via the Tauri command bridge.
+ *
+ * Phase D — each completed command is rendered as a Warp-style Block so the
+ * user can copy the whole turn, re-run it, or share a permalink. The raw
+ * streaming output still appears inline while a command runs; once it
+ * completes, the final pair (command + output + exit code) is committed as
+ * a Block at the top of the log.
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { executeCommand } from "../../store/engine";
+import { Block, type BlockStatus } from "../wotann/Block";
 
 interface TerminalLine {
   readonly id: string;
@@ -14,19 +21,55 @@ interface TerminalLine {
   readonly timestamp: number;
 }
 
+interface CompletedBlock {
+  readonly id: string;
+  readonly command: string;
+  readonly output: string;
+  readonly status: BlockStatus;
+  readonly durationMs: number;
+}
+
 const MAX_HISTORY = 50;
+const MAX_BLOCKS = 20;
 
 export function EditorTerminal() {
   const [lines, setLines] = useState<readonly TerminalLine[]>([
     { id: "1", type: "output", content: "WOTANN Terminal v0.1.0", timestamp: Date.now() },
     { id: "2", type: "output", content: "Type commands or ask the agent to run them.", timestamp: Date.now() },
   ]);
+  const [blocks, setBlocks] = useState<readonly CompletedBlock[]>([]);
   const [input, setInput] = useState("");
   const [isExecuting, setIsExecuting] = useState(false);
   const [cwd, setCwd] = useState(".");
   const [commandHistory, setCommandHistory] = useState<readonly string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const commitBlock = useCallback(
+    (entry: Omit<CompletedBlock, "id">): void => {
+      // Immutable append: drop the oldest block if we're at the cap.
+      setBlocks((prev) => {
+        const withNew: readonly CompletedBlock[] = [
+          ...prev,
+          { id: `blk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, ...entry },
+        ];
+        return withNew.length > MAX_BLOCKS ? withNew.slice(withNew.length - MAX_BLOCKS) : withNew;
+      });
+    },
+    [],
+  );
+
+  const rerunCommand = useCallback((cmd: string): void => {
+    // Fire-and-forget: push the command into the input and let the normal
+    // submit path handle it. This also records history correctly.
+    setInput(cmd);
+  }, []);
+
+  const shareBlock = useCallback((blockId: string): void => {
+    // Placeholder permalink — phase E wires conversation export.
+    const permalink = `wotann://terminal-block/${blockId}`;
+    void navigator.clipboard?.writeText(permalink).catch(() => {});
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
@@ -101,6 +144,7 @@ export function EditorTerminal() {
 
     // Prepend cd to cwd so the command runs in the right directory
     const fullCmd = cwd === "." ? trimmed : `cd ${cwd} && ${trimmed}`;
+    const startedAt = Date.now();
 
     try {
       const result = await executeCommand(fullCmd);
@@ -132,6 +176,19 @@ export function EditorTerminal() {
       }
 
       setLines((prev) => [...prev, ...outputLines]);
+
+      // Commit a Block record for the completed command.
+      const combinedOutput = [result.stdout, result.stderr]
+        .filter((s): s is string => typeof s === "string" && s.length > 0)
+        .join("");
+      const blockStatus: BlockStatus =
+        result.exitCode === 0 ? "success" : "error";
+      commitBlock({
+        command: trimmed,
+        output: combinedOutput || `Process exited with code ${result.exitCode}`,
+        status: blockStatus,
+        durationMs: Date.now() - startedAt,
+      });
     } catch {
       setLines((prev) => [
         ...prev,
@@ -142,10 +199,16 @@ export function EditorTerminal() {
           timestamp: Date.now(),
         },
       ]);
+      commitBlock({
+        command: trimmed,
+        output: "Failed to execute command",
+        status: "error",
+        durationMs: Date.now() - startedAt,
+      });
     } finally {
       setIsExecuting(false);
     }
-  }, [input, isExecuting, cwd]);
+  }, [input, isExecuting, cwd, commitBlock]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowUp") {
@@ -172,7 +235,10 @@ export function EditorTerminal() {
 
   const handleClear = useCallback(() => {
     setLines([]);
+    setBlocks([]);
   }, []);
+
+  const [blocksMode, setBlocksMode] = useState<"stream" | "blocks">("stream");
 
   return (
     <div className="h-full flex flex-col font-mono text-xs" style={{ background: "var(--bg-base)" }} role="region" aria-label="Terminal">
@@ -186,6 +252,16 @@ export function EditorTerminal() {
           <span className="text-[10px] truncate max-w-[200px]" style={{ color: "var(--color-text-dim)" }} title={cwd}>{cwd}</span>
         </div>
         <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setBlocksMode((m) => (m === "stream" ? "blocks" : "stream"))}
+            className="px-1.5 py-0.5 text-[9px] terminal-btn-hover"
+            style={{ color: "var(--color-text-muted)" }}
+            aria-pressed={blocksMode === "blocks"}
+            title={blocksMode === "blocks" ? "Switch to stream view" : "Switch to Warp-style blocks view"}
+          >
+            {blocksMode === "blocks" ? "Stream" : "Blocks"}
+          </button>
           <button
             onClick={handleClear}
             className="px-1.5 py-0.5 text-[9px] terminal-btn-hover"
@@ -227,25 +303,55 @@ export function EditorTerminal() {
       </div>
 
       {/* Output */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-2 space-y-0.5" role="log" aria-label="Terminal output" aria-live="polite">
-        {lines.map((line) => (
-          <div key={line.id} className="flex">
-            {line.type === "input" ? (
-              <>
-                <span style={{ color: "var(--color-success)" }} className="mr-2">$</span>
-                <span style={{ color: "var(--color-text-primary)" }}>{line.content}</span>
-              </>
-            ) : line.type === "error" ? (
-              <span style={{ color: "var(--color-error)" }}>{line.content}</span>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-2" role="log" aria-label="Terminal output" aria-live="polite">
+        {blocksMode === "blocks" ? (
+          <div className="flex flex-col gap-2">
+            {blocks.length === 0 ? (
+              <div style={{ color: "var(--color-text-muted)" }} className="text-[10px] p-2">
+                No completed commands yet — run something to populate blocks.
+              </div>
             ) : (
-              <span style={{ color: "var(--color-text-secondary)" }}>{line.content}</span>
+              blocks.map((b) => (
+                <Block
+                  key={b.id}
+                  command={b.command}
+                  output={b.output}
+                  status={b.status}
+                  duration={`${b.durationMs}ms`}
+                  onRerun={() => rerunCommand(b.command)}
+                  onShare={() => shareBlock(b.id)}
+                />
+              ))
+            )}
+            {isExecuting && (
+              <div className="flex items-center gap-2" style={{ color: "var(--color-text-muted)" }}>
+                <span className="w-2 h-2 border rounded-full animate-spin" style={{ borderColor: "var(--color-text-dim)", borderTopColor: "var(--color-text-secondary)" }} />
+                Running...
+              </div>
             )}
           </div>
-        ))}
-        {isExecuting && (
-          <div className="flex items-center gap-2" style={{ color: "var(--color-text-muted)" }}>
-            <span className="w-2 h-2 border rounded-full animate-spin" style={{ borderColor: "var(--color-text-dim)", borderTopColor: "var(--color-text-secondary)" }} />
-            Running...
+        ) : (
+          <div className="space-y-0.5">
+            {lines.map((line) => (
+              <div key={line.id} className="flex">
+                {line.type === "input" ? (
+                  <>
+                    <span style={{ color: "var(--color-success)" }} className="mr-2">$</span>
+                    <span style={{ color: "var(--color-text-primary)" }}>{line.content}</span>
+                  </>
+                ) : line.type === "error" ? (
+                  <span style={{ color: "var(--color-error)" }}>{line.content}</span>
+                ) : (
+                  <span style={{ color: "var(--color-text-secondary)" }}>{line.content}</span>
+                )}
+              </div>
+            ))}
+            {isExecuting && (
+              <div className="flex items-center gap-2" style={{ color: "var(--color-text-muted)" }}>
+                <span className="w-2 h-2 border rounded-full animate-spin" style={{ borderColor: "var(--color-text-dim)", borderTopColor: "var(--color-text-secondary)" }} />
+                Running...
+              </div>
+            )}
           </div>
         )}
       </div>
