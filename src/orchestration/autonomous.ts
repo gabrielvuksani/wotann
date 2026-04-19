@@ -42,6 +42,29 @@ import {
   crystallizeSuccessHook,
   type CrystallizationHookResult,
 } from "../runtime-hooks/dead-code-hooks.js";
+import { scorePatch, type PatchDescriptor, type PatchScore } from "../intelligence/patch-scorer.js";
+import {
+  runAdversarialTests,
+  type AdversarialContext,
+  type AdversarialTestGenerator,
+  type AdversarialRunResult,
+} from "../intelligence/adversarial-test-generator.js";
+import {
+  voteOnPatches,
+  type VoteResult,
+  type VotingOptions,
+} from "../intelligence/multi-patch-voter.js";
+import {
+  TrajectoryRecorder,
+  saveTrajectory,
+  type FrameKind,
+} from "../autopilot/trajectory-recorder.js";
+import {
+  saveCheckpoint,
+  checkpointFilename,
+  CHECKPOINT_VERSION,
+  type AutopilotCheckpoint,
+} from "../autopilot/checkpoint.js";
 
 export interface AutonomousConfig {
   readonly maxCycles: number;

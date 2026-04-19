@@ -34,6 +34,7 @@
  */
 
 import { TFIDFIndex } from "./semantic-search.js";
+import { computeContentSha } from "./incremental-indexer.js";
 
 export interface VectorSearchResult {
   readonly id: string;
@@ -168,6 +169,12 @@ export class QuantizedVectorStore {
     new Map();
   private readonly encodeQueue: Array<{ id: string; content: string }> = [];
   private encoding = false;
+  /**
+   * Phase 13 Wave-3C — per-id SHA of last indexed content for change
+   * detection. addDocument skips the embed queue when the content is
+   * unchanged (pure redundancy elimination, no behavioural change).
+   */
+  private readonly contentShas: Map<string, string> = new Map();
 
   constructor(config: QuantizedVectorStoreConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -201,7 +208,18 @@ export class QuantizedVectorStore {
    * encode when ONNX is available (or will be once ready() resolves).
    */
   addDocument(id: string, content: string): void {
+    // Phase 13 Wave-3C: incremental-indexer SHA skip. When the same id is
+    // re-added with unchanged content, skip the TF-IDF re-ingest AND the
+    // ONNX encode queue. Writes stay idempotent; first-add always runs.
+    let sha: string | null = null;
+    try {
+      sha = computeContentSha(content);
+    } catch {
+      sha = null;
+    }
+    if (sha !== null && this.contentShas.get(id) === sha) return;
     this.fallback.addDocument(id, content);
+    if (sha !== null) this.contentShas.set(id, sha);
     if (this.config.forceTFIDFFallback) return;
     this.encodeQueue.push({ id, content });
     void this.drainQueue();
@@ -214,6 +232,7 @@ export class QuantizedVectorStore {
   removeDocument(id: string): void {
     this.fallback.removeDocument(id);
     this.vectors.delete(id);
+    this.contentShas.delete(id);
     // Also drop any queued-but-not-yet-encoded entry for this id.
     for (let i = this.encodeQueue.length - 1; i >= 0; i--) {
       if (this.encodeQueue[i]?.id === id) this.encodeQueue.splice(i, 1);
@@ -227,6 +246,7 @@ export class QuantizedVectorStore {
     this.fallback.clear();
     this.vectors.clear();
     this.encodeQueue.length = 0;
+    this.contentShas.clear();
   }
 
   /**
