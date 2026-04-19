@@ -1078,6 +1078,7 @@ export class AutonomousExecutor {
         }
 
         this.exitMode();
+        await this.persistTrajectoryBestEffort(trajectory, callbacks?.trajectoryPath);
         return this.buildResult(
           true,
           cycles,
@@ -1103,6 +1104,7 @@ export class AutonomousExecutor {
     }
 
     this.exitMode();
+    await this.persistTrajectoryBestEffort(trajectory, callbacks?.trajectoryPath);
     return this.buildResult(
       false,
       cycles,
@@ -1112,6 +1114,25 @@ export class AutonomousExecutor {
       currentStrategy,
       filesChanged,
     );
+  }
+
+  /**
+   * Phase-13 wire: save TrajectoryRecorder frames to disk. Honest: on
+   * IO failure we warn and continue. Default path is
+   * `~/.wotann/trajectories/<runId>.jsonl`.
+   */
+  private async persistTrajectoryBestEffort(
+    trajectory: TrajectoryRecorder,
+    path?: string,
+  ): Promise<void> {
+    try {
+      const snapshot = trajectory.end();
+      const target =
+        path ?? `${process.env["HOME"] ?? "."}/.wotann/trajectories/${snapshot.id}.jsonl`;
+      await saveTrajectory(target, snapshot);
+    } catch (err) {
+      console.warn(`[autonomous] trajectory save failed: ${(err as Error).message}`);
+    }
   }
 
   private async heartbeatWatchdog(): Promise<string> {
