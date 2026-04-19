@@ -31,7 +31,7 @@ import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pi
 import { assembleSystemPromptParts } from "../prompt/engine.js";
 import { canBypass, executeBypass } from "../utils/wasm-bypass.js";
 import { CostTracker } from "../telemetry/cost-tracker.js";
-import { MemoryStore } from "../memory/store.js";
+import { MemoryStore, type AutoCaptureEntry } from "../memory/store.js";
 import { TFIDFIndex } from "../memory/semantic-search.js";
 import { QuantizedVectorStore } from "../memory/quantized-vector-store.js";
 import {
@@ -4455,25 +4455,43 @@ export class WotannRuntime {
   } | null {
     if (!this.memoryStore) return null;
     try {
-      return this.memoryStore.consolidateAutoCaptures(
-        (entries) => this.observationExtractor.extractFromCaptures(entries),
-        {
-          batchSize,
-          onClassificationFailed: (entry, reason) => {
-            this.memoryStore?.captureEvent(
-              "classification_failed",
-              JSON.stringify({
-                reason,
-                sourceId: entry.id,
-                sourceType: entry.eventType,
-                contentPreview: entry.content.slice(0, 120),
-              }),
-              "observation-consolidation",
-              this.session.id,
-            );
-          },
+      // Phase 13 Wave-3C: capture the observations produced by the sync
+      // extractor so we can run relationship classification (updates /
+      // extends / derives) as a fire-and-forget async companion. The
+      // classifier runs on the microtask queue without blocking the
+      // daemon tick that drives this method.
+      const captured: { assertion: string; id: string; domain?: string }[] = [];
+      const extractWrapped = (entries: readonly AutoCaptureEntry[]) => {
+        const obs = this.observationExtractor.extractFromCaptures(entries);
+        for (const o of obs) {
+          captured.push({
+            assertion: o.assertion,
+            id: o.id,
+            ...(o.domain ? { domain: o.domain } : {}),
+          });
+        }
+        return obs;
+      };
+      const report = this.memoryStore.consolidateAutoCaptures(extractWrapped, {
+        batchSize,
+        onClassificationFailed: (entry, reason) => {
+          this.memoryStore?.captureEvent(
+            "classification_failed",
+            JSON.stringify({
+              reason,
+              sourceId: entry.id,
+              sourceType: entry.eventType,
+              contentPreview: entry.content.slice(0, 120),
+            }),
+            "observation-consolidation",
+            this.session.id,
+          );
         },
-      );
+      });
+      if (captured.length >= 2) {
+        void this.classifyAndPersistRelationships(captured);
+      }
+      return report;
     } catch (err) {
       this.memoryStore?.captureEvent(
         "consolidation_error",
@@ -4482,6 +4500,37 @@ export class WotannRuntime {
         this.session.id,
       );
       return null;
+    }
+  }
+
+  /**
+   * Phase 13 Wave-3C — async companion to consolidateObservations.
+   * Runs relationship classification on newly extracted observations and
+   * persists the edges via the store's addRelationships method (when
+   * available). Honest logger.warn on failure; never silently swallows.
+   */
+  private async classifyAndPersistRelationships(
+    obs: readonly { readonly id: string; readonly assertion: string; readonly domain?: string }[],
+  ): Promise<void> {
+    if (!this.memoryStore) return;
+    try {
+      const enriched = obs.map((o) => ({
+        id: o.id,
+        type: "decision" as const,
+        assertion: o.assertion,
+        confidence: 0.7,
+        sourceIds: [] as readonly number[],
+        extractedAt: Date.now(),
+        ...(o.domain ? { domain: o.domain } : {}),
+      }));
+      const relationships = await this.observationExtractor.classifyRelationships(enriched);
+      if (relationships.length === 0) return;
+      const store = this.memoryStore as unknown as {
+        addRelationships?: (rels: typeof relationships) => void;
+      };
+      store.addRelationships?.(relationships);
+    } catch (err) {
+      console.warn(`[WOTANN] relationship classification failed: ${(err as Error).message}`);
     }
   }
 
