@@ -73,26 +73,27 @@ describe("Integration: End-to-End Provider Fallback", () => {
     expect(next).toBe("free");
   });
 
-  it("model is preserved across the entire fallback chain", () => {
-    // The user requested opus. As providers cascade, the MODEL stays opus.
-    // The fallback chain only changes the PROVIDER, never the model.
+  it("fallback chain routes past a rate-limited provider without scrubbing it from the chain", () => {
+    // Previously this test asserted `const userRequestedModel === "claude-opus-4-6"`
+    // — a tautology against a locally-declared value. The real invariants are:
+    //   1. When `anthropic` is rate-limited, the next-available provider is `openai`.
+    //   2. `anthropic` is STILL in the chain but marked `rateLimited: true` — rate
+    //      limits are transient, so we don't permanently scrub the provider.
+    //   3. Every provider from the set appears exactly once in the chain.
     const allProviders = new Set<ProviderName>(["anthropic", "openai", "ollama"]);
     const mgr = new RateLimitManager(["anthropic", "openai", "ollama"]);
 
-    const userRequestedModel = "claude-opus-4-6";
-
-    // Even as we walk through providers, the model request stays the same.
-    // The adapter will use its best available model, but the REQUEST never
-    // asks for a downgraded model.
     mgr.markRateLimited("anthropic", 60_000);
     const chain = buildFallbackChain("anthropic", allProviders, (p) => mgr.isRateLimited(p));
     const fallbackProvider = resolveNextProvider(chain);
 
-    // The fallback changes the provider, not the model
     expect(fallbackProvider).toBe("openai");
-    // Model stays as-is — AgentBridge passes model=undefined to non-preferred
-    // providers so they use their best model, but the harness never DEGRADES
-    expect(userRequestedModel).toBe("claude-opus-4-6");
+    const providerNames = chain.map((e) => e.provider);
+    expect(providerNames).toContain("anthropic");
+    const anthropicEntry = chain.find((e) => e.provider === "anthropic");
+    expect(anthropicEntry?.rateLimited).toBe(true);
+    expect(new Set(providerNames).size).toBe(chain.length);
+    expect(new Set(providerNames)).toEqual(allProviders);
   });
 
   it("RateLimitManager.isAllExhausted correctly tracks total exhaustion", () => {
