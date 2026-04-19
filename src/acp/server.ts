@@ -1,14 +1,27 @@
 /**
- * ACP server dispatcher (C16).
+ * ACP server dispatcher (C16, upgraded to ACP v1 on 2026-04-19).
  *
  * Pure message-routing layer over the codec in protocol.ts. Callers
- * register handlers for the ACP methods their runtime implements and
- * the dispatcher produces JsonRpcResponse / JsonRpcNotification
+ * register handlers for the ACP v1 methods their runtime implements
+ * and the dispatcher produces JsonRpcResponse / JsonRpcNotification
  * objects that can be written to stdout (or any duplex stream).
  *
  * Keeping this free of I/O lets tests drive the dispatcher directly
  * with strings + assertions; the actual stdio wiring is a thin
- * wrapper left for the main entry point.
+ * wrapper left for the main entry point in `stdio.ts`.
+ *
+ * ACP v1 dispatch surface (vs legacy 0.2):
+ *   - `initialize`                  — request
+ *   - `session/new`                 — request (carries cwd + mcpServers,
+ *                                     client-provided MCP discovery
+ *                                     channel per spec)
+ *   - `session/prompt`              — request, returns PromptResponse
+ *     with final `stopReason`; intermediate streaming rides on
+ *     `session/update` notifications (replaces the 0.2
+ *     `prompt/partial` + `prompt/complete` pair).
+ *   - `session/cancel`              — NOTIFICATION (no id, no response).
+ *   - WOTANN `thread/*`             — additive request routes for
+ *     conversation-branch control; not part of upstream ACP.
  */
 
 import {
@@ -21,14 +34,16 @@ import {
   makeError,
   makeNotification,
   makeResponse,
+  negotiateProtocolVersion,
+  type AcpCancelParams,
   type AcpInitializeParams,
   type AcpInitializeResult,
+  type AcpNewSessionParams,
+  type AcpNewSessionResult,
   type AcpPromptParams,
-  type AcpSessionCreateParams,
-  type AcpSessionCreateResult,
-  type AcpCancelParams,
-  type AcpPromptPartial,
-  type AcpPromptComplete,
+  type AcpPromptResult,
+  type AcpSessionUpdateNotification,
+  type AcpImplementation,
   type JsonRpcId,
   type JsonRpcNotification,
   type JsonRpcRequest,
@@ -39,30 +54,28 @@ import {
 
 export interface AcpHandlers {
   initialize(params: AcpInitializeParams): Promise<AcpInitializeResult>;
-  sessionCreate(params: AcpSessionCreateParams): Promise<AcpSessionCreateResult>;
+  sessionNew(params: AcpNewSessionParams): Promise<AcpNewSessionResult>;
   /**
-   * Prompt is intentionally a streaming method — the dispatcher pumps
-   * `partial` callbacks into `onPartial` / `onComplete` notifications.
+   * Prompt is intentionally a streaming method. The dispatcher pumps
+   * `onUpdate` into `session/update` notifications; the handler
+   * resolves with the final PromptResponse (stopReason) when the turn
+   * ends or cancellation is observed.
    */
   sessionPrompt(
     params: AcpPromptParams,
-    onPartial: (p: AcpPromptPartial) => void,
-    onComplete: (c: AcpPromptComplete) => void,
-  ): Promise<void>;
+    onUpdate: (n: AcpSessionUpdateNotification) => void,
+  ): Promise<AcpPromptResult>;
   sessionCancel(params: AcpCancelParams): Promise<void>;
 }
 
-export interface AcpServerInfo {
-  readonly name: string;
-  readonly version: string;
-}
+export type AcpServerInfo = AcpImplementation;
 
 export interface AcpServerOptions {
   readonly handlers: AcpHandlers;
   readonly serverInfo: AcpServerInfo;
   /**
    * Called whenever the dispatcher needs to emit a notification
-   * (streaming partials, tool events, etc.). Callers connect this to
+   * (streaming updates, tool events, etc.). Callers connect this to
    * stdout/socket send.
    */
   readonly emit: (frame: string) => void;
@@ -92,9 +105,7 @@ export class AcpServer {
       return decoded;
     }
     if (decoded.kind === "notification") {
-      // We don't expect server-bound notifications in the current ACP
-      // shape, but silently ignore them rather than bouncing errors
-      // back (per JSON-RPC semantics).
+      await this.handleNotification(decoded.message as JsonRpcNotification);
       return undefined;
     }
     if (decoded.kind === "response") {
@@ -105,17 +116,37 @@ export class AcpServer {
     return this.handleRequest(decoded.message as JsonRpcRequest);
   }
 
+  private async handleNotification(note: JsonRpcNotification): Promise<void> {
+    // `session/cancel` is the only client→agent notification WOTANN
+    // currently honours. Everything else is silently ignored per
+    // JSON-RPC semantics — bouncing errors to notifications violates
+    // the spec and confuses hosts like Zed that re-send the same
+    // frame on retry.
+    if (note.method === ACP_METHODS.SessionCancel) {
+      const params = note.params as AcpCancelParams | undefined;
+      if (!params?.sessionId) return;
+      try {
+        await this.handlers.sessionCancel(params);
+      } catch {
+        /* cancel is best-effort */
+      }
+    }
+  }
+
   private async handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
     try {
       switch (req.method) {
         case ACP_METHODS.Initialize:
           return await this.onInitialize(req);
-        case ACP_METHODS.SessionCreate:
-          return await this.onSessionCreate(req);
+        case ACP_METHODS.SessionNew:
+          return await this.onSessionNew(req);
         case ACP_METHODS.SessionPrompt:
           return await this.onSessionPrompt(req);
         case ACP_METHODS.SessionCancel:
-          return await this.onSessionCancel(req);
+          // Spec says cancel is a notification, but some hosts still
+          // send it as a request. Honour it and respond `{ok:true}`
+          // so the host doesn't block on the reply.
+          return await this.onSessionCancelAsRequest(req);
         default:
           return makeError(
             req.id,
@@ -131,59 +162,57 @@ export class AcpServer {
 
   private async onInitialize(req: JsonRpcRequest): Promise<JsonRpcResponse> {
     const params = req.params as AcpInitializeParams | undefined;
-    if (!params?.protocolVersion || !params.clientInfo) {
+    if (params === undefined || typeof params.protocolVersion !== "number") {
       return makeError(
         req.id,
         JSON_RPC_ERROR_CODES.InvalidParams,
-        "initialize: missing protocolVersion or clientInfo",
+        "initialize: missing or non-integer protocolVersion",
       );
     }
     const result = await this.handlers.initialize(params);
     this.initialized = true;
-    // Surface WOTANN's own server info if the handler left it off.
+    // Surface WOTANN's own agent info if the handler left it off.
+    // Negotiate the version at the dispatcher layer so handlers can
+    // be naive about downgrade logic.
+    const negotiated = negotiateProtocolVersion(result.protocolVersion ?? params.protocolVersion);
     const merged: AcpInitializeResult = {
-      protocolVersion: result.protocolVersion || ACP_PROTOCOL_VERSION,
-      capabilities: result.capabilities,
-      serverInfo: result.serverInfo ?? this.serverInfo,
+      protocolVersion: negotiated,
+      agentCapabilities: result.agentCapabilities,
+      agentInfo: result.agentInfo ?? this.serverInfo,
+      ...(result.authMethods ? { authMethods: result.authMethods } : {}),
+      ...(result._meta ? { _meta: result._meta } : {}),
     };
     return makeResponse(req.id, merged);
   }
 
-  private async onSessionCreate(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+  private async onSessionNew(req: JsonRpcRequest): Promise<JsonRpcResponse> {
     if (!this.initialized) return this.notInitialized(req.id);
-    const params = req.params as AcpSessionCreateParams | undefined;
-    if (!params?.rootUri) {
-      return makeError(
-        req.id,
-        JSON_RPC_ERROR_CODES.InvalidParams,
-        "session/create: missing rootUri",
-      );
+    const params = req.params as AcpNewSessionParams | undefined;
+    if (!params?.cwd || typeof params.cwd !== "string") {
+      return makeError(req.id, JSON_RPC_ERROR_CODES.InvalidParams, "session/new: missing cwd");
     }
-    const result = await this.handlers.sessionCreate(params);
+    const result = await this.handlers.sessionNew(params);
     return makeResponse(req.id, result);
   }
 
   private async onSessionPrompt(req: JsonRpcRequest): Promise<JsonRpcResponse> {
     if (!this.initialized) return this.notInitialized(req.id);
     const params = req.params as AcpPromptParams | undefined;
-    if (!params?.sessionId || typeof params.text !== "string") {
+    if (!params?.sessionId || !Array.isArray(params.prompt)) {
       return makeError(
         req.id,
         JSON_RPC_ERROR_CODES.InvalidParams,
-        "session/prompt: missing sessionId or text",
+        "session/prompt: missing sessionId or prompt[]",
       );
     }
-    const onPartial = (p: AcpPromptPartial) => {
-      this.emit(encodeJsonRpc(makeNotification(ACP_METHODS.PromptPartial, p)));
+    const onUpdate = (n: AcpSessionUpdateNotification): void => {
+      this.emit(encodeJsonRpc(makeNotification(ACP_METHODS.SessionUpdate, n)));
     };
-    const onComplete = (c: AcpPromptComplete) => {
-      this.emit(encodeJsonRpc(makeNotification(ACP_METHODS.PromptComplete, c)));
-    };
-    await this.handlers.sessionPrompt(params, onPartial, onComplete);
-    return makeResponse(req.id, { accepted: true });
+    const result = await this.handlers.sessionPrompt(params, onUpdate);
+    return makeResponse(req.id, result);
   }
 
-  private async onSessionCancel(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+  private async onSessionCancelAsRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
     if (!this.initialized) return this.notInitialized(req.id);
     const params = req.params as AcpCancelParams | undefined;
     if (!params?.sessionId) {
@@ -237,3 +266,8 @@ export function createRecordingBus(): RecordingBus {
     },
   };
 }
+
+// Re-export the version so call-sites don't reach into protocol.ts
+// just to emit a banner. The recordingBus/server pair is the stable
+// public surface of this module.
+export { ACP_PROTOCOL_VERSION };

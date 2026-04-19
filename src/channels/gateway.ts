@@ -23,6 +23,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { ChannelType } from "./channel-types.js";
+import type { RoutePolicyEngine } from "./route-policies.js";
 
 export type { ChannelType } from "./channel-types.js";
 
@@ -107,8 +108,28 @@ export class ChannelGateway {
   private messageQueue: ChannelMessage[] = [];
   private messageHandler: ((message: ChannelMessage) => Promise<string>) | null = null;
 
+  // Route-policy engine (optional). When present, every inbound message
+  // is gated by the per-channel policy: pairing rules, rate limits, and
+  // response formatting. When absent the gateway falls back to its
+  // previous behaviour so existing tests that don't wire the engine
+  // keep passing unchanged.
+  private routePolicyEngine: RoutePolicyEngine | null = null;
+
   constructor(config?: Partial<GatewayConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /**
+   * Attach a RoutePolicyEngine. The gateway consults it for every inbound
+   * message. Denial is honest: the sender receives a short reason string
+   * ("rate_limited", "pairing_required", …) rather than a silent drop.
+   */
+  setRoutePolicyEngine(engine: RoutePolicyEngine): void {
+    this.routePolicyEngine = engine;
+  }
+
+  getRoutePolicyEngine(): RoutePolicyEngine | null {
+    return this.routePolicyEngine;
   }
 
   /**
@@ -133,7 +154,10 @@ export class ChannelGateway {
   /**
    * Connect all registered adapters.
    */
-  async connectAll(): Promise<{ connected: readonly ChannelType[]; failed: readonly ChannelType[] }> {
+  async connectAll(): Promise<{
+    connected: readonly ChannelType[];
+    failed: readonly ChannelType[];
+  }> {
     const connected: ChannelType[] = [];
     const failed: ChannelType[] = [];
 
@@ -198,7 +222,11 @@ export class ChannelGateway {
   /**
    * Register a device node with its capabilities.
    */
-  registerDevice(name: string, channelType: ChannelType, capabilities: readonly string[]): DeviceNode {
+  registerDevice(
+    name: string,
+    channelType: ChannelType,
+    capabilities: readonly string[],
+  ): DeviceNode {
     const node: DeviceNode = {
       id: randomUUID(),
       name,
@@ -227,6 +255,15 @@ export class ChannelGateway {
       .map(([type]) => type);
   }
 
+  /**
+   * Get every channel type that currently has a registered adapter,
+   * whether connected or not. Used by the daemon's policy wire-up so
+   * default route policies can be installed before any adapter connects.
+   */
+  getRegisteredChannels(): readonly ChannelType[] {
+    return [...this.adapters.keys()];
+  }
+
   getAdapter(type: ChannelType): ChannelAdapter | undefined {
     return this.adapters.get(type);
   }
@@ -234,7 +271,12 @@ export class ChannelGateway {
   /**
    * Send a message to a specific channel.
    */
-  async sendToChannel(channelType: ChannelType, channelId: string, content: string, replyTo?: string): Promise<boolean> {
+  async sendToChannel(
+    channelType: ChannelType,
+    channelId: string,
+    content: string,
+    replyTo?: string,
+  ): Promise<boolean> {
     const adapter = this.adapters.get(channelType);
     if (!adapter?.connected) return false;
     return adapter.send(channelId, content, replyTo);
@@ -275,8 +317,12 @@ export class ChannelGateway {
     this.verifiedSenders.add(senderId);
   }
 
-  getAdapterCount(): number { return this.adapters.size; }
-  getVerifiedSenderCount(): number { return this.verifiedSenders.size; }
+  getAdapterCount(): number {
+    return this.adapters.size;
+  }
+  getVerifiedSenderCount(): number {
+    return this.verifiedSenders.size;
+  }
 
   // ── Private ────────────────────────────────────────────────
 
@@ -302,10 +348,78 @@ export class ChannelGateway {
       this.verifiedSenders.add(message.senderId);
     }
 
+    // Route-policy gate. When an engine is wired, consult it before the
+    // handler runs. On denial we reply with the reason string so the
+    // sender learns *why* ("rate_limited", "pairing_required", …) —
+    // silent drops violate the honest-rejection quality bar.
+    //
+    // When no engine is wired, `policy` is null and behaviour is the
+    // same as before this wire-up. This keeps older tests unchanged.
+    //
+    // Two paths bypass the engine's pairing/anonymity checks (rate
+    // limits still apply):
+    //   1. `config.requirePairing === false` — operator disabled pairing
+    //      at the gateway layer; policy must honor that.
+    //   2. Sender is already in `verifiedSenders` — the gateway is the
+    //      authoritative trust ledger for CLI, webchat, and anyone who
+    //      completed a pairing exchange.
+    let activePolicy: ReturnType<RoutePolicyEngine["resolvePolicy"]> | null = null;
+    if (this.routePolicyEngine) {
+      const trustedAtGateway =
+        !this.config.requirePairing || this.verifiedSenders.has(message.senderId);
+
+      if (trustedAtGateway) {
+        activePolicy = this.routePolicyEngine.resolvePolicyForTrustedSender(
+          message.channelType,
+          message.senderId,
+        );
+        // Rate-limit exhaustion is the only remaining failure mode here
+        // and `resolvePolicyForTrustedSender` returns null in that case.
+        // Check the policies list to distinguish "no policy at all" from
+        // "rate-limited" so we can give an honest reason.
+        if (!activePolicy) {
+          const channelHasPolicy = this.routePolicyEngine
+            .getPolicies()
+            .some((p) => p.enabled && p.channel === message.channelType);
+          if (channelHasPolicy) {
+            const adapter = this.adapters.get(message.channelType);
+            if (adapter?.connected) {
+              await adapter.send(message.channelId, `denied: rate_limited`, message.id);
+            }
+            return;
+          }
+          // No policy for this channel — fall through to legacy behaviour.
+        }
+      } else {
+        const decision = this.routePolicyEngine.resolvePolicyWithReason(
+          message.channelType,
+          message.senderId,
+        );
+        if (!decision.policy && decision.reason) {
+          const adapter = this.adapters.get(message.channelType);
+          if (adapter?.connected) {
+            await adapter.send(message.channelId, `denied: ${decision.reason}`, message.id);
+          }
+          return;
+        }
+        activePolicy = decision.policy;
+      }
+    }
+
     // Process message through handler
     if (this.messageHandler) {
       try {
-        const response = await this.messageHandler(message);
+        const rawResponse = await this.messageHandler(message);
+        // Apply policy-driven response formatting + truncation when we
+        // have a policy for this channel. Otherwise pass through.
+        const response = activePolicy
+          ? (this.routePolicyEngine?.formatResponse(
+              rawResponse,
+              activePolicy.responseFormat,
+              activePolicy.maxResponseLength,
+            ) ?? rawResponse)
+          : rawResponse;
+
         const adapter = this.adapters.get(message.channelType);
         if (adapter?.connected) {
           await adapter.send(message.channelId, response, message.id);

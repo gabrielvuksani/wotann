@@ -3564,20 +3564,39 @@ export class WotannRuntime {
    * Persist the knowledge graph to disk. Called on close() and any explicit
    * checkpoint (e.g. before a destructive compaction). Idempotent; writes
    * through a temp file + rename for atomicity.
+   *
+   * Phase B Bug #2 fix: the previous implementation leaked `.tmp.*` files
+   * into `.wotann/` every time the write failed mid-rename (crash, disk
+   * full, EACCES). We now wrap the write in try/finally and unlink the
+   * temp on ANY error so we don't accumulate dozens of orphan .tmp.*
+   * files across daemon restarts.
    */
   async persistKnowledgeGraph(): Promise<void> {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const target = this.knowledgeGraphPath();
+    const dir = path.dirname(target);
+    const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
+    let renamed = false;
     try {
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const target = this.knowledgeGraphPath();
-      const dir = path.dirname(target);
       await fs.mkdir(dir, { recursive: true });
-      const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
       await fs.writeFile(tmp, this.knowledgeGraph.toJSON(), "utf-8");
       await fs.rename(tmp, target);
+      renamed = true;
     } catch {
       /* persistence is best-effort — a disk error during shutdown should
          not propagate and kill the rest of runtime.close(). */
+    } finally {
+      // If the rename never happened, the tmp file is orphaned. Try to
+      // remove it. Swallow the unlink error (the file may never have been
+      // created in the first place).
+      if (!renamed) {
+        try {
+          await fs.unlink(tmp);
+        } catch {
+          /* tmp was never created or already cleaned up — fine */
+        }
+      }
     }
   }
   getContextTreeView(): ContextTree {
@@ -3853,6 +3872,54 @@ export class WotannRuntime {
   getObservationExtractor(): ObservationExtractor {
     return this.observationExtractor;
   }
+
+  /**
+   * Drive one consolidation pass over auto_capture. Intended to be called
+   * from the daemon heartbeat so structured memory_entries are produced
+   * even when no user queries are running. Phase B Bug #1 fix.
+   *
+   * Safe to call on an empty queue — returns a zero-valued report.
+   * @returns the consolidation report, or null if no memoryStore exists.
+   */
+  consolidateObservations(batchSize: number = 200): {
+    readonly read: number;
+    readonly routed: number;
+    readonly classificationFailed: number;
+    readonly decisionLogged: number;
+    readonly byBlock: Readonly<Record<string, number>>;
+  } | null {
+    if (!this.memoryStore) return null;
+    try {
+      return this.memoryStore.consolidateAutoCaptures(
+        (entries) => this.observationExtractor.extractFromCaptures(entries),
+        {
+          batchSize,
+          onClassificationFailed: (entry, reason) => {
+            this.memoryStore?.captureEvent(
+              "classification_failed",
+              JSON.stringify({
+                reason,
+                sourceId: entry.id,
+                sourceType: entry.eventType,
+                contentPreview: entry.content.slice(0, 120),
+              }),
+              "observation-consolidation",
+              this.session.id,
+            );
+          },
+        },
+      );
+    } catch (err) {
+      this.memoryStore?.captureEvent(
+        "consolidation_error",
+        `${(err as Error).name}: ${(err as Error).message}`,
+        "observation-consolidation",
+        this.session.id,
+      );
+      return null;
+    }
+  }
+
   getTunnelDetector(): TunnelDetector {
     return this.tunnelDetector;
   }
@@ -4384,54 +4451,54 @@ export class WotannRuntime {
       );
     }
 
-    // C7: Dream pipeline seed — feed the full conversation into the
-    // ObservationExtractor so downstream dream / instinct / self-evolution
-    // stages have structured observations to consolidate at night.
-    try {
-      const now = new Date().toISOString();
-      const captures = this.session.messages
-        .filter((m) => typeof m.content === "string" && m.content.length > 0)
-        .map((m, idx) => ({
-          id: idx,
-          eventType: m.role === "user" ? "user_message" : "assistant_response",
-          content: (m.content as string).slice(0, 4000),
-          createdAt: now,
-        }));
-      if (captures.length > 0) {
-        const observations = this.observationExtractor.extractFromCaptures(captures);
-        for (const obs of observations.slice(0, 50)) {
-          // Promote observations to structured memory_entries (not auto_capture again).
-          // Map ObservationType → MemoryBlockType: decision→decisions, preference→feedback,
-          // milestone→project, problem→issues, discovery→cases.
-          const blockType =
-            obs.type === "decision"
-              ? "decisions"
-              : obs.type === "preference"
-                ? "feedback"
-                : obs.type === "milestone"
-                  ? "project"
-                  : obs.type === "problem"
-                    ? "issues"
-                    : "cases";
-          this.memoryStore?.insert({
-            id: obs.id,
-            layer: "working",
-            blockType,
-            key: `${obs.type}:${obs.assertion.slice(0, 80)}`,
-            value: obs.assertion,
-            sessionId: this.session.id,
-            verified: false,
-            freshnessScore: 1.0,
-            confidenceLevel: obs.confidence,
-            verificationStatus: "unverified",
-            tags: obs.type,
-            domain: obs.domain ?? "",
-            topic: obs.topic ?? "",
-          });
-        }
+    // Phase B Bug #1 fix: route unconsolidated auto_capture rows into the
+    // structured memory_entries / decision_log tables. Previously this ran
+    // only against `session.messages` (in-memory conversation), so a
+    // daemon lifecycle that did no real queries produced 0 memory_entries
+    // despite thousands of auto_capture rows. Now we pull from the DB so
+    // every captured event gets a chance at structured routing.
+    if (this.memoryStore) {
+      try {
+        const report = this.memoryStore.consolidateAutoCaptures(
+          (entries) => this.observationExtractor.extractFromCaptures(entries),
+          {
+            batchSize: 500,
+            onClassificationFailed: (entry, reason) => {
+              // Re-emit into auto_capture so the failure is observable in
+              // the next session's logs + searchable via `wotann memory`.
+              // Quality bar: never silently swallow.
+              this.memoryStore?.captureEvent(
+                "classification_failed",
+                JSON.stringify({
+                  reason,
+                  sourceId: entry.id,
+                  sourceType: entry.eventType,
+                  contentPreview: entry.content.slice(0, 120),
+                }),
+                "observation-consolidation",
+                this.session.id,
+              );
+            },
+          },
+        );
+        // Log the pass — small structured record so ops can see the
+        // pipeline doing something even when routed=0.
+        this.memoryStore?.captureEvent(
+          "consolidation_pass",
+          JSON.stringify(report),
+          "observation-consolidation",
+          this.session.id,
+        );
+      } catch (err) {
+        // Hard failure (e.g., DB locked, extractor crash). Surface as an
+        // auto_capture event; do NOT swallow. Quality bar.
+        this.memoryStore?.captureEvent(
+          "consolidation_error",
+          `${(err as Error).name}: ${(err as Error).message}`,
+          "observation-consolidation",
+          this.session.id,
+        );
       }
-    } catch {
-      // Best-effort — observation extraction must never block shutdown.
     }
 
     // Fire plugin lifecycle session end (best-effort, ignore errors)

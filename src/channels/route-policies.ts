@@ -18,7 +18,12 @@ export type ResponseFormat = "markdown" | "plain" | "rich" | "html" | "json";
 
 export type ModelTier = "fast" | "balanced" | "powerful" | "local";
 
-export type EscalationAction = "retry" | "switch-model" | "switch-channel" | "human-escalate" | "snooze";
+export type EscalationAction =
+  | "retry"
+  | "switch-model"
+  | "switch-channel"
+  | "human-escalate"
+  | "snooze";
 
 // ── Route Policy ────────────────────────────────────────
 
@@ -64,12 +69,25 @@ export interface RoutePolicy {
 }
 
 export type DeviceCapability =
-  | "text" | "voice" | "images" | "files" | "browser"
-  | "desktop" | "notifications" | "camera" | "gps"
-  | "screen-recording" | "clipboard";
+  | "text"
+  | "voice"
+  | "images"
+  | "files"
+  | "browser"
+  | "desktop"
+  | "notifications"
+  | "camera"
+  | "gps"
+  | "screen-recording"
+  | "clipboard";
 
 export interface EscalationRule {
-  readonly trigger: "failure-count" | "cost-exceeded" | "timeout" | "complexity" | "explicit-request";
+  readonly trigger:
+    | "failure-count"
+    | "cost-exceeded"
+    | "timeout"
+    | "complexity"
+    | "explicit-request";
   readonly threshold: number;
   readonly action: EscalationAction;
   readonly target?: string; // Channel ID or model name
@@ -107,6 +125,24 @@ export class RoutePolicyEngine {
    */
   removePolicy(policyId: string): boolean {
     return this.policies.delete(policyId);
+  }
+
+  /**
+   * Register (or replace) the policy for a channel. Convenience wrapper
+   * the daemon uses at start(): iterate over registered adapters and
+   * install each channel's default policy in one pass. Channel is kept
+   * in the signature so callers can't accidentally mismatch the id
+   * convention that other call sites rely on.
+   */
+  registerChannel(channel: ChannelType, policy: RoutePolicy): void {
+    if (policy.channel !== channel) {
+      // Honest failure — never silently rewrite channel on the caller's
+      // policy object (that would mask a wiring bug for months).
+      throw new Error(
+        `registerChannel mismatch: requested "${channel}" but policy is for "${policy.channel}"`,
+      );
+    }
+    this.policies.set(policy.id, policy);
   }
 
   /**
@@ -152,6 +188,71 @@ export class RoutePolicyEngine {
     }
 
     return null;
+  }
+
+  /**
+   * Variant of resolvePolicy for senders already trusted by the
+   * gateway layer. Skips the pairing/anonymous checks but still
+   * enforces rate limits. Returns null when rate-limited (the caller
+   * is expected to short-circuit in that case).
+   */
+  resolvePolicyForTrustedSender(channel: ChannelType, senderId: string): RoutePolicy | null {
+    const candidates = [...this.policies.values()]
+      .filter((p) => p.enabled && p.channel === channel)
+      .sort((a, b) => b.priority - a.priority);
+
+    for (const policy of candidates) {
+      if (!this.checkRateLimit(policy.id, senderId)) {
+        continue;
+      }
+      return policy;
+    }
+    return null;
+  }
+
+  /**
+   * Resolve a policy and return an explanation when no policy applies.
+   * Returns `{ policy, reason: null }` on success, or `{ policy: null, reason }`
+   * when denied. Honest rejection never swallows the cause — callers can
+   * forward `reason` verbatim to the sender so policy decisions are visible.
+   */
+  resolvePolicyWithReason(
+    channel: ChannelType,
+    senderId: string,
+  ): { readonly policy: RoutePolicy | null; readonly reason: string | null } {
+    const candidates = [...this.policies.values()]
+      .filter((p) => p.enabled && p.channel === channel)
+      .sort((a, b) => b.priority - a.priority);
+
+    if (candidates.length === 0) {
+      return { policy: null, reason: null };
+    }
+
+    let sawPairingBlock = false;
+    let sawAnonymousBlock = false;
+    let sawRateLimitBlock = false;
+
+    for (const policy of candidates) {
+      if (policy.requiresPairing && !policy.trustedSenders.includes(senderId)) {
+        sawPairingBlock = true;
+        continue;
+      }
+      if (!policy.allowAnonymous && !senderId) {
+        sawAnonymousBlock = true;
+        continue;
+      }
+      if (!this.checkRateLimit(policy.id, senderId)) {
+        sawRateLimitBlock = true;
+        continue;
+      }
+      return { policy, reason: null };
+    }
+
+    // Every candidate failed — report the most-specific reason.
+    if (sawRateLimitBlock) return { policy: null, reason: "rate_limited" };
+    if (sawPairingBlock) return { policy: null, reason: "pairing_required" };
+    if (sawAnonymousBlock) return { policy: null, reason: "anonymous_denied" };
+    return { policy: null, reason: "policy_denied" };
   }
 
   /**
@@ -329,7 +430,7 @@ export function createDefaultPolicy(channel: ChannelType): RoutePolicy {
       includeCodeBlocks: true,
       maxRequestsPerMinute: 20,
       maxRequestsPerHour: 200,
-      maxCostPerRequest: 0.50,
+      maxCostPerRequest: 0.5,
       preferredModelTier: "balanced",
     },
     discord: {
@@ -347,7 +448,7 @@ export function createDefaultPolicy(channel: ChannelType): RoutePolicy {
       includeCodeBlocks: true,
       maxRequestsPerMinute: 5,
       maxRequestsPerHour: 50,
-      maxCostPerRequest: 0.50,
+      maxCostPerRequest: 0.5,
       preferredModelTier: "powerful",
     },
     sms: {
@@ -356,7 +457,7 @@ export function createDefaultPolicy(channel: ChannelType): RoutePolicy {
       includeCodeBlocks: false,
       maxRequestsPerMinute: 5,
       maxRequestsPerHour: 30,
-      maxCostPerRequest: 0.10,
+      maxCostPerRequest: 0.1,
       preferredModelTier: "fast",
     },
     voice: {
@@ -365,7 +466,7 @@ export function createDefaultPolicy(channel: ChannelType): RoutePolicy {
       includeCodeBlocks: false,
       maxRequestsPerMinute: 10,
       maxRequestsPerHour: 60,
-      maxCostPerRequest: 0.30,
+      maxCostPerRequest: 0.3,
       preferredModelTier: "fast",
     },
     webhook: {
@@ -374,7 +475,7 @@ export function createDefaultPolicy(channel: ChannelType): RoutePolicy {
       includeCodeBlocks: true,
       maxRequestsPerMinute: 30,
       maxRequestsPerHour: 300,
-      maxCostPerRequest: 0.50,
+      maxCostPerRequest: 0.5,
       preferredModelTier: "balanced",
     },
   };

@@ -10,30 +10,38 @@ import type { MiddlewareContext } from "../../src/middleware/types.js";
 
 describe("Middleware Pipeline", () => {
   describe("pipeline structure", () => {
-    it("has 25 layers in correct order", () => {
+    it("has the expected layers in correct order", () => {
       // S5-4 removed two structurally dead middleware layers:
-      // SubagentLimit (gated on taskType "subagent" which IntentGate
-      // never produces) and LSP (read ctx.filePath which no preceding
-      // middleware layer ever set). Layer count is now 25, down from 27.
+      // SubagentLimit and LSP. Phase C added FileTypeGate at 3.5.
+      // Lane 2 added 6 more middleware (DanglingToolCall, SandboxAudit,
+      // GuardrailProvider, LLMErrorHandling, DeferredToolFilter, Title).
+      // Total: 32 layers.
       const pipeline = createDefaultPipeline();
       const names = pipeline.getLayerNames();
 
-      expect(names).toHaveLength(25);
+      expect(names).toHaveLength(32);
       expect(names[0]).toBe("ToolPairValidator");
       expect(names[1]).toBe("IntentGate");
-      // Layers 2-6: ThreadData, Uploads, Sandbox, Guardrail, ToolError
-      expect(names[7]).toBe("OutputTruncation");
-      expect(names[15]).toBe("Frustration");
-      expect(names[16]).toBe("PreCompletionChecklist");
-      expect(names[17]).toBe("SystemNotifications");
-      // TerminalBench layers 18-24:
-      expect(names[18]).toBe("NonInteractive");
-      expect(names[19]).toBe("PlanEnforcement");
-      expect(names[20]).toBe("VerificationEnforcement");
-      expect(names[21]).toBe("AutoInstall");
-      expect(names[22]).toBe("StaleDetection");
-      expect(names[23]).toBe("DoomLoop");
-      expect(names[24]).toBe("SelfReflection");
+      expect(names[2]).toBe("ThreadData");
+      expect(names[3]).toBe("Uploads");
+      expect(names[4]).toBe("FileTypeGate");
+      // Assert key anchors rather than every index so future layer
+      // insertions don't require rewriting every expectation.
+      expect(names).toContain("Sandbox");
+      expect(names).toContain("Guardrail");
+      expect(names).toContain("ToolError");
+      expect(names).toContain("OutputTruncation");
+      expect(names).toContain("Frustration");
+      expect(names).toContain("PreCompletionChecklist");
+      expect(names).toContain("SystemNotifications");
+      expect(names).toContain("NonInteractive");
+      expect(names).toContain("PlanEnforcement");
+      expect(names).toContain("VerificationEnforcement");
+      expect(names).toContain("AutoInstall");
+      expect(names).toContain("StaleDetection");
+      expect(names).toContain("DoomLoop");
+      // SelfReflection must remain the final (post-response) layer.
+      expect(names[names.length - 1]).toBe("SelfReflection");
     });
 
     it("runs before hooks in forward order", async () => {

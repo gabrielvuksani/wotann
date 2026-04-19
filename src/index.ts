@@ -3479,7 +3479,7 @@ program
 program
   .command("bench <flavour>")
   .description(
-    "Run a Phase-4 real benchmark (terminal-bench | aider-polyglot | humaneval-plus | mbpp-plus | livecodebench)",
+    "Run a benchmark (terminal-bench | aider-polyglot | humaneval-plus | mbpp-plus | livecodebench | longmemeval)",
   )
   .option("-n, --limit <number>", "Max tasks to run (default: all)", (v) => parseInt(v, 10))
   .option("-s, --seed <number>", "Deterministic shuffle seed", (v) => parseInt(v, 10))
@@ -3490,6 +3490,18 @@ program
   .option("-b, --budget <ms>", "Total wall-clock budget across all tasks (ms)", (v) =>
     parseInt(v, 10),
   )
+  // LongMemEval-specific options (ignored by other flavours)
+  .option("--variant <variant>", "LongMemEval variant: s | m | oracle (default: s)")
+  .option("--top-k <number>", "LongMemEval retrieval top-K (default: 10)", (v) => parseInt(v, 10))
+  .option(
+    "--skip-download",
+    "LongMemEval: use built-in 10-instance smoke corpus instead of the downloaded dataset",
+  )
+  .option("--dry-run", "LongMemEval: alias for --skip-download; runs end-to-end on smoke corpus")
+  .option(
+    "--runtime",
+    "LongMemEval: route retrieved context through runtime.query (default: memory-stack only)",
+  )
   .action(
     async (
       flavour: string,
@@ -3499,8 +3511,19 @@ program
         model?: string;
         threshold?: number;
         budget?: number;
+        variant?: string;
+        topK?: number;
+        skipDownload?: boolean;
+        dryRun?: boolean;
+        runtime?: boolean;
       },
     ) => {
+      // LongMemEval has a different runner surface; dispatch separately.
+      if (flavour === "longmemeval") {
+        await runLongMemEvalCommand(cliOpts);
+        return;
+      }
+
       const validFlavours = [
         "terminal-bench",
         "aider-polyglot",
@@ -3510,7 +3533,11 @@ program
       ] as const;
       type Flavour = (typeof validFlavours)[number];
       if (!(validFlavours as readonly string[]).includes(flavour)) {
-        console.error(chalk.red(`Invalid flavour: ${flavour}. Valid: ${validFlavours.join(", ")}`));
+        console.error(
+          chalk.red(
+            `Invalid flavour: ${flavour}. Valid: ${[...validFlavours, "longmemeval"].join(", ")}`,
+          ),
+        );
         process.exit(1);
       }
       const typedFlavour = flavour as Flavour;
@@ -3554,6 +3581,163 @@ program
       console.log();
     },
   );
+
+// ── LongMemEval dispatch helper ────────────────────────────
+
+/**
+ * Handle `wotann bench longmemeval` — keeps the bench command tidy by
+ * lazy-loading the runner and owning the pretty-print for this flavour.
+ *
+ * Honest error surfacing: when the corpus file is missing and neither
+ * --skip-download nor --dry-run is set, the loader throws with download
+ * instructions. We print that verbatim and exit 1 rather than silently
+ * running on the smoke corpus — the "honest error + --skip-download"
+ * contract from the spec.
+ */
+async function runLongMemEvalCommand(cliOpts: {
+  limit?: number;
+  seed?: number;
+  model?: string;
+  budget?: number;
+  variant?: string;
+  topK?: number;
+  skipDownload?: boolean;
+  dryRun?: boolean;
+  runtime?: boolean;
+}): Promise<void> {
+  const { loadLongMemEvalCorpus, runLongMemEval } =
+    await import("./memory/evals/longmemeval/index.js");
+
+  const variant = (cliOpts.variant ?? "s") as "s" | "m" | "oracle";
+  if (!["s", "m", "oracle"].includes(variant)) {
+    console.error(chalk.red(`Invalid variant: ${variant}. Valid: s, m, oracle`));
+    process.exit(1);
+  }
+
+  const skipDownload = cliOpts.skipDownload === true || cliOpts.dryRun === true;
+  const topK = cliOpts.topK ?? 10;
+
+  console.log(chalk.bold("\nWOTANN Bench — longmemeval\n"));
+  console.log(chalk.dim(`  Variant:   ${variant}`));
+  console.log(chalk.dim(`  Mode:      ${cliOpts.runtime ? "runtime" : "memory-stack"}`));
+  console.log(chalk.dim(`  Top-K:     ${topK}`));
+  console.log(chalk.dim(`  Limit:     ${cliOpts.limit ?? "all"}`));
+  console.log(chalk.dim(`  Seed:      ${cliOpts.seed ?? "deterministic-order"}`));
+  console.log(
+    chalk.dim(
+      `  Corpus:    ${skipDownload ? "smoke (10 instances, built-in)" : `on-disk ${variant}`}`,
+    ),
+  );
+  console.log();
+  console.log(chalk.dim("  Running...\n"));
+
+  let instances;
+  try {
+    const loadOpts: {
+      variant: "s" | "m" | "oracle";
+      skipDownload: boolean;
+      limit?: number;
+      seed?: number;
+    } = { variant, skipDownload };
+    if (cliOpts.limit !== undefined) loadOpts.limit = cliOpts.limit;
+    if (cliOpts.seed !== undefined) loadOpts.seed = cliOpts.seed;
+    instances = loadLongMemEvalCorpus(process.cwd(), loadOpts);
+  } catch (e) {
+    console.error(chalk.red("LongMemEval corpus load failed:"));
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+
+  if (instances.length === 0) {
+    console.error(chalk.red("No LongMemEval instances loaded."));
+    process.exit(1);
+  }
+
+  const runOpts: {
+    mode: "memory-stack" | "runtime";
+    topK: number;
+    totalBudgetMs?: number;
+    model?: string;
+  } = {
+    mode: cliOpts.runtime ? "runtime" : "memory-stack",
+    topK,
+  };
+  if (cliOpts.budget !== undefined) runOpts.totalBudgetMs = cliOpts.budget;
+  if (cliOpts.model !== undefined) runOpts.model = cliOpts.model;
+
+  // Runtime mode needs an initialised WotannRuntime; memory-stack doesn't.
+  let runtimeInstance: unknown;
+  if (runOpts.mode === "runtime") {
+    const { createRuntime } = await import("./core/runtime.js");
+    runtimeInstance = await createRuntime(process.cwd());
+  }
+
+  const report = await runLongMemEval(instances, {
+    ...runOpts,
+    ...(runtimeInstance ? { runtime: runtimeInstance as never } : {}),
+  });
+
+  console.log(chalk.bold("  Results:\n"));
+  console.log(chalk.dim(`  Run ID:              ${report.runId}`));
+  console.log(chalk.dim(`  Instances:           ${report.totalInstances}`));
+  console.log(chalk.dim(`  Completed:           ${report.completedInstances}`));
+  console.log(
+    chalk.dim(`  Overall accuracy:    ${(report.score.overallAccuracy * 100).toFixed(1)}%`),
+  );
+  console.log(
+    chalk.dim(`    ├─ strict (verbatim): ${(report.score.strictAccuracy * 100).toFixed(1)}%`),
+  );
+  console.log(
+    chalk.dim(`    └─ lenient (words):   ${(report.score.lenientAccuracy * 100).toFixed(1)}%`),
+  );
+  console.log(
+    chalk.dim(
+      `  Wall clock:          ${((report.finishedAt - report.startedAt) / 1000).toFixed(1)}s`,
+    ),
+  );
+
+  console.log(chalk.bold("\n  Ability breakdown:\n"));
+  for (const [ability, breakdown] of Object.entries(report.score.byAbility)) {
+    if (breakdown.total === 0) continue;
+    const pct = (breakdown.accuracy * 100).toFixed(1);
+    const icon =
+      breakdown.accuracy >= 0.7
+        ? chalk.green("✓")
+        : breakdown.accuracy >= 0.5
+          ? chalk.yellow("○")
+          : chalk.red("✗");
+    console.log(`  ${icon} ${ability.padEnd(26)} ${breakdown.passed}/${breakdown.total} (${pct}%)`);
+  }
+
+  if (report.errors.length > 0) {
+    console.log(chalk.yellow(`\n  ${report.errors.length} instance(s) errored:`));
+    for (const err of report.errors.slice(0, 5)) {
+      console.log(chalk.dim(`    ${err.question_id}: ${err.error}`));
+    }
+    if (report.errors.length > 5) {
+      console.log(chalk.dim(`    ... and ${report.errors.length - 5} more`));
+    }
+  }
+
+  // Persist the report for trend tracking. Uses the same .wotann/benchmarks
+  // layout as the other benchmark flavours.
+  try {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const outDir = join(process.cwd(), ".wotann", "benchmarks", "longmemeval");
+    mkdirSync(outDir, { recursive: true });
+    const outPath = join(outDir, `${report.runId}.json`);
+    writeFileSync(outPath, JSON.stringify(report, null, 2));
+    console.log(chalk.dim(`\n  Saved: ${outPath}`));
+  } catch (e) {
+    console.log(
+      chalk.dim(
+        `\n  (warning: failed to persist report — ${e instanceof Error ? e.message : String(e)})`,
+      ),
+    );
+  }
+
+  console.log();
+}
 
 // ── wotann health ───────────────────────────────────────────
 
@@ -3741,6 +3925,87 @@ program
           .then(resolve);
       });
     });
+  });
+
+// ── wotann import-design ───────────────────────────────────
+// F7: Receiver for Claude Design handoff bundles (Anthropic Labs, 2026-04-17).
+
+program
+  .command("import-design <bundle>")
+  .description("Import a Claude Design handoff bundle (ZIP) into ~/.wotann/imported-designs/")
+  .option("--require-components", "Fail if the bundle has no components.json", false)
+  .option("--out <dir>", "Override output directory (default ~/.wotann/imported-designs/<name>)")
+  .action(async (bundlePath: string, opts: { requireComponents?: boolean; out?: string }) => {
+    const { parseHandoffBundle } = await import("./design/handoff-receiver.js");
+    const { emitTokensCss } = await import("./design/design-tokens-parser.js");
+    const { writeComponents } = await import("./design/component-importer.js");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const absBundle = resolve(process.cwd(), bundlePath);
+
+    let bundle;
+    try {
+      bundle = parseHandoffBundle(absBundle, {
+        requireComponents: opts.requireComponents === true,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(chalk.red(`import-design failed: ${msg}\n`));
+      process.exit(2);
+    }
+
+    const baseDir =
+      opts.out !== undefined
+        ? resolve(process.cwd(), opts.out)
+        : join(homedir(), ".wotann", "imported-designs", bundle.manifest.name);
+    const componentsDir = join(baseDir, "components");
+    const tokensPath = join(baseDir, "tokens.css");
+    const manifestPath = join(baseDir, "manifest.json");
+    const tokensJsonPath = join(baseDir, "design-system.json");
+
+    mkdirSync(baseDir, { recursive: true });
+    writeFileSync(tokensPath, emitTokensCss(bundle.tokens));
+    writeFileSync(manifestPath, JSON.stringify(bundle.manifest, null, 2));
+    writeFileSync(tokensJsonPath, JSON.stringify(bundle.rawDesignSystem, null, 2));
+
+    const result = writeComponents(bundle.components, componentsDir);
+
+    console.log(chalk.bold("\nWOTANN Design Import\n"));
+    console.log(chalk.dim(`  Bundle:         ${bundle.manifest.name} v${bundle.manifest.version}`));
+    console.log(chalk.dim(`  Bundle format:  ${bundle.manifest.bundleVersion}`));
+    if (bundle.manifest.author) {
+      console.log(chalk.dim(`  Author:         ${bundle.manifest.author}`));
+    }
+    if (bundle.manifest.exportedFrom) {
+      console.log(chalk.dim(`  Exported from:  ${bundle.manifest.exportedFrom}`));
+    }
+    console.log(chalk.dim(`  Output dir:     ${baseDir}`));
+    console.log();
+    console.log(chalk.bold("  Tokens"));
+    console.log(chalk.dim(`    colors:        ${bundle.tokens.colors.length}`));
+    console.log(chalk.dim(`    typography:    ${bundle.tokens.typography.length}`));
+    console.log(chalk.dim(`    spacing:       ${bundle.tokens.spacing.length}`));
+    console.log(chalk.dim(`    borderRadius:  ${bundle.tokens.borderRadius.length}`));
+    console.log(chalk.dim(`    shadows:       ${bundle.tokens.shadows.length}`));
+    console.log(chalk.dim(`    other:         ${bundle.tokens.extras.length}`));
+    console.log(chalk.dim(`    total:         ${bundle.tokens.totalCount}`));
+    console.log();
+    console.log(chalk.bold("  Components"));
+    console.log(chalk.dim(`    imported:      ${result.componentCount}`));
+    console.log();
+    console.log(chalk.bold("  Extras"));
+    console.log(
+      chalk.dim(`    figma.json:    ${bundle.figma === undefined ? "absent" : "present"}`),
+    );
+    console.log(
+      chalk.dim(
+        `    code-scaffold: ${bundle.codeScaffold === undefined ? 0 : bundle.codeScaffold.length} files`,
+      ),
+    );
+    console.log(chalk.dim(`    assets:        ${bundle.assets.length} files`));
+    console.log();
+    console.log(chalk.green(`  Imported to ${baseDir}`));
+    console.log();
+    process.exit(0);
   });
 
 // ── Parse ───────────────────────────────────────────────────

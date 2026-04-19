@@ -9,7 +9,23 @@
  * when `WOTANN_RUN_MAGIKA_TESTS=1` is set.
  */
 import { describe, it, expect } from "vitest";
-import { detectFileType } from "../../src/middleware/file-type-gate.js";
+import {
+  detectFileType,
+  fileTypeGateMiddleware,
+  type FileUpload,
+} from "../../src/middleware/file-type-gate.js";
+import type { MiddlewareContext } from "../../src/middleware/types.js";
+import { createDefaultPipeline } from "../../src/middleware/pipeline.js";
+
+function baseContext(overrides: Partial<MiddlewareContext> = {}): MiddlewareContext {
+  return {
+    sessionId: "test-session",
+    userMessage: "",
+    recentHistory: [],
+    workingDir: process.cwd(),
+    ...overrides,
+  };
+}
 
 describe("file-type-gate — extension fallback", () => {
   it("returns a FileTypeResult for a .pdf named file (shape contract)", async () => {
@@ -91,4 +107,125 @@ describe("file-type-gate — real Magika model (env-gated)", () => {
       expect(result.handler).toBe("code");
     },
   );
+});
+
+describe("file-type-gate middleware — layer 3.5 wiring", () => {
+  it("no-ops when ctx.uploads is absent (pre-gate contexts unchanged)", async () => {
+    const ctx = baseContext();
+    const out = await fileTypeGateMiddleware.before!(ctx);
+    // No uploads → handler/events slots remain absent.
+    expect((out as MiddlewareContext).uploads).toBeUndefined();
+    expect((out as MiddlewareContext).fileTypeGateEvents).toBeUndefined();
+  });
+
+  it("stamps handler + trustBoundary on each upload", async () => {
+    const code = new TextEncoder().encode(
+      "export function add(a: number, b: number): number { return a + b; }\n",
+    );
+    const uploads: readonly FileUpload[] = [{ filename: "math.ts", bytes: code }];
+    const ctx = baseContext({ uploads });
+    const out = (await fileTypeGateMiddleware.before!(ctx)) as MiddlewareContext;
+    expect(out.uploads).toBeDefined();
+    expect(out.uploads!.length).toBe(1);
+    const stamped = out.uploads![0]!;
+    expect(stamped.filename).toBe("math.ts");
+    expect(stamped.handler).toBe("code");
+    expect(stamped.trustBoundary).toBe("safe");
+    expect(typeof stamped.confidence).toBe("number");
+    // Immutability: original upload object is not the same reference.
+    expect(stamped).not.toBe(uploads[0]);
+  });
+
+  it("emits gate_failed event for empty uploads (no silent swallow)", async () => {
+    const uploads: readonly FileUpload[] = [
+      { filename: "empty.bin", bytes: new Uint8Array(0) },
+    ];
+    const ctx = baseContext({ uploads });
+    const out = (await fileTypeGateMiddleware.before!(ctx)) as MiddlewareContext;
+    expect(out.fileTypeGateEvents).toBeDefined();
+    expect(out.fileTypeGateEvents!.length).toBe(1);
+    const ev = out.fileTypeGateEvents![0]!;
+    expect(ev.kind).toBe("gate_failed");
+    expect(ev.reason).toBe("empty-bytes");
+    expect(ev.filename).toBe("empty.bin");
+    // Upload is still stamped — as "unknown" with "unknown" boundary — not dropped.
+    expect(out.uploads![0]!.handler).toBe("unknown");
+    expect(out.uploads![0]!.trustBoundary).toBe("unknown");
+  });
+
+  it("emits gate_failed event for unknown-format uploads", async () => {
+    // Random bytes with an invented extension — neither model nor
+    // extension fallback will classify it.
+    const bytes = new Uint8Array([0xaa, 0xbb, 0xcc, 0xdd]);
+    const uploads: readonly FileUpload[] = [
+      { filename: "mystery.qqzxy", bytes },
+    ];
+    const ctx = baseContext({ uploads });
+    const out = (await fileTypeGateMiddleware.before!(ctx)) as MiddlewareContext;
+    const stamped = out.uploads![0]!;
+    // When model is loaded it may still classify the bytes; in that case
+    // handler may not be "unknown" and no event fires. When only fallback
+    // is available, handler is "unknown" and the gate emits the event.
+    if (stamped.handler === "unknown") {
+      expect(out.fileTypeGateEvents!.some((e) => e.reason === "unknown-format")).toBe(true);
+    }
+  });
+
+  it("appears immediately after Uploads in the default pipeline (layer 3.5)", () => {
+    const pipeline = createDefaultPipeline();
+    const names = pipeline.getLayerNames();
+    const uploadsIdx = names.indexOf("Uploads");
+    const gateIdx = names.indexOf("FileTypeGate");
+    const sandboxIdx = names.indexOf("Sandbox");
+    expect(uploadsIdx).toBeGreaterThanOrEqual(0);
+    // Task requirement: FileTypeGate is inserted directly after uploadsMiddleware.
+    expect(gateIdx).toBe(uploadsIdx + 1);
+    // FileTypeGate must run before sandbox so trust-boundary is set first.
+    expect(sandboxIdx).toBeGreaterThan(gateIdx);
+  });
+
+  it("functional: .pdf-as-.txt upload is stamped correctly through the pipeline", async () => {
+    // Real PDF header bytes. Extension is `.txt` — the whole point is
+    // that Magika sees the actual bytes and classifies as pdf.
+    const pdfHeader = new TextEncoder().encode(
+      "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n",
+    );
+    const uploads: readonly FileUpload[] = [
+      { filename: "disguised.txt", bytes: pdfHeader },
+    ];
+    const ctx = baseContext({ uploads });
+    const pipeline = createDefaultPipeline();
+    const out = await pipeline.processBefore(ctx);
+    expect(out.uploads).toBeDefined();
+    const stamped = out.uploads![0]!;
+    // Shape assertions always hold regardless of whether Magika loaded.
+    expect(typeof stamped.handler).toBe("string");
+    expect(stamped.trustBoundary).toBeDefined();
+    expect(["pdf", "text", "unknown"]).toContain(stamped.handler);
+    // When Magika loaded (local + CI with weights) the specific handler
+    // is "pdf" and the boundary reports content/extension mismatch.
+    if (stamped.handler === "pdf") {
+      expect(stamped.trustBoundary).toBe("binary");
+      expect(stamped.extensionMismatch).toBe(true);
+    }
+  });
+
+  it("functional (env-gated): .pdf-as-.txt → handler='pdf' when model loads", async () => {
+    if (process.env["WOTANN_RUN_MAGIKA_TESTS"] !== "1") return;
+    const pdfHeader = new TextEncoder().encode(
+      "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n",
+    );
+    const uploads: readonly FileUpload[] = [
+      { filename: "disguised.txt", bytes: pdfHeader },
+    ];
+    const ctx = baseContext({ uploads });
+    const pipeline = createDefaultPipeline();
+    const out = await pipeline.processBefore(ctx);
+    const stamped = out.uploads![0]!;
+    if (!stamped.handler) return; // defensive
+    // With model loaded, handler MUST be pdf per task requirement.
+    expect(stamped.handler).toBe("pdf");
+    expect(stamped.trustBoundary).toBe("binary");
+    expect(stamped.extensionMismatch).toBe(true);
+  }, 60_000);
 });

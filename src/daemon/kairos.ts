@@ -4,7 +4,14 @@
  * Daily log as append-only JSONL audit trail.
  */
 
-import { appendFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  mkdirSync,
+  readdirSync,
+  unlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
@@ -12,6 +19,7 @@ import { promisify } from "node:util";
 import { ChannelGateway, type ChannelMessage } from "../channels/gateway.js";
 import { UnifiedDispatchPlane } from "../channels/unified-dispatch.js";
 import { wrapLegacyAdapter } from "../channels/integration.js";
+import { RoutePolicyEngine, createDefaultPolicy } from "../channels/route-policies.js";
 import { runWorkspaceDreamIfDue } from "../learning/dream-runner.js";
 import { KairosRPCHandler } from "./kairos-rpc.js";
 import { KairosIPCServer, writeSessionToken } from "./kairos-ipc.js";
@@ -147,6 +155,11 @@ export class KairosDaemon {
   private gateway: ChannelGateway | null = null;
   private dispatchPlane: UnifiedDispatchPlane | null = null;
 
+  // Phase-C wire-up: per-channel auth/rate/escalation policy engine.
+  // Lives on the daemon (not inside the gateway) so the same instance
+  // can also back RPC handlers that list/mutate policies at runtime.
+  private routePolicyEngine: RoutePolicyEngine | null = null;
+
   // Phase A: Runtime hosting
   private runtime: WotannRuntime | null = null;
   private rpcHandler: KairosRPCHandler | null = null;
@@ -227,6 +240,23 @@ export class KairosDaemon {
   private contextPressureTickCounter = 0;
   private modelRefreshTickCounter = 0;
 
+  // Phase B Bug #1 fix: run the auto_capture -> memory_entries
+  // consolidation pipeline on a cadence so structured memory_entries exist
+  // even when no user queries land. Without this, a daemon that does
+  // lifecycle-only work (session_start / session_end) produces 1990+
+  // auto_capture rows and 0 memory_entries.
+  private consolidationTickCounter = 0;
+
+  // Phase B Bug #2 fix: track shutdown handlers so we install them at most
+  // once per daemon instance (tests that spin up multiple daemons would
+  // otherwise leak SIGINT/SIGTERM/exit listeners across the process).
+  private shutdownHandlersInstalled = false;
+  private shutdownHandlers: {
+    readonly sigintHandler: () => void;
+    readonly sigtermHandler: () => void;
+    readonly exitHandler: () => void;
+  } | null = null;
+
   constructor(logDir?: string, workingDir?: string) {
     this.workingDir = workingDir ?? process.cwd();
     this.logDir = logDir ?? join(this.workingDir, ".wotann", "logs");
@@ -255,6 +285,25 @@ export class KairosDaemon {
       status: "starting",
       startedAt: new Date(),
     };
+
+    // Phase B Bug #2 fix: sweep orphan .tmp.* + stranded WAL/SHM from the
+    // last crashed run BEFORE opening any new SQLite connections. Running
+    // the sweep pre-runtime means the fresh SQLite instance doesn't get
+    // confused by leftover WAL files pointing at a different journal.
+    const sweepResult = this.sweepOrphanFiles();
+    if (sweepResult.tmpRemoved + sweepResult.walRemoved + sweepResult.shmRemoved > 0) {
+      this.appendLog({
+        type: "start",
+        message: `Orphan file sweep: ${sweepResult.tmpRemoved} tmp, ${sweepResult.walRemoved} wal, ${sweepResult.shmRemoved} shm removed`,
+        data: { ...sweepResult },
+      });
+    }
+
+    // Phase B Bug #2 fix (cont'd): install signal + exit handlers so the
+    // daemon flushes + cleans up even on SIGINT/SIGTERM. Previously a
+    // Ctrl-C mid-write left a stranded .tmp.*; now stop() runs in the
+    // handler before the process exits.
+    this.installShutdownHandlers();
 
     // Phase A1: Initialize WotannRuntime with discovered providers
     try {
@@ -974,6 +1023,29 @@ export class KairosDaemon {
       /* ide bridge not available */
     }
 
+    // Phase-C wire-up: now that every adapter is registered on the
+    // gateway, stand up the route-policy engine with a default policy
+    // for each channel. This activates the 412-LOC policy module
+    // (auth/pairing/rate-limit/escalation/response-formatting) that
+    // was previously unreachable from the gateway code path.
+    //
+    // TODO(channels.setPolicy RPC): the richer RoutePolicy type here
+    // differs from kairos-rpc.ts's DispatchRoutePolicy (which only
+    // covers provider/model routing). Once the RPC surface is
+    // unified, expose `channels.setPolicy(channel, policy)` via
+    // kairos-rpc.ts to let CLI/Desktop mutate these policies at
+    // runtime — matching the existing channels.policy.{list,add,remove}
+    // pattern but targeting this engine instead of the dispatch plane's.
+    this.routePolicyEngine = new RoutePolicyEngine();
+    for (const channel of this.gateway.getRegisteredChannels()) {
+      this.routePolicyEngine.registerChannel(channel, createDefaultPolicy(channel));
+    }
+    this.gateway.setRoutePolicyEngine(this.routePolicyEngine);
+    this.appendLog({
+      type: "heartbeat",
+      message: `Route policy engine wired: ${this.gateway.getRegisteredChannels().length} channels with default policies`,
+    });
+
     await this.gateway.connectAll();
     this.appendLog({
       type: "start",
@@ -984,6 +1056,14 @@ export class KairosDaemon {
 
   getGateway(): ChannelGateway | null {
     return this.gateway;
+  }
+
+  /**
+   * Get the route-policy engine backing the channel gateway (null until
+   * startChannelGateway has run). Exposed for RPC handlers and tests.
+   */
+  getRoutePolicyEngine(): RoutePolicyEngine | null {
+    return this.routePolicyEngine;
   }
 
   /**
@@ -1273,6 +1353,31 @@ export class KairosDaemon {
     this.specTickCounter++;
     if (this.specTickCounter % 100 === 0) {
       this.checkLivingSpecDivergence();
+    }
+
+    // ── Phase B Bug #1 fix: Consolidate auto_capture -> memory_entries ──
+    // Every 8th tick (~2 min at 15s) run a small consolidation pass. Keeps
+    // the work queue bounded and produces structured memory even when no
+    // real user queries are happening. Cheap when the queue is empty.
+    this.consolidationTickCounter++;
+    if (this.consolidationTickCounter % 8 === 0 && this.runtime) {
+      try {
+        const report = this.runtime.consolidateObservations(200);
+        if (report && report.read > 0) {
+          this.appendLog({
+            type: "heartbeat",
+            message: `Consolidation: read ${report.read}, routed ${report.routed}, failed ${report.classificationFailed}, decisions ${report.decisionLogged}`,
+            data: {
+              byBlock: report.byBlock,
+            },
+          });
+        }
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `Consolidation tick failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     }
 
     // ── Tier 2A: Context Pressure — check every 4th tick (~1 min) ──
@@ -1640,6 +1745,167 @@ export class KairosDaemon {
         task.name === taskName && task.schedule === schedule ? { ...task, lastRun, nextRun } : task,
       ),
     };
+  }
+
+  /**
+   * Phase B Bug #2 fix: install shutdown handlers so the daemon flushes
+   * state and cleans up its `.tmp.*` / WAL files even on SIGINT/SIGTERM.
+   *
+   * Previously Ctrl-C mid-write left a stranded `knowledge-graph.json.tmp.*`.
+   * Now the handler calls `stop()` (idempotent) before the process exits.
+   * Registered once per daemon instance; subsequent start()s don't re-add
+   * listeners (the `shutdownHandlersInstalled` flag prevents leak).
+   */
+  private installShutdownHandlers(): void {
+    if (this.shutdownHandlersInstalled) return;
+    this.shutdownHandlersInstalled = true;
+
+    // Keep a reference so tests / external code can remove these if they
+    // need clean teardown (process-wide listeners leak across vitest runs
+    // otherwise).
+    const handleShutdown = (signal: string) => {
+      if (this.state.status === "stopped") return;
+      this.appendLog({
+        type: "stop",
+        message: `Shutdown signal received: ${signal}`,
+      });
+      try {
+        this.stop();
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `stop() threw during ${signal}: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    };
+
+    const sigintHandler = () => handleShutdown("SIGINT");
+    const sigtermHandler = () => handleShutdown("SIGTERM");
+    const exitHandler = () => {
+      // 'exit' fires synchronously after all work is done. stop() is
+      // idempotent — if SIGINT already fired we're a no-op.
+      if (this.state.status !== "stopped") {
+        try {
+          this.stop();
+        } catch {
+          /* process is dying — nothing to do */
+        }
+      }
+    };
+
+    process.on("SIGINT", sigintHandler);
+    process.on("SIGTERM", sigtermHandler);
+    process.on("exit", exitHandler);
+
+    this.shutdownHandlers = { sigintHandler, sigtermHandler, exitHandler };
+  }
+
+  /**
+   * Remove signal handlers. Called from stop() when the caller asks for a
+   * clean teardown (tests, second start()).
+   */
+  private removeShutdownHandlers(): void {
+    if (!this.shutdownHandlersInstalled || !this.shutdownHandlers) return;
+    process.removeListener("SIGINT", this.shutdownHandlers.sigintHandler);
+    process.removeListener("SIGTERM", this.shutdownHandlers.sigtermHandler);
+    process.removeListener("exit", this.shutdownHandlers.exitHandler);
+    this.shutdownHandlersInstalled = false;
+    this.shutdownHandlers = null;
+  }
+
+  /**
+   * Phase B Bug #2 fix: clean up orphan `.tmp.*` files and stranded
+   * WAL/SHM files from previous daemon runs.
+   *
+   * Symptoms that triggered this fix:
+   *   - `.wotann/knowledge-graph.json.tmp.*` × 30+ (leaked atomic-write temps)
+   *   - `.wotann/memory 2.db-wal`, `memory 3.db-shm`, etc. — 6 orphan
+   *     pairs from duplicate SQLite instances opened by crashed processes.
+   *     They have no matching `.db` so they're dead weight.
+   *
+   * Sweeps:
+   *   1. Remove all `*.tmp.*` files in `.wotann/` root (dead atomic-write temps).
+   *   2. Remove all `memory N.db-wal` / `memory N.db-shm` whose corresponding
+   *      `memory N.db` does NOT exist.
+   *
+   * Safe to run on every daemon start. Never touches files that are in-use
+   * by a live SQLite connection (no matching bare `.db` means nothing owns them).
+   *
+   * @returns the number of files removed, split by bucket.
+   */
+  private sweepOrphanFiles(): { tmpRemoved: number; walRemoved: number; shmRemoved: number } {
+    const wotannDirs = [join(this.workingDir, ".wotann"), join(homedir(), ".wotann")];
+    let tmpRemoved = 0;
+    let walRemoved = 0;
+    let shmRemoved = 0;
+
+    for (const dir of wotannDirs) {
+      if (!existsSync(dir)) continue;
+
+      let entries: readonly string[] = [];
+      try {
+        entries = readdirSync(dir);
+      } catch {
+        continue;
+      }
+
+      // Build a set of live `.db` files so we know which WAL/SHM pairs
+      // are safe to remove. A WAL/SHM with a corresponding `.db` is still
+      // in use and must NOT be touched.
+      const liveDbNames = new Set(
+        entries.filter((name) => name.endsWith(".db")).map((name) => name),
+      );
+
+      for (const name of entries) {
+        const full = join(dir, name);
+
+        // Pass 1: remove stale atomic-write temps. Pattern is
+        // `<base>.tmp.<pid>.<ts>` (e.g. `knowledge-graph.json.tmp.12345.67890`).
+        // Match `.tmp.` followed by a digit to avoid false positives like
+        // `.tmpl` or `.tmp` (with no suffix).
+        if (/\.tmp\.\d+/.test(name)) {
+          try {
+            unlinkSync(full);
+            tmpRemoved++;
+          } catch {
+            /* may have been deleted by a race — ignore */
+          }
+          continue;
+        }
+
+        // Pass 2: orphan SQLite WAL files. A `.db-wal` without a matching
+        // `.db` is from a crashed process that can never finish the
+        // checkpoint.
+        if (name.endsWith(".db-wal")) {
+          const baseDb = name.slice(0, -"-wal".length);
+          if (!liveDbNames.has(baseDb)) {
+            try {
+              unlinkSync(full);
+              walRemoved++;
+            } catch {
+              /* race — ignore */
+            }
+          }
+          continue;
+        }
+
+        // Pass 3: orphan SQLite SHM files. Same rule.
+        if (name.endsWith(".db-shm")) {
+          const baseDb = name.slice(0, -"-shm".length);
+          if (!liveDbNames.has(baseDb)) {
+            try {
+              unlinkSync(full);
+              shmRemoved++;
+            } catch {
+              /* race — ignore */
+            }
+          }
+          continue;
+        }
+      }
+    }
+
+    return { tmpRemoved, walRemoved, shmRemoved };
   }
 
   // ── Daily Log (append-only JSONL) ───────────────────────────

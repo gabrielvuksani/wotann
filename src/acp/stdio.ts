@@ -1,20 +1,24 @@
 /**
- * ACP stdio runtime wrapper (C16 runtime).
+ * ACP stdio runtime wrapper (C16 runtime, upgraded to ACP v1).
  *
  * Frames newline-delimited JSON-RPC messages on a duplex stream
  * (stdin/stdout by default) and feeds them to an AcpServer. Mirrors
  * the LSP-style framing most editors already speak, so hosts like
- * Zed and Goose can invoke `wotann acp --stdio` and drop straight
- * into a chat session.
+ * Zed, Gemini CLI and Goose can invoke `wotann acp --stdio` and drop
+ * straight into a session.
  *
  * Intentionally minimal — no Content-Length framing, one message per
- * line. Matches `agentclientprotocol.com` v0.x reference servers.
+ * line. Matches `agentclientprotocol.com` v1 reference servers.
  */
 
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { AcpServer, type AcpHandlers, type AcpServerInfo } from "./server.js";
-import { ACP_PROTOCOL_VERSION } from "./protocol.js";
+import {
+  ACP_PROTOCOL_VERSION,
+  type AcpAgentCapabilities,
+  type AcpContentBlock,
+} from "./protocol.js";
 
 export interface AcpStdioOptions {
   readonly handlers: AcpHandlers;
@@ -62,17 +66,17 @@ export function startAcpStdio(options: AcpStdioOptions): AcpStdioHandle {
     emit: write,
   });
 
-  // Announce protocol version banner on a stderr-like channel via the
-  // `emit` path isn't appropriate — notifications are reserved for
-  // protocol messages. We surface only real ACP frames here. Hosts
-  // should call `initialize` as their first request.
+  // ACP v1 does not define a hello-banner; hosts drive the handshake
+  // by sending `initialize` first. We only emit real protocol frames
+  // from the stdio wrapper — `ACP_PROTOCOL_VERSION` is kept visible
+  // for callers that want to log it outside the protocol channel.
   void ACP_PROTOCOL_VERSION;
 
   rl = createInterface({ input, crlfDelay: Infinity });
 
   // Serialise request processing so order matches input order — a
   // second message cannot start its handler until the first has
-  // resolved. Without this, `initialize` racing with `session/create`
+  // resolved. Without this, `initialize` racing with `session/new`
   // + `session/prompt` causes ServerNotInitialized errors on the
   // later frames even though they arrived in the correct order.
   let queue: Promise<unknown> = Promise.resolve();
@@ -111,29 +115,57 @@ export function startAcpStdio(options: AcpStdioOptions): AcpStdioHandle {
  * Minimal reference handlers — lets callers stand up an ACP server
  * with the spec-required methods even before WotannRuntime is wired.
  * Returns canned responses that satisfy the contract but never stream
- * partials. Intended as a smoke-test / reference implementation.
+ * real content. Intended as a smoke-test / reference implementation
+ * for Zed, Gemini CLI, Goose hosting sanity checks.
  */
 export function referenceHandlers(): AcpHandlers {
   let counter = 0;
+  const REFERENCE_CAPABILITIES: AcpAgentCapabilities = {
+    loadSession: false,
+    promptCapabilities: {
+      image: false,
+      audio: false,
+      embeddedContext: false,
+    },
+    mcpCapabilities: {
+      stdio: true,
+      http: false,
+      sse: false,
+    },
+    _meta: {
+      // Signal to WOTANN-aware hosts that thread/fork etc. are available.
+      "wotann/thread-ops": true,
+    },
+  };
+
   return {
     async initialize(params) {
       return {
+        // Echo the negotiated version — the dispatcher re-runs the
+        // negotiation so handlers can stay naive.
         protocolVersion: params.protocolVersion || ACP_PROTOCOL_VERSION,
-        capabilities: { tools: false, prompts: true, sampling: false },
-        serverInfo: { name: "wotann-reference", version: "0.0.0" },
+        agentCapabilities: REFERENCE_CAPABILITIES,
+        agentInfo: { name: "wotann-reference", version: "0.0.0" },
+        authMethods: [],
       };
     },
-    async sessionCreate() {
+    async sessionNew() {
       counter++;
       return { sessionId: `ref-session-${counter}` };
     },
-    async sessionPrompt(params, onPartial, onComplete) {
-      onPartial({
+    async sessionPrompt(params, onUpdate) {
+      const block: AcpContentBlock = {
+        type: "text",
+        text: "reference handler reply",
+      };
+      onUpdate({
         sessionId: params.sessionId,
-        kind: "text",
-        content: "reference handler reply",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: block,
+        },
       });
-      onComplete({ sessionId: params.sessionId, finishReason: "stop" });
+      return { stopReason: "end_turn" };
     },
     async sessionCancel() {
       /* noop */

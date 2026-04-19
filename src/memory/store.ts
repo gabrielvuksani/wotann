@@ -161,6 +161,24 @@ export interface AutoCaptureEntry {
   readonly createdAt: string;
 }
 
+/**
+ * Result of a call to `MemoryStore.consolidateAutoCaptures`. Surfaces the
+ * work done in the last pass so callers (daemon heartbeat, close(), tests)
+ * can log/assert without re-querying the DB.
+ */
+export interface ConsolidationReport {
+  /** Auto-capture rows read in this pass. */
+  readonly read: number;
+  /** Rows that produced at least one observation and were routed to memory_entries. */
+  readonly routed: number;
+  /** Count by memory_entries block type. Keys: decisions/feedback/project/issues/cases. */
+  readonly byBlock: Readonly<Record<string, number>>;
+  /** Rows that matched no pattern and produced no observation. */
+  readonly classificationFailed: number;
+  /** Rows mirrored into the decision_log table. Sub-count of `byBlock.decisions`. */
+  readonly decisionLogged: number;
+}
+
 export class MemoryStore {
   private readonly db: Database.Database;
   private readonly dbPath: string;
@@ -362,6 +380,19 @@ export class MemoryStore {
       )
       .run();
 
+    // ── Auto-Capture Consolidation Tracking (Phase B Bug #1 fix) ──
+    // Without this column, every consolidation pass would re-process all
+    // auto_capture rows and create duplicate memory_entries. The column
+    // records the ISO-timestamp when a row was routed into the structured
+    // tables (memory_entries / decision_log / etc.). NULL = not yet
+    // consolidated.
+    this.migrateAddColumn("auto_capture", "consolidated_at", "TEXT");
+    this.db
+      .prepare(
+        `CREATE INDEX IF NOT EXISTS idx_capture_consolidated ON auto_capture(consolidated_at)`,
+      )
+      .run();
+
     // ── Temporal Validity Migration (MemPalace R2) ──
     // Add valid_from/valid_to to knowledge_edges for bi-temporal fact queries.
     this.migrateAddColumn(
@@ -442,6 +473,220 @@ export class MemoryStore {
       sessionId: row["session_id"] as string | undefined,
       createdAt: row["created_at"] as string,
     }));
+  }
+
+  /**
+   * Return auto_capture entries that have NOT yet been routed into the
+   * structured memory_entries / decision_log tables. Phase B Bug #1 fix.
+   *
+   * Consolidation uses `consolidated_at IS NULL` as the work-queue marker.
+   * Once a row has been processed by `consolidateAutoCaptures()`, its
+   * `consolidated_at` is stamped with the current ISO-8601 timestamp so
+   * it won't be re-read on the next pass.
+   */
+  getUnconsolidatedAutoCaptures(limit: number = 500): readonly AutoCaptureEntry[] {
+    const rows = this.db
+      .prepare(
+        `
+      SELECT * FROM auto_capture
+      WHERE consolidated_at IS NULL
+      ORDER BY created_at ASC
+      LIMIT ?
+    `,
+      )
+      .all(limit) as Record<string, unknown>[];
+
+    return rows.map((row) => ({
+      id: Number(row["id"] ?? 0),
+      eventType: row["event_type"] as string,
+      toolName: row["tool_name"] as string | undefined,
+      content: row["content"] as string,
+      sessionId: row["session_id"] as string | undefined,
+      createdAt: row["created_at"] as string,
+    }));
+  }
+
+  /**
+   * Mark a set of auto_capture rows as consolidated. Called by
+   * `consolidateAutoCaptures()` once their observations have been inserted
+   * into `memory_entries` / `decision_log`. Idempotent.
+   */
+  markAutoCapturesConsolidated(ids: readonly number[]): void {
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => "?").join(",");
+    const stmt = this.db.prepare(
+      `UPDATE auto_capture SET consolidated_at = datetime('now')
+       WHERE id IN (${placeholders}) AND consolidated_at IS NULL`,
+    );
+    stmt.run(...ids);
+  }
+
+  /**
+   * Route unconsolidated auto_capture rows into structured memory tables
+   * (memory_entries + decision_log). Phase B Bug #1 fix.
+   *
+   * Bug: `.wotann/memory.db` showed 1,990 rows in `auto_capture` but 0
+   * in `memory_entries`, `knowledge_nodes`, and `decision_log` — every
+   * observation was silently dumped into the raw capture table with no
+   * structured routing. Session-end extraction ran from
+   * `session.messages` (not from the DB), so daemon lifecycle events
+   * never produced structured entries.
+   *
+   * This method reads from the auto_capture table itself, runs each row
+   * through the caller-supplied extractor (normally
+   * `ObservationExtractor.extractFromCaptures`), maps the observation
+   * type to the right MemoryBlockType, and inserts into memory_entries.
+   * Decisions are ALSO mirrored into decision_log for the decision
+   * ledger.
+   *
+   * Classification failures (row content matches no pattern) emit a
+   * `classification_failed` event via the optional callback — never
+   * silently swallowed. Quality bar from feedback_wotann_quality_bars.
+   *
+   * @returns a report: how many routed per bucket + how many failed classification.
+   */
+  consolidateAutoCaptures(
+    extractFn: (captures: readonly AutoCaptureEntry[]) => readonly {
+      readonly type: "decision" | "preference" | "milestone" | "problem" | "discovery";
+      readonly assertion: string;
+      readonly confidence: number;
+      readonly sourceIds: readonly number[];
+      readonly domain?: string;
+      readonly topic?: string;
+    }[],
+    options?: {
+      readonly batchSize?: number;
+      readonly onClassificationFailed?: (entry: AutoCaptureEntry, reason: string) => void;
+    },
+  ): ConsolidationReport {
+    const batchSize = options?.batchSize ?? 500;
+    const entries = this.getUnconsolidatedAutoCaptures(batchSize);
+    if (entries.length === 0) {
+      return {
+        read: 0,
+        routed: 0,
+        byBlock: {},
+        classificationFailed: 0,
+        decisionLogged: 0,
+      };
+    }
+
+    let observations: readonly {
+      readonly type: "decision" | "preference" | "milestone" | "problem" | "discovery";
+      readonly assertion: string;
+      readonly confidence: number;
+      readonly sourceIds: readonly number[];
+      readonly domain?: string;
+      readonly topic?: string;
+    }[];
+    try {
+      observations = extractFn(entries);
+    } catch (err) {
+      // Extractor crash — surface to caller via callback (honest stub, not
+      // silent success — feedback_wotann_quality_bars_session2). Mark NONE
+      // consolidated so the next pass can retry when the extractor is fixed.
+      options?.onClassificationFailed?.(entries[0]!, `extractor_crash:${(err as Error).message}`);
+      throw err;
+    }
+
+    const covered = new Set<number>();
+    const byBlock: Record<string, number> = {};
+    let decisionLogged = 0;
+
+    // Phase 1: insert into memory_entries for every extracted observation.
+    // Wrapped in a transaction so a later SQL failure rolls back the whole
+    // batch — we don't want a half-routed pass where some rows are marked
+    // consolidated but their memory_entries never made it.
+    const insertTx = this.db.transaction(() => {
+      for (const obs of observations) {
+        const blockType = this.observationTypeToBlockType(obs.type);
+        byBlock[blockType] = (byBlock[blockType] ?? 0) + 1;
+
+        const sessionId = entries.find((e) => obs.sourceIds.includes(e.id))?.sessionId;
+        this.insert({
+          id: randomUUID(),
+          layer: "working",
+          blockType,
+          key: `${obs.type}:${obs.assertion.slice(0, 80)}`,
+          value: obs.assertion,
+          sessionId,
+          verified: false,
+          freshnessScore: 1.0,
+          confidenceLevel: obs.confidence,
+          verificationStatus: "unverified",
+          tags: `consolidated,${obs.type}`,
+          domain: obs.domain ?? "",
+          topic: obs.topic ?? "",
+        });
+
+        // Decisions ALSO flow into the decision_log (bi-temporal ledger).
+        if (obs.type === "decision") {
+          this.db
+            .prepare(
+              `INSERT INTO decision_log (id, decision, rationale, alternatives, constraints, stakeholders, session_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+              randomUUID(),
+              obs.assertion.slice(0, 500),
+              `auto-consolidated from ${obs.sourceIds.length} capture(s)`,
+              null,
+              null,
+              null,
+              sessionId ?? null,
+            );
+          decisionLogged++;
+        }
+
+        for (const sid of obs.sourceIds) covered.add(sid);
+      }
+    });
+    insertTx();
+
+    // Phase 2: mark all auto_capture rows that fed into an observation as
+    // consolidated, AND mark uncovered rows as consolidated-but-unclassified
+    // so we don't re-visit them every tick. Emit classification_failed for
+    // those so the caller can log/alert.
+    const coveredIds = [...covered];
+    this.markAutoCapturesConsolidated(coveredIds);
+
+    const unclassified = entries.filter((e) => !covered.has(e.id));
+    if (unclassified.length > 0 && options?.onClassificationFailed) {
+      for (const entry of unclassified) {
+        options.onClassificationFailed(entry, "no_pattern_matched");
+      }
+    }
+    // Mark unclassified as consolidated too — they've had their chance.
+    // Without this, the queue grows unbounded and every pass re-examines
+    // the same junk. The `onClassificationFailed` callback above gives
+    // observability without keeping them in the work queue forever.
+    this.markAutoCapturesConsolidated(unclassified.map((e) => e.id));
+
+    return {
+      read: entries.length,
+      routed: covered.size,
+      byBlock,
+      classificationFailed: unclassified.length,
+      decisionLogged,
+    };
+  }
+
+  /** Map observation type to the right memory block. Isolated for testability. */
+  private observationTypeToBlockType(
+    type: "decision" | "preference" | "milestone" | "problem" | "discovery",
+  ): MemoryBlockType {
+    switch (type) {
+      case "decision":
+        return "decisions";
+      case "preference":
+        return "feedback";
+      case "milestone":
+        return "project";
+      case "problem":
+        return "issues";
+      case "discovery":
+        return "cases";
+    }
   }
 
   // ── Verbatim Drawers (MemPalace R6) ────────────────────────
@@ -713,9 +958,7 @@ export class MemoryStore {
    * Get knowledge edges that were active at a specific point in time.
    * A relationship is active if valid_from <= date AND (valid_to IS NULL OR valid_to > date).
    */
-  getActiveEdgesAt(
-    date: string,
-  ): readonly {
+  getActiveEdgesAt(date: string): readonly {
     id: string;
     sourceId: string;
     targetId: string;

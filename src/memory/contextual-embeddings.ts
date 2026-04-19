@@ -1,9 +1,9 @@
 /**
- * Contextual embeddings — Phase 6 (partial).
+ * Contextual embeddings — Phase 6 + Phase H wiring.
  *
- * Before embedding a chunk, prepend 50-100 tokens of context that
- * describe where the chunk sits in the larger document. Anthropic's
- * 2024 "Contextual Retrieval" paper showed +35% recall improvement on
+ * Before embedding a chunk, prepend ~50 tokens of context that describe
+ * where the chunk sits in the larger document. Anthropic's 2024
+ * "Contextual Retrieval" paper showed +35% recall improvement on
  * retrieval benchmarks when combined with BM25 — with contextual BM25
  * plus contextual embeddings plus reranking, +67%.
  *
@@ -21,10 +21,22 @@
  *   - buildContextualChunk(chunk, doc, generator) — single-chunk async
  *   - buildBatchedContextualChunks(chunks, doc, gen, opts) — batch w/ rate limit
  *   - createLlmContextGenerator(query) — LLM-backed context generator factory
- *   - A cost-aware prompt template that caps the context at 80 tokens
+ *   - A cost-aware prompt template that caps the context at ~50 tokens
+ *   - clampContextTokens(context, maxTokens) — enforce budget post-hoc
+ *   - wireContextualIngest(...) — Phase H: a ready-to-use adapter that
+ *     wraps an "insert chunk" callback so every inserted chunk is
+ *     prefixed with LLM-generated context before indexing.
  *
- * Integrates with the existing memory layer: callers pass chunks through
- * this BEFORE sending to whatever embedding model / vector store they use.
+ * WIRING STATUS (as of Phase H): this module is NOT yet called on ingest
+ * by memory-store.ts or observation-extractor.ts. `wireContextualIngest`
+ * is the intended integration point — callers construct it once at
+ * startup with a cheap-provider LLM (Haiku / Gemma) and pass their
+ * existing insert callback. Every inserted chunk then flows through
+ * contextualization before embedding. Extractors / stores that still
+ * insert raw chunks SHOULD be migrated to call this wrapper.
+ *
+ * Callers pass chunks through this BEFORE sending to whatever embedding
+ * model / vector store they use.
  */
 
 // ── Types ──────────────────────────────────────────────
@@ -58,6 +70,32 @@ export interface BatchOptions {
   readonly onProgress?: (done: number, total: number) => void;
 }
 
+// ── Budget constants ───────────────────────────────────
+
+/**
+ * Token budget for the generated context. Anthropic's paper uses 50-100.
+ * We target 50 — shorter means fewer embed tokens per chunk, lower
+ * cost, and less drift from the chunk's own content. Not enforced by
+ * the model (LLMs don't count tokens natively); enforced by
+ * `clampContextTokens()` post-hoc.
+ */
+export const TARGET_CONTEXT_TOKENS = 50;
+
+/**
+ * Hard upper bound. We throw `maxTokens: 120` to the LLM (generous
+ * slack) then clamp after. This prevents runaway context that could
+ * dominate the chunk's own semantic signal in the embedding.
+ */
+export const MAX_CONTEXT_TOKENS = 80;
+
+/**
+ * Rough chars-per-token heuristic for English. Accurate tokenization
+ * requires the model's tokenizer; this approximation is "good enough"
+ * for budget clamping — errs on the side of keeping MORE context
+ * rather than less.
+ */
+const CHARS_PER_TOKEN = 4;
+
 // ── Prompt ─────────────────────────────────────────────
 
 const MAX_DOC_PREVIEW_CHARS = 8000;
@@ -67,7 +105,7 @@ function buildContextPrompt(chunk: string, document: string): string {
     document.length > MAX_DOC_PREVIEW_CHARS
       ? `${document.slice(0, MAX_DOC_PREVIEW_CHARS)}\n...[truncated to fit context window]...`
       : document;
-  return `You will be given a CHUNK extracted from a larger DOCUMENT. Write a SHORT context (50-80 tokens, one sentence or two short sentences) that situates the chunk within the document. The context will be PREPENDED to the chunk during retrieval indexing.
+  return `You will be given a CHUNK extracted from a larger DOCUMENT. Write a SHORT context (target ${TARGET_CONTEXT_TOKENS} tokens, hard max ${MAX_CONTEXT_TOKENS}, one sentence) that situates the chunk within the document. The context will be PREPENDED to the chunk during retrieval indexing.
 
 Goals:
 - Name the document's topic, domain, or source (e.g. "TechCo retail returns policy")
@@ -87,6 +125,37 @@ ${chunk}
 """
 
 Context:`;
+}
+
+/**
+ * Clamp a context string to the token budget. Uses a char-based
+ * approximation (~4 chars/token for English); over-generous by design
+ * so we don't truncate meaningful context. Called automatically by
+ * `createLlmContextGenerator` and `wireContextualIngest`.
+ */
+export function clampContextTokens(
+  context: string,
+  maxTokens: number = MAX_CONTEXT_TOKENS,
+): string {
+  if (!context) return "";
+  const maxChars = Math.max(1, maxTokens) * CHARS_PER_TOKEN;
+  if (context.length <= maxChars) return context;
+  // Cut at the last sentence boundary within budget, falling back to a
+  // word boundary, falling back to a hard cut.
+  const head = context.slice(0, maxChars);
+  const lastSentence = Math.max(
+    head.lastIndexOf("."),
+    head.lastIndexOf("!"),
+    head.lastIndexOf("?"),
+  );
+  if (lastSentence > maxChars * 0.5) {
+    return head.slice(0, lastSentence + 1).trim();
+  }
+  const lastSpace = head.lastIndexOf(" ");
+  if (lastSpace > maxChars * 0.5) {
+    return head.slice(0, lastSpace).trim();
+  }
+  return head.trim();
 }
 
 // ── Generator factory ─────────────────────────────────

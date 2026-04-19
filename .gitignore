@@ -122,3 +122,10 @@ anthropic-oauth.json
 .cache/
 tmp/
 .git-old-corrupt-*/
+.DS_Store
+python-scripts/__pycache__/
+/big.txt
+/p1.txt
+/p2.txt
+/p3.txt
+/small.txt

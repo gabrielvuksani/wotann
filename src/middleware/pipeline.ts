@@ -1,10 +1,11 @@
 /**
- * Middleware pipeline: executes all 25 layers in order.
- * Before hooks run in forward order (1→25), after hooks in reverse (25→1).
+ * Middleware pipeline: executes all 26 layers in order.
+ * Before hooks run in forward order (1→26), after hooks in reverse (26→1).
  *
- * Layers 1-18: Original pipeline (intent, thread, uploads, sandbox, etc.)
+ * Layers 1-18: Original pipeline (intent, thread, uploads, file-type-gate, sandbox, etc.)
  * Layers 19-24: TerminalBench accuracy optimizations (Sprint A + B)
  * Layer 25: Self-reflection (post-response quality validation)
+ * Note: FileTypeGate (Magika classifier) sits at logical layer 3.5 between Uploads and Sandbox.
  */
 
 import type { Middleware, MiddlewareContext, AgentResult } from "./types.js";
@@ -50,6 +51,26 @@ import {
   ToolPairValidatorMiddleware,
   createToolPairValidatorMiddleware,
 } from "./tool-pair-validator.js";
+import { fileTypeGateMiddleware } from "./file-type-gate.js";
+import {
+  GuardrailProviderMiddleware,
+  AllowlistProvider,
+  createGuardrailProviderMiddleware,
+} from "./guardrail-provider.js";
+import {
+  DanglingToolCallMiddleware,
+  createDanglingToolCallMiddleware,
+} from "./dangling-tool-call.js";
+import {
+  LLMErrorHandlingMiddleware,
+  createLLMErrorHandlingMiddleware,
+} from "./llm-error-handling.js";
+import { SandboxAuditMiddleware, createSandboxAuditMiddleware } from "./sandbox-audit.js";
+import { TitleMiddleware, createTitleMiddleware } from "./title.js";
+import {
+  DeferredToolFilterMiddleware,
+  createDeferredToolFilterMiddleware,
+} from "./deferred-tool-filter.js";
 
 // ── Shared instances for new middleware ────────────────────────
 
@@ -63,27 +84,41 @@ const defaultStaleDetectionInstance = new StaleDetectionMiddleware();
 const defaultDoomLoopInstance = new DoomLoopMiddleware();
 const defaultOutputTruncationInstance = new OutputTruncationMiddleware();
 const defaultToolPairValidatorInstance = new ToolPairValidatorMiddleware();
+// Lane 2 deer-flow ports (6 new middleware — closes Lane 2 parity gap).
+const defaultGuardrailProviderInstance = new GuardrailProviderMiddleware(new AllowlistProvider({}));
+const defaultDanglingToolCallInstance = new DanglingToolCallMiddleware();
+const defaultLLMErrorHandlingInstance = new LLMErrorHandlingMiddleware();
+const defaultSandboxAuditInstance = new SandboxAuditMiddleware();
+const defaultTitleInstance = new TitleMiddleware();
+const defaultDeferredToolFilterInstance = new DeferredToolFilterMiddleware();
 
-// ── Pipeline Definition (24 layers in order) ────────────────
+// ── Pipeline Definition (31 layers in order, 6 Lane 2 additions) ─
 
 const PIPELINE: readonly Middleware[] = [
   createToolPairValidatorMiddleware(defaultToolPairValidatorInstance), // 0. Tool use/result pair validation
   intentGateMiddleware, // 1. Intent analysis
   threadDataMiddleware, // 2. Thread isolation
   uploadsMiddleware, // 3. File uploads
+  fileTypeGateMiddleware, // 3.5. Magika file-type classifier + trust boundary
+  createDanglingToolCallMiddleware(defaultDanglingToolCallInstance), // 3.7. Lane 2: repair dangling tool_use
   sandboxMiddleware, // 4. Sandbox env
-  guardrailMiddleware, // 5. Pre-execution auth
+  createSandboxAuditMiddleware(defaultSandboxAuditInstance), // 4.7. Lane 2: sandbox command audit
+  guardrailMiddleware, // 5. Pre-execution auth (keyword heuristic — existing)
+  createGuardrailProviderMiddleware(defaultGuardrailProviderInstance), // 5.5. Lane 2: pluggable provider
   toolErrorMiddleware, // 6. Error standardization
   createOutputTruncationMiddleware(defaultOutputTruncationInstance), // 6.5. Output truncation
+  createLLMErrorHandlingMiddleware(defaultLLMErrorHandlingInstance), // 6.7. Lane 2: canonical provider errors
   summarizationMiddleware, // 7. Token management
   memoryMiddleware, // 8. Memory extraction
   clarificationMiddleware, // 10. User clarification (S5-4: 9 SubagentLimit deleted as dead code)
   cacheMiddleware, // 11. Cache tracking
   autonomyMiddleware, // 12. Risk classification
   fileTrackMiddleware, // 14. File tracking (S5-4: 13 LSP deleted as dead code)
+  createDeferredToolFilterMiddleware(defaultDeferredToolFilterInstance), // 14.5. Lane 2: hide deferred tool schemas
   forcedVerificationMiddleware, // 15. Auto-verify writes
   frustrationMiddleware, // 16. Frustration detection
   createPreCompletionMiddleware(defaultChecklistInstance), // 17. Pre-completion gate
+  createTitleMiddleware(defaultTitleInstance), // 17.5. Lane 2: auto-title after first exchange
   createSystemNotificationsMiddleware(defaultNotificationTracker), // 18. System notifications
   // ── TerminalBench Accuracy Optimizations ──────────────────
   createNonInteractiveMiddleware(defaultNonInteractiveInstance), // 19. Non-interactive mode
@@ -177,6 +212,12 @@ export function createPipelineWithInstances(
   readonly doomLoop: DoomLoopMiddleware;
   readonly outputTruncation: OutputTruncationMiddleware;
   readonly toolPairValidator: ToolPairValidatorMiddleware;
+  readonly guardrailProvider: GuardrailProviderMiddleware;
+  readonly danglingToolCall: DanglingToolCallMiddleware;
+  readonly llmErrorHandling: LLMErrorHandlingMiddleware;
+  readonly sandboxAudit: SandboxAuditMiddleware;
+  readonly title: TitleMiddleware;
+  readonly deferredToolFilter: DeferredToolFilterMiddleware;
 } {
   const nonInteractive = new NonInteractiveMiddleware();
   const planEnforcement = new PlanEnforcementMiddleware();
@@ -186,25 +227,38 @@ export function createPipelineWithInstances(
   const doomLoop = new DoomLoopMiddleware();
   const outputTruncation = new OutputTruncationMiddleware();
   const toolPairValidator = new ToolPairValidatorMiddleware();
+  const guardrailProvider = new GuardrailProviderMiddleware(new AllowlistProvider({}));
+  const danglingToolCall = new DanglingToolCallMiddleware();
+  const llmErrorHandling = new LLMErrorHandlingMiddleware();
+  const sandboxAudit = new SandboxAuditMiddleware();
+  const title = new TitleMiddleware();
+  const deferredToolFilter = new DeferredToolFilterMiddleware();
 
   const layers: readonly Middleware[] = [
     createToolPairValidatorMiddleware(toolPairValidator),
     intentGateMiddleware,
     threadDataMiddleware,
     uploadsMiddleware,
+    fileTypeGateMiddleware,
+    createDanglingToolCallMiddleware(danglingToolCall),
     sandboxMiddleware,
+    createSandboxAuditMiddleware(sandboxAudit),
     guardrailMiddleware,
+    createGuardrailProviderMiddleware(guardrailProvider),
     toolErrorMiddleware,
     createOutputTruncationMiddleware(outputTruncation),
+    createLLMErrorHandlingMiddleware(llmErrorHandling),
     summarizationMiddleware,
     memoryMiddleware,
     clarificationMiddleware,
     cacheMiddleware,
     autonomyMiddleware,
     fileTrackMiddleware,
+    createDeferredToolFilterMiddleware(deferredToolFilter),
     forcedVerificationMiddleware,
     frustrationMiddleware,
     createPreCompletionMiddleware(checklist),
+    createTitleMiddleware(title),
     createSystemNotificationsMiddleware(notificationTracker),
     createNonInteractiveMiddleware(nonInteractive),
     createPlanEnforcementMiddleware(planEnforcement),
@@ -226,6 +280,12 @@ export function createPipelineWithInstances(
     doomLoop,
     outputTruncation,
     toolPairValidator,
+    guardrailProvider,
+    danglingToolCall,
+    llmErrorHandling,
+    sandboxAudit,
+    title,
+    deferredToolFilter,
   };
 }
 
@@ -297,4 +357,36 @@ export function getDefaultOutputTruncation(): OutputTruncationMiddleware {
  */
 export function getDefaultToolPairValidator(): ToolPairValidatorMiddleware {
   return defaultToolPairValidatorInstance;
+}
+
+// ── Lane 2 deer-flow port accessors ──────────────────────────
+
+/** Get the default shared GuardrailProviderMiddleware instance (Lane 2). */
+export function getDefaultGuardrailProvider(): GuardrailProviderMiddleware {
+  return defaultGuardrailProviderInstance;
+}
+
+/** Get the default shared DanglingToolCallMiddleware instance (Lane 2). */
+export function getDefaultDanglingToolCall(): DanglingToolCallMiddleware {
+  return defaultDanglingToolCallInstance;
+}
+
+/** Get the default shared LLMErrorHandlingMiddleware instance (Lane 2). */
+export function getDefaultLLMErrorHandling(): LLMErrorHandlingMiddleware {
+  return defaultLLMErrorHandlingInstance;
+}
+
+/** Get the default shared SandboxAuditMiddleware instance (Lane 2). */
+export function getDefaultSandboxAudit(): SandboxAuditMiddleware {
+  return defaultSandboxAuditInstance;
+}
+
+/** Get the default shared TitleMiddleware instance (Lane 2). */
+export function getDefaultTitle(): TitleMiddleware {
+  return defaultTitleInstance;
+}
+
+/** Get the default shared DeferredToolFilterMiddleware instance (Lane 2). */
+export function getDefaultDeferredToolFilter(): DeferredToolFilterMiddleware {
+  return defaultDeferredToolFilterInstance;
 }

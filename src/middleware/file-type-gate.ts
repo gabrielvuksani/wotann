@@ -355,3 +355,228 @@ export async function detectFileTypeFromPath(filePath: string): Promise<FileType
     };
   }
 }
+
+// ── Pipeline integration (Layer 3.5) ─────────────────────────────
+//
+// The file-type gate sits immediately after the uploads layer. Before
+// wiring it we only had extension-based routing which is trivially
+// bypassed (`.exe → .txt`). The gate runs `detectFileType` on every
+// upload's bytes and stamps the classification *plus* a trust boundary
+// so downstream layers (sandbox, skills router, exploit-tab queue) can
+// quarantine dangerous payloads before they touch a text handler.
+
+/** Trust classification applied to each upload after gate inspection. */
+export type UploadTrustBoundary =
+  /** Plain text / markup / docs — safe to pass to text handlers. */
+  | "safe"
+  /** Binary content (image/audio/video/archive/data) — needs typed handler, not text. */
+  | "binary"
+  /** Known-executable formats (pebin/elf/macho/dex/etc.) — quarantine for Exploit review. */
+  | "quarantine"
+  /** Gate failed (no bytes / detection threw) — defer decision, treat conservatively. */
+  | "unknown";
+
+/**
+ * A single uploaded blob flowing through the pipeline. Consumers build this
+ * in whichever pre-pipeline ingestion layer they own (file picker, drag-drop,
+ * iOS upload RPC, channel inbox). The gate stamps `handler` and
+ * `trustBoundary` in place by producing a new immutable object.
+ */
+export interface FileUpload {
+  /** Original filename as supplied by the user (kept for extension fallback + display). */
+  readonly filename: string;
+  /** Raw bytes. Required — the gate runs Magika on these. */
+  readonly bytes: Uint8Array;
+  /** Detected coarse-grained handler. Stamped by the gate; absent pre-gate. */
+  readonly handler?: FileHandler;
+  /** Magika's specific label (e.g. "python", "pdf"). Stamped by the gate. */
+  readonly label?: string;
+  /** 0.0–1.0 detector confidence. Stamped by the gate. */
+  readonly confidence?: number;
+  /** True if extension disagrees with content. Stamped by the gate. */
+  readonly extensionMismatch?: boolean;
+  /** Trust classification. Stamped by the gate. */
+  readonly trustBoundary?: UploadTrustBoundary;
+}
+
+/**
+ * Event emitted when the gate cannot classify an upload (empty bytes,
+ * detection threw, or both model + extension fallback failed). Surface
+ * these via the existing telemetry / structured-logger rather than
+ * silently letting the upload through — quality bar: "no silent error
+ * swallow".
+ */
+export interface FileTypeGateEvent {
+  readonly kind: "gate_failed";
+  readonly filename: string;
+  readonly reason: "empty-bytes" | "detection-error" | "unknown-format";
+  readonly error?: string;
+}
+
+/**
+ * Declaration-merging augmentation — adds the upload slot and gate-event
+ * log to `MiddlewareContext` without editing the owner file (types.ts).
+ * The fields are optional so existing callers compile unchanged.
+ */
+declare module "./types.js" {
+  interface MiddlewareContext {
+    uploads?: readonly FileUpload[];
+    /** Append-only log of gate failures seen during this request. */
+    fileTypeGateEvents?: readonly FileTypeGateEvent[];
+  }
+}
+
+/**
+ * Map a FileHandler to the trust boundary that controls downstream
+ * routing. Executable formats land in `quarantine` so the Exploit tab
+ * can review them; opaque binaries route to typed handlers; text /
+ * code / markup are considered `safe`.
+ */
+function boundaryForHandler(handler: FileHandler): UploadTrustBoundary {
+  switch (handler) {
+    case "binary":
+      return "quarantine";
+    case "image":
+    case "video":
+    case "audio":
+    case "archive":
+    case "data":
+    case "pdf":
+    case "docx":
+    case "xlsx":
+      return "binary";
+    case "code":
+    case "markup":
+    case "text":
+      return "safe";
+    case "unknown":
+      return "unknown";
+    default: {
+      // Exhaustiveness guard — if FileHandler grows a new variant and we
+      // forget to classify it, the compiler flags the missing branch.
+      const _never: never = handler;
+      void _never;
+      return "unknown";
+    }
+  }
+}
+
+/**
+ * Classify a single upload by invoking `detectFileType` on its bytes.
+ * Returns both the stamped upload and an optional gate-failure event so
+ * the caller can fold failures into the context event log.
+ */
+async function classifyUpload(upload: FileUpload): Promise<{
+  readonly stamped: FileUpload;
+  readonly event?: FileTypeGateEvent;
+}> {
+  if (upload.bytes.length === 0) {
+    // Empty payload — flag rather than silently mark "text".
+    return {
+      stamped: {
+        ...upload,
+        handler: "unknown",
+        label: "",
+        confidence: 0,
+        extensionMismatch: false,
+        trustBoundary: "unknown",
+      },
+      event: {
+        kind: "gate_failed",
+        filename: upload.filename,
+        reason: "empty-bytes",
+      },
+    };
+  }
+
+  try {
+    const result = await detectFileType(upload.bytes, upload.filename);
+    const boundary = boundaryForHandler(result.handler);
+    const stamped: FileUpload = {
+      ...upload,
+      handler: result.handler,
+      label: result.label,
+      confidence: result.confidence,
+      extensionMismatch: result.extensionMismatch,
+      trustBoundary: boundary,
+    };
+    if (result.handler === "unknown") {
+      return {
+        stamped,
+        event: {
+          kind: "gate_failed",
+          filename: upload.filename,
+          reason: "unknown-format",
+        },
+      };
+    }
+    return { stamped };
+  } catch (err) {
+    // `detectFileType` is designed never to throw, but we belt-and-suspend
+    // in case a Magika upgrade changes that contract. Emit the event and
+    // mark the upload as unknown/unknown-boundary instead of passing raw.
+    return {
+      stamped: {
+        ...upload,
+        handler: "unknown",
+        label: "",
+        confidence: 0,
+        extensionMismatch: false,
+        trustBoundary: "unknown",
+      },
+      event: {
+        kind: "gate_failed",
+        filename: upload.filename,
+        reason: "detection-error",
+        error: err instanceof Error ? err.message : String(err),
+      },
+    };
+  }
+}
+
+// Defer the Middleware type import until use to avoid forcing every
+// module that imports `detectFileType` to also pull in the middleware
+// shape surface.
+import type { Middleware, MiddlewareContext } from "./types.js";
+
+/**
+ * Middleware layer 3.5 — Magika file-type gate.
+ *
+ * Pipeline position: after `uploadsMiddleware` (which resolves `@file`
+ * references to filenames) and before `sandboxMiddleware` (which needs
+ * trustBoundary to decide containment). The gate runs `detectFileType`
+ * on every upload's bytes and returns a NEW context with each upload
+ * stamped (handler, label, confidence, extensionMismatch, trustBoundary)
+ * plus an append-only `fileTypeGateEvents` log for any failures.
+ *
+ * Immutability: neither the input context nor its uploads array are
+ * mutated — we return fresh objects so downstream layers see a stable
+ * snapshot and the caller's reference is untouched.
+ */
+export const fileTypeGateMiddleware: Middleware = {
+  name: "FileTypeGate",
+  order: 3.5,
+  async before(ctx: MiddlewareContext): Promise<MiddlewareContext> {
+    const uploads = ctx.uploads;
+    if (!uploads || uploads.length === 0) {
+      // No uploads → nothing to gate. Leave context untouched.
+      return ctx;
+    }
+
+    const classified = await Promise.all(uploads.map(classifyUpload));
+    const stampedUploads: readonly FileUpload[] = classified.map((c) => c.stamped);
+    const newEvents: readonly FileTypeGateEvent[] = classified
+      .map((c) => c.event)
+      .filter((e): e is FileTypeGateEvent => e !== undefined);
+
+    const existingEvents = ctx.fileTypeGateEvents ?? [];
+    const mergedEvents: readonly FileTypeGateEvent[] =
+      newEvents.length > 0 ? [...existingEvents, ...newEvents] : existingEvents;
+
+    return {
+      ...ctx,
+      uploads: stampedUploads,
+      fileTypeGateEvents: mergedEvents,
+    };
+  },
+};

@@ -1,15 +1,25 @@
 /**
- * C16 — ACP stdio runtime tests.
+ * C16 — ACP stdio runtime tests (ACP v1).
  */
 
 import { describe, it, expect } from "vitest";
 import { PassThrough, Writable } from "node:stream";
 import { startAcpStdio, referenceHandlers } from "../../src/acp/stdio.js";
-import { ACP_METHODS, ACP_PROTOCOL_VERSION, encodeJsonRpc, makeRequest } from "../../src/acp/protocol.js";
+import {
+  ACP_METHODS,
+  ACP_PROTOCOL_VERSION,
+  encodeJsonRpc,
+  makeRequest,
+  type AcpInitializeParams,
+} from "../../src/acp/protocol.js";
 
 class CapturingWritable extends Writable {
   private readonly chunks: string[] = [];
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: (e?: Error | null) => void): void {
+  override _write(
+    chunk: Buffer | string,
+    _enc: BufferEncoding,
+    cb: (e?: Error | null) => void,
+  ): void {
     this.chunks.push(Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : String(chunk));
     cb();
   }
@@ -39,7 +49,7 @@ async function withServer(
   const timeoutMs = options.timeoutMs ?? 2_000;
   await new Promise<void>((resolve) => {
     const deadline = Date.now() + timeoutMs;
-    const poll = () => {
+    const poll = (): void => {
       if (output.lines().length >= options.expectedLines) return resolve();
       if (Date.now() > deadline) return resolve();
       setTimeout(poll, 10);
@@ -50,54 +60,55 @@ async function withServer(
   return output.lines();
 }
 
+function initParams(): AcpInitializeParams {
+  return {
+    protocolVersion: ACP_PROTOCOL_VERSION,
+    clientCapabilities: { fs: { readTextFile: true }, terminal: false },
+    clientInfo: { name: "test", version: "0" },
+  };
+}
+
 describe("startAcpStdio", () => {
-  it("responds to initialize over stdio", async () => {
-    const req = encodeJsonRpc(
-      makeRequest(1, ACP_METHODS.Initialize, {
-        protocolVersion: ACP_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: "test", version: "0" },
-      }),
-    );
+  it("responds to initialize over stdio with integer protocolVersion", async () => {
+    const req = encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams()));
     const lines = await withServer([req], { expectedLines: 1 });
-    const parsed = JSON.parse(lines[0]!) as { result?: { protocolVersion: string } };
+    const parsed = JSON.parse(lines[0]!) as {
+      result?: { protocolVersion: number; agentInfo?: { name: string } };
+    };
     expect(parsed.result?.protocolVersion).toBe(ACP_PROTOCOL_VERSION);
+    expect(parsed.result?.agentInfo?.name).toBe("wotann-reference");
   });
 
-  it("streams prompt/partial + prompt/complete notifications + accepted response", async () => {
-    const initReq = encodeJsonRpc(
-      makeRequest(1, ACP_METHODS.Initialize, {
-        protocolVersion: ACP_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: "test", version: "0" },
+  it("streams session/update notifications + PromptResponse", async () => {
+    const initReq = encodeJsonRpc(makeRequest(1, ACP_METHODS.Initialize, initParams()));
+    const newReq = encodeJsonRpc(makeRequest(2, ACP_METHODS.SessionNew, { cwd: "/tmp" }));
+    const promptReq = encodeJsonRpc(
+      makeRequest(3, ACP_METHODS.SessionPrompt, {
+        sessionId: "ref-session-1",
+        prompt: [{ type: "text", text: "hi" }],
       }),
     );
-    const createReq = encodeJsonRpc(
-      makeRequest(2, ACP_METHODS.SessionCreate, { rootUri: "file:///tmp" }),
-    );
-    const promptReq = encodeJsonRpc(
-      makeRequest(3, ACP_METHODS.SessionPrompt, { sessionId: "ref-session-1", text: "hi" }),
-    );
-    const lines = await withServer([initReq, createReq, promptReq], { expectedLines: 5 });
+    const lines = await withServer([initReq, newReq, promptReq], { expectedLines: 4 });
 
-    // Expect: init response, create response, partial notification,
-    // complete notification, prompt response
+    // Expect: init response, new response, session/update, prompt response
     const methods = lines.map((l) => {
       const msg = JSON.parse(l) as { method?: string; id?: number };
       return msg.method ?? `response:${msg.id ?? "?"}`;
     });
-    expect(methods).toContain(ACP_METHODS.PromptPartial);
-    expect(methods).toContain(ACP_METHODS.PromptComplete);
+    expect(methods).toContain(ACP_METHODS.SessionUpdate);
+    const promptResponseLine = lines.find((l) => {
+      const parsed = JSON.parse(l) as { id?: number; result?: { stopReason?: string } };
+      return parsed.id === 3;
+    });
+    expect(promptResponseLine).toBeDefined();
+    const promptResult = JSON.parse(promptResponseLine!) as {
+      result: { stopReason: string };
+    };
+    expect(promptResult.result.stopReason).toBe("end_turn");
   });
 
   it("ignores blank input lines", async () => {
-    const req = encodeJsonRpc(
-      makeRequest(7, ACP_METHODS.Initialize, {
-        protocolVersion: ACP_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: "test", version: "0" },
-      }),
-    );
+    const req = encodeJsonRpc(makeRequest(7, ACP_METHODS.Initialize, initParams()));
     const lines = await withServer(["", "   ", req, ""], { expectedLines: 1 });
     expect(lines.length).toBe(1);
   });
@@ -111,34 +122,30 @@ describe("startAcpStdio", () => {
 });
 
 describe("referenceHandlers", () => {
-  it("initialize returns the protocol version", async () => {
+  it("initialize returns an integer protocol version and agentInfo", async () => {
     const h = referenceHandlers();
-    const r = await h.initialize({
-      protocolVersion: ACP_PROTOCOL_VERSION,
-      capabilities: {},
-      clientInfo: { name: "test", version: "0" },
-    });
+    const r = await h.initialize(initParams());
     expect(r.protocolVersion).toBe(ACP_PROTOCOL_VERSION);
+    expect(r.agentInfo?.name).toBe("wotann-reference");
+    expect(r.agentCapabilities).toBeDefined();
   });
 
-  it("increments session counter across creates", async () => {
+  it("increments session counter across session/new calls", async () => {
     const h = referenceHandlers();
-    const s1 = await h.sessionCreate({ rootUri: "file:///a" });
-    const s2 = await h.sessionCreate({ rootUri: "file:///b" });
+    const s1 = await h.sessionNew({ cwd: "/a" });
+    const s2 = await h.sessionNew({ cwd: "/b" });
     expect(s1.sessionId).toBe("ref-session-1");
     expect(s2.sessionId).toBe("ref-session-2");
   });
 
-  it("sessionPrompt emits one partial and one complete", async () => {
+  it("sessionPrompt emits exactly one session/update and returns end_turn", async () => {
     const h = referenceHandlers();
-    const partials: unknown[] = [];
-    const completes: unknown[] = [];
-    await h.sessionPrompt(
-      { sessionId: "s1", text: "hi" },
-      (p) => partials.push(p),
-      (c) => completes.push(c),
+    const updates: unknown[] = [];
+    const result = await h.sessionPrompt(
+      { sessionId: "s1", prompt: [{ type: "text", text: "hi" }] },
+      (n) => updates.push(n),
     );
-    expect(partials).toHaveLength(1);
-    expect(completes).toHaveLength(1);
+    expect(updates).toHaveLength(1);
+    expect(result.stopReason).toBe("end_turn");
   });
 });
