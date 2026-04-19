@@ -38,14 +38,33 @@ function tolerantJSONParse(raw: string): unknown {
   } catch {
     // Try common transformations.
     try {
-      // Convert single quotes to double quotes (lossy but often correct).
-      const doubleQuoted = trimmed.replace(/'/g, '"');
-      return JSON.parse(doubleQuoted);
+      // Strip trailing commas first (non-lossy, safe).
+      const stripped = trimmed.replace(/,(\s*[}\]])/g, "$1");
+      return JSON.parse(stripped);
     } catch {
-      // Strip trailing commas.
       try {
-        const stripped = trimmed.replace(/,(\s*[}\]])/g, "$1");
-        return JSON.parse(stripped);
+        // Convert single-quoted string delimiters to double quotes WITHOUT
+        // corrupting apostrophes inside legitimate double-quoted strings
+        // (e.g. "user's input"). Strategy: split the text by already-present
+        // double-quoted spans, transform only the odd (outside-string)
+        // segments, then re-join. A single-quoted delimiter must appear
+        // adjacent to a structural token (`{ , : [ ]` or a whitespace /
+        // boundary). Inside single-quoted spans, escape any literal `"`.
+        const segs = trimmed.split(/("(?:\\.|[^"\\])*")/);
+        const transformed = segs
+          .map((seg, i) => {
+            // Odd indexes are already-double-quoted spans — leave untouched.
+            if (i % 2 === 1) return seg;
+            // Even indexes are outside any JSON string literal: here single
+            // quotes act as string delimiters. Convert `'...'` to `"..."`
+            // while escaping internal double quotes.
+            return seg.replace(/'([^']*)'/g, (_m, body: string) => {
+              const escaped = body.replace(/"/g, '\\"');
+              return `"${escaped}"`;
+            });
+          })
+          .join("");
+        return JSON.parse(transformed);
       } catch {
         return undefined;
       }
