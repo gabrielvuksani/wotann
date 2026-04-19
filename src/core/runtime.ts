@@ -132,6 +132,13 @@ import {
   type VirtualPathsConfig,
 } from "../sandbox/virtual-paths.js";
 import {
+  performHandoff,
+  type AgentId,
+  type Handoff,
+  type HandoffInputData,
+  type HandoffResult,
+} from "./handoff.js";
+import {
   applyHashEdit,
   type HashEditOperation,
   type HashEditResult,
@@ -1172,6 +1179,25 @@ export class WotannRuntime {
    */
   getDiffTheater(): VisualDiffTheater | null {
     return this.diffTheater;
+  }
+
+  /**
+   * Session-13 OpenAI agents-python parity: perform a full agent
+   * handoff. Runs the input filter (or default nested-history filter)
+   * and returns the HandoffResult — caller uses `downstreamInput` to
+   * start the next agent's turn. Called externally by
+   * `orchestration/agent-registry.ts`.
+   *
+   * Honest: throws on from===to per performHandoff() invariant; never
+   * fabricates a success.
+   */
+  async performAgentHandoff(
+    from: AgentId,
+    to: AgentId,
+    handoff: Handoff,
+    data: HandoffInputData,
+  ): Promise<HandoffResult> {
+    return performHandoff(from, to, handoff, data);
   }
 
   /**

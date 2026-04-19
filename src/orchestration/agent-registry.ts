@@ -12,6 +12,13 @@
  */
 
 import { requiredReadingHook } from "../runtime-hooks/dead-code-hooks.js";
+import {
+  performHandoff,
+  type AgentId as HandoffAgentId,
+  type Handoff,
+  type HandoffInputData,
+  type HandoffResult,
+} from "../core/handoff.js";
 import type { RequiredReadingItem } from "../agents/required-reading.js";
 
 export type AgentModel = "opus" | "sonnet" | "haiku" | "local";
@@ -435,6 +442,27 @@ export class AgentRegistry {
   /** Check if an agent ID is registered. */
   has(id: string): boolean {
     return this.agents.has(id);
+  }
+
+  /**
+   * Session-13 OpenAI agents-python parity: perform an agent handoff.
+   * Delegates to `core/handoff.ts::performHandoff`. The runtime exposes
+   * the same entry point via `WotannRuntime.performAgentHandoff()` —
+   * this method is for callers that already hold a registry reference
+   * without a runtime handle.
+   *
+   * Honest: throws on from===to per performHandoff() invariant.
+   */
+  async handoff(
+    from: HandoffAgentId,
+    to: HandoffAgentId,
+    handoff: Handoff,
+    data: HandoffInputData,
+  ): Promise<HandoffResult> {
+    if (!this.agents.has(to)) {
+      throw new Error(`handoff: unknown target agent "${to}"`);
+    }
+    return performHandoff(from, to, handoff, data);
   }
 
   /** Get the count of registered agents. */
