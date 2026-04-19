@@ -16,6 +16,7 @@ import { RateLimitManager } from "../providers/rate-limiter.js";
 import { buildFallbackChain, resolveNextProvider } from "../providers/fallback-chain.js";
 import { augmentQuery, parseToolCallsFromText } from "../providers/capability-augmenter.js";
 import { AccountPool } from "../providers/account-pool.js";
+import { SemanticCache } from "../memory/semantic-cache.js";
 import { estimatePromptTokens, estimateCost } from "../telemetry/token-estimator.js";
 
 export interface AgentBridgeConfig {
@@ -57,6 +58,13 @@ export class AgentBridge {
   private readonly defaultModel: string;
   private readonly defaultProvider: ProviderName;
   private readonly onPreflightEstimate: AgentBridgeConfig["onPreflightEstimate"] | undefined;
+  /**
+   * Phase 13 Wave-3C — optional semantic LLM response cache. Gated via
+   * WOTANN_SEMANTIC_CACHE=1. Uses a lightweight char-bigram surrogate
+   * embedding so the cache stays self-contained (no ML dep). Per-session
+   * (per-bridge-instance) state — never module-global.
+   */
+  private semanticCache: SemanticCache<QueryResult> | null = null;
 
   constructor(config: AgentBridgeConfig) {
     this.adapters = config.adapters;
@@ -66,6 +74,12 @@ export class AgentBridge {
     this.defaultModel = config.defaultModel ?? "gemma4:e4b";
     this.defaultProvider = config.defaultProvider ?? ("ollama" as ProviderName);
     this.onPreflightEstimate = config.onPreflightEstimate;
+    if (process.env["WOTANN_SEMANTIC_CACHE"] === "1") {
+      this.semanticCache = new SemanticCache<QueryResult>({
+        similarityThreshold: 0.95,
+        embed: async (text) => bigramEmbedding(text),
+      });
+    }
   }
 
   /**
@@ -339,6 +353,20 @@ export class AgentBridge {
    * Non-streaming query — collects all chunks into a single result.
    */
   async querySync(options: WotannQueryOptions): Promise<QueryResult> {
+    // Phase 13 Wave-3C: semantic cache hit check before running the full
+    // streaming pipeline. Cache key is the prompt+system+model combo so
+    // different system prompts and models don't collide. Honest:
+    // cache.get failure falls through to the full query path.
+    if (this.semanticCache) {
+      try {
+        const cacheKey = `${options.systemPrompt ?? ""}::${options.model ?? ""}::${options.prompt}`;
+        const hit = await this.semanticCache.get(cacheKey);
+        if (hit !== null) return hit;
+      } catch {
+        /* honest fall-through: miss treated as cache unavailable */
+      }
+    }
+
     const startTime = Date.now();
     let content = "";
     let model = this.defaultModel;
@@ -364,7 +392,7 @@ export class AgentBridge {
       if (chunk.tokensUsed) tokensUsed = chunk.tokensUsed;
     }
 
-    return {
+    const result: QueryResult = {
       content,
       model,
       provider,
@@ -373,6 +401,17 @@ export class AgentBridge {
       usedFallback,
       fallbackChain,
     };
+    // Phase 13 Wave-3C: populate semantic cache on success. Skip on
+    // empty content (errors upstream should not pollute the cache).
+    if (this.semanticCache && content.length > 0) {
+      try {
+        const cacheKey = `${options.systemPrompt ?? ""}::${options.model ?? ""}::${options.prompt}`;
+        await this.semanticCache.set(cacheKey, result);
+      } catch {
+        /* honest fall-through: cache.set failure is non-fatal */
+      }
+    }
+    return result;
   }
 
   getAvailableProviders(): readonly ProviderName[] {
@@ -387,6 +426,31 @@ export class AgentBridge {
   getAdapter(provider: ProviderName): ProviderAdapter | null {
     return this.adapters.get(provider) ?? null;
   }
+}
+
+/**
+ * Phase 13 Wave-3C — lightweight surrogate embedding for semantic cache
+ * dedup. 128-dim vector derived from char-bigram hashes. Not a real
+ * semantic embedding, but good enough to detect near-duplicate prompts
+ * for cache hits without requiring an ML dependency. Deterministic;
+ * same input → same vector.
+ */
+function bigramEmbedding(text: string, dim: number = 128): readonly number[] {
+  const vec = new Float32Array(dim);
+  const normalized = text.toLowerCase();
+  for (let i = 0; i < normalized.length - 1; i++) {
+    const bg = normalized.charCodeAt(i) * 256 + normalized.charCodeAt(i + 1);
+    const idx = Math.abs(bg) % dim;
+    vec[idx] = (vec[idx] ?? 0) + 1;
+  }
+  // L2 normalize so cosine similarity is well-defined.
+  let mag = 0;
+  for (const v of vec) mag += v * v;
+  mag = Math.sqrt(mag);
+  if (mag === 0) return Array.from(vec);
+  const out: number[] = new Array(dim);
+  for (let i = 0; i < dim; i++) out[i] = (vec[i] ?? 0) / mag;
+  return out;
 }
 
 function isRateLimitError(message: string): boolean {
