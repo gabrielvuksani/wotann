@@ -19,14 +19,25 @@ final class ChatViewModel: ObservableObject {
 
     private let appState: AppState
     private let connectionManager: ConnectionManager
+    private let onDeviceModelService: OnDeviceModelService
     private let streamHandler = StreamHandler()
     private let offlineQueue = OfflineQueueService()
     private var cancellables = Set<AnyCancellable>()
 
-    init(conversationId: UUID, appState: AppState, connectionManager: ConnectionManager) {
+    // S4-25: OnDeviceModelService is injected so every ChatViewModel shares the
+    // process-wide singleton instead of allocating a fresh one per conversation.
+    // Default-arg preserves existing callers; explicit injection is used from
+    // ChatView which reads the environment singleton.
+    init(
+        conversationId: UUID,
+        appState: AppState,
+        connectionManager: ConnectionManager,
+        onDeviceModelService: OnDeviceModelService
+    ) {
         self.conversationId = conversationId
         self.appState = appState
         self.connectionManager = connectionManager
+        self.onDeviceModelService = onDeviceModelService
 
         // Subscribe to streaming events, filtering by conversation ID
         connectionManager.rpcClient.subscribe("stream.text") { [weak self] event in
@@ -100,8 +111,8 @@ final class ChatViewModel: ObservableObject {
         guard connectionManager.isConnected else {
             let enableOnDevice = UserDefaults.standard.bool(forKey: "enableOnDeviceInference")
             if enableOnDevice {
-                // Try on-device inference
-                let onDeviceService = OnDeviceModelService()
+                // Try on-device inference via the shared singleton (S4-25).
+                let onDeviceService = onDeviceModelService
                 isStreaming = true
                 let offlineAssistantId = UUID()
                 let offlinePlaceholder = Message(

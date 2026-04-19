@@ -19,11 +19,17 @@ struct ChatView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
     @StateObject private var viewModel: ChatViewModel
 
-    init(conversationId: UUID, appState: AppState, connectionManager: ConnectionManager) {
+    init(
+        conversationId: UUID,
+        appState: AppState,
+        connectionManager: ConnectionManager,
+        onDeviceModelService: OnDeviceModelService
+    ) {
         _viewModel = StateObject(wrappedValue: ChatViewModel(
             conversationId: conversationId,
             appState: appState,
-            connectionManager: connectionManager
+            connectionManager: connectionManager,
+            onDeviceModelService: onDeviceModelService
         ))
     }
 

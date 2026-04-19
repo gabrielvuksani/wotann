@@ -11,15 +11,17 @@ import SwiftUI
 struct DaemonOfflineView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var connectionManager: ConnectionManager
+    // S4-25: read the singleton injected at app startup instead of allocating
+    // a fresh service every time this view's body recomputes `canUseOffline`.
+    @EnvironmentObject var onDeviceModelService: OnDeviceModelService
 
     @State private var isRetrying = false
     @State private var retryCount = 0
     @State private var showOfflineOption = false
 
-    /// Check if on-device model is available for offline use
+    /// Check if on-device model is available for offline use.
     private var canUseOffline: Bool {
-        let onDeviceService = OnDeviceModelService()
-        return onDeviceService.isModelDownloaded && onDeviceService.canRunOnDevice
+        onDeviceModelService.isModelDownloaded && onDeviceModelService.canRunOnDevice
     }
 
     /// Paired device info from keychain

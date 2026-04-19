@@ -4,7 +4,10 @@ import SwiftUI
 
 /// Manage on-device AI models for offline chat capability.
 struct OnDeviceAIView: View {
-    @StateObject private var modelService = OnDeviceModelService()
+    // S4-25: read the process-wide singleton rather than instantiating a fresh
+    // service per-view. The preview path injects a local instance for isolated
+    // rendering.
+    @EnvironmentObject private var modelService: OnDeviceModelService
     @AppStorage("enableOnDeviceInference") private var enableOnDevice = false
 
     var body: some View {
@@ -236,6 +239,7 @@ private struct TierRow: View {
 #Preview {
     NavigationStack {
         OnDeviceAIView()
+            .environmentObject(OnDeviceModelService())
     }
     .preferredColorScheme(.dark)
 }

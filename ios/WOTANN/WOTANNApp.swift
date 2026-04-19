@@ -25,6 +25,11 @@ struct WOTANNApp: App {
     private let localSendService = LocalSendService()
     @StateObject private var crossDeviceService = CrossDeviceService()
     @StateObject private var continuityCameraService = ContinuityCameraService()
+    // S4-25: one process-wide OnDeviceModelService so per-view `@StateObject`
+    // instantiations do not each allocate a config struct + OfflineQueueService.
+    // Mounted on ContentView so every descendant reads it via
+    // `@EnvironmentObject`.
+    @StateObject private var onDeviceModelService = OnDeviceModelService()
 
     var body: some Scene {
         WindowGroup {
@@ -37,6 +42,7 @@ struct WOTANNApp: App {
                         .environmentObject(connectionManager)
                         .environmentObject(crossDeviceService)
                         .environmentObject(continuityCameraService)
+                        .environmentObject(onDeviceModelService)
                         .preferredColorScheme(resolvedColorScheme)
                         .tint(WTheme.Colors.primary)
                         .onOpenURL { url in

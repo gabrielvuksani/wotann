@@ -6,6 +6,10 @@ import SwiftUI
 struct ConversationListView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var connectionManager: ConnectionManager
+    // S4-25: shared singleton so the ChatViewModel built for a chat
+    // destination hangs off the same on-device model instance as the rest of
+    // the app.
+    @EnvironmentObject var onDeviceModelService: OnDeviceModelService
     @AppStorage("lastBriefingDate") private var lastBriefingDate = ""
     @State private var searchText = ""
     @State private var filterMode: ConversationListVM.FilterMode = .all
@@ -78,7 +82,8 @@ struct ConversationListView: View {
                     viewModel: ChatViewModel(
                         conversationId: target.id,
                         appState: appState,
-                        connectionManager: connectionManager
+                        connectionManager: connectionManager,
+                        onDeviceModelService: onDeviceModelService
                     )
                 )
             }
