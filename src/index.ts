@@ -4541,6 +4541,36 @@ program
     process.exit(0);
   });
 
+// ── wotann sandbox list ─────────────────────────────────────
+// Phase 13 Wave 3B: list every backend WOTANN knows about (core 3 +
+// extended 5: daytona/modal/singularity/ssh/landlock) with its
+// availability. Extended backend availability is probed per call via
+// env vars + `which`.
+const sandboxCmd = program
+  .command("sandbox")
+  .description("Sandbox / execution environment utilities");
+sandboxCmd
+  .command("list")
+  .description("List every available sandbox backend + its availability")
+  .option("--json", "Emit JSON instead of table", false)
+  .action(async (opts: { json?: boolean }) => {
+    const { listAvailableBackends } = await import("./sandbox/execution-environments.js");
+    const backends = listAvailableBackends();
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(backends, null, 2)}\n`);
+      return;
+    }
+    console.log(chalk.bold("\nAvailable sandbox backends:\n"));
+    for (const b of backends) {
+      const mark = b.available ? chalk.green("✓") : chalk.yellow("·");
+      console.log(
+        `  ${mark} ${chalk.bold(b.label.padEnd(12))} ${chalk.dim(b.isolation.padEnd(10))} ${chalk.dim(b.availabilityReason)}`,
+      );
+      console.log(chalk.dim(`      ${b.description}`));
+    }
+    console.log();
+  });
+
 // ── wotann loop ─────────────────────────────────────────────
 // Session-13 Claude Code parity: `wotann loop <interval> <command>`
 // runs the command on a recurring schedule via LoopManager. Honours

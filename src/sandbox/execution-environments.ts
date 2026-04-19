@@ -171,3 +171,93 @@ export function listAllEnvironments(): readonly ExecutionEnvironment[] {
     EXECUTION_ENVIRONMENTS.docker,
   ];
 }
+
+// ── Phase 13 Wave 3B: extended-backends catalog entry ───
+
+/**
+ * Descriptor for ANY backend (core or extended) surfaced to the CLI.
+ * Core backends always return available=true (they are local, Docker
+ * is probed via command presence at higher layers). Extended backends
+ * bring their own availability probe keyed on env vars + binary
+ * presence (see extended-backends.detectAvailableBackends).
+ */
+export interface BackendListing {
+  readonly name: string;
+  readonly label: string;
+  readonly description: string;
+  readonly isolation: "none" | "filesystem" | "full";
+  readonly startupCostMs: number;
+  readonly supportsRollback: boolean;
+  readonly available: boolean;
+  readonly availabilityReason: string;
+}
+
+/**
+ * Enumerate every backend WOTANN knows about — the core 3 plus the 5
+ * extended ones (daytona/modal/singularity/ssh/landlock). Availability
+ * for extended backends is probed on each call (env vars + `which`).
+ * Consumed by `wotann sandbox list`.
+ */
+export function listAvailableBackends(
+  env: NodeJS.ProcessEnv = process.env,
+): readonly BackendListing[] {
+  const coreListings: BackendListing[] = listAllEnvironments().map((envDesc) => ({
+    name: envDesc.name,
+    label: envDesc.label,
+    description: envDesc.description,
+    isolation: envDesc.isolation,
+    startupCostMs: envDesc.startupCostMs,
+    supportsRollback: envDesc.supportsRollback,
+    available: true,
+    availabilityReason: "built-in",
+  }));
+
+  // Lazy-require extended-backends so listAllEnvironments remains a
+  // cheap zero-deps call. Honest: if extended module fails to load we
+  // return only the core list plus a warn, never throw up.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-invalid-type-assertions
+    const ext = require("./extended-backends.js") as {
+      EXTENDED_EXECUTION_ENVIRONMENTS: Record<
+        string,
+        {
+          name: string;
+          label: string;
+          description: string;
+          isolation: "none" | "filesystem" | "full";
+          startupCostMs: number;
+          supportsRollback: boolean;
+        }
+      >;
+      detectAvailableBackends: (
+        env: NodeJS.ProcessEnv,
+      ) => readonly { name: string; available: boolean; reason: string }[];
+    };
+    const availabilityMap = new Map<string, { available: boolean; reason: string }>();
+    for (const probe of ext.detectAvailableBackends(env)) {
+      availabilityMap.set(probe.name, { available: probe.available, reason: probe.reason });
+    }
+    const extendedListings: BackendListing[] = Object.values(
+      ext.EXTENDED_EXECUTION_ENVIRONMENTS,
+    ).map((envDesc) => {
+      const probe = availabilityMap.get(envDesc.name) ?? {
+        available: false,
+        reason: "no probe registered",
+      };
+      return {
+        name: envDesc.name,
+        label: envDesc.label,
+        description: envDesc.description,
+        isolation: envDesc.isolation,
+        startupCostMs: envDesc.startupCostMs,
+        supportsRollback: envDesc.supportsRollback,
+        available: probe.available,
+        availabilityReason: probe.reason,
+      };
+    });
+    return [...coreListings, ...extendedListings];
+  } catch (err) {
+    console.warn(`[WOTANN] extended-backends load failed: ${(err as Error).message}`);
+    return coreListings;
+  }
+}
