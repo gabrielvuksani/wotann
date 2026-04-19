@@ -90,6 +90,7 @@
     "@types/ws": "^8.5.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "esbuild": "^0.27.7",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.1.0",
     "ink-testing-library": "^4.0.0",
