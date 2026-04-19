@@ -35,22 +35,33 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm run build
-      - name: Package single-executable
+      # postject is required by sea-bundle.sh. Install it once up-front so
+      # the first `npx postject` inside the bundle script is a no-op fetch.
+      - name: Install postject
+        shell: bash
+        run: npm install --no-save postject
+      - name: Build + SEA bundle (via build-all.sh)
+        if: matrix.os != 'windows-latest'
         shell: bash
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           VERSION="${REF_NAME#v}"
-          mkdir -p dist/release
-          ART="dist/release/wotann-${VERSION}-${TARGET}"
-          # Honest failure: if dist/index.js is missing, the build is broken — fail loudly.
-          # No more printf'ing an empty sh shim that silently ships a non-functional binary.
-          test -f dist/index.js || { echo "::error::dist/index.js missing — build failed, refusing to ship empty shim"; exit 1; }
-          cp dist/index.js "$ART"
-          chmod +x "$ART"
-          ( cd dist/release && tar -czf "wotann-${VERSION}-${TARGET}.tar.gz" "wotann-${VERSION}-${TARGET}" )
+          # build-all.sh runs: npm run build -> sea-bundle.sh -> archive+sha256.
+          # Honest failure: non-zero exit propagates and fails the job.
+          bash scripts/release/build-all.sh "$VERSION"
+      - name: Build + SEA bundle (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          # Same build-all.sh path — bash-for-Windows (Git Bash) on the
+          # windows-latest runner. postject handles Windows PE binary format.
+          bash scripts/release/build-all.sh "$VERSION"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -86,6 +97,9 @@ jobs:
           registry-url: "https://registry.npmjs.org/"
       - run: npm ci --ignore-scripts
       - run: npm run build
+      # Run strengthened prepublish-check BEFORE publish. Fails loudly if
+      # any bundle-health gate fails — blocks a broken publish.
+      - run: node scripts/release/prepublish-check.mjs
       - run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

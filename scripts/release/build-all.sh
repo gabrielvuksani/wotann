@@ -1,33 +1,50 @@
 #!/usr/bin/env bash
-# Build release artifacts for all platforms.
-# Assumes: node, npm, rustup, cross-compile toolchains installed.
-# Produces: dist/wotann-<version>-<os>-<arch>[.tar.gz|.dmg|.exe|.deb|.rpm|.AppImage]
+# build-all.sh — Orchestrator that builds, SEA-bundles, and archives
+# release artifacts for the HOST target. CI invokes this on each matrix
+# runner so we get a full platform fan-out.
 #
-# Run locally or via GitHub Actions. CI path skips DMG/MSI signing — those
-# need Apple Developer ID + Windows code-signing certs.
+# Responsibilities:
+#   1. Run TypeScript build (`npm run build`)
+#   2. Delegate SEA binary production to `sea-bundle.sh` (fails loudly if
+#      postject is missing — no silent skip)
+#   3. Archive + checksum the produced binary
+#
+# Inputs (args or env):
+#   $1 / WOTANN_VERSION — version string (default: from package.json)
+#
+# Exit codes:
+#   0   — success
+#   1   — prerequisite missing or build failure
+#   2-4 — propagated from sea-bundle.sh
 
 set -euo pipefail
 
-VERSION="${1:-$(node -p "require('./package.json').version")}"
-DIST="dist/release"
+log()  { printf "\033[0;36m[build-all]\033[0m %s\n" "$*"; }
+fail() { printf "\033[0;31m[build-all:ERROR]\033[0m %s\n" "$*" >&2; exit "${2:-1}"; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="${1:-${WOTANN_VERSION:-$(node -p "require('./package.json').version")}}"
+export WOTANN_VERSION="$VERSION"
+DIST="${WOTANN_DIST:-dist/release}"
+export WOTANN_DIST="$DIST"
+
 mkdir -p "$DIST"
+log "version: $VERSION"
+log "output:  $DIST"
 
-log() { printf "\033[0;36m[build-all]\033[0m %s\n" "$*"; }
+# ── Step 1: TypeScript build ──────────────────────────────────────
+log "step 1/3: TypeScript build (npm run build)"
+npm run build || fail "npm run build failed" 1
 
-# 1. TypeScript → JavaScript bundles
-log "building JavaScript bundles"
-npm run build
+# ── Step 2: SEA bundle ────────────────────────────────────────────
+log "step 2/3: SEA bundle via sea-bundle.sh"
+if [ ! -x "$SCRIPT_DIR/sea-bundle.sh" ]; then
+  fail "missing or non-executable: $SCRIPT_DIR/sea-bundle.sh" 1
+fi
+# Propagate non-zero exit so CI fails rather than silently shipping half-built binary.
+bash "$SCRIPT_DIR/sea-bundle.sh" || fail "SEA bundling failed — see above" $?
 
-# 2. Produce the SEA blob (one per version, the same blob injects into
-# the platform-specific node binary for each target).
-log "producing SEA blob from sea.config.json"
-node --experimental-sea-config sea.config.json
-
-# 3. For each target, copy the local node binary + inject the blob.
-# Cross-compilation for non-host targets requires downloading the Node
-# binary for that platform; this script only produces the HOST target
-# by default. CI handles the full matrix by running on each platform.
-
+# ── Host target detection (for archive naming) ────────────────────
 HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$HOST_OS" in
   darwin) HOST_OS="macos" ;;
@@ -40,48 +57,27 @@ case "$HOST_ARCH" in
 esac
 HOST_TARGET="${HOST_OS}-${HOST_ARCH}"
 
-log "building for host target: $HOST_TARGET"
-
-NODE_BIN="$(which node)"
 ART="$DIST/wotann-${VERSION}-${HOST_TARGET}"
 [ "$HOST_OS" = "windows" ] && ART="${ART}.exe"
 
-# Copy node → our binary
-cp "$NODE_BIN" "$ART"
-
-# Strip code-signing on macOS so we can re-inject (resign after)
-if [ "$HOST_OS" = "macos" ]; then
-  codesign --remove-signature "$ART" 2>/dev/null || true
+if [ ! -f "$ART" ]; then
+  fail "expected SEA binary missing after sea-bundle: $ART" 1
 fi
 
-# Inject the SEA blob
-npx --yes postject "$ART" NODE_SEA_BLOB "$DIST/wotann.blob" \
-  --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 \
-  $([ "$HOST_OS" = "macos" ] && echo "--macho-segment-name NODE_SEA" || echo "")
-
-# Re-sign macOS binary ad-hoc (unsigned distribution requires user
-# right-click → open). Real release CI should notarize via Apple Dev ID.
-if [ "$HOST_OS" = "macos" ]; then
-  codesign --sign - "$ART" 2>/dev/null || true
-fi
-
-chmod +x "$ART"
-log "  host artifact: $ART"
-
-# Non-host targets — CI job on that platform runs the same script
-log "NOTE: non-host targets require CI runner on that platform"
-
-# 3. Archive + checksums
-log "archiving + computing checksums"
-cd "$DIST"
-for bin in wotann-${VERSION}-*; do
-  tar -czf "${bin}.tar.gz" "$bin"
+# ── Step 3: Archive + checksum ────────────────────────────────────
+log "step 3/3: archive + checksum"
+(
+  cd "$DIST"
+  BASENAME="$(basename "$ART")"
+  tar -czf "${BASENAME}.tar.gz" "$BASENAME"
   if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "${bin}.tar.gz" > "${bin}.tar.gz.sha256"
+    shasum -a 256 "${BASENAME}.tar.gz" > "${BASENAME}.tar.gz.sha256"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${BASENAME}.tar.gz" > "${BASENAME}.tar.gz.sha256"
   else
-    sha256sum "${bin}.tar.gz" > "${bin}.tar.gz.sha256"
+    fail "neither shasum nor sha256sum available — cannot compute checksum" 1
   fi
-done
+)
 
-log "done — artifacts in $DIST"
-ls -la
+log "DONE — artifacts in $DIST:"
+ls -la "$DIST"
