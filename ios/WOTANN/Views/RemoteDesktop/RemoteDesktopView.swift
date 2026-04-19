@@ -1,4 +1,7 @@
 import SwiftUI
+import ImageIO
+import UniformTypeIdentifiers
+import os.log
 
 // MARK: - RemoteDesktopView
 
@@ -878,10 +881,18 @@ final class RemoteDesktopViewModel: ObservableObject {
         guard case .object(let obj) = response.result else { return }
 
         if let base64 = obj["image"]?.stringValue,
-           let imageData = Data(base64Encoded: base64),
-           let image = UIImage(data: imageData) {
-            screenImage = image
-            recordFrame()
+           let imageData = Data(base64Encoded: base64) {
+            // S4-24: downsample on the decode path so a 4K source shrinks to
+            // a phone-friendly width before it ever reaches the render tree.
+            if let image = Self.downsample(imageData: imageData, maxPixelWidth: Self.downsampleWidth) {
+                screenImage = image
+                recordFrame()
+            } else if let image = UIImage(data: imageData) {
+                // ImageIO decode should never fail on PNG, but retain the
+                // direct-init fallback so a malformed response still renders.
+                screenImage = image
+                recordFrame()
+            }
         }
 
         if let w = obj["width"]?.intValue ?? obj["width"]?.doubleValue.map({ Int($0) }) {
@@ -890,6 +901,47 @@ final class RemoteDesktopViewModel: ObservableObject {
         if let h = obj["height"]?.intValue ?? obj["height"]?.doubleValue.map({ Int($0) }) {
             screenHeight = h
         }
+    }
+
+    // MARK: - Downsampling (S4-24)
+
+    /// Maximum pixel width retained after downsampling. 1920 matches a standard
+    /// 1080p source; a 4K (3840 px) capture lands at ~25% the pixel count
+    /// which roughly quarters the decoded bitmap memory footprint.
+    static let downsampleWidth: CGFloat = 1920
+
+    private static let remoteDesktopLog = Logger(
+        subsystem: "com.wotann.ios",
+        category: "RemoteDesktop"
+    )
+
+    /// Decode `imageData` through ImageIO, applying a thumbnail-style downsample
+    /// so the resulting bitmap never exceeds `maxPixelWidth`. This is cheaper
+    /// than decoding a full 4K bitmap then resizing, because ImageIO can
+    /// short-circuit the full decode when the largest requested dimension fits
+    /// inside a preview.
+    ///
+    /// Returns a standard-scale `UIImage` so the SwiftUI rendering path does
+    /// not upscale back to the screen scale — at 1920 px that is already well
+    /// above what the phone display can resolve.
+    static func downsample(imageData: Data, maxPixelWidth: CGFloat) -> UIImage? {
+        let sourceOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: false,
+        ]
+        guard let source = CGImageSourceCreateWithData(imageData as CFData, sourceOptions as CFDictionary) else {
+            return nil
+        }
+
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelWidth,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage, scale: 1.0, orientation: .up)
     }
 
     // MARK: - Refresh Timer
