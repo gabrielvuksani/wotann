@@ -75,10 +75,10 @@ export class PersonaManager {
       `**Priorities:** ${persona.priorities.join(", ")}`,
       `**Communication:** ${persona.communication.join(", ")}`,
       persona.decisionFramework ? `**Decision Framework:** ${persona.decisionFramework}` : "",
-      persona.avoidPatterns?.length
-        ? `**Avoid:** ${persona.avoidPatterns.join(", ")}`
-        : "",
-    ].filter(Boolean).join("\n");
+      persona.avoidPatterns?.length ? `**Avoid:** ${persona.avoidPatterns.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   getCount(): number {
@@ -126,20 +126,75 @@ export interface BootstrapResult {
 }
 
 /** 8-file bootstrap order — loaded at session start into system prompt */
-const BOOTSTRAP_FILES: readonly { name: string; filename: string; description: string; required: boolean }[] = [
-  { name: "agents", filename: "AGENTS.md", description: "Agent roster and capabilities", required: false },
-  { name: "tools", filename: "TOOLS.md", description: "Available tools and MCP servers", required: false },
-  { name: "soul", filename: "SOUL.md", description: "Agent personality and values", required: false },
-  { name: "identity", filename: "IDENTITY.md", description: "Agent name, role, communication style", required: false },
-  { name: "user", filename: "USER.md", description: "User preferences, knowledge level", required: false },
-  { name: "heartbeat", filename: "HEARTBEAT.md", description: "Recurring tasks and checks", required: false },
-  { name: "lessons", filename: "LESSONS.md", description: "Accumulated lessons from past sessions", required: false },
-  { name: "rules", filename: "RULES.md", description: "Behavioral constraints and coding standards", required: false },
+const BOOTSTRAP_FILES: readonly {
+  name: string;
+  filename: string;
+  description: string;
+  required: boolean;
+}[] = [
+  {
+    name: "agents",
+    filename: "AGENTS.md",
+    description: "Agent roster and capabilities",
+    required: false,
+  },
+  {
+    name: "tools",
+    filename: "TOOLS.md",
+    description: "Available tools and MCP servers",
+    required: false,
+  },
+  {
+    name: "soul",
+    filename: "SOUL.md",
+    description: "Agent personality and values",
+    required: false,
+  },
+  {
+    name: "identity",
+    filename: "IDENTITY.md",
+    description: "Agent name, role, communication style",
+    required: false,
+  },
+  {
+    name: "user",
+    filename: "USER.md",
+    description: "User preferences, knowledge level",
+    required: false,
+  },
+  {
+    name: "heartbeat",
+    filename: "HEARTBEAT.md",
+    description: "Recurring tasks and checks",
+    required: false,
+  },
+  {
+    name: "lessons",
+    filename: "LESSONS.md",
+    description: "Accumulated lessons from past sessions",
+    required: false,
+  },
+  {
+    name: "rules",
+    filename: "RULES.md",
+    description: "Behavioral constraints and coding standards",
+    required: false,
+  },
 ];
 
 /**
  * Load all 8 bootstrap files in fixed order.
  * Returns their content merged into a single system prompt section.
+ *
+ * @deprecated Superseded by `src/prompt/engine.ts` which has its own
+ * inline BOOTSTRAP_FILES loop. Kept only for the `src/lib.ts` public
+ * re-export (backwards-compat surface). Per Gabriel's "zero deletions"
+ * mandate the implementation is retained; new call-sites should use
+ * `assembleSystemPromptParts` from `prompt/engine.ts` instead.
+ *
+ * Wave 3G verification (2026-04-19): zero non-barrel consumers
+ * confirmed via grep. The re-export in `src/lib.ts:109-112` is the
+ * only reason this function exists.
  */
 export function loadBootstrapFiles(wotannDir: string): BootstrapResult {
   const files: BootstrapFile[] = [];
@@ -294,11 +349,26 @@ export interface PersonaSwitchResult {
 
 /**
  * Build a combined system prompt section from identity + persona + bootstrap.
+ *
+ * @deprecated Superseded by `src/prompt/engine.ts::assembleSystemPromptParts`
+ * which assembles the same identity + persona + bootstrap + mode + rules
+ * sections through the full module registry. Kept only for the
+ * `src/lib.ts` public re-export. Per Gabriel's "zero deletions" mandate
+ * the implementation is retained for backwards compatibility.
+ *
+ * Wave 3G verification (2026-04-19): zero non-barrel consumers
+ * confirmed via grep. The re-export in `src/lib.ts:109-112` is the
+ * only reason this function exists.
  */
 export function buildIdentityPrompt(
   wotannDir: string,
   personaName?: string,
-): { identity: Identity; persona: PersonaConfig | null; bootstrap: BootstrapResult; systemPrompt: string } {
+): {
+  identity: Identity;
+  persona: PersonaConfig | null;
+  bootstrap: BootstrapResult;
+  systemPrompt: string;
+} {
   const identity = loadIdentity(wotannDir);
   const personaManager = new PersonaManager(wotannDir);
   const persona = personaName ? personaManager.get(personaName) : null;
