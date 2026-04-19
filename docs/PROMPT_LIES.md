@@ -143,13 +143,21 @@ No `eval` exists in the file. The prompt's "rephrased to avoid eval keyword in c
 
 ---
 
-## LIE #6 — "4857 tests passing across 309 files"
+## NOT-A-LIE #6 — "4857 tests passing across 309 files"
 
 **Prompt said**: "CLAIMED 4857 tests passing 0 failures across 309 files."
 
-**Status**: UNVERIFIED at time of this writing. Will be checked via `npm test` in Phase 12. Session 10 state snapshot shows 252 files / 3,942 pass / 0 fail / 6 skipped at that point. The jump from 3,942 → 4,857 would require ~900 new tests in a short timeframe — plausible given the ~60 commits since, but needs empirical check.
+**Verified**: `npm test` (vitest run) output 2026-04-19 11:26:07, 53.78s duration:
+```
+ Test Files  309 passed (309)
+      Tests  4857 passed | 7 skipped (4864)
+```
 
-**Impact**: LOW (trivially checkable).
+**Verdict**: The claim is **EXACT** — 309 test files, 4857 passing tests, 7 skipped, 0 failures. The prompt understates slightly by saying "0 failures" (accurate) but omitting the 7 skipped (7 tests skip deliberately). Typecheck also clean (`npm run typecheck` returned zero-lines).
+
+**Note**: A side-effect discovered — `camoufox-backend` Python driver fails its imports (`ModuleNotFoundError: No module named 'camoufox'` and `'playwright'`) in the test environment and repeatedly spawns/kills the stub. Not a test failure, but the Python driver is not installable in bare CI without `pip install camoufox playwright` — needs a runtime.deps declaration or silent guard in tests to avoid stub-churn log spam.
+
+**Impact**: LOW (verified).
 
 ---
 
@@ -259,8 +267,167 @@ There are **49 files in `wotann/docs/`**. The audit prompt implicitly told a fre
 
 ---
 
+---
+
+## LIE #11 — Screenshot inventory incomplete
+
+**Prompt listed**: "chat-*.png, depth-*.png, e2e-*.png, editor-space.png, exploit-*.png, command-palette.png, main-app-*.png, final-main-view.png, fix-layout-*.png, input-fix-check.png"
+
+**Reality** (per Agent A's full parent-root walk): parent root has substantially more PNGs. Additional unmentioned:
+- `settings-appearance.png`, `settings-page.png`, `settings-providers.png`
+- `model-picker-open.png`
+- `notification-panel.png`
+- `onboarding-*.png` (7 variants including `onboarding-step1.png`)
+- `spacing-fix-system.png`, `spacing-fix-welcome.png`
+- `wotann-engine.png`, `wotann-main-app.png`, `wotann-providers.png`, `wotann-system-check.png`, `wotann-welcome.png`
+- `workshop-space.png`
+
+**Impact**: MEDIUM — Visual-UI agent would have skipped ~12 screenshots, missing onboarding variants + settings panel states + model-picker + notifications. Agent E re-derived the full list.
+
+---
+
+## LIE #12 — `COMPUTER_CONTROL_ARCHITECTURE.md` location + size
+
+**Prompt said**: "Parent-level analysis MDs (~250KB total): ... COMPUTER_CONTROL_ARCHITECTURE.md (48KB)"
+
+**Reality**:
+- `COMPUTER_CONTROL_ARCHITECTURE.md` is NOT at parent root. It lives at **`research/COMPUTER_CONTROL_ARCHITECTURE.md`** (48 KiB — size figure is correct, location isn't).
+- Parent root instead has `NEXUS_V4_SPEC.md` which is **325 KiB (333,824 bytes)** — THIS is the ~"250KB" file the prompt was probably recalling (and my memory file `project_nexus_v4.md` is a separate 7927-line auto-memory pointer, NOT the spec itself).
+
+**Impact**: MEDIUM — Agents routed to the wrong path would not find the doc.
+
+---
+
+## LIE #13 — Parent-level MD list incomplete
+
+**Prompt listed 6 MDs**: AGENT_FRAMEWORK_ANALYSIS, COMPETITIVE_ANALYSIS, COMPETITOR_FEATURE_COMPARISON_2026-04-03, COMPREHENSIVE_SOURCE_FINDINGS_2026-04-03, DEEP_SOURCE_EXTRACTION_2026-04-03, COMPUTER_CONTROL_ARCHITECTURE.
+
+**Reality**: Parent root ALSO has: `AGENTS.md`, `BUILD_GUIDE.md`, `ECOSYSTEM-CATALOG.md` (34 KiB), `MASTER_CONTINUATION_PROMPT.md`, `NEXUS_V1_SPEC_old.md`, `NEXUS_V2_SPEC_old.md`, `NEXUS_V3_SPEC_old.md`, `NEXUS_V4_SPEC.md` (325 KiB — the real spec), `SOURCES.md`, `UNIFIED_SYSTEMS_RESEARCH.md`, `.abstract.md`. Total count is ~15+ MDs, not 6.
+
+**Impact**: MEDIUM-HIGH — The Phase 11 Hidden-State / Unknown-Unknowns agents need the FULL MD list, not a subset. NEXUS V4 SPEC at 325 KiB is the single most important doc to spec-trace implementation against; it was mis-cited.
+
+---
+
+## LIE #14 — Exclusion list missed 4 GB of build caches + an old-git backup
+
+**Prompt said (implicit)**: excluding `node_modules/`, `.git/`, `dist/`, `build/`, `target/`, `.next/`, `__pycache__/` suffices for workspace walk.
+
+**Reality** (per Agent A): three large dirs slip through:
+- `wotann/desktop-app/src-tauri/target-audit/` — 6,622 files, **3.42 GiB Rust cache** (name is `target-audit`, not `target`, so `target/` exclusion misses it).
+- `wotann/ios/.build/` — 3,299 files, **278 MiB Swift build cache**.
+- **`wotann-old-git-20260414_114728/`** — 692 files, **685 MiB** — a sibling dir next to `wotann/` containing a backup of an OLD `.git/` tree. NEVER MENTIONED IN PROMPT. Likely past-Claude renamed `.git/` during history rewrite and forgot to delete.
+- `research/.broken/` — 7,461 files, 168 MiB.
+
+**Impact**: HIGH — (a) wotann-old-git-20260414 is 685 MiB of rot that should be pruned; (b) if it contains secret-laden commits that were rewritten out of main `.git/`, those secrets are STILL recoverable from this backup, reopening the Supabase-leak question. Agent B needs to scan this dir too.
+
+---
+
+## LIE #15 — `.wotann/` runtime state omitted
+
+**Prompt said (implicit)**: Hidden state at parent = `.nexus/` (memory.db), `.swarm/`, `.superpowers/`, `.claude-flow/`, `.playwright-mcp/`, `.github/`.
+
+**Reality**: `wotann/.wotann/` contains **5,208 files / 202 MiB** of ACTIVE runtime state: memory.db, logs, knowledge graph, dreams, episodes, sessions, shadow-git. This is where the LIVE runtime writes — it dwarfs `.nexus/` (156 KiB V3 vestige).
+
+Also: `wotann/.wotann/memory{2,3,4,5}.db-shm/-wal` are ORPHAN WAL/SHM files from crashed SQLite writers. 20+ leaked `knowledge-graph.json.tmp.*` temp files churning every daemon tick indicate leaky resource management — needs a finally-block / pending-cleanup fix.
+
+**Impact**: HIGH — (a) correct "prior-product memory extract" target is `.wotann/memory.db`, not just `.nexus/memory.db`; (b) the orphan WAL + tmp files are a real bug (data integrity risk on crash during write).
+
+---
+
+## LIE #16 — `src-tauri/` location
+
+**Prompt said**: "Compile-check with `cd ../src-tauri && cargo check`" implying `wotann/src-tauri/`.
+
+**Reality**: Tauri Rust source lives at `wotann/desktop-app/src-tauri/`, NOT `wotann/src-tauri/`. Correct build command: `cd desktop-app/src-tauri && cargo check`. 13 Rust source files live there (lib.rs, commands.rs, computer_use/, remote_control/, sidecar.rs, state.rs, tray.rs, audio_capture.rs, cursor_overlay.rs, hotkeys.rs, input.rs, ipc_client.rs, localsend.rs, main.rs).
+
+**Impact**: MEDIUM — Phase 5 cross-surface parity agent would `cd` to the wrong path and fail.
+
+---
+
+## LIE #17 — `Formula/` + `python-scripts/` omitted
+
+**Prompt said (implicit)**: wotann top-level includes standard dirs (src/, tests/, desktop-app/, ios/).
+
+**Reality**: ALSO top-level in wotann/: `Formula/wotann.rb` (Homebrew, 56 LOC — relevant to Phase 15 release audit) + `python-scripts/camoufox-driver.py` (341 LOC — the Python backend for the allegedly-fixed camoufox bridge).
+
+**Impact**: LOW-MEDIUM — Release + camoufox re-verification needs to touch these paths.
+
+---
+
+## LIE #18 — Only 5 of 24 AppShell views are visually verified
+
+**Prompt implied**: screenshots reasonably represent the UI.
+
+**Reality** (per Agent E): AppShell.tsx lazy-loads 24 views. Only **5 appear in any screenshot** (Chat, Editor, Workshop-adjacent, Exploit, Onboarding variants). The remaining **19 views are visually unverified**: MeetPanel, ArenaView, IntelligenceDashboard, CanvasView, AgentFleetDashboard, ConnectorsGUI, ProjectList, DispatchInbox, ExecApprovals, PluginManager, DesignModePanel, CodePlayground, ScheduledTasks, ComputerUsePanel, CouncilView, TrainingReview, TrustView, IntegrationsView.
+
+Similarly: iOS app has **34 view directories** in `ios/WOTANN/Views/`; only one iOS screenshot (`docs/session-10-ios-pairing.png`, 713 KB) exists.
+
+TUI (Ink) — **zero screenshots**; `wotann start` interactive session is not visually captured anywhere.
+
+**Impact**: HIGH — 80% of WOTANN's UI is unchecked. Phase 10 Agent must mandate capturing the remaining 19 views (run `wotann desktop` + navigate each tab, screenshot) before UI quality can be honestly scored.
+
+---
+
+## LIE #19 — `Header.tsx` carries a self-invalidating comment
+
+Not strictly a prompt-lie, but a CODE-lie discovered by Agent E that the prompt should have surfaced:
+
+**`desktop-app/src/components/layout/Header.tsx:5-9`**: doc comment claims *"The 4-tab header (Chat|Editor|Workshop|Exploit) is eliminated"* — directly above `VIEW_PILLS` containing those exact 4 pills. A prior session removed them, session-10 UX audit re-added them, the doc comment was never updated. Quality-bar #13 "commit-message-is-claim" applies: remove the stale comment.
+
+**`desktop-app/src/components/input/ModePicker.tsx`** comment still describes dead modes *"Chat, Build, Autopilot, Compare, Review"* — the old 5-mode picker alongside the new 4-tab system. Either ModePicker is dead code or its comment is.
+
+**Impact**: LOW (cosmetic) but HIGH for trust signal. Stale comments undermine future-session's ability to trust the code.
+
+---
+
+## Updated Verification Ledger
+
+| Claim | Status | Evidence |
+|-------|--------|----------|
+| HEAD `aaf7ec2` | ✓ VERIFIED | `git rev-parse HEAD` |
+| iOS path `ios-app/` | ✗ LIE #1 | `ls wotann/` shows `ios/` |
+| gepa Promise-cache added after test failure | ✗ LIE #2 | Single commit `3c1b215`, co-committed tests |
+| skill-compositor flip from `toBe(11)` | ✗ LIE #2 | Single commit `23419ec`, test asserts `toBe(11)` with intent comment |
+| confidence-calibrator band reshape | ✗ LIE #2 | Single commit `8267f13`, consistent test expectations |
+| output-isolator 4 tests force-compression | Partial lie #2 | Tests DO pass `minSizeToIsolate: 100`, but that's normal test practice, not test-flip |
+| release.yml GH Actions injection "workaround" | ✗ LIE #3 | Uses canonical `env:`-pattern, not a workaround |
+| unified-exec.ts spawn bypass | ✗ LIE #3 | Documented Codex parity, not a bypass |
+| workflow-runner.ts eval rephrase | ✗ LIE #3 | No `eval`, explicit string-matching with safety docs |
+| ~45 library-only modules | ✗ LIE #4 | Prior audit shows 14; Phase 14 closed ≥3 |
+| 4 CRITICAL provider bugs open | ✗ LIE #5 | All closed via named commits post-Apr-18 |
+| 4857 tests passing | ✓ VERIFIED | `npm test` output 309 files / 4857 pass / 7 skip / 0 fail |
+| Session 3/5 feedback files exist | ✗ LIE #7 | Only sessions 1/2/4 have feedback files |
+| NEXUS V4 "11 providers" | ✗ LIE #8 | ProviderName union has 19 |
+| Prompt omits prior docs | ✗ LIE #9 | 49 files in `docs/` unmentioned |
+| Supabase key leak | ✗ LIE #10 (preliminary) | No keys in HEAD or history; Agent B confirming on wotann-old-git backup |
+| Screenshot list complete | ✗ LIE #11 | ~12 additional PNGs at parent root |
+| `COMPUTER_CONTROL_ARCHITECTURE.md` at parent | ✗ LIE #12 | Actually at `research/`; 48 KiB is right |
+| Parent MD list (6 files) | ✗ LIE #13 | Actually ~15+ including `NEXUS_V4_SPEC.md` (325 KiB) |
+| Exclusion list sufficient | ✗ LIE #14 | Missed `target-audit/` (3.42 GiB), `.build/` (278 MiB), `wotann-old-git-20260414` (685 MiB) |
+| `.wotann/` runtime state omitted | ✗ LIE #15 | 5,208 files / 202 MiB of ACTIVE state + 20+ leaked tmp files |
+| `src-tauri/` at wotann root | ✗ LIE #16 | Actually at `desktop-app/src-tauri/` |
+| `Formula/` + `python-scripts/` omitted | ✗ LIE #17 | Both exist, relevant for release + camoufox |
+| UI visually verified | ✗ LIE #18 | 19/24 desktop views + ~33/34 iOS views + 100% TUI are NOT screenshot-verified |
+| `Header.tsx` self-invalidating comment | ⚠ CODE-LIE #19 | Comment says "4-tab eliminated" above 4-tab code |
+
+---
+
+## Meta-lesson
+
+My past-session self has a pattern of:
+1. Paraphrasing rather than quoting — framing design choices as "workarounds" or "flips"
+2. Inflating numbers — "45 modules" vs actual "~14"
+3. Omitting significant context — 49 prior audit docs not mentioned
+4. Mislocating files — wrong parent vs research root; wrong src-tauri path
+5. Incomplete inventories — screenshot list, parent MDs, hidden-state dirs
+
+Future prompts MUST cite SHAs, line numbers, exact file paths verbatim. Any factual claim without `git show <sha>` or `wc -l <file>` style citation should be flagged SUSPECT by the consumer.
+
+---
+
 **Next verification work**:
-- `npm test` + `npm run typecheck` (Phase 12 agent will execute)
-- Agent B's thorough git-secret scan
+- Agent B's thorough git-secret scan (including `wotann-old-git-20260414` backup)
 - Agent C's memory archaeology cross-reference
 - Phase 4c wiring gap grep against the 14 Apr-18 items + newer modules
+- Phase 5 surface parity (cross-check all 24 GUI views + 34 iOS views)
+- Phase 6 provider smoke-test (confirms Bug #5 Ollama stopReason status)
