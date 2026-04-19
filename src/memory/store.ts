@@ -27,6 +27,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync, unlinkSync } from "
 import { randomUUID } from "node:crypto";
 import { writeFileAtomicSyncBestEffort } from "../utils/atomic-io.js";
 import { deriveIngestTimestamps } from "./dual-timestamp.js";
+import type { MemoryRelationship, MemoryRelationshipKind } from "./relationship-types.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -2333,6 +2334,107 @@ export class MemoryStore {
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     const info = this.db.prepare("DELETE FROM auto_capture WHERE created_at < ?").run(cutoff);
     return Number(info.changes);
+  }
+
+  // ── Typed Relationships (Phase H Task 2) ───────────────────
+
+  /** Persist one typed relationship. Idempotent on id. */
+  addRelationship(rel: MemoryRelationship): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO memory_relationships
+         (id, from_id, to_id, kind, confidence, rationale, invalidated_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        rel.id,
+        rel.fromId,
+        rel.toId,
+        rel.kind,
+        rel.confidence,
+        rel.rationale ?? null,
+        null,
+        rel.createdAt,
+      );
+  }
+
+  /** Bulk-persist relationships in a single transaction. */
+  addRelationships(rels: readonly MemoryRelationship[]): number {
+    if (rels.length === 0) return 0;
+    const tx = this.db.transaction((items: readonly MemoryRelationship[]) => {
+      for (const rel of items) this.addRelationship(rel);
+    });
+    tx(rels);
+    return rels.length;
+  }
+
+  /**
+   * Mark a relationship as invalidated. Used by
+   * knowledge-update-dynamics when a successor supersedes a
+   * predecessor — the predecessor's outbound non-updates edges are
+   * stamped so readers can distinguish active from historical edges.
+   */
+  invalidateRelationship(id: string, atMs: number = Date.now()): boolean {
+    const info = this.db
+      .prepare(
+        `UPDATE memory_relationships SET invalidated_at = ? WHERE id = ? AND invalidated_at IS NULL`,
+      )
+      .run(atMs, id);
+    return Number(info.changes) > 0;
+  }
+
+  /** Fetch all relationships touching a given memory_entries id. */
+  getRelationshipsForEntry(
+    entryId: string,
+    options?: { readonly kind?: MemoryRelationshipKind; readonly includeInvalidated?: boolean },
+  ): readonly MemoryRelationship[] {
+    const includeInvalidated = options?.includeInvalidated ?? false;
+    const conditions: string[] = ["(from_id = ? OR to_id = ?)"];
+    const params: (string | number)[] = [entryId, entryId];
+    if (options?.kind) {
+      conditions.push("kind = ?");
+      params.push(options.kind);
+    }
+    if (!includeInvalidated) conditions.push("invalidated_at IS NULL");
+
+    const rows = this.db
+      .prepare(
+        `SELECT id, from_id, to_id, kind, confidence, rationale, created_at
+         FROM memory_relationships
+         WHERE ${conditions.join(" AND ")}
+         ORDER BY created_at DESC`,
+      )
+      .all(...params) as Record<string, unknown>[];
+
+    return rows.map((r) => ({
+      id: r["id"] as string,
+      fromId: r["from_id"] as string,
+      toId: r["to_id"] as string,
+      kind: r["kind"] as MemoryRelationshipKind,
+      confidence: (r["confidence"] as number) ?? 0.5,
+      createdAt: (r["created_at"] as number) ?? 0,
+      ...(r["rationale"] ? { rationale: r["rationale"] as string } : {}),
+    }));
+  }
+
+  /** All relationships — used by resolveLatest walkers + tests. */
+  getAllRelationships(options?: {
+    readonly includeInvalidated?: boolean;
+  }): readonly MemoryRelationship[] {
+    const includeInvalidated = options?.includeInvalidated ?? false;
+    const sql = includeInvalidated
+      ? `SELECT id, from_id, to_id, kind, confidence, rationale, created_at FROM memory_relationships ORDER BY created_at DESC`
+      : `SELECT id, from_id, to_id, kind, confidence, rationale, created_at FROM memory_relationships WHERE invalidated_at IS NULL ORDER BY created_at DESC`;
+    const rows = this.db.prepare(sql).all() as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r["id"] as string,
+      fromId: r["from_id"] as string,
+      toId: r["to_id"] as string,
+      kind: r["kind"] as MemoryRelationshipKind,
+      confidence: (r["confidence"] as number) ?? 0.5,
+      createdAt: (r["created_at"] as number) ?? 0,
+      ...(r["rationale"] ? { rationale: r["rationale"] as string } : {}),
+    }));
   }
 
   close(): void {

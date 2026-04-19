@@ -11,17 +11,17 @@
 
 import { randomUUID } from "node:crypto";
 import type { AutoCaptureEntry } from "./store.js";
+import {
+  createHeuristicClassifier,
+  type MemoryRelationship,
+  type RelationshipClassifier,
+} from "./relationship-types.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type ObservationType =
-  | "decision"
-  | "preference"
-  | "milestone"
-  | "problem"
-  | "discovery";
+export type ObservationType = "decision" | "preference" | "milestone" | "problem" | "discovery";
 
 export interface Observation {
   readonly id: string;
@@ -121,16 +121,11 @@ function matchesAny(text: string, patterns: readonly RegExp[]): boolean {
 }
 
 function buildAssertion(prefix: string, content: string): string {
-  const cleaned = content
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 200);
+  const cleaned = content.replace(/\s+/g, " ").trim().slice(0, 200);
   return `${prefix}: ${cleaned}`;
 }
 
-export function extractDecisions(
-  captures: readonly AutoCaptureEntry[],
-): readonly Observation[] {
+export function extractDecisions(captures: readonly AutoCaptureEntry[]): readonly Observation[] {
   const results: Observation[] = [];
 
   for (const cap of captures) {
@@ -150,9 +145,7 @@ export function extractDecisions(
   return results;
 }
 
-export function extractPreferences(
-  captures: readonly AutoCaptureEntry[],
-): readonly Observation[] {
+export function extractPreferences(captures: readonly AutoCaptureEntry[]): readonly Observation[] {
   const toolCounts = new Map<string, { readonly count: number; readonly ids: readonly number[] }>();
 
   for (const cap of captures) {
@@ -182,9 +175,7 @@ export function extractPreferences(
   return results;
 }
 
-export function extractMilestones(
-  captures: readonly AutoCaptureEntry[],
-): readonly Observation[] {
+export function extractMilestones(captures: readonly AutoCaptureEntry[]): readonly Observation[] {
   const results: Observation[] = [];
 
   for (const cap of captures) {
@@ -204,9 +195,7 @@ export function extractMilestones(
   return results;
 }
 
-export function extractProblems(
-  captures: readonly AutoCaptureEntry[],
-): readonly Observation[] {
+export function extractProblems(captures: readonly AutoCaptureEntry[]): readonly Observation[] {
   const results: Observation[] = [];
 
   for (const cap of captures) {
@@ -226,9 +215,7 @@ export function extractProblems(
   return results;
 }
 
-export function extractDiscoveries(
-  captures: readonly AutoCaptureEntry[],
-): readonly Observation[] {
+export function extractDiscoveries(captures: readonly AutoCaptureEntry[]): readonly Observation[] {
   const results: Observation[] = [];
   const bySession = new Map<string, readonly AutoCaptureEntry[]>();
 
@@ -260,8 +247,7 @@ export function extractDiscoveries(
     if (hasError && hasFix) {
       const errorCap = relevant.find(
         (c) =>
-          c.eventType.toLowerCase().includes("error") ||
-          matchesAny(c.content, PROBLEM_PATTERNS),
+          c.eventType.toLowerCase().includes("error") || matchesAny(c.content, PROBLEM_PATTERNS),
       );
       const fixCap = relevant.find(
         (c) =>
@@ -294,6 +280,14 @@ export function extractDiscoveries(
 // ---------------------------------------------------------------------------
 
 export class ObservationExtractor {
+  private readonly classifier: RelationshipClassifier;
+
+  constructor(classifier?: RelationshipClassifier) {
+    // Phase H Task 2: default to heuristic classifier. Callers wanting
+    // LLM-backed relationships can pass createLlmClassifier(query).
+    this.classifier = classifier ?? createHeuristicClassifier();
+  }
+
   extractFromCaptures(captures: readonly AutoCaptureEntry[]): readonly Observation[] {
     if (captures.length === 0) return [];
 
@@ -304,6 +298,72 @@ export class ObservationExtractor {
       ...extractProblems(captures),
       ...extractDiscoveries(captures),
     ];
+  }
+
+  /**
+   * Phase H Task 2: classify relationships between newly extracted
+   * observations. Pair each observation with earlier ones in the same
+   * domain and ask the classifier if the later updates/extends/derives
+   * from the earlier.
+   *
+   * Runs AFTER extractFromCaptures. Observations are sorted by
+   * extractedAt so the earlier one is the predecessor.
+   *
+   * The classifier is async so callers can swap in LLM-backed
+   * classification; the default heuristic classifier returns instantly.
+   *
+   * Returns an empty list when fewer than 2 observations exist — no
+   * fabricated edges. Pairs from different domains are skipped to
+   * avoid cross-domain noise.
+   */
+  async classifyRelationships(
+    observations: readonly Observation[],
+    now: number = Date.now(),
+  ): Promise<readonly MemoryRelationship[]> {
+    if (observations.length < 2) return [];
+
+    const sorted = [...observations].sort((a, b) => a.extractedAt - b.extractedAt);
+    const relationships: MemoryRelationship[] = [];
+
+    // Pair each observation with up to 5 previous ones. Capped to keep
+    // classification cost bounded: O(5n) instead of O(n²).
+    for (let i = 1; i < sorted.length; i++) {
+      const successor = sorted[i]!;
+      const start = Math.max(0, i - 5);
+      for (let j = start; j < i; j++) {
+        const predecessor = sorted[j]!;
+
+        // Only classify same-domain pairs when both have a domain.
+        if (predecessor.domain && successor.domain && predecessor.domain !== successor.domain) {
+          continue;
+        }
+
+        let classification: Awaited<ReturnType<RelationshipClassifier["classify"]>>;
+        try {
+          classification = await this.classifier.classify(
+            predecessor.assertion,
+            successor.assertion,
+          );
+        } catch {
+          // Honest-failure: skip this pair rather than fabricate an edge.
+          continue;
+        }
+        if (!classification) continue;
+
+        const rel: MemoryRelationship = {
+          id: randomUUID(),
+          fromId: predecessor.id,
+          toId: successor.id,
+          kind: classification.kind,
+          confidence: classification.confidence,
+          createdAt: now,
+          ...(classification.rationale ? { rationale: classification.rationale } : {}),
+        };
+        relationships.push(rel);
+      }
+    }
+
+    return relationships;
   }
 }
 
