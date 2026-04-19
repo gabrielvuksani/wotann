@@ -69,10 +69,32 @@ function mapOpenAIFinishReason(
   }
 }
 
+/**
+ * Append `path` to `baseUrl` preserving any pre-existing query string or
+ * hash. Crucial for Azure OpenAI, whose baseUrl ends with
+ * `?api-version=YYYY-MM-DD`; a naive `${baseUrl}/chat/completions`
+ * produces `.../deployments/gpt-4o?api-version=2024-12-01-preview/chat/completions`,
+ * which 404s every call because the path gets baked INTO the query
+ * string value. Using the URL API avoids that class of bug across all
+ * providers.
+ */
+function appendPath(baseUrl: string, path: string): string {
+  if (!baseUrl) return path;
+  const hashIdx = baseUrl.indexOf("#");
+  const baseNoHash = hashIdx === -1 ? baseUrl : baseUrl.slice(0, hashIdx);
+  const hash = hashIdx === -1 ? "" : baseUrl.slice(hashIdx);
+  const queryIdx = baseNoHash.indexOf("?");
+  const basePath = queryIdx === -1 ? baseNoHash : baseNoHash.slice(0, queryIdx);
+  const query = queryIdx === -1 ? "" : baseNoHash.slice(queryIdx);
+  const trimmed = basePath.replace(/\/+$/, "");
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  return `${trimmed}${normalized}${query}${hash}`;
+}
+
 export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderAdapter {
   async function* query(options: UnifiedQueryOptions): AsyncGenerator<StreamChunk> {
     const model = options.model ?? config.defaultModel;
-    const url = `${config.baseUrl}/chat/completions`;
+    const url = appendPath(config.baseUrl, "/chat/completions");
     const authToken = options.authToken ?? config.apiKey;
     const messages: Array<Record<string, unknown>> = [];
 
@@ -312,7 +334,7 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`${config.baseUrl}/models`, {
+      const response = await fetch(appendPath(config.baseUrl, "/models"), {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           ...config.headers,
