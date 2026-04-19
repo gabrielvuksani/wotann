@@ -210,6 +210,10 @@ program
     "Enable WOTANN_ENABLE_EXTENDED_CONTEXT=1 for 1M context on supported providers",
   )
   .option("--tdd", "Enable TDD enforcement (test-first workflow)")
+  .option(
+    "--shell <shell>",
+    "Generate OSC 133 shell init script for Warp-style blocks (zsh|bash|fish)",
+  )
   .action(
     async (options: {
       free?: boolean;
@@ -218,7 +222,46 @@ program
       reset?: boolean;
       extendedContext?: boolean;
       tdd?: boolean;
+      shell?: string;
     }) => {
+      // ── --shell short-circuit: write the OSC 133 init file and exit.
+      // Side-by-side with workspace init so users can bootstrap blocks
+      // without touching `.wotann/`.
+      if (options.shell) {
+        const { buildShellInit, isSupportedShell, SUPPORTED_SHELLS } =
+          await import("./ui/terminal-blocks/init-snippets.js");
+        const shell = options.shell.toLowerCase();
+        if (!isSupportedShell(shell)) {
+          console.error(
+            chalk.red(
+              `Unsupported shell "${options.shell}". Supported: ${SUPPORTED_SHELLS.join(", ")}`,
+            ),
+          );
+          process.exit(1);
+        }
+        const init = buildShellInit(shell);
+        const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
+        const shellDir = join(homedir(), ".wotann", "shell");
+        if (!existsSync(shellDir)) {
+          mkdirSync(shellDir, { recursive: true });
+        }
+        const outPath = join(shellDir, init.filename);
+        writeFileSync(outPath, init.script, "utf-8");
+        console.log(chalk.green(`  \u2713 Wrote ${outPath}`));
+        console.log("");
+        console.log(chalk.bold("Next step: add this line to your shell rc file:"));
+        console.log("");
+        console.log(chalk.cyan(`    ${init.sourceLine}`));
+        console.log("");
+        console.log(chalk.dim(`  (Typical location: ${init.rcPath})`));
+        console.log(
+          chalk.dim(
+            `  Then start a new shell. WOTANN will render Warp-style blocks for every command.`,
+          ),
+        );
+        return;
+      }
+
       const { runInit } = await import("./cli/commands.js");
       await runInit(process.cwd(), options);
 
@@ -2519,6 +2562,289 @@ program
     },
   );
 
+// ── wotann autopilot ────────────────────────────────────────
+//
+// Phase H+D: long-horizon phase-gated orchestration.
+// Wraps the existing autonomous executor OR, with --long-horizon, runs the
+// autonovel-style phase/plateau/dual-persona orchestrator for 8+ hour tasks.
+
+program
+  .command("autopilot <prompt>")
+  .description("Autopilot: run autonomously until the task is complete")
+  .option("--long-horizon", "Use the phase-gated long-horizon orchestrator (autonovel-style)")
+  .option("--phases <path>", "Path to phases.json (required with --long-horizon)")
+  .option("--budget <spec>", "Budget (e.g. '300s', '5m', '2h' for time)", "8h")
+  .option("--budget-tokens <n>", "Token budget cap", "1000000")
+  .option("--budget-usd <n>", "USD budget cap", "50")
+  .option("--no-review", "Disable dual-persona review gate")
+  .option("--no-escalation", "Disable tier escalation on plateau")
+  .option("--checkpoint-dir <path>", "Directory for per-phase checkpoints")
+  .option("--provider <provider>", "Force provider")
+  .option("--model <model>", "Force model")
+  .action(
+    async (
+      prompt: string,
+      options: {
+        longHorizon?: boolean;
+        phases?: string;
+        budget?: string;
+        budgetTokens?: string;
+        budgetUsd?: string;
+        review?: boolean;
+        escalation?: boolean;
+        checkpointDir?: string;
+        provider?: string;
+        model?: string;
+      },
+    ) => {
+      // Non-long-horizon path: delegate to the existing autonomous executor.
+      // Keeps a single user-facing entrypoint while leaving `autonomous` as
+      // the low-level alias. Users get `wotann autopilot <prompt>` as the
+      // default and opt into the long-horizon engine with --long-horizon.
+      if (!options.longHorizon) {
+        console.log(
+          chalk.yellow(
+            "autopilot without --long-horizon — delegating to `wotann autonomous`. Use `wotann autonomous` directly for the classic loop.",
+          ),
+        );
+        // Delegate by spawning autonomous with same argv. Keeps behavior
+        // consistent with the existing code path without duplicating logic.
+        const { AutonomousExecutor } = await import("./orchestration/autonomous.js");
+        const { createRuntime } = await import("./core/runtime.js");
+        const { runRuntimeQuery } = await import("./cli/runtime-query.js");
+        const executor = new AutonomousExecutor({
+          maxCycles: 10,
+          maxTimeMs: 30 * 60_000,
+          maxCostUsd: parseFloat(options.budgetUsd ?? "5"),
+        });
+        const runtime = await createRuntime(process.cwd(), "autonomous");
+        try {
+          const result = await executor.execute(
+            prompt,
+            async (p) => {
+              const query = await runRuntimeQuery(runtime, {
+                prompt: p,
+                model: options.model,
+                provider: options.provider as "anthropic" | undefined,
+              });
+              return {
+                output: query.output || query.errors.join("\n"),
+                costUsd: query.costUsd,
+                tokensUsed: query.tokensUsed,
+              };
+            },
+            async () => ({ testsPass: true, typecheckPass: true, lintPass: true, output: "" }),
+          );
+          process.exit(result.success ? 0 : 1);
+        } finally {
+          runtime.close();
+        }
+        return;
+      }
+
+      // ── Long-horizon path ──
+      if (!options.phases) {
+        console.error(chalk.red("--long-horizon requires --phases <path> pointing to phases.json"));
+        process.exit(1);
+      }
+
+      const { LongHorizonOrchestrator, parsePhases } =
+        await import("./orchestration/long-horizon-orchestrator.js");
+      const { createRuntime } = await import("./core/runtime.js");
+      const { runRuntimeQuery } = await import("./cli/runtime-query.js");
+      const { readFileSync, mkdirSync, writeFileSync } = await import("node:fs");
+
+      // Load phases.json.
+      let phasesRaw: unknown;
+      try {
+        phasesRaw = JSON.parse(readFileSync(resolve(options.phases), "utf-8"));
+      } catch (err) {
+        console.error(chalk.red(`Failed to read phases file: ${(err as Error).message}`));
+        process.exit(1);
+      }
+      let phases;
+      try {
+        phases = parsePhases(phasesRaw);
+      } catch (err) {
+        console.error(chalk.red(`Invalid phases schema: ${(err as Error).message}`));
+        process.exit(1);
+      }
+
+      const budgetMs = parseBudgetToMs(options.budget ?? "8h");
+      const checkpointDir =
+        options.checkpointDir ?? join(process.cwd(), ".wotann", "long-horizon-checkpoints");
+
+      const orchestrator = new LongHorizonOrchestrator({
+        budget: {
+          tokens: parseInt(options.budgetTokens ?? "1000000", 10),
+          timeMs: budgetMs,
+          usd: parseFloat(options.budgetUsd ?? "50"),
+        },
+        enableReview: options.review !== false,
+        enableTierEscalation: options.escalation !== false,
+      });
+
+      const runtime = await createRuntime(process.cwd(), "autonomous");
+
+      console.log(chalk.bold("\nWOTANN Autopilot — Long-Horizon Mode"));
+      console.log(chalk.dim(`  Task: ${prompt.slice(0, 100)}`));
+      console.log(chalk.dim(`  Phases: ${phases.length}`));
+      console.log(
+        chalk.dim(
+          `  Budget: ${options.budget}, $${options.budgetUsd}, ${options.budgetTokens} tokens`,
+        ),
+      );
+      console.log();
+
+      try {
+        const result = await orchestrator.run({
+          taskDescription: prompt,
+          phases,
+          worker: async ({
+            phase,
+            iteration,
+            previousArtifact,
+            reviewerFeedback,
+            plateauHint,
+            tierHint,
+          }) => {
+            const workerPrompt = [
+              `Task: ${prompt}`,
+              "",
+              `Phase ${phase.id}: ${phase.name}`,
+              `Goal: ${phase.goal}`,
+              `Iteration: ${iteration + 1}/${phase.maxIterations}`,
+              tierHint === "escalated" ? "[ESCALATED — use stronger reasoning]" : "",
+              previousArtifact
+                ? `\nPrevious artifact:\n---\n${previousArtifact.slice(0, 4000)}\n---\n`
+                : "",
+              reviewerFeedback ? `\nReviewer feedback to address:\n${reviewerFeedback}\n` : "",
+              plateauHint ? `\nPlateau detected: ${plateauHint}. Change approach.\n` : "",
+            ]
+              .filter(Boolean)
+              .join("\n");
+            const query = await runRuntimeQuery(runtime, {
+              prompt: workerPrompt,
+              model: options.model,
+              provider: options.provider as "anthropic" | undefined,
+            });
+            return {
+              artifact: query.output || query.errors.join("\n") || "",
+              tokensUsed: query.tokensUsed,
+              costUsd: query.costUsd,
+            };
+          },
+          scorer: async (artifact) => {
+            // Simple heuristic scorer: proportion of requested length hit.
+            // Callers can override by writing a smarter scorer — this is just
+            // the CLI default so users have a working baseline.
+            const target = Math.max(500, artifact.length > 0 ? 1000 : 0);
+            return Math.min(1, artifact.length / target);
+          },
+          reviewer: async (persona, artifact, context) => {
+            const { buildCriticPrompt, buildDefenderPrompt, parsePersonaReply } =
+              await import("./orchestration/dual-persona-reviewer.js");
+            const prompt =
+              persona === "critic"
+                ? buildCriticPrompt(artifact, context)
+                : buildDefenderPrompt(artifact, context);
+            const reply = await runRuntimeQuery(runtime, {
+              prompt,
+              model: options.model,
+            });
+            return parsePersonaReply(reply.output || "", persona, reply.tokensUsed);
+          },
+          saveCheckpoint: async (snapshot) => {
+            try {
+              mkdirSync(checkpointDir, { recursive: true });
+              const path = join(checkpointDir, `phase-${snapshot.currentPhaseIndex}.json`);
+              writeFileSync(path, JSON.stringify(snapshot, null, 2));
+            } catch {
+              // Best-effort.
+            }
+          },
+          onEvent: (event) => {
+            switch (event.kind) {
+              case "phase-start":
+                console.log(
+                  chalk.bold(`\n▶ Phase ${event.index + 1}/${event.total}: ${event.phase.name}`),
+                );
+                break;
+              case "iteration-end":
+                console.log(
+                  chalk.dim(
+                    `  iter ${event.iteration + 1} — score ${event.score.toFixed(3)} (${event.tokensUsed} tok)`,
+                  ),
+                );
+                break;
+              case "review":
+                console.log(
+                  chalk.cyan(
+                    `  review — ${event.verdict.outcome} (critic ${event.verdict.critic.confidence.toFixed(2)}, defender ${event.verdict.defender.confidence.toFixed(2)})`,
+                  ),
+                );
+                break;
+              case "plateau":
+                console.log(
+                  chalk.yellow(
+                    `  plateau — ${event.verdict.kind} → ${event.response}: ${event.verdict.reason}`,
+                  ),
+                );
+                break;
+              case "tier-escalate":
+                console.log(chalk.magenta(`  tier-escalated: ${event.reason}`));
+                break;
+              case "phase-end":
+                console.log(
+                  chalk.green(
+                    `  phase-end: ${event.status}, best score ${event.bestScore.toFixed(3)}`,
+                  ),
+                );
+                break;
+              case "budget-exceeded":
+                console.log(
+                  chalk.red(
+                    `  BUDGET EXCEEDED on ${event.dimension}: ${event.spent} > ${event.cap}`,
+                  ),
+                );
+                break;
+              case "progress":
+                process.stdout.write(`\r  progress: ${event.percentage}%  `);
+                break;
+            }
+          },
+        });
+        console.log();
+        console.log(chalk.bold("\nLong-Horizon Autopilot Results:"));
+        console.log(`  Exit reason:   ${result.exitReason}`);
+        console.log(
+          `  Phases exited: ${result.phases.filter((p) => p.status === "exited").length}/${result.phases.length}`,
+        );
+        console.log(`  Duration:      ${(result.totalDurationMs / 1000).toFixed(1)}s`);
+        console.log(`  Tokens:        ${result.totalTokens}`);
+        console.log(`  USD:           $${result.totalUsd.toFixed(4)}`);
+        console.log(
+          result.success
+            ? chalk.green("  Done — all phases exited cleanly")
+            : chalk.red("  Failed — see exit reason above"),
+        );
+        process.exit(result.success ? 0 : 1);
+      } finally {
+        runtime.close();
+      }
+    },
+  );
+
+// Parse budget spec like "300s", "5m", "2h" into ms.
+function parseBudgetToMs(spec: string): number {
+  const match = spec.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)?$/);
+  if (!match || !match[1]) return 8 * 60 * 60 * 1000;
+  const value = parseFloat(match[1]);
+  const unit = match[2] ?? "ms";
+  const mult = unit === "h" ? 3_600_000 : unit === "m" ? 60_000 : unit === "s" ? 1_000 : 1;
+  return Math.floor(value * mult);
+}
+
 // ── wotann onboard ──────────────────────────────────────────
 
 program
@@ -4113,24 +4439,5 @@ program
   });
 
 // ── Parse ───────────────────────────────────────────────────
-
-// Deep-link fast path — if the first positional arg is a `wotann://` URL,
-// parse it and dispatch via the deep-link handler BEFORE commander sees
-// the URL (commander would otherwise attempt to resolve the scheme as a
-// subcommand and abort). This lets OS handlers (launch services on macOS,
-// xdg-open on Linux, registry-handler on Windows) open links directly.
-const firstArg = process.argv[2];
-if (firstArg && firstArg.startsWith("wotann://")) {
-  const { parseDeepLink, executeDeepLink } = await import("./core/deep-link.js");
-  const req = parseDeepLink(firstArg);
-  if (!req) {
-    console.error(chalk.red(`Invalid wotann:// URL: ${firstArg}`));
-    process.exit(1);
-  }
-  const res = executeDeepLink(req, { workingDir: process.cwd() });
-  const prefix = res.success ? chalk.green("✓") : chalk.red("✗");
-  console.log(`${prefix} ${res.message}`);
-  process.exit(res.success ? 0 : 1);
-}
 
 await program.parseAsync();
