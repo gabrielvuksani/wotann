@@ -28,6 +28,7 @@ import { randomUUID } from "node:crypto";
 import { writeFileAtomicSyncBestEffort } from "../utils/atomic-io.js";
 import { deriveIngestTimestamps } from "./dual-timestamp.js";
 import type { MemoryRelationship, MemoryRelationshipKind } from "./relationship-types.js";
+import { clampContextTokens, cleanContext } from "./contextual-embeddings.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -205,6 +206,19 @@ export interface ConsolidationReport {
 export class MemoryStore {
   private readonly db: Database.Database;
   private readonly dbPath: string;
+  /**
+   * Optional synchronous contextual-retrieval generator. When set, insert()
+   * prepends a ~50-token chunk-context to the FTS-indexed value per
+   * Anthropic's 2024 contextual retrieval (+30-50% recall on paraphrase).
+   * Pure sync — LLM-backed generators should pre-render async context and
+   * capture it in the closure. Null = disabled (honest pass-through).
+   */
+  private contextGenerator: ((key: string, value: string) => string) | null = null;
+
+  /** Install or clear the contextual-embedding generator used by insert(). */
+  setContextGenerator(gen: ((key: string, value: string) => string) | null): void {
+    this.contextGenerator = gen;
+  }
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -870,6 +884,21 @@ export class MemoryStore {
         ? "user-supplied"
         : (entry.eventDateSource ?? derived.eventDateSource);
 
+    // Phase H Wave-3C: contextual-retrieval enrichment. When a generator
+    // is installed, prepend a ~50-token chunk-context to the indexed
+    // value per Anthropic contextual retrieval. Generator failure falls
+    // through to raw value — honest pass-through, never silent garbage.
+    let indexedValue = entry.value;
+    if (this.contextGenerator) {
+      try {
+        const raw = this.contextGenerator(entry.key, entry.value);
+        const context = clampContextTokens(cleanContext(raw));
+        if (context) indexedValue = `${context}\n\n${entry.value}`;
+      } catch {
+        /* honest fallback: keep raw value */
+      }
+    }
+
     this.db
       .prepare(
         `
@@ -882,7 +911,7 @@ export class MemoryStore {
         entry.layer,
         entry.blockType,
         entry.key,
-        entry.value,
+        indexedValue,
         entry.sessionId ?? null,
         entry.verified ? 1 : 0,
         entry.confidence ?? 1.0,
