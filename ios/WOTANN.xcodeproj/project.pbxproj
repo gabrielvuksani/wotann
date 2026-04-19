@@ -29,6 +29,7 @@
 		1DBF7CB49929C59A63CCC4B1 /* PairingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C15FCB52E102C803EB082B5 /* PairingViewModel.swift */; };
 		1DFA4133059A447B8F8FB65B /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85CD124246CE92A9A09C3C73 /* HomeView.swift */; };
 		1E7D23BB279777C85830341B /* ActiveWorkStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D2841CE2B1B3A5500D3B19C /* ActiveWorkStrip.swift */; };
+		2011416DD966342A47EF1027 /* DiagnosticLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17BE0EC43A77717E763C2310 /* DiagnosticLogger.swift */; };
 		21C6F764ABDF58935CE189D7 /* TaskApprovalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A13F72B52D66CA749AE5EB74 /* TaskApprovalView.swift */; };
 		23A7F86B00A7849DBD5969F7 /* AutoDetectedCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65F7C041405B0992A27A764 /* AutoDetectedCard.swift */; };
 		24F0739AE35AB50D5787EB29 /* MainShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F75BF4B301AF5FAFB55CCA6 /* MainShell.swift */; };
@@ -231,6 +232,7 @@
 		125D3C15B8578307FEF2095C /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		134BED7028B56BDFE8D4A930 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		17A6AF2E81E8E10A8600F1D2 /* FilterPillBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterPillBar.swift; sourceTree = "<group>"; };
+		17BE0EC43A77717E763C2310 /* DiagnosticLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticLogger.swift; sourceTree = "<group>"; };
 		17F025A4946358EB8D1FEA23 /* ProviderBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderBadge.swift; sourceTree = "<group>"; };
 		17F777D17CAB671B6045E8E2 /* DispatchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchView.swift; sourceTree = "<group>"; };
 		1FB16DF280858CD49AD1B3F5 /* BiometricAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricAuth.swift; sourceTree = "<group>"; };
@@ -367,7 +369,7 @@
 		FC4279027D915B49348FAA83 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
 		FD4FCFB6760540EF97A7DA40 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FF2C467534932F2AF3DCB79A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		"TEMP_A8ACD61A-0CAA-468B-9E21-1FE58DE91C27" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+		"TEMP_12B0ED07-FE90-45FB-BD5C-D7C4BF95C6F1" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -416,6 +418,7 @@
 		1B31F7EBAF893729C6723F2B = {
 			isa = PBXGroup;
 			children = (
+				4E824B935976B75AE0E0CCCA /* Tests */,
 				51204C585D67BB42709EC91A /* WOTANN */,
 				289EA053335C16D7678B1C72 /* WOTANNIntents */,
 				3E0471DB8E92C0552DD174C3 /* WOTANNLiveActivity */,
@@ -629,6 +632,14 @@
 			path = Arena;
 			sourceTree = "<group>";
 		};
+		4465EA6C81CB94B6022E8121 /* Infrastructure */ = {
+			isa = PBXGroup;
+			children = (
+				17BE0EC43A77717E763C2310 /* DiagnosticLogger.swift */,
+			);
+			path = Infrastructure;
+			sourceTree = "<group>";
+		};
 		4B47FAB798359E766201E9A7 /* Conversations */ = {
 			isa = PBXGroup;
 			children = (
@@ -636,6 +647,14 @@
 				595256C0E55C3A3725A6466F /* ConversationRow.swift */,
 			);
 			path = Conversations;
+			sourceTree = "<group>";
+		};
+		4E824B935976B75AE0E0CCCA /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				4465EA6C81CB94B6022E8121 /* Infrastructure */,
+			);
+			path = Tests;
 			sourceTree = "<group>";
 		};
 		4FA6DBCAE4B4A13A91F9945D /* Playground */ = {
@@ -913,10 +932,10 @@
 			path = Dashboard;
 			sourceTree = "<group>";
 		};
-		"TEMP_9EBF67CF-859A-4FA4-B883-9616ED06533B" /* ios */ = {
+		"TEMP_0FD43814-8586-4EBA-AFBA-C3A119BA223D" /* ios */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_A8ACD61A-0CAA-468B-9E21-1FE58DE91C27" /* Local.xcconfig */,
+				"TEMP_12B0ED07-FE90-45FB-BD5C-D7C4BF95C6F1" /* Local.xcconfig */,
 			);
 			path = ios;
 			sourceTree = "<group>";
@@ -1175,6 +1194,7 @@
 				1B56EBCCAA296B201D4AF8A7 /* CrossDeviceService.swift in Sources */,
 				B30108A450FFF40ABC15EFBF /* DaemonOfflineView.swift in Sources */,
 				1930CD58A874F7A219589044 /* DashboardView.swift in Sources */,
+				2011416DD966342A47EF1027 /* DiagnosticLogger.swift in Sources */,
 				56709630C9E9D1D11C2C5EB9 /* DiagnosticsView.swift in Sources */,
 				D7B9EB89239758BBCF0F2C2A /* DispatchComposer.swift in Sources */,
 				5A9F32A99B9FD86E7E024678 /* DispatchView.swift in Sources */,
@@ -1391,7 +1411,7 @@
 		};
 		35715A6A8931B13D7362B776 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_A8ACD61A-0CAA-468B-9E21-1FE58DE91C27" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_12B0ED07-FE90-45FB-BD5C-D7C4BF95C6F1" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -1568,7 +1588,7 @@
 		};
 		E96B011291432A6F1F017F8B /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_A8ACD61A-0CAA-468B-9E21-1FE58DE91C27" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_12B0ED07-FE90-45FB-BD5C-D7C4BF95C6F1" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

@@ -49,6 +49,12 @@ targets:
         buildPhase: sources
         excludes:
           - "Info.plist"
+      # Diagnostic infrastructure is shipped with the main app so the
+      # `DiagnosticLogger` is available in all build configurations. The
+      # automation sources live in a separate UI-test target below.
+      - path: Tests/Infrastructure
+        type: group
+        buildPhase: sources
     settings:
       base:
         SUPPORTED_PLATFORMS: "iphonesimulator iphoneos"
