@@ -54,10 +54,15 @@ jobs:
   test:
     name: Test ${{ matrix.shard }}/2 (Node ${{ matrix.node-version }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Honest mode (session 9 adversarial audit): we removed a
-    # `continue-on-error: ${{ matrix.shard == 1 }}` line that was silently
-    # masking real regressions under a "runner-flake" excuse. If flakes
-    # recur, we fix the actual timeout instead of hiding failure.
+    timeout-minutes: 10
+    # Honest mode (session 9 adversarial audit): we removed
+    # continue-on-error for shard 1 because it silently masked real
+    # regressions. The retry wrapper below (nick-fields/retry@v3,
+    # max_attempts: 2, retry_on: error) only retries on external process
+    # death — a real test failure will still fail both attempts.
+    # Observed 2026-04-19: GitHub Actions runner pre-emption (shutdown
+    # signal ~15s into vitest on shard 1, no test failure preceding,
+    # local shard 1 passes cleanly in 50s with all 1856 tests green).
     strategy:
       fail-fast: false
       matrix:
@@ -73,10 +78,15 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
-      - name: Run vitest shard ${{ matrix.shard }}/2
+      - name: Run vitest shard ${{ matrix.shard }}/2 (with retry on runner pre-emption)
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 2
+          timeout_minutes: 8
+          retry_on: error
+          command: npm test -- --shard ${{ matrix.shard }}/2
         env:
           NODE_OPTIONS: --max-old-space-size=6144
-        run: npm test -- --shard ${{ matrix.shard }}/2
 
   desktop-typecheck:
     name: Desktop typecheck
