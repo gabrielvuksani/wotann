@@ -440,14 +440,107 @@ program
 
 // ── wotann autofix-pr (C21) ──────────────────────────────────
 
+/**
+ * execFile promise that resolves with stdout/stderr/exitCode instead of
+ * throwing — callers decide whether a non-zero exit is fatal. Used by
+ * `--create-pr` so we can surface `gh` errors honestly (no silent success).
+ */
+async function execFileNoThrow(
+  file: string,
+  args: readonly string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const { execFile } = await import("node:child_process");
+  return await new Promise((resolve) => {
+    execFile(file, args as string[], (error, stdout, stderr) => {
+      const exitCode =
+        error && typeof (error as NodeJS.ErrnoException).code === "number"
+          ? Number((error as NodeJS.ErrnoException).code)
+          : error
+            ? 1
+            : 0;
+      resolve({
+        exitCode,
+        stdout: stdout?.toString() ?? "",
+        stderr: stderr?.toString() ?? (error instanceof Error ? error.message : ""),
+      });
+    });
+  });
+}
+
 program
   .command("autofix-pr")
   .description("Analyze the current branch's latest CI failures and produce a fix plan")
   .option("--branch <name>", "Branch to analyse (defaults to current)")
-  .action(async (options: { branch?: string }) => {
-    const { runAutofixPR } = await import("./cli/autofix-pr.js");
+  .option("--create-pr", "After analysis, open a pull request with the fix plan via `gh pr create`")
+  .action(async (options: { branch?: string; createPr?: boolean }) => {
+    const { runAutofixPR, buildFixPlan, renderFixPlan } = await import("./cli/autofix-pr.js");
     try {
-      await runAutofixPR({ branch: options.branch });
+      if (!options.createPr) {
+        await runAutofixPR({ branch: options.branch });
+        return;
+      }
+
+      // --create-pr path: fetch CI failures, build the plan, generate a PR
+      // template, then invoke `gh pr create`. Failures from `gh` propagate
+      // as non-zero exit codes — no silent success.
+      const { GitHubActionsProvider } = await import("./autopilot/ci-feedback.js");
+      const { PRArtifactGenerator } = await import("./autopilot/pr-artifacts.js");
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execFileAsync = promisify(execFile);
+
+      const branch =
+        options.branch ??
+        (await (async () => {
+          try {
+            const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+            return stdout.trim() || undefined;
+          } catch {
+            return undefined;
+          }
+        })());
+      if (!branch) {
+        console.log(
+          chalk.red("autofix-pr --create-pr: could not determine branch (not in a git repo?)."),
+        );
+        process.exit(1);
+      }
+
+      const provider = new GitHubActionsProvider();
+      const run = await provider.latestRun(branch);
+      if (!run) {
+        console.log(chalk.red(`autofix-pr --create-pr: no CI run found for branch "${branch}".`));
+        process.exit(1);
+      }
+
+      const failures = run.status === "failure" ? await provider.parseFailures(run.id) : [];
+      const plan = buildFixPlan(failures);
+      console.log(renderFixPlan(plan));
+      console.log();
+
+      const generator = new PRArtifactGenerator();
+      const pr = generator.generatePRFromFixPlan(plan, {
+        branch,
+        runUrl: run.htmlUrl,
+      });
+
+      const ghArgs = [
+        "pr",
+        "create",
+        "--title",
+        pr.title,
+        "--body",
+        pr.description,
+        ...(pr.labels || []).flatMap((l) => ["--label", l]),
+      ];
+      const ghResult = await execFileNoThrow("gh", ghArgs);
+      if (ghResult.exitCode !== 0) {
+        console.error(
+          chalk.red(`gh pr create failed (exit ${ghResult.exitCode}): ${ghResult.stderr.trim()}`),
+        );
+        process.exit(1);
+      }
+      console.log(ghResult.stdout.trim());
     } catch (error) {
       console.log(
         chalk.red(`autofix-pr failed: ${error instanceof Error ? error.message : "unknown"}`),
