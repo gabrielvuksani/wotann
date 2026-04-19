@@ -176,3 +176,59 @@ export async function isClaudeSDKAvailable(): Promise<boolean> {
   const q = await loadSDKQuery();
   return typeof q === "function";
 }
+
+/**
+ * Provider names the SDK bridge recognises. Only `anthropic` and
+ * `anthropic-subscription` route through the Claude Agent SDK; every
+ * other provider falls through to the custom AgentBridge path.
+ */
+const SDK_ELIGIBLE_PROVIDERS: ReadonlySet<string> = new Set([
+  "anthropic",
+  "anthropic-subscription",
+]);
+
+export interface SDKDispatchDecision {
+  readonly useSDK: boolean;
+  readonly reason: string;
+}
+
+/**
+ * Decide whether a given provider should route via the Claude Agent
+ * SDK or through the custom AgentBridge. Returns {useSDK:true} only
+ * when the provider is Anthropic-family AND the SDK package is
+ * importable. Async because we lazily probe for the peer dep.
+ */
+export async function shouldUseClaudeSDK(providerName: string): Promise<SDKDispatchDecision> {
+  if (!SDK_ELIGIBLE_PROVIDERS.has(providerName)) {
+    return {
+      useSDK: false,
+      reason: `provider "${providerName}" is not Anthropic-family`,
+    };
+  }
+  const available = await isClaudeSDKAvailable();
+  if (!available) {
+    return {
+      useSDK: false,
+      reason: "Claude Agent SDK not installed (npm install @anthropic-ai/claude-agent-sdk)",
+    };
+  }
+  return { useSDK: true, reason: "Anthropic provider + SDK available" };
+}
+
+/**
+ * Dispatch via the Claude Agent SDK when eligible; otherwise yield a
+ * single-chunk `fallback` signal so the caller routes through the
+ * custom AgentBridge. Thin convenience wrapper that keeps the
+ * provider check + SDK invocation co-located.
+ */
+export async function* routeViaClaudeSDK(
+  providerName: string,
+  options: ClaudeSDKQueryOptions,
+): AsyncGenerator<StreamChunk | { readonly type: "fallback"; readonly reason: string }> {
+  const decision = await shouldUseClaudeSDK(providerName);
+  if (!decision.useSDK) {
+    yield { type: "fallback", reason: decision.reason };
+    return;
+  }
+  yield* queryViaClaudeSDK(options);
+}
