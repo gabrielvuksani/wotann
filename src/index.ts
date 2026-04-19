@@ -2060,17 +2060,95 @@ mcpCmd
 
 mcpCmd
   .command("import")
-  .option("--from-claude", "Import from Claude Code settings")
-  .description("Import MCP servers from other tools")
-  .action(async (options: { fromClaude?: boolean }) => {
-    const { MCPRegistry } = await import("./marketplace/registry.js");
-    const registry = new MCPRegistry();
-    let count = 0;
-    if (options.fromClaude) {
-      count = registry.importFromClaudeCode();
-    }
-    console.log(chalk.green(`Imported ${count} MCP servers.`));
-  });
+  .option("--from-claude", "Import from ~/.claude/settings.json")
+  .option("--from-cursor", "Import from ~/.cursor/mcp.json")
+  .option("--from-windsurf", "Import from ~/.windsurf/mcp.json")
+  .option("--from-codex", "Import from ~/.codex/mcp.json")
+  .option("--dry-run", "List what would be imported without modifying the registry")
+  .description("Import MCP servers from other tools (Claude/Cursor/Windsurf/Codex)")
+  .action(
+    async (options: {
+      fromClaude?: boolean;
+      fromCursor?: boolean;
+      fromWindsurf?: boolean;
+      fromCodex?: boolean;
+      dryRun?: boolean;
+    }) => {
+      const { MCPRegistry } = await import("./marketplace/registry.js");
+      const registry = new MCPRegistry();
+
+      // Wave 3H: expand the CLI surface to every importer the registry
+      // already knows about. Previously only --from-claude wired through;
+      // --from-cursor / --from-windsurf / --from-codex existed only in
+      // the library API. Dry-run lists the resulting servers without
+      // persisting — the registry only lives in-process so rollback is
+      // implicit when the command exits.
+      const sources: { flag: boolean; label: string; fn: () => number }[] = [
+        {
+          flag: options.fromClaude ?? false,
+          label: "Claude Code",
+          fn: () => registry.importFromClaudeCode(),
+        },
+        {
+          flag: options.fromCursor ?? false,
+          label: "Cursor",
+          fn: () => registry.importFromTool("cursor"),
+        },
+        {
+          flag: options.fromWindsurf ?? false,
+          label: "Windsurf",
+          fn: () => registry.importFromTool("windsurf"),
+        },
+        {
+          flag: options.fromCodex ?? false,
+          label: "Codex",
+          fn: () => registry.importFromTool("codex"),
+        },
+      ];
+      const requested = sources.filter((s) => s.flag);
+      if (requested.length === 0) {
+        console.error(
+          chalk.yellow(
+            "No source flag supplied. Use --from-claude / --from-cursor / --from-windsurf / --from-codex.",
+          ),
+        );
+        process.exit(1);
+      }
+
+      let totalImported = 0;
+      for (const source of requested) {
+        const count = source.fn();
+        totalImported += count;
+        console.log(
+          `  ${chalk.cyan(source.label)}: ${count} server${count === 1 ? "" : "s"} ${
+            options.dryRun ? "(dry-run — not persisted)" : "imported"
+          }`,
+        );
+      }
+
+      if (options.dryRun) {
+        const servers = registry.getAllServers();
+        console.log(chalk.dim(`\nWould register ${servers.length} server(s):`));
+        for (const s of servers) {
+          console.log(
+            `  ${chalk.dim("●")} ${s.name} — ${s.command} ${s.args.slice(0, 3).join(" ")}${
+              s.args.length > 3 ? " ..." : ""
+            }`,
+          );
+        }
+        console.log();
+        return;
+      }
+
+      console.log(
+        chalk.green(
+          `Imported ${totalImported} MCP server${totalImported === 1 ? "" : "s"} from ${requested.length} source${
+            requested.length === 1 ? "" : "s"
+          }.`,
+        ),
+      );
+    },
+  );
 
 // ── wotann lsp ───────────────────────────────────────────────
 
@@ -4539,6 +4617,56 @@ program
     console.log(chalk.green(`  Imported to ${baseDir}`));
     console.log();
     process.exit(0);
+  });
+
+// ── wotann shell snapshot ───────────────────────────────────
+// Phase 13 Wave 3B: Codex parity — save + restore a PTY-less shell
+// session's state (cwd + env + history) to ~/.wotann/shell-snapshots/.
+// Uses serializeShellSnapshot/deserializeShellSnapshot from
+// sandbox/unified-exec so a future session can attach to the state.
+const shellCmd = program.command("shell").description("Shell session snapshot utilities");
+const shellSnapshotCmd = shellCmd.command("snapshot").description("Shell snapshot management");
+shellSnapshotCmd
+  .command("save <name>")
+  .description("Capture the current cwd+env+history as a named snapshot")
+  .action(async (name: string) => {
+    const { UnifiedExecSession, serializeShellSnapshot } =
+      await import("./sandbox/unified-exec.js");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const session = new UnifiedExecSession();
+    const snapshot = session.shellSnapshot();
+    const serialized = serializeShellSnapshot(snapshot);
+    const dir = join(homedir(), ".wotann", "shell-snapshots");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${name}.json`);
+    writeFileSync(path, serialized, "utf-8");
+    console.log(chalk.green(`✓ Saved shell snapshot "${name}" → ${path}`));
+    console.log(chalk.dim(`  cwd=${snapshot.cwd} history=${snapshot.history.length}`));
+  });
+shellSnapshotCmd
+  .command("restore <name>")
+  .description("Load a named snapshot and print its state (cwd/env)")
+  .action(async (name: string) => {
+    const { UnifiedExecSession, deserializeShellSnapshot } =
+      await import("./sandbox/unified-exec.js");
+    const { readFileSync, existsSync } = await import("node:fs");
+    const path = join(homedir(), ".wotann", "shell-snapshots", `${name}.json`);
+    if (!existsSync(path)) {
+      console.error(chalk.red(`✗ Snapshot "${name}" not found at ${path}`));
+      process.exit(1);
+    }
+    try {
+      const snapshot = deserializeShellSnapshot(readFileSync(path, "utf-8"));
+      // Reconstruct the session and print its recovered state so callers
+      // can pipe into `source <(...)` if they want.
+      const session = UnifiedExecSession.fromSnapshot(snapshot);
+      console.log(chalk.green(`✓ Restored shell snapshot "${name}"`));
+      console.log(chalk.dim(`  cwd=${session.cwd}`));
+      console.log(chalk.dim(`  history=${snapshot.history.length} commands`));
+    } catch (err) {
+      console.error(chalk.red(`✗ Failed to restore: ${(err as Error).message}`));
+      process.exit(1);
+    }
   });
 
 // ── wotann sandbox list ─────────────────────────────────────

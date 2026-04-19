@@ -22,6 +22,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { recordWrite } from "../security/write-audit.js";
 
 export interface HashAnchor {
   readonly startLine: number; // 1-indexed
@@ -99,6 +100,11 @@ export function applyHashAnchoredEdit(edit: HashAnchoredEdit): HashAnchoredEditR
   const replacementLines = edit.replacement.split(/\r?\n/);
   const newContent = [...before, ...replacementLines, ...after].join("\n");
 
+  // Capture shaBefore so the audit entry records the authoritative
+  // pre-write state regardless of whether the caller supplied a range
+  // anchor or a full-file hash.
+  const shaBefore = createHash("sha256").update(content).digest("hex");
+
   try {
     writeFileSync(edit.filePath, newContent, "utf-8");
   } catch (err) {
@@ -110,6 +116,19 @@ export function applyHashAnchoredEdit(edit: HashAnchoredEdit): HashAnchoredEditR
   }
 
   const newHash = computeAnchorHash(newContent, startLine, startLine + replacementLines.length - 1);
+
+  // Wave-3E (spec priority #5): append to the write-audit chain so
+  // every file mutation is tamper-evidently logged. shaAfter uses a
+  // full-file SHA-256 (not the 16-char range hash) so the audit
+  // entry is verifiable end-to-end.
+  const shaAfter = createHash("sha256").update(newContent).digest("hex");
+  recordWrite({
+    file: edit.filePath,
+    shaBefore,
+    shaAfter,
+    tool: "hash_anchored_edit",
+  });
+
   return {
     ok: true,
     bytesWritten: Buffer.byteLength(newContent, "utf-8"),

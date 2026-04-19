@@ -19,6 +19,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { recordWrite } from "../security/write-audit.js";
 
 // ── Hash Functions ────────────────────────────────────────
 
@@ -83,7 +84,10 @@ export function buildLineIndex(content: string): readonly HashedLine[] {
  * Find lines matching a specific hash.
  * Returns all matching lines (hashes may collide, but rarely).
  */
-export function findByHash(index: readonly HashedLine[], targetHash: string): readonly HashedLine[] {
+export function findByHash(
+  index: readonly HashedLine[],
+  targetHash: string,
+): readonly HashedLine[] {
   return index.filter((line) => line.hash === targetHash);
 }
 
@@ -116,10 +120,7 @@ export interface HashEditResult {
  * 4. Replace the range with newContent
  * 5. Write the file and return the new file hash
  */
-export function applyHashEdit(
-  filePath: string,
-  edit: HashEditOperation,
-): HashEditResult {
+export function applyHashEdit(filePath: string, edit: HashEditOperation): HashEditResult {
   const content = readFileSync(filePath, "utf-8");
 
   // Verify file hash if provided
@@ -189,9 +190,26 @@ export function applyHashEdit(
   const after = lines.slice(endLine);
   const newContent = [...before, ...edit.newContent.split("\n"), ...after].join("\n");
 
+  // Compute shaBefore over the pre-write bytes so the audit entry
+  // captures the exact state this edit observed. `edit.fileHash` is
+  // only present when the caller supplied it; re-hashing the content
+  // we just read is the authoritative before-state.
+  const shaBefore = createHash("sha256").update(content).digest("hex");
+
   writeFileSync(filePath, newContent);
 
   const newFileHash = createHash("sha256").update(newContent).digest("hex");
+
+  // Wave-3E (spec priority #5): append to the write-audit chain so
+  // every file mutation is tamper-evidently logged. `recordWrite`
+  // is a no-op when WOTANN_WRITE_AUDIT_DISABLED=1 (tests only).
+  recordWrite({
+    file: filePath,
+    shaBefore,
+    shaAfter: newFileHash,
+    tool: "hashline_edit",
+  });
+
   return {
     success: true,
     linesReplaced: endLine - startLine + 1,
