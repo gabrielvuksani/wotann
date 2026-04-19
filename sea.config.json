@@ -1,5 +1,5 @@
 {
-  "main": "dist/index.js",
+  "main": "dist-cjs/index.cjs",
   "output": "dist/release/wotann.blob",
   "disableExperimentalSEAWarning": true,
   "useSnapshot": false,
