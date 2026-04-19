@@ -204,6 +204,21 @@ import {
 } from "../intelligence/prefill-continuation.js";
 import { agentRegistry, type AgentRegistry } from "../orchestration/agent-registry.js";
 
+// ── Phase-13 Wave 3A intelligence + learning wires ──
+import { injectPolicyByDomain } from "../intelligence/policy-injector.js";
+import { enforceDeterministicSchema } from "../intelligence/strict-schema.js";
+import { calibrateConfidence } from "../intelligence/confidence-calibrator.js";
+import {
+  chainOfVerification,
+  type LlmQuery as CoVeLlmQuery,
+} from "../intelligence/chain-of-verification.js";
+import { PatternDetector } from "../intelligence/tool-pattern-detector.js";
+import {
+  createDefaultWebSearchProvider,
+  type WebSearchProvider,
+} from "../intelligence/search-providers.js";
+import { ReflectionBuffer } from "../learning/reflection-buffer.js";
+
 // ── Tier 2B: LLM-invokable tools ──
 import { WebFetchTool } from "../tools/web-fetch.js";
 import { PlanStore } from "../orchestration/plan-store.js";
