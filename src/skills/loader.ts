@@ -16,6 +16,12 @@ import { execFileSync } from "node:child_process";
 import { platform } from "node:os";
 import { parse as parseYaml } from "yaml";
 import type { AgentTool } from "../core/config-discovery.js";
+import {
+  SkillCompositor,
+  type SkillChain,
+  type SkillDescriptor,
+  type ExecutionResult as CompositorExecutionResult,
+} from "./skill-compositor.js";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -81,48 +87,186 @@ interface ResolvedSkill {
 
 const BUILT_IN_SKILLS: readonly SkillMetadata[] = [
   // Languages (4)
-  { name: "typescript-pro", description: "TypeScript strict mode, generics, type-level programming", version: "1.0.0", context: "fork", paths: ["**/*.ts", "**/*.tsx"], notFor: ["**/*.test.ts", "**/*.spec.ts"], category: "languages" },
-  { name: "react-expert", description: "React 18+ hooks, composition, performance", version: "1.0.0", context: "fork", paths: ["**/*.tsx", "**/*.jsx"], notFor: ["**/*.test.*"], category: "frontend" },
-  { name: "python-pro", description: "Python 3.11+, async, type hints", version: "1.0.0", context: "fork", paths: ["**/*.py"], notFor: ["**/test_*", "**/*_test.py"], category: "languages", requires: { anyBins: ["python3", "python"] } },
-  { name: "golang-pro", description: "Go idioms, goroutines, channels", version: "1.0.0", context: "fork", paths: ["**/*.go", "**/go.mod"], category: "languages", requires: { bins: ["go"] } },
+  {
+    name: "typescript-pro",
+    description: "TypeScript strict mode, generics, type-level programming",
+    version: "1.0.0",
+    context: "fork",
+    paths: ["**/*.ts", "**/*.tsx"],
+    notFor: ["**/*.test.ts", "**/*.spec.ts"],
+    category: "languages",
+  },
+  {
+    name: "react-expert",
+    description: "React 18+ hooks, composition, performance",
+    version: "1.0.0",
+    context: "fork",
+    paths: ["**/*.tsx", "**/*.jsx"],
+    notFor: ["**/*.test.*"],
+    category: "frontend",
+  },
+  {
+    name: "python-pro",
+    description: "Python 3.11+, async, type hints",
+    version: "1.0.0",
+    context: "fork",
+    paths: ["**/*.py"],
+    notFor: ["**/test_*", "**/*_test.py"],
+    category: "languages",
+    requires: { anyBins: ["python3", "python"] },
+  },
+  {
+    name: "golang-pro",
+    description: "Go idioms, goroutines, channels",
+    version: "1.0.0",
+    context: "fork",
+    paths: ["**/*.go", "**/go.mod"],
+    category: "languages",
+    requires: { bins: ["go"] },
+  },
 
   // Frontend (2)
-  { name: "nextjs-developer", description: "App Router, server components, server actions", version: "1.0.0", context: "fork", paths: ["**/next.config*"], category: "frontend" },
-  { name: "rust-engineer", description: "Ownership, borrowing, zero-cost abstractions", version: "1.0.0", context: "fork", paths: ["**/*.rs", "**/Cargo.toml"], category: "languages", requires: { bins: ["cargo"] } },
+  {
+    name: "nextjs-developer",
+    description: "App Router, server components, server actions",
+    version: "1.0.0",
+    context: "fork",
+    paths: ["**/next.config*"],
+    category: "frontend",
+  },
+  {
+    name: "rust-engineer",
+    description: "Ownership, borrowing, zero-cost abstractions",
+    version: "1.0.0",
+    context: "fork",
+    paths: ["**/*.rs", "**/Cargo.toml"],
+    category: "languages",
+    requires: { bins: ["cargo"] },
+  },
 
   // Database (1)
-  { name: "sql-pro", description: "Query optimization, indexing, migrations", version: "1.0.0", context: "fork", paths: ["**/*.sql"], category: "database" },
+  {
+    name: "sql-pro",
+    description: "Query optimization, indexing, migrations",
+    version: "1.0.0",
+    context: "fork",
+    paths: ["**/*.sql"],
+    category: "database",
+  },
 
   // Debugging (1)
-  { name: "systematic-debugging", description: "Hypothesis-driven root cause analysis", version: "1.0.0", context: "fork", paths: [], category: "debugging" },
+  {
+    name: "systematic-debugging",
+    description: "Hypothesis-driven root cause analysis",
+    version: "1.0.0",
+    context: "fork",
+    paths: [],
+    category: "debugging",
+  },
 
   // Testing (1)
-  { name: "tdd-workflow", description: "RED-GREEN-REFACTOR enforcement", version: "1.0.0", context: "fork", paths: ["**/*.test.*", "**/*.spec.*"], always: true, category: "testing" },
+  {
+    name: "tdd-workflow",
+    description: "RED-GREEN-REFACTOR enforcement",
+    version: "1.0.0",
+    context: "fork",
+    paths: ["**/*.test.*", "**/*.spec.*"],
+    always: true,
+    category: "testing",
+  },
 
   // Quality (2)
-  { name: "code-reviewer", description: "Severity-based code review (CRITICAL/HIGH/MED/LOW)", version: "1.0.0", context: "fork", paths: [], category: "quality" },
-  { name: "code-simplifier", description: "Reduce complexity, preserve behavior", version: "1.0.0", context: "fork", paths: [], notFor: ["**/*.test.*", "**/*.spec.*"], category: "quality" },
+  {
+    name: "code-reviewer",
+    description: "Severity-based code review (CRITICAL/HIGH/MED/LOW)",
+    version: "1.0.0",
+    context: "fork",
+    paths: [],
+    category: "quality",
+  },
+  {
+    name: "code-simplifier",
+    description: "Reduce complexity, preserve behavior",
+    version: "1.0.0",
+    context: "fork",
+    paths: [],
+    notFor: ["**/*.test.*", "**/*.spec.*"],
+    category: "quality",
+  },
 
   // Git (1)
-  { name: "conventional-commit", description: "Conventional commit format enforcement", version: "1.0.0", context: "main", paths: [], always: true, category: "git" },
+  {
+    name: "conventional-commit",
+    description: "Conventional commit format enforcement",
+    version: "1.0.0",
+    context: "main",
+    paths: [],
+    always: true,
+    category: "git",
+  },
 
   // Research (1)
-  { name: "search-first", description: "Library search before coding", version: "1.0.0", context: "fork", paths: [], always: true, category: "research" },
+  {
+    name: "search-first",
+    description: "Library search before coding",
+    version: "1.0.0",
+    context: "fork",
+    paths: [],
+    always: true,
+    category: "research",
+  },
 
   // Planning (1)
-  { name: "file-based-planning", description: "task_plan.md, findings.md, progress.md", version: "1.0.0", context: "fork", paths: [], category: "planning" },
+  {
+    name: "file-based-planning",
+    description: "task_plan.md, findings.md, progress.md",
+    version: "1.0.0",
+    context: "fork",
+    paths: [],
+    category: "planning",
+  },
 
   // Security (1)
-  { name: "security-reviewer", description: "OWASP Top 10, injection, XSS scanning", version: "1.0.0", context: "fork", paths: [], always: true, category: "security" },
+  {
+    name: "security-reviewer",
+    description: "OWASP Top 10, injection, XSS scanning",
+    version: "1.0.0",
+    context: "fork",
+    paths: [],
+    always: true,
+    category: "security",
+  },
 
   // DevOps (1)
-  { name: "docker-expert", description: "Multi-stage builds, optimization", version: "1.0.0", context: "fork", paths: ["**/Dockerfile", "**/docker-compose*"], category: "devops", requires: { anyBins: ["docker", "podman"] } },
+  {
+    name: "docker-expert",
+    description: "Multi-stage builds, optimization",
+    version: "1.0.0",
+    context: "fork",
+    paths: ["**/Dockerfile", "**/docker-compose*"],
+    category: "devops",
+    requires: { anyBins: ["docker", "podman"] },
+  },
 
   // Architecture (1)
-  { name: "api-design", description: "REST vs GraphQL, versioning, response formats", version: "1.0.0", context: "fork", paths: [], category: "architecture" },
+  {
+    name: "api-design",
+    description: "REST vs GraphQL, versioning, response formats",
+    version: "1.0.0",
+    context: "fork",
+    paths: [],
+    category: "architecture",
+  },
 
   // Scraping (1)
-  { name: "web-scraper", description: "6-phase reconnaissance and extraction", version: "1.0.0", context: "fork", paths: [], category: "scraping" },
+  {
+    name: "web-scraper",
+    description: "6-phase reconnaissance and extraction",
+    version: "1.0.0",
+    context: "fork",
+    paths: [],
+    category: "scraping",
+  },
 ];
 
 // ── Skill Registry ──────────────────────────────────────────
@@ -176,9 +320,7 @@ export class SkillRegistry {
     for (const skill of this.skills.values()) {
       if (skill.paths.length === 0) continue;
 
-      const matches = filePaths.some((fp) =>
-        skill.paths.some((pattern) => matchGlob(fp, pattern)),
-      );
+      const matches = filePaths.some((fp) => skill.paths.some((pattern) => matchGlob(fp, pattern)));
 
       if (!matches) continue;
 
@@ -211,11 +353,23 @@ export class SkillRegistry {
   validatePreflight(skillName: string): PreflightResult {
     const skill = this.skills.get(skillName);
     if (!skill) {
-      return { ready: false, missingBins: [], missingEnv: [], osBlocked: false, message: `Skill not found: ${skillName}` };
+      return {
+        ready: false,
+        missingBins: [],
+        missingEnv: [],
+        osBlocked: false,
+        message: `Skill not found: ${skillName}`,
+      };
     }
 
     if (!skill.requires) {
-      return { ready: true, missingBins: [], missingEnv: [], osBlocked: false, message: "No requirements" };
+      return {
+        ready: true,
+        missingBins: [],
+        missingEnv: [],
+        osBlocked: false,
+        message: "No requirements",
+      };
     }
 
     const missingBins: string[] = [];
@@ -260,7 +414,10 @@ export class SkillRegistry {
     const parts: string[] = [];
     if (missingBins.length > 0) parts.push(`Missing binaries: ${missingBins.join(", ")}`);
     if (missingEnv.length > 0) parts.push(`Missing env vars: ${missingEnv.join(", ")}`);
-    if (osBlocked) parts.push(`OS not supported: requires ${skill.requires.os!.join(" or ")}, running on ${platform()}`);
+    if (osBlocked)
+      parts.push(
+        `OS not supported: requires ${skill.requires.os!.join(" or ")}, running on ${platform()}`,
+      );
 
     return {
       ready,
@@ -361,6 +518,47 @@ export class SkillRegistry {
   }
 
   /**
+   * Compose a chain of skills that all declare `compose=true` in their
+   * extraMetadata along with `input`/`output` type labels. Uses
+   * {@link SkillCompositor} to find and execute the shortest chain from
+   * `source` type to `goal` type. Each composable skill supplies an
+   * `execute` closure via `invokers[skillName]`.
+   *
+   * Returns null when no chain exists for the given types.
+   */
+  async composeSkills(
+    source: string,
+    goal: string,
+    input: unknown,
+    invokers: Readonly<Record<string, (input: unknown) => Promise<unknown>>>,
+  ): Promise<CompositorExecutionResult | null> {
+    const compositor = new SkillCompositor();
+    for (const skill of this.skills.values()) {
+      const meta = skill.extraMetadata ?? {};
+      if (meta["compose"] !== "true") continue;
+      const inputType = meta["input"];
+      const outputType = meta["output"];
+      const exec = invokers[skill.name];
+      if (!inputType || !outputType || !exec) continue;
+      const descriptor: SkillDescriptor = {
+        name: skill.name,
+        inputType,
+        outputType,
+        execute: exec,
+        description: skill.description,
+      };
+      try {
+        compositor.register(descriptor);
+      } catch {
+        // duplicate registration — ignore
+      }
+    }
+    const chain: SkillChain | null = compositor.findChain(source, goal);
+    if (!chain) return null;
+    return compositor.compose(input, source, goal);
+  }
+
+  /**
    * Discover and load skills from all 8 known agent tool directories.
    * Searches: .wotann/, .claude/, .cursor/, .codex/, .gemini/, .crush/, .cline/, .copilot/
    *
@@ -368,7 +566,11 @@ export class SkillRegistry {
    * Returns the total number of newly discovered skills.
    */
   discoverCrossToolSkills(homeDir: string, projectDir: string): number {
-    const TOOL_SKILL_DIRS: readonly { readonly tool: AgentTool; readonly dirName: string; readonly skillsDir: string }[] = [
+    const TOOL_SKILL_DIRS: readonly {
+      readonly tool: AgentTool;
+      readonly dirName: string;
+      readonly skillsDir: string;
+    }[] = [
       { tool: "wotann", dirName: ".wotann", skillsDir: "skills" },
       { tool: "claude", dirName: ".claude", skillsDir: "skills" },
       { tool: "cursor", dirName: ".cursor", skillsDir: "rules" },
@@ -434,12 +636,14 @@ function parseSkillFrontmatter(content: string): SkillMetadata | null {
       notFor: (fm["not_for"] as string[]) ?? (fm["notFor"] as string[]) ?? undefined,
       always: (fm["always"] as boolean) ?? undefined,
       category: (fm["category"] as string) ?? "custom",
-      requires: requires ? {
-        bins: requires["bins"] as string[] | undefined,
-        anyBins: requires["anyBins"] as string[] | undefined,
-        env: requires["env"] as string[] | undefined,
-        os: requires["os"] as string[] | undefined,
-      } : undefined,
+      requires: requires
+        ? {
+            bins: requires["bins"] as string[] | undefined,
+            anyBins: requires["anyBins"] as string[] | undefined,
+            env: requires["env"] as string[] | undefined,
+            os: requires["os"] as string[] | undefined,
+          }
+        : undefined,
     };
   } catch {
     return null;
@@ -587,7 +791,9 @@ function convertAgentSkillBundle(skillRoot: string, skillContent: string): strin
     "Resolve relative paths from that directory when following file references.",
     "",
     ...inventory,
-  ].join("\n").trimEnd();
+  ]
+    .join("\n")
+    .trimEnd();
 }
 
 function listBundleFiles(dir: string, root: string): readonly string[] {
@@ -599,7 +805,13 @@ function listAdditionalBundleFiles(root: string): readonly string[] {
 
   const files = readdirSync(root, { withFileTypes: true })
     .filter((entry) => !shouldSkipSkillScanEntry(entry.name))
-    .filter((entry) => entry.name !== "SKILL.md" && entry.name !== "scripts" && entry.name !== "references" && entry.name !== "assets")
+    .filter(
+      (entry) =>
+        entry.name !== "SKILL.md" &&
+        entry.name !== "scripts" &&
+        entry.name !== "references" &&
+        entry.name !== "assets",
+    )
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return files.map((entry) => entry.name + (entry.isDirectory() ? "/" : ""));
@@ -668,7 +880,9 @@ function parseAllowedTools(value: unknown): readonly string[] | undefined {
   }
 
   if (Array.isArray(value)) {
-    const tools = value.filter((tool): tool is string => typeof tool === "string" && tool.length > 0);
+    const tools = value.filter(
+      (tool): tool is string => typeof tool === "string" && tool.length > 0,
+    );
     return tools.length > 0 ? tools : undefined;
   }
 
