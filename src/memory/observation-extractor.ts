@@ -22,6 +22,20 @@ import {
   type Entity,
   type ExtractionOptions,
 } from "./entity-types.js";
+import { observationTypeToHall, type Hall } from "./wings-rooms-halls.js";
+
+/**
+ * Enrich topic with the Wings/Rooms/Halls corridor suffix so every
+ * observation is partitioned via the MemPalace convention
+ * (+34% retrieval precision). Legacy callers that don't use WRH still
+ * get a usable topic — the suffix is only appended when a type is known.
+ */
+function enrichTopicWithHall(type: ObservationType, topic: string | undefined): string | undefined {
+  const hall: Hall = observationTypeToHall(type);
+  if (!topic || topic.length === 0) return `|${hall}`;
+  if (topic.includes("|")) return topic; // already WRH-encoded
+  return `${topic}|${hall}`;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -145,7 +159,7 @@ export function extractDecisions(captures: readonly AutoCaptureEntry[]): readonl
       sourceIds: [cap.id],
       extractedAt: Date.now(),
       domain: inferDomain(cap.content),
-      topic: inferTopic(cap.content),
+      topic: enrichTopicWithHall("decision", inferTopic(cap.content)),
     });
   }
   return results;
@@ -175,7 +189,7 @@ export function extractPreferences(captures: readonly AutoCaptureEntry[]): reado
       sourceIds: ids,
       extractedAt: Date.now(),
       domain: undefined,
-      topic: undefined,
+      topic: enrichTopicWithHall("preference", undefined),
     });
   }
   return results;
@@ -195,7 +209,7 @@ export function extractMilestones(captures: readonly AutoCaptureEntry[]): readon
       sourceIds: [cap.id],
       extractedAt: Date.now(),
       domain: inferDomain(cap.content),
-      topic: inferTopic(cap.content),
+      topic: enrichTopicWithHall("milestone", inferTopic(cap.content)),
     });
   }
   return results;
@@ -215,7 +229,7 @@ export function extractProblems(captures: readonly AutoCaptureEntry[]): readonly
       sourceIds: [cap.id],
       extractedAt: Date.now(),
       domain: inferDomain(cap.content),
-      topic: inferTopic(cap.content),
+      topic: enrichTopicWithHall("problem", inferTopic(cap.content)),
     });
   }
   return results;
@@ -273,7 +287,10 @@ export function extractDiscoveries(captures: readonly AutoCaptureEntry[]): reado
           sourceIds: relevant.map((c) => c.id),
           extractedAt: Date.now(),
           domain: inferDomain(errorCap.content) ?? inferDomain(fixCap.content),
-          topic: inferTopic(fixCap.content) ?? inferTopic(errorCap.content),
+          topic: enrichTopicWithHall(
+            "discovery",
+            inferTopic(fixCap.content) ?? inferTopic(errorCap.content),
+          ),
         });
       }
     }

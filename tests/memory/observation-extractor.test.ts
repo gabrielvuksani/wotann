@@ -337,14 +337,17 @@ describe("domain and topic inference", () => {
     expect(decision?.domain).toBe("memory");
   });
 
-  it("infers topic from content keywords", () => {
+  it("infers topic from content keywords with Wings/Rooms/Halls corridor suffix", () => {
+    // Per Phase H MemPalace wiring, every observation's topic gets its
+    // Wings/Rooms/Halls hall suffix appended via pipe separator. Problem
+    // observations partition into the "events" hall (+34% retrieval).
     const extractor = new ObservationExtractor();
     const captures = [
       makeCapture({ id: 1, content: "Database schema update failed with column mismatch" }),
     ];
     const observations = extractor.extractFromCaptures(captures);
     const problem = observations.find((o) => o.type === "problem");
-    expect(problem?.topic).toBe("schema");
+    expect(problem?.topic).toBe("schema|events");
   });
 });
 
