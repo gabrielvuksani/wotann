@@ -12,6 +12,7 @@
 
 import type { ProviderName } from "../core/types.js";
 import { randomBytes } from "node:crypto";
+import { speculativeExecute, type SpeculativeResult } from "./speculative-execution.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -101,6 +102,42 @@ export async function runArenaContest(
   );
 
   return contestants;
+}
+
+// ── Speculative contest (SPECULATIVE=1 mode) ──────────────
+
+/**
+ * Opt-in speculative variant of the arena. Runs all providers in parallel,
+ * scores each response with a caller-supplied `score` function, and returns
+ * the best candidate + rankings. Gate behind `process.env.SPECULATIVE === "1"`
+ * at the call-site — this function is a thin opt-in shell over
+ * `speculativeExecute`.
+ */
+export async function runSpeculativeContest(
+  executor: ArenaQueryExecutor,
+  prompt: string,
+  providers: readonly ProviderName[],
+  score: (response: string) => Promise<number>,
+): Promise<SpeculativeResult<ArenaContestant>> {
+  const labels = ["Model A", "Model B", "Model C"];
+  const selected = [...providers].sort(() => Math.random() - 0.5).slice(0, 3);
+  return speculativeExecute<ArenaContestant>({
+    n: selected.length,
+    generate: async (index): Promise<ArenaContestant> => {
+      const provider = selected[index]!;
+      const result = await executor(provider, prompt);
+      return {
+        id: randomBytes(4).toString("hex"),
+        label: labels[index] ?? `Model ${index + 1}`,
+        provider,
+        model: result.model ?? "auto",
+        response: result.response,
+        tokensUsed: result.tokensUsed,
+        durationMs: result.durationMs,
+      };
+    },
+    score: async (cand) => score(cand.response),
+  });
 }
 
 // ── Leaderboard ────────────────────────────────────────────
