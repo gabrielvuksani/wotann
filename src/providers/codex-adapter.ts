@@ -57,6 +57,31 @@ function readCodexAuthFile(): CodexAuthFile | null {
 }
 
 /**
+ * Build a synthetic CodexAuthFile from a caller-supplied raw access token.
+ * Used as a fallback when no on-disk Codex auth exists — primarily for test
+ * fixtures that need to exercise the wire-format assembly path without
+ * vendoring credentials. The `refresh_token` is left empty; refreshTokens()
+ * will surface an error if the synthetic token expires mid-session, which is
+ * the correct failure mode (tests never reach that branch because they
+ * capture the first fetch call and abort).
+ */
+function synthesizeAuthFromToken(rawToken: string | undefined): CodexAuthFile | null {
+  if (!rawToken) return null;
+  return {
+    auth_mode: "raw_token",
+    tokens: {
+      access_token: rawToken,
+      id_token: "",
+      refresh_token: "",
+      account_id: "",
+    },
+    // Set to a future-enough timestamp so ensureFreshAuth() doesn't
+    // trigger a refresh path on first use.
+    last_refresh: new Date().toISOString(),
+  };
+}
+
+/**
  * Extract the access token from the auth file, searching multiple nested paths.
  * Matches OpenClaw's resilient approach (10+ paths searched).
  */
@@ -138,8 +163,15 @@ async function refreshTokens(auth: CodexAuthFile): Promise<CodexAuthFile | null>
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
 
-export function createCodexAdapter(_rawToken?: string): ProviderAdapter {
-  let auth = readCodexAuthFile();
+export function createCodexAdapter(rawToken?: string): ProviderAdapter {
+  // Prefer the on-disk Codex auth file (where Codex CLI stores the refreshable
+  // access_token + refresh_token). Fall back to the caller-supplied rawToken
+  // so fixtures and test harnesses can exercise the adapter without a live
+  // ~/.codex/auth.json on the runner. The fallback path skips refresh logic
+  // (there's no refresh_token to use) but preserves every downstream wire-
+  // format assertion — tools[], messages[], stream decoding — so CI can
+  // validate request shape without vendored credentials.
+  let auth = readCodexAuthFile() ?? synthesizeAuthFromToken(rawToken);
   const contextConfig = getModelContextConfig("codexplan", "codex");
 
   const capabilities: ProviderCapabilities = {
