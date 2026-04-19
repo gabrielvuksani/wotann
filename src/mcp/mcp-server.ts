@@ -29,6 +29,7 @@
 
 import { createInterface, type Interface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
+import { loadToolsWithOptions, resolveTier, type McpTier, type TieredTool } from "./tool-loader.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -66,6 +67,29 @@ export interface McpServerOptions {
   readonly stdin?: Readable;
   readonly stdout?: Writable;
   readonly stderr?: Writable;
+  /**
+   * Optional MCP tier scope (Lane 2 #10 — task-master parity). When
+   * set, the server filters the adapter's `listTools()` output to the
+   * tier-appropriate subset using `tool-loader.ts`. When omitted, the
+   * server reads `WOTANN_MCP_TIER` at construction time; when that's
+   * also absent the adapter's tools pass through unfiltered (legacy
+   * behaviour for callers that manage their own tier selection).
+   *
+   * Only the NAMES are matched — the adapter still owns the authoritative
+   * definition + callTool implementation. A tier filter therefore cannot
+   * surface a tool the adapter doesn't expose; it only narrows the catalogue.
+   */
+  readonly tier?: McpTier;
+  /**
+   * Override the environment used for tier resolution (test hook).
+   * Production callers should leave this undefined so `process.env` is used.
+   */
+  readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Optional custom registry passed to `loadToolsWithOptions` when a tier
+   * is active. Defaults to `DEFAULT_TIERED_TOOLS` inside the loader.
+   */
+  readonly tieredRegistry?: readonly TieredTool[];
 }
 
 // ── JSON-RPC envelope ─────────────────────────────────
@@ -95,6 +119,14 @@ export class WotannMcpServer {
   private rl: Interface | null = null;
   private initialized = false;
   private closed = false;
+  /**
+   * Names of tools allowed to pass through `tools/list`. `null` means
+   * no tier filter is active and the adapter's full catalogue is
+   * exposed (legacy behaviour). Resolved once at construction so the
+   * tier decision is stable for the life of the server.
+   */
+  private readonly tierAllowlist: ReadonlySet<string> | null;
+  private readonly activeTier: McpTier | null;
 
   constructor(options: McpServerOptions) {
     this.info = options.info;
@@ -102,6 +134,46 @@ export class WotannMcpServer {
     this.stdin = options.stdin ?? process.stdin;
     this.stdout = options.stdout ?? process.stdout;
     this.stderr = options.stderr ?? process.stderr;
+
+    // Tier resolution — explicit option wins, then WOTANN_MCP_TIER env,
+    // then null (legacy: expose full adapter catalogue). We only build
+    // an allowlist when a tier is genuinely active so callers that
+    // don't opt in pay zero cost.
+    const env = options.env ?? process.env;
+    const hasExplicitTier = options.tier !== undefined;
+    const hasEnvTier =
+      typeof env["WOTANN_MCP_TIER"] === "string" && env["WOTANN_MCP_TIER"].length > 0;
+    if (hasExplicitTier || hasEnvTier) {
+      const tier = resolveTier({
+        ...(options.tier !== undefined ? { tier: options.tier } : {}),
+        env,
+      });
+      const result = loadToolsWithOptions({
+        tier,
+        env,
+        ...(options.tieredRegistry !== undefined ? { registry: options.tieredRegistry } : {}),
+      });
+      this.activeTier = tier;
+      this.tierAllowlist = new Set(result.tools.map((t) => t.name));
+    } else {
+      this.activeTier = null;
+      this.tierAllowlist = null;
+    }
+  }
+
+  /**
+   * Filter the adapter's tool list through the active tier allowlist.
+   * Returns the adapter list unchanged when no tier is configured.
+   */
+  private tierScopedTools(): readonly McpToolDefinition[] {
+    const all = this.adapter.listTools();
+    if (this.tierAllowlist === null) return all;
+    return all.filter((t) => this.tierAllowlist!.has(t.name));
+  }
+
+  /** Currently-active MCP tier, or null when unfiltered. */
+  get tier(): McpTier | null {
+    return this.activeTier;
   }
 
   /**
@@ -203,11 +275,23 @@ export class WotannMcpServer {
       case "notifications/initialized":
         return null;
       case "tools/list": {
-        return { tools: this.adapter.listTools() };
+        // Tier scoping — the tier allowlist (if any) narrows the
+        // adapter's full catalogue to the task-master-style tier subset.
+        // Legacy callers (no tier configured) see the unfiltered list.
+        return { tools: this.tierScopedTools() };
       }
       case "tools/call": {
         const p = (params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
         if (!p.name) throw new Error("tools/call: name is required");
+        // Enforce the tier allowlist at invocation time as well — a
+        // client that cached an older (wider) tools/list response
+        // should not be able to dispatch to a hidden tool. This
+        // matches the "honest error envelope" bar.
+        if (this.tierAllowlist !== null && !this.tierAllowlist.has(p.name)) {
+          throw new Error(
+            `tools/call: tool "${p.name}" not available at tier "${this.activeTier ?? "unknown"}"`,
+          );
+        }
         const result = await this.adapter.callTool(p.name, p.arguments ?? {});
         return result;
       }

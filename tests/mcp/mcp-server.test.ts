@@ -203,3 +203,208 @@ describe("makeTextResult", () => {
     expect(r.isError).toBe(true);
   });
 });
+
+// ── Tier-scoped tool catalogue (WOTANN_MCP_TIER) ─────────────
+
+describe("WotannMcpServer — tier-scoped tools/list (WOTANN_MCP_TIER)", () => {
+  /**
+   * Adapter ships every tier-default tool name so we can verify the
+   * tier filter on its own. We intentionally expose all 42+ here so
+   * filtering is the ONLY thing that can reduce the list.
+   */
+  function adapterWithDefaultTools(): ToolHostAdapter {
+    const names = [
+      // core (7)
+      "memory_search",
+      "memory_save",
+      "find_symbol",
+      "run_workflow",
+      "unified_exec",
+      "read_file",
+      "write_file",
+      // standard (+7)
+      "plan_create",
+      "plan_next",
+      "plan_update",
+      "search_code",
+      "edit_file",
+      "skill_run",
+      "list_files",
+      // all (+ 28)
+      "lsp_rename",
+      "lsp_references",
+      "lsp_definition",
+      "lsp_hover",
+      "git_status",
+      "git_diff",
+      "git_commit",
+      "git_log",
+      "git_blame",
+      "orchestrator_delegate",
+      "orchestrator_status",
+      "computer_use_screenshot",
+      "computer_use_click",
+      "computer_use_type",
+      "browser_navigate",
+      "browser_click",
+      "telemetry_cost",
+      "telemetry_audit",
+      "marketplace_list",
+      "marketplace_install",
+      "channel_send",
+      "channel_list",
+      "voice_transcribe",
+      "voice_speak",
+      "learning_replay",
+      "learning_diary",
+      "identity_set",
+      "desktop_control_focus",
+    ];
+    return {
+      listTools: () =>
+        names.map((name) => ({
+          name,
+          description: name,
+          inputSchema: { type: "object", properties: {} } as const,
+        })),
+      callTool: async () => makeTextResult(`invoked`),
+    };
+  }
+
+  it("exposes the full adapter catalogue when no tier is configured", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const server = new WotannMcpServer({
+      info: { name: "wotann-test", version: "0.1.0" },
+      adapter: adapterWithDefaultTools(),
+      stdin,
+      stdout,
+      stderr,
+      env: {},
+    });
+    const response = await server.handleRequest(
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.result.tools.length).toBeGreaterThanOrEqual(42);
+    expect(server.tier).toBeNull();
+  });
+
+  it("filters to 7 tools when tier=core is set explicitly", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const server = new WotannMcpServer({
+      info: { name: "wotann-test", version: "0.1.0" },
+      adapter: adapterWithDefaultTools(),
+      stdin,
+      stdout,
+      stderr,
+      tier: "core",
+      env: {},
+    });
+    const response = await server.handleRequest(
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.result.tools).toHaveLength(7);
+    expect(server.tier).toBe("core");
+    const names = parsed.result.tools.map((t: { name: string }) => t.name);
+    expect(names).toContain("memory_search");
+    expect(names).not.toContain("browser_navigate");
+  });
+
+  it("filters to 14 tools when tier=standard is set", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const server = new WotannMcpServer({
+      info: { name: "wotann-test", version: "0.1.0" },
+      adapter: adapterWithDefaultTools(),
+      stdin,
+      stdout,
+      stderr,
+      tier: "standard",
+      env: {},
+    });
+    const response = await server.handleRequest(
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.result.tools).toHaveLength(14);
+  });
+
+  it("reads WOTANN_MCP_TIER from env when no explicit tier is set", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const server = new WotannMcpServer({
+      info: { name: "wotann-test", version: "0.1.0" },
+      adapter: adapterWithDefaultTools(),
+      stdin,
+      stdout,
+      stderr,
+      env: { WOTANN_MCP_TIER: "standard" },
+    });
+    const response = await server.handleRequest(
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.result.tools).toHaveLength(14);
+    expect(server.tier).toBe("standard");
+  });
+
+  it("blocks tools/call for tools hidden by the active tier", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const server = new WotannMcpServer({
+      info: { name: "wotann-test", version: "0.1.0" },
+      adapter: adapterWithDefaultTools(),
+      stdin,
+      stdout,
+      stderr,
+      tier: "core",
+      env: {},
+    });
+    // browser_navigate exists in the adapter but not in core tier
+    const response = await server.handleRequest(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "browser_navigate", arguments: { url: "https://x" } },
+      }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.error).toBeDefined();
+    expect(parsed.error.message).toMatch(/not available at tier "core"/);
+  });
+
+  it("allows tools/call for tools exposed by the active tier", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const server = new WotannMcpServer({
+      info: { name: "wotann-test", version: "0.1.0" },
+      adapter: adapterWithDefaultTools(),
+      stdin,
+      stdout,
+      stderr,
+      tier: "core",
+      env: {},
+    });
+    const response = await server.handleRequest(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "memory_search", arguments: { query: "x" } },
+      }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.result.content[0].text).toBe("invoked");
+  });
+});
