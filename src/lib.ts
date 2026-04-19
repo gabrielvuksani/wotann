@@ -405,6 +405,244 @@ export {
   type PerceptionOutput,
 } from "./computer-use/perception-adapter.js";
 
+// ── Phase H Memory Stack (Supermemory/MemPalace SOTA parity) ─────────
+// LongMemEval leader EverMemOS 83% / Supermemory 98.60% ensemble — WOTANN
+// ships every primitive; wire via `ingestSession()` + abstention gate.
+export {
+  shouldAbstain,
+  buildAbstentionResponse,
+  type AbstentionThresholds,
+  type AbstentionResponse,
+} from "./memory/abstention.js";
+export {
+  ingestSession,
+  scheduleViaHook as scheduleSessionIngestion,
+  type SessionIngestInput,
+  type SessionIngestResult,
+  type SessionIngestStageFailures,
+  type IngestOptions as SessionIngestOptions,
+} from "./memory/session-ingestion.js";
+export {
+  detectSupersession,
+  detectSupersessionsInPool,
+  applySupersession,
+  parseAssertionAsFact,
+  type SupersessionDetection,
+} from "./memory/knowledge-update-dynamics.js";
+export {
+  parseWrh,
+  formatWrh,
+  toStoreFields,
+  observationTypeToHall,
+  type WingRoomHall,
+} from "./memory/wings-rooms-halls.js";
+export {
+  ProgressiveContextLoader,
+  PrepareContext,
+  DEFAULT_BUDGETS as PROGRESSIVE_DEFAULT_BUDGETS,
+  type ProgressiveAdapters,
+  type ContextTier as MemoryContextTier,
+  type ContextPayload,
+  type TierBudgets,
+  type PreparedContext,
+} from "./memory/progressive-context-loader.js";
+export {
+  resolveContextAtIngest,
+  createLlmResolver,
+  toResolutionEvent,
+  bindPronoun,
+  bindTaskAlias,
+  bindAbbreviation,
+  type SessionContext as AtomicMemorySessionContext,
+  type ResolvedMemory,
+} from "./memory/atomic-memory.js";
+export {
+  deriveIngestTimestamps,
+  parseDateHints,
+  buildEntry as buildDualTimestampEntry,
+  recordedIn,
+  eventIn,
+  temporallyConflicting,
+  type DualTimestampEntry,
+  type DateHint,
+  type DualTimestampIngestPayload,
+} from "./memory/dual-timestamp.js";
+export {
+  hybridSearchV2,
+  createBm25Retriever,
+  createDenseRetriever,
+  createCrossEncoderStub,
+  createCrossEncoderReranker,
+  type HybridV2Config,
+  type HybridV2Query,
+  type HybridV2Result,
+  type CrossEncoderFn,
+} from "./memory/hybrid-retrieval-v2.js";
+
+// ── Intelligence (Guardian + CID — small-model safety) ───────────────
+export {
+  guardReview,
+  type GuardVerdict,
+  type ReviewContext,
+  type Concern,
+} from "./intelligence/guardian.js";
+export {
+  maybeBuildCidIndexForProvider,
+  type CidIntelligenceInput,
+} from "./intelligence/content-cid.js";
+
+// ── Orchestration (long-horizon + council primitives) ────────────────
+export {
+  LongHorizonOrchestrator,
+  parsePhases,
+  DEFAULT_LONG_HORIZON_CONFIG,
+  type LongHorizonConfig,
+  type LongHorizonInput,
+  type LongHorizonBudget,
+  type OrchestratorEvent,
+  type OrchestratorExitReason,
+  type OrchestratorResult,
+  type OrchestratorSnapshot,
+} from "./orchestration/long-horizon-orchestrator.js";
+export {
+  initPhaseState,
+  canEnter,
+  canExit,
+  isExhausted,
+  recordIteration,
+  markPhaseStatus,
+  type Phase as LongHorizonPhase,
+  type PhaseState,
+  type PhaseExitCriterion,
+  type PhaseEntryCriterion,
+  type GateDecision,
+  type IterationResult,
+} from "./orchestration/phase-gate.js";
+export {
+  detectPlateau,
+  recommendPlateauResponse,
+  DEFAULT_PLATEAU_CONFIG,
+  type PlateauConfig,
+  type PlateauKind,
+  type PlateauVerdict,
+  type PlateauResponse,
+} from "./orchestration/plateau-detector.js";
+export {
+  runDualPersonaReview,
+  type DualPersonaVerdict,
+  type PersonaExecutor,
+} from "./orchestration/dual-persona-reviewer.js";
+export {
+  performHandoff,
+  nestHandoffHistory,
+  type Handoff,
+  type HandoffInputData,
+  type HandoffInputFilter,
+} from "./core/handoff.js";
+
+// ── Sandbox (Codex parity + deer-flow virtual paths) ──────────────────
+export { toVirtual, toPhysical, scrubPaths, unscrubPaths } from "./sandbox/virtual-paths.js";
+export {
+  serializeShellSnapshot,
+  deserializeShellSnapshot,
+  type ShellSnapshot,
+} from "./sandbox/unified-exec.js";
+export {
+  proposeRule,
+  proposeRuleCandidates,
+  draftToRule,
+  type RuleDraft,
+} from "./sandbox/request-rule.js";
+
+// ── MCP (tiered tool loading — 7/14/42+ saves 7k tokens) ─────────────
+export {
+  loadTools as loadMcpTools,
+  loadToolsWithOptions as loadMcpToolsWithOptions,
+  listToolNamesForTier,
+  resolveTier as resolveMcpTier,
+  filterByTier as filterMcpByTier,
+  estimateTokenCost as estimateMcpTokenCost,
+  DEFAULT_TIERED_TOOLS,
+  WOTANN_MCP_TIER_ENV,
+  type McpTier,
+  type TieredTool,
+  type LoadToolsOptions,
+  type LoadToolsResult,
+} from "./mcp/tool-loader.js";
+
+// ── LSP (Serena parity — 10 language servers as agent tools) ─────────
+export {
+  LanguageServerRegistry,
+  LSP_SERVER_CATALOG,
+  lspNotInstalled,
+  type LspServerConfig,
+  type LspLanguage,
+  type LspNotInstalledError,
+  type LanguageServerRegistryOptions,
+  type WhichChecker,
+} from "./lsp/server-registry.js";
+export {
+  buildLspTools,
+  type BuiltLspTools,
+  type LspToolDeps,
+  type LspToolSuccess,
+  type LspToolFailure,
+} from "./lsp/agent-tools.js";
+
+// ── Tools (Monitor — Claude Code v2.1.98 parity) ─────────────────────
+export {
+  spawnMonitor,
+  type MonitorSession,
+  type MonitorEvent,
+  type MonitorOptions,
+} from "./tools/monitor.js";
+
+// ── Design (Claude Design handoff bundle receiver — Anthropic Labs) ──
+export { parseHandoffBundle, type HandoffBundle } from "./design/handoff-receiver.js";
+export {
+  parseDesignTokens,
+  emitTokensCss,
+  type DesignTokens,
+  type DesignTokenEntry,
+} from "./design/design-tokens-parser.js";
+
+// ── Benchmarks (TerminalBench / SWE-bench / τ-bench / LongMemEval) ────
+export {
+  BlockedCorpusError,
+  type DryRunReport,
+  type TrajectoryWriter,
+} from "./intelligence/benchmark-runners/shared.js";
+
+// ── Channels (Phase D — 6 new adapters) ──────────────────────────────
+export { MastodonAdapter } from "./channels/mastodon.js";
+export { WeChatAdapter } from "./channels/wechat.js";
+export { LineAdapter } from "./channels/line.js";
+export { ViberAdapter } from "./channels/viber.js";
+export { DingTalkAdapter } from "./channels/dingtalk.js";
+export { FeishuAdapter } from "./channels/feishu.js";
+
+// ── UI Terminal Blocks (OSC 133 — Warp parity) ───────────────────────
+export { Osc133Parser, OSC_133, type BlockEvent } from "./ui/terminal-blocks/osc-133-parser.js";
+export { BlockBuffer, type Block as TerminalBlock } from "./ui/terminal-blocks/block.js";
+export {
+  buildShellInit,
+  isSupportedShell,
+  SUPPORTED_SHELLS,
+  type SupportedShell,
+  type ShellInitResult,
+} from "./ui/terminal-blocks/init-snippets.js";
+
+// ── Middleware (Phase D — deer-flow 6-middleware port) ───────────────
+export { DanglingToolCallMiddleware } from "./middleware/dangling-tool-call.js";
+export { LLMErrorHandlingMiddleware } from "./middleware/llm-error-handling.js";
+export { GuardrailProviderMiddleware } from "./middleware/guardrail-provider.js";
+export { SandboxAuditMiddleware } from "./middleware/sandbox-audit.js";
+export { TitleMiddleware } from "./middleware/title.js";
+export { DeferredToolFilterMiddleware } from "./middleware/deferred-tool-filter.js";
+
+// ── Utils (shadow-git ghost branches — Hermes parity) ────────────────
+// shadow-git is already exported earlier in this file via existing entry
+
 // ── Security (extended) ─────────────────────────────────
 export { SkillsGuard, type SkillScanResult } from "./security/skills-guard.js";
 export { HashAuditChain, type AuditEntry } from "./security/hash-audit-chain.js";
