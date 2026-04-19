@@ -119,6 +119,7 @@ import type { BuiltLspTools } from "../lsp/agent-tools.js";
 import { AGENT_LSP_TOOL_NAMES } from "../lsp/agent-tools.js";
 import { buildLspToolsForAgent } from "./runtime-tools.js";
 import { loadToolsWithOptions, type McpTier, type LoadToolsResult } from "../mcp/tool-loader.js";
+import { VisualDiffTheater, type FileChange } from "../testing/visual-diff-theater.js";
 import {
   applyHashEdit,
   type HashEditOperation,
@@ -593,6 +594,12 @@ export class WotannRuntime {
   // honours env var, with a config override path later.
   private mcpTools: readonly LoadToolsResult["tools"][number][] = [];
   private mcpTier: McpTier | null = null;
+
+  // ── Session-13: per-session Visual Diff Theater ──
+  // Owns diff sessions for hunk-level accept/reject. Populated via
+  // `captureFileEditForDiff()` from the PostToolUse hook and surfaced
+  // through `getDiffTheater()` for CLI/TUI + iOS review surfaces.
+  private diffTheater: VisualDiffTheater | null = null;
 
   constructor(config: RuntimeConfig) {
     this.config = config;
@@ -1116,6 +1123,40 @@ export class WotannRuntime {
     return this.mcpTier;
   }
 
+  /**
+   * Session-13: per-session Visual Diff Theater for hunk-level review.
+   * Consumers (CLI `wotann review`, iOS diff viewer) read sessions,
+   * accept/reject hunks, and apply.
+   */
+  getDiffTheater(): VisualDiffTheater | null {
+    return this.diffTheater;
+  }
+
+  /**
+   * Session-13: capture a file edit and push into a Visual Diff Theater
+   * session so the user can review hunks before a final merge. Reads
+   * current on-disk content for the `oldContent` side (empty string if
+   * the file is new). Honest: a missing file leaves `oldContent` empty
+   * rather than throwing. No-op when the theater is unavailable.
+   */
+  captureFileEditForDiff(filePath: string, newContent: string): void {
+    if (!this.diffTheater) return;
+    let oldContent = "";
+    try {
+      if (existsSync(filePath)) {
+        oldContent = readFileSync(filePath, "utf-8");
+      }
+    } catch (err) {
+      console.warn(`[WOTANN] diff-theater read failed (${filePath}): ${(err as Error).message}`);
+    }
+    const change: FileChange = { filePath, oldContent, newContent };
+    try {
+      this.diffTheater.createSession([change]);
+    } catch (err) {
+      console.warn(`[WOTANN] diff-theater createSession failed: ${(err as Error).message}`);
+    }
+  }
+
   /** Get the cost tracker (daily/weekly/monthly aggregates + recording). */
   getCostTracker(): CostTracker {
     return this.costTracker;
@@ -1177,6 +1218,36 @@ export class WotannRuntime {
       console.warn(`[WOTANN] mcp tool-loader init failed: ${(err as Error).message}`);
       this.mcpTools = [];
       this.mcpTier = null;
+    }
+
+    // Session-13 Visual Diff Theater — hunk-level diff review surface.
+    // Per-session instance (no module-global cache). A PostToolUse hook
+    // auto-captures `write`/`edit` tool payloads into a diff session
+    // that CLI/TUI + iOS review UI can inspect via `getDiffTheater()`.
+    try {
+      this.diffTheater = new VisualDiffTheater();
+      this.hookEngine.register({
+        name: "VisualDiffTheaterCapture",
+        event: "PostToolUse",
+        profile: "standard",
+        kind: "tool",
+        priority: 200,
+        handler: (payload) => {
+          const name = (payload.toolName ?? "").toLowerCase();
+          if (name === "write" || name === "edit") {
+            const input = payload.toolInput as Record<string, unknown> | undefined;
+            const filePath = payload.filePath ?? (input?.["path"] as string | undefined);
+            const newContent = (input?.["content"] as string | undefined) ?? payload.content ?? "";
+            if (filePath && typeof newContent === "string" && newContent.length > 0) {
+              this.captureFileEditForDiff(filePath, newContent);
+            }
+          }
+          return { action: "allow" };
+        },
+      });
+    } catch (err) {
+      console.warn(`[WOTANN] visual-diff-theater init failed: ${(err as Error).message}`);
+      this.diffTheater = null;
     }
 
     // Phase H — Progressive context loader. Constructed once per runtime,
