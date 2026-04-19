@@ -18,13 +18,31 @@
 import { execFileSync } from "node:child_process";
 import { STTDetector } from "./stt-detector.js";
 import { TTSEngine } from "./tts-engine.js";
+import { VibeVoiceBackend } from "./vibevoice-backend.js";
 import type { STTTranscription } from "./stt-detector.js";
 import type { TTSResult } from "./tts-engine.js";
 
 // ── Types ───────────────────────────────────────────────
 
-export type STTBackend = "web-speech-api" | "whisper-local" | "whisper-cloud" | "whisperkit" | "deepgram" | "system";
-export type TTSBackend = "web-speech-api" | "elevenlabs" | "openai-tts" | "piper" | "system" | "none";
+// Wave 3G: "vibevoice" added as a first-class STT backend option so the
+// 60-minute ASR + speaker-diarization code-path becomes reachable
+// through the pipeline's normal provider cascade, not only via the
+// dedicated long-form path.
+export type STTBackend =
+  | "web-speech-api"
+  | "whisper-local"
+  | "whisper-cloud"
+  | "whisperkit"
+  | "deepgram"
+  | "system"
+  | "vibevoice";
+export type TTSBackend =
+  | "web-speech-api"
+  | "elevenlabs"
+  | "openai-tts"
+  | "piper"
+  | "system"
+  | "none";
 export type VoiceState = "idle" | "listening" | "processing" | "speaking" | "error";
 
 export interface VoiceConfig {
@@ -112,14 +130,17 @@ function createWhisperLocalProvider(modelSize: string): STTProvider {
       if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
       try {
-        execFileSync(cmd, [
-          audioPath,
-          "--model", modelSize,
-          "--output_format", "txt",
-          "--output_dir", outputDir,
-        ], { timeout: 120_000, stdio: "pipe" });
+        execFileSync(
+          cmd,
+          [audioPath, "--model", modelSize, "--output_format", "txt", "--output_dir", outputDir],
+          { timeout: 120_000, stdio: "pipe" },
+        );
 
-        const baseName = audioPath.split("/").pop()?.replace(/\.\w+$/, "") ?? "audio";
+        const baseName =
+          audioPath
+            .split("/")
+            .pop()
+            ?.replace(/\.\w+$/, "") ?? "audio";
         const txtPath = join(outputDir, `${baseName}.txt`);
         const text = existsSync(txtPath) ? readFileSync(txtPath, "utf-8").trim() : "";
 
@@ -131,7 +152,13 @@ function createWhisperLocalProvider(modelSize: string): STTProvider {
           segments: [],
         };
       } catch {
-        return { text: `[${cmd} failed for ${audioPath}]`, language: "en", confidence: 0, durationMs: 0, segments: [] };
+        return {
+          text: `[${cmd} failed for ${audioPath}]`,
+          language: "en",
+          confidence: 0,
+          durationMs: 0,
+          segments: [],
+        };
       }
     },
     isAvailable(): boolean {
@@ -141,7 +168,9 @@ function createWhisperLocalProvider(modelSize: string): STTProvider {
       }
       return available;
     },
-    async cleanup(): Promise<void> { /* no-op */ },
+    async cleanup(): Promise<void> {
+      /* no-op */
+    },
   };
 }
 
@@ -153,23 +182,49 @@ function createWhisperKitProvider(): STTProvider {
     },
     async transcribe(audioPath: string): Promise<TranscriptionResult> {
       if (process.platform !== "darwin") {
-        return { text: "[WhisperKit requires macOS with Apple Silicon]", language: "en", confidence: 0, durationMs: 0, segments: [] };
+        return {
+          text: "[WhisperKit requires macOS with Apple Silicon]",
+          language: "en",
+          confidence: 0,
+          durationMs: 0,
+          segments: [],
+        };
       }
       try {
         const { execFileSync } = await import("node:child_process");
-        const output = execFileSync("whisperkit-cli", ["transcribe", "--audio-path", audioPath, "--model", "openai_whisper-base"], {
-          encoding: "utf-8", timeout: 60_000, stdio: "pipe",
-        }).trim();
-        return { text: output || "[No output from WhisperKit]", language: "en", confidence: 0.95, durationMs: 0, segments: [] };
+        const output = execFileSync(
+          "whisperkit-cli",
+          ["transcribe", "--audio-path", audioPath, "--model", "openai_whisper-base"],
+          {
+            encoding: "utf-8",
+            timeout: 60_000,
+            stdio: "pipe",
+          },
+        ).trim();
+        return {
+          text: output || "[No output from WhisperKit]",
+          language: "en",
+          confidence: 0.95,
+          durationMs: 0,
+          segments: [],
+        };
       } catch {
         // Fallback: WhisperKit not installed, try system whisper
-        return { text: `[WhisperKit unavailable — install via brew install whisperkit-cli]`, language: "en", confidence: 0, durationMs: 0, segments: [] };
+        return {
+          text: `[WhisperKit unavailable — install via brew install whisperkit-cli]`,
+          language: "en",
+          confidence: 0,
+          durationMs: 0,
+          segments: [],
+        };
       }
     },
     isAvailable(): boolean {
       return process.platform === "darwin" && isCliAvailable("whisperkit-cli");
     },
-    async cleanup(): Promise<void> { /* no-op */ },
+    async cleanup(): Promise<void> {
+      /* no-op */
+    },
   };
 }
 
@@ -182,7 +237,13 @@ function createWhisperCloudProvider(): STTProvider {
     async transcribe(audioPath: string): Promise<TranscriptionResult> {
       const apiKey = process.env["OPENAI_API_KEY"];
       if (!apiKey) {
-        return { text: "[OPENAI_API_KEY not set]", language: "en", confidence: 0, durationMs: 0, segments: [] };
+        return {
+          text: "[OPENAI_API_KEY not set]",
+          language: "en",
+          confidence: 0,
+          durationMs: 0,
+          segments: [],
+        };
       }
       try {
         const { readFileSync } = await import("node:fs");
@@ -194,15 +255,25 @@ function createWhisperCloudProvider(): STTProvider {
 
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
           method: "POST",
-          headers: { "Authorization": `Bearer ${apiKey}` },
+          headers: { Authorization: `Bearer ${apiKey}` },
           body: formData,
         });
 
         if (!response.ok) {
-          return { text: `[Whisper API error: ${response.status}]`, language: "en", confidence: 0, durationMs: 0, segments: [] };
+          return {
+            text: `[Whisper API error: ${response.status}]`,
+            language: "en",
+            confidence: 0,
+            durationMs: 0,
+            segments: [],
+          };
         }
 
-        const data = (await response.json()) as { text?: string; language?: string; duration?: number };
+        const data = (await response.json()) as {
+          text?: string;
+          language?: string;
+          duration?: number;
+        };
         return {
           text: data.text ?? "",
           language: data.language ?? "en",
@@ -211,13 +282,92 @@ function createWhisperCloudProvider(): STTProvider {
           segments: [],
         };
       } catch (error) {
-        return { text: `[Whisper API error: ${error instanceof Error ? error.message : "unknown"}]`, language: "en", confidence: 0, durationMs: 0, segments: [] };
+        return {
+          text: `[Whisper API error: ${error instanceof Error ? error.message : "unknown"}]`,
+          language: "en",
+          confidence: 0,
+          durationMs: 0,
+          segments: [],
+        };
       }
     },
     isAvailable(): boolean {
       return !!process.env["OPENAI_API_KEY"];
     },
-    async cleanup(): Promise<void> { /* no-op */ },
+    async cleanup(): Promise<void> {
+      /* no-op */
+    },
+  };
+}
+
+/**
+ * VibeVoice STT provider (Wave 3G registry wire-up).
+ *
+ * Bridges the existing VibeVoiceBackend module (60-minute ASR + speaker
+ * diarization) into the pipeline's legacy STT cascade so
+ * `sttBackend: "vibevoice"` becomes a selectable option alongside
+ * whisper-local / whisper-cloud / whisperkit. Availability is detected
+ * via `VibeVoiceBackend.detect()`; unavailable state yields an honest
+ * "install VibeVoice…" transcription rather than a silent success.
+ */
+function createVibeVoiceProvider(): STTProvider {
+  const backend = new VibeVoiceBackend();
+  let detected = false;
+  let available = false;
+
+  return {
+    name: "vibevoice" as STTBackend,
+    async initialize(): Promise<boolean> {
+      const status = await backend.detect();
+      available = status.available;
+      detected = true;
+      return available;
+    },
+    async transcribe(audioPath: string): Promise<TranscriptionResult> {
+      if (!detected) {
+        const status = await backend.detect();
+        available = status.available;
+        detected = true;
+      }
+      if (!available) {
+        return {
+          text: "[VibeVoice unavailable — install vibevoice-server or the vibevoice Python package]",
+          language: "en",
+          confidence: 0,
+          durationMs: 0,
+          segments: [],
+        };
+      }
+      try {
+        const long = await backend.transcribeLong(audioPath);
+        return {
+          text: long.text,
+          language: long.language,
+          confidence: long.confidence,
+          durationMs: long.durationMs,
+          segments: long.segments.map((s) => ({
+            text: s.text,
+            startMs: s.startMs,
+            endMs: s.endMs,
+            confidence: s.confidence,
+          })),
+        };
+      } catch (error) {
+        return {
+          text: `[VibeVoice error: ${error instanceof Error ? error.message : "unknown"}]`,
+          language: "en",
+          confidence: 0,
+          durationMs: 0,
+          segments: [],
+        };
+      }
+    },
+    isAvailable(): boolean {
+      return detected ? available : false;
+    },
+    async cleanup(): Promise<void> {
+      /* no-op — VibeVoiceBackend owns no persistent handles */
+    },
   };
 }
 
@@ -237,7 +387,10 @@ function createPiperTTSProvider(): TTSProvider {
     async initialize(): Promise<boolean> {
       return isCliAvailable("piper");
     },
-    async speak(text: string, _voiceId: string): Promise<{ audioPath: string; durationMs: number }> {
+    async speak(
+      text: string,
+      _voiceId: string,
+    ): Promise<{ audioPath: string; durationMs: number }> {
       const { join } = await import("node:path");
       const { tmpdir } = await import("node:os");
       const { existsSync } = await import("node:fs");
@@ -249,13 +402,20 @@ function createPiperTTSProvider(): TTSProvider {
           timeout: 30_000,
           stdio: ["pipe", "pipe", "pipe"],
         });
-        return { audioPath: existsSync(outputPath) ? outputPath : "", durationMs: text.length * 60 };
+        return {
+          audioPath: existsSync(outputPath) ? outputPath : "",
+          durationMs: text.length * 60,
+        };
       } catch {
         return { audioPath: "", durationMs: 0 };
       }
     },
-    isAvailable(): boolean { return isCliAvailable("piper"); },
-    async cleanup(): Promise<void> { /* no-op */ },
+    isAvailable(): boolean {
+      return isCliAvailable("piper");
+    },
+    async cleanup(): Promise<void> {
+      /* no-op */
+    },
   };
 }
 
@@ -274,18 +434,21 @@ function createElevenLabsTTSProvider(): TTSProvider {
       const outputPath = join(tmpdir(), `wotann-elevenlabs-${Date.now()}.mp3`);
       try {
         const effectiveVoiceId = voiceId || "21m00Tcm4TlvDq8ikWAM"; // Rachel default
-        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${effectiveVoiceId}`, {
-          method: "POST",
-          headers: {
-            "xi-api-key": apiKey,
-            "Content-Type": "application/json",
+        const response = await fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${effectiveVoiceId}`,
+          {
+            method: "POST",
+            headers: {
+              "xi-api-key": apiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              text,
+              model_id: "eleven_monolingual_v1",
+              voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+            }),
           },
-          body: JSON.stringify({
-            text,
-            model_id: "eleven_monolingual_v1",
-            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-          }),
-        });
+        );
         if (!response.ok) return { audioPath: "", durationMs: 0 };
         const buffer = Buffer.from(await response.arrayBuffer());
         writeFileSync(outputPath, buffer);
@@ -297,7 +460,9 @@ function createElevenLabsTTSProvider(): TTSProvider {
     isAvailable(): boolean {
       return !!process.env["ELEVENLABS_API_KEY"];
     },
-    async cleanup(): Promise<void> { /* no-op */ },
+    async cleanup(): Promise<void> {
+      /* no-op */
+    },
   };
 }
 
@@ -417,9 +582,7 @@ export class VoicePipeline {
    * Register a callback for real-time transcription events.
    * Works with Web Speech API's streaming interim results.
    */
-  onTranscription(
-    callback: (text: string, isFinal: boolean, confidence: number) => void,
-  ): void {
+  onTranscription(callback: (text: string, isFinal: boolean, confidence: number) => void): void {
     this.sttDetector.on("result", (event) => {
       if (event.transcription) {
         callback(event.transcription.text, true, event.transcription.confidence);
@@ -548,12 +711,12 @@ export class VoicePipeline {
       state: this.state,
       totalTranscriptions: this.transcriptionCount,
       totalSpoken: this.spokenCount,
-      avgTranscriptionLatencyMs: this.transcriptionCount > 0
-        ? Math.round(this.totalSTTLatency / this.transcriptionCount)
-        : 0,
-      avgTTSLatencyMs: this.spokenCount > 0
-        ? Math.round(this.totalTTSLatency / this.spokenCount)
-        : 0,
+      avgTranscriptionLatencyMs:
+        this.transcriptionCount > 0
+          ? Math.round(this.totalSTTLatency / this.transcriptionCount)
+          : 0,
+      avgTTSLatencyMs:
+        this.spokenCount > 0 ? Math.round(this.totalTTSLatency / this.spokenCount) : 0,
       sttBackend: this.config.sttBackend,
       ttsBackend: this.config.ttsBackend,
     };
@@ -599,6 +762,15 @@ export class VoicePipeline {
       stt.push("whisperkit");
     }
 
+    // VibeVoice: registered as a selectable STT backend. Live
+    // availability is gated by VibeVoiceBackend.detect() inside the
+    // provider factory so listing it here is honest — the transcribe
+    // path returns an "install VibeVoice…" message when the CLI or
+    // Python package isn't present.
+    if (!stt.includes("vibevoice" as STTBackend)) {
+      stt.push("vibevoice" as STTBackend);
+    }
+
     return { stt, tts };
   }
 
@@ -623,6 +795,9 @@ export class VoicePipeline {
         return createWhisperCloudProvider();
       case "whisper-local":
         return createWhisperLocalProvider(this.config.sttModelSize);
+      case "vibevoice":
+        // Wave 3G: VibeVoice registered as an STT backend option.
+        return createVibeVoiceProvider();
       default:
         return createWhisperLocalProvider(this.config.sttModelSize);
     }
