@@ -159,7 +159,7 @@ const MIGRATIONS: readonly MigrationStep[] = [
           ...rest,
           auth: apiKey
             ? { method: "api-key", token: apiKey }
-            : providerConfig["auth"] ?? { method: "local" },
+            : (providerConfig["auth"] ?? { method: "local" }),
         };
       }
 
@@ -247,9 +247,10 @@ export function executeMigration(
   return {
     success: errors.length === 0,
     fromVersion: plan.currentVersion,
-    toVersion: errors.length === 0
-      ? plan.targetVersion
-      : (current["version"] as string) ?? plan.currentVersion,
+    toVersion:
+      errors.length === 0
+        ? plan.targetVersion
+        : ((current["version"] as string) ?? plan.currentVersion),
     stepsApplied: appliedSteps,
     backupPath: null,
     errors,
@@ -343,4 +344,78 @@ export function needsMigration(
  */
 export function getMigrationSteps(): readonly MigrationStep[] {
   return MIGRATIONS;
+}
+
+// ── Startup auto-migrate ─────────────────────────────────
+
+export interface StartupMigrationReport {
+  /** Whether a migration actually ran (false = already up-to-date OR no config). */
+  readonly migrated: boolean;
+  /** Path to the backup file when a migration ran (null otherwise). */
+  readonly backupPath: string | null;
+  /** Version the config started at. */
+  readonly fromVersion: string | null;
+  /** Version the config ended at. */
+  readonly toVersion: string;
+  /** Human-readable step descriptions applied. */
+  readonly stepsApplied: readonly string[];
+  /** Any errors or validation warnings. */
+  readonly errors: readonly string[];
+}
+
+/**
+ * Entry point for "migrate old-version configs on startup". Safe to
+ * call unconditionally at runtime boot — returns {migrated:false}
+ * when no config exists or the config is already current, so callers
+ * don't need to pre-check. Always creates a timestamped backup BEFORE
+ * mutating the on-disk file so rollback is a single `mv`.
+ *
+ * Callers typically invoke this after resolving the workspace but
+ * BEFORE loading any runtime state that depends on the schema shape.
+ */
+export function migrateOnStartup(
+  configPath: string,
+  targetVersion: string = CURRENT_SCHEMA_VERSION,
+): StartupMigrationReport {
+  // No config file → nothing to migrate. Treat as a clean slate.
+  if (!existsSync(configPath)) {
+    return {
+      migrated: false,
+      backupPath: null,
+      fromVersion: null,
+      toVersion: targetVersion,
+      stepsApplied: [],
+      errors: [],
+    };
+  }
+
+  const result = migrateConfigFile(configPath, targetVersion);
+
+  return {
+    migrated: result.stepsApplied.length > 0 && result.success,
+    backupPath: result.backupPath,
+    fromVersion: result.fromVersion,
+    toVersion: result.toVersion,
+    stepsApplied: result.stepsApplied,
+    errors: result.errors,
+  };
+}
+
+/**
+ * Lightweight "does this config need migration" check suitable for UI
+ * prompts ("Your config is out of date — migrate now?"). Reads the
+ * file but does not mutate it.
+ */
+export function configNeedsMigration(
+  configPath: string,
+  targetVersion: string = CURRENT_SCHEMA_VERSION,
+): boolean {
+  if (!existsSync(configPath)) return false;
+  try {
+    const raw = readFileSync(configPath, "utf-8");
+    const config = parseYaml(raw) as Record<string, unknown>;
+    return needsMigration(config, targetVersion);
+  } catch {
+    return false;
+  }
 }
