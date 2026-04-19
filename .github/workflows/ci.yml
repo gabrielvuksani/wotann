@@ -84,13 +84,9 @@ jobs:
           max_attempts: 2
           timeout_minutes: 8
           retry_on: error
-          command: npm test -- --shard ${{ matrix.shard }}/2 --pool=threads --poolOptions.threads.maxThreads=2
+          command: npm test -- --shard ${{ matrix.shard }}/2
         env:
-          # Lowered from 6144 to 4096 to match GitHub's ubuntu-latest
-          # runner RAM envelope (7GB total, OS + other processes ~3GB) —
-          # previous value risked OOM-kill under peak test load which
-          # looks indistinguishable from runner pre-emption.
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=6144
 
   desktop-typecheck:
     name: Desktop typecheck
