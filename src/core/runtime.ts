@@ -282,6 +282,21 @@ import { VibeVoiceBackend } from "../voice/vibevoice-backend.js";
 // Desktop (mega-merge)
 import { PromptEnhancer } from "../desktop/prompt-enhancer.js";
 
+// ── Phase H: Library-only modules wired into query/close/init paths ──
+import { guardReview } from "../intelligence/guardian.js";
+import { maybeBuildCidIndexForProvider, renderCidAnnotation } from "../intelligence/content-cid.js";
+import { shouldAbstain } from "../memory/abstention.js";
+import type { SearchHit } from "../memory/extended-search-types.js";
+import {
+  scheduleViaHook as scheduleSessionIngestion,
+  type SessionIngestStoreLike,
+} from "../memory/session-ingestion.js";
+import { detectSupersession, parseAssertionAsFact } from "../memory/knowledge-update-dynamics.js";
+import {
+  ProgressiveContextLoader,
+  type ContextTier,
+} from "../memory/progressive-context-loader.js";
+
 // ── Types ──────────────────────────────────────────────────
 
 export type ThinkingEffort = "low" | "medium" | "high" | "max";
@@ -314,6 +329,24 @@ export interface RuntimeConfig {
    * code treats it as "auto" and lets the router choose.
    */
   readonly defaultModel?: string;
+  /**
+   * Phase H — LLM-as-judge auto-review after each query response. When
+   * true and a diff/response can be assembled, guardReview runs once with
+   * up to one retry on low-confidence failing verdicts. Defaults to
+   * `process.env.WOTANN_GUARDIAN === "1"` so it stays opt-in.
+   */
+  readonly enableGuardian?: boolean;
+  /**
+   * Phase H — emit honest "I don't know" on low-confidence retrievals
+   * instead of fabricating an answer from weak hits. Defaults to true.
+   */
+  readonly enableContextualAbstention?: boolean;
+  /**
+   * Phase H — which progressive context tier to prepare at initialize().
+   * L0 = identity only (~50 tokens), L1 = identity + critical facts
+   * (~170 tokens). L2/L3 are loaded lazily on topic/deep-search triggers.
+   */
+  readonly progressiveContextTier?: ContextTier;
 }
 
 export interface RuntimeStatus {
@@ -529,8 +562,20 @@ export class WotannRuntime {
   private nightlyConsolidator: NightlyConsolidator;
   private benchmarkHarness: BenchmarkHarness;
 
+  // ── Phase H: library-only modules wired into query/close/init ──
+  private progressiveLoader: ProgressiveContextLoader | null = null;
+  private runSessionIngestion: ((sid: string, limit?: number) => Promise<unknown>) | null = null;
+  private readonly guardianEnabled: boolean;
+  private readonly contextualAbstentionEnabled: boolean;
+  private readonly progressiveTier: ContextTier;
+
   constructor(config: RuntimeConfig) {
     this.config = config;
+
+    // Phase H config flags (per-session state; never module-global caches).
+    this.guardianEnabled = config.enableGuardian ?? process.env["WOTANN_GUARDIAN"] === "1";
+    this.contextualAbstentionEnabled = config.enableContextualAbstention ?? true;
+    this.progressiveTier = config.progressiveContextTier ?? "L1";
 
     // Initialize hook engine
     // Hook profile resolution: explicit config overrides everything,
@@ -1001,6 +1046,27 @@ export class WotannRuntime {
 
     // Agent registry: centralized source of truth for agent spawning
     this.agentRegistryInstance = agentRegistry;
+
+    // Phase H — wire session-level ingestion hook. Registers a SessionEnd
+    // handler that pulls auto_capture entries, runs them through
+    // resolution→extraction→classification→dedup, and persists observations
+    // + relationships. The returned runner is retained for explicit flush
+    // at close(). Honest: when memoryStore is null we skip wiring rather
+    // than silently succeed.
+    if (this.memoryStore) {
+      try {
+        const store = this.memoryStore as unknown as SessionIngestStoreLike;
+        this.runSessionIngestion = scheduleSessionIngestion(
+          this.hookEngine,
+          store,
+          () => undefined, // No per-session SessionContext wired yet; resolver no-ops.
+        );
+      } catch (err) {
+        console.warn(
+          `[WOTANN] session-ingestion hook registration failed: ${(err as Error).message}`,
+        );
+      }
+    }
   }
 
   /** Get the image generation router for multi-provider image routing. */
@@ -1035,6 +1101,28 @@ export class WotannRuntime {
       }
     }
     this.pluginPanels = plugins.flatMap((plugin) => plugin.panels);
+
+    // Phase H — Progressive context loader. Constructed once per runtime,
+    // after MemoryStore init but before provider discovery so wake-up
+    // tokens can be materialised deterministically. Adapters default to
+    // no-ops; callers with custom identity/facts wire them via
+    // setProgressiveAdapters() (future work). Honest empty when no
+    // adapters provided.
+    try {
+      this.progressiveLoader = new ProgressiveContextLoader();
+      // Eagerly load the configured tier so the loader pre-warms state
+      // before the first query. L1 matches the spec's default "prepare
+      // wake-up tokens" behaviour (~170 tokens, identity + critical facts).
+      if (this.progressiveTier === "L0") {
+        this.progressiveLoader.loadL0();
+      } else {
+        this.progressiveLoader.loadL0();
+        this.progressiveLoader.loadL1();
+      }
+    } catch (err) {
+      console.warn(`[WOTANN] progressive-context-loader init failed: ${(err as Error).message}`);
+      this.progressiveLoader = null;
+    }
 
     // Discover providers
     const providers = await discoverProviders();
@@ -1581,6 +1669,33 @@ export class WotannRuntime {
         );
       }
       this.episodicMemory.recordEvent("plan", options.prompt.slice(0, 200));
+
+      // ── Step 5.8: Content-CID annotation (small-vision / text-only tiers) ──
+      // Weak models mis-copy long SHA hashes mid-CoT. When the active
+      // provider's model is small-vision or text-only, emit a 3-char CID
+      // index over the prompt chunks and prepend it so the model can
+      // reference [cid:xx] anchors instead. Frontier vision models carry
+      // full hashes fine and return null from this helper.
+      try {
+        const activeModelId = options.model ?? this.session.model ?? "";
+        const activeProviderForCid = options.provider ?? this.session.provider;
+        const visionStatus = this.capabilityEqualizer.hasCapability(
+          activeProviderForCid,
+          activeModelId,
+          "vision",
+        );
+        const cidResult = maybeBuildCidIndexForProvider({
+          modelId: activeModelId,
+          hasVision: visionStatus === "native" || visionStatus === "emulated",
+          chunks: [{ content: options.prompt.slice(0, 8000), metadata: { source: "user-prompt" } }],
+        });
+        const annotation = renderCidAnnotation(cidResult);
+        if (annotation) {
+          options = { ...options, prompt: `${annotation}\n\n${options.prompt}` };
+        }
+      } catch (err) {
+        console.warn(`[WOTANN] content-cid annotation failed: ${(err as Error).message}`);
+      }
 
       // ── Step 6: Reasoning sandwich (asymmetric budget) ──
       const reasoning = this.reasoningSandwich.getAdjustment(options.prompt, this.isFirstTurn);
@@ -2536,6 +2651,43 @@ export class WotannRuntime {
         };
       }
 
+      // ── Phase H: Guardian — LLM-as-judge auto-review ──
+      // Opt-in via WOTANN_GUARDIAN=1 or config.enableGuardian. Cheap judge
+      // via the same bridge we just used. No retry when `unknown`, never
+      // fabricates a verdict. Honest warn on failure.
+      if (this.guardianEnabled && this.infra && fullContent.length > 0) {
+        try {
+          const judge = async (p: string): Promise<string> => {
+            let out = "";
+            for await (const c of this.infra!.bridge.query({ prompt: p, model: responseModel })) {
+              if (c.type === "text") out += c.content;
+            }
+            return out;
+          };
+          const verdict = await guardReview(
+            {
+              diff: fullContent,
+              filesChanged: filesInContent,
+              originalPrompt: options.prompt,
+              response: fullContent,
+              runId: this.session.id,
+              judgeModel: responseModel,
+            },
+            { llmQuery: judge, skipPersist: false },
+          );
+          if (!verdict.passed && !verdict.unknown && verdict.score < 0.5) {
+            yield {
+              type: "text" as const,
+              content: `\n[Guardian] Concerns raised (score=${verdict.score.toFixed(2)}): ${verdict.concerns.map((c) => `${c.category}/${c.severity}`).join(", ")}\n`,
+              provider: responseProvider,
+              model: responseModel,
+            };
+          }
+        } catch (err) {
+          console.warn(`[WOTANN] guardian review failed: ${(err as Error).message}`);
+        }
+      }
+
       // MicroEvalRunner: validate tool compatibility when response indicates tool issues
       if (fullContent.includes("missing-tool-call") || fullContent.includes("missing-parameter")) {
         const cachedEval = this.microEvalRunner.getCachedResults(responseModel, responseProvider);
@@ -3135,7 +3287,18 @@ export class WotannRuntime {
       timestamp: Date.now(),
     });
 
-    return results.sort((a, b) => b.score - a.score).slice(0, 10);
+    // Phase H — contextual abstention. Return [] when every retrieval
+    // signal falls below threshold, so callers can emit an honest
+    // "I don't know" instead of fabricating from weak hits.
+    const sorted = results.sort((a, b) => b.score - a.score).slice(0, 10);
+    if (this.contextualAbstentionEnabled && sorted.length > 0) {
+      const hits: readonly SearchHit[] = sorted.map((r) => ({
+        entry: { id: r.id, content: r.text },
+        score: r.score,
+      }));
+      if (shouldAbstain({ hits })) return [];
+    }
+    return sorted;
   }
 
   // ── Trace Analysis ─────────────────────────────────────
@@ -4580,8 +4743,57 @@ export class WotannRuntime {
     // best-effort anyway (JSON snapshot under .wotann/).
     void this.persistKnowledgeGraph();
 
+    // Phase H — session-level ingestion + knowledge-update dynamics. Runs
+    // the full ingest pipeline (resolution → extraction → classification →
+    // dedup) on accumulated auto_capture entries. For each new fact we
+    // probe predecessors via detectSupersession to auto-emit `updates`
+    // edges on contradictions. Async; fire-and-forget from sync close().
+    void this.runPhaseHSessionIngestion();
+
     this.memoryStore?.close();
     runWorkspaceDreamIfDue(this.config.workingDir, { quiet: true });
+  }
+
+  /**
+   * Phase H — executes session-ingestion + supersession detection. Split
+   * out so close() stays sync while the async pipeline runs on the
+   * microtask queue. Honest warn on any failure; never silently swallows.
+   */
+  private async runPhaseHSessionIngestion(): Promise<void> {
+    if (!this.runSessionIngestion || !this.memoryStore) return;
+    try {
+      const raw = await this.runSessionIngestion(this.session.id);
+      const result = raw as {
+        readonly observations?: readonly { id: string; assertion: string }[];
+      };
+      const obs = result.observations ?? [];
+      if (obs.length < 2) return;
+      const now = Date.now();
+      for (let i = 0; i < obs.length; i++) {
+        const sfact = parseAssertionAsFact(obs[i]!.id, obs[i]!.assertion, now);
+        if (!sfact) continue;
+        for (let j = 0; j < i; j++) {
+          const pfact = parseAssertionAsFact(obs[j]!.id, obs[j]!.assertion, now - 1);
+          if (!pfact) continue;
+          const detection = detectSupersession(sfact, pfact);
+          if (detection) {
+            this.memoryStore.captureEvent(
+              "supersession_detected",
+              JSON.stringify({
+                predecessor: detection.predecessor.id,
+                successor: detection.successor.id,
+                reason: detection.reason,
+                confidence: detection.confidence,
+              }),
+              "knowledge-update",
+              this.session.id,
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[WOTANN] phase-h session ingestion failed: ${(err as Error).message}`);
+    }
   }
 
   /**
