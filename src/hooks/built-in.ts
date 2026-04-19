@@ -1206,6 +1206,60 @@ export const mcpAutoApproval: HookHandler = {
   },
 };
 
+// ── Phase 13 Wave 3B: Codex request_rule approval gate ───
+
+/**
+ * Consult the ApprovalRuleEngine before each PreToolUse. If a previous
+ * session installed a rule like "auto-approve ls commands", this hook
+ * short-circuits the approval UI with an `allow` (or `deny`) based on
+ * the rule match. When no rule applies (default `ask`) the hook stays
+ * neutral and downstream approval machinery runs.
+ *
+ * Persistent rules round-trip through ~/.wotann/approval-rules.json via
+ * getApprovalRuleEngine() hydration on first access.
+ */
+export const approvalRuleGate: HookHandler = {
+  name: "ApprovalRuleGate",
+  event: "PreToolUse",
+  profile: "standard",
+  handler(payload: HookPayload): HookResult {
+    const toolName = payload.toolName ?? "";
+    if (!toolName) return { action: "allow" };
+    try {
+      // Lazy import to keep hook module light at load time.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const security = require("../sandbox/security.js") as {
+        evaluateApprovalRules: (
+          name: string,
+          input: unknown,
+        ) => {
+          readonly action: "allow" | "deny" | "ask";
+          readonly matchedRuleId: string | null;
+          readonly reason: string;
+        };
+      };
+      const result = security.evaluateApprovalRules(toolName, payload.toolInput);
+      if (result.action === "allow") {
+        return {
+          action: "allow",
+          message: `ApprovalRuleGate: rule "${result.matchedRuleId ?? "unknown"}" matched — ${result.reason}`,
+        };
+      }
+      if (result.action === "deny") {
+        return {
+          action: "deny",
+          message: `ApprovalRuleGate: rule "${result.matchedRuleId ?? "unknown"}" denied — ${result.reason}`,
+        };
+      }
+    } catch (err) {
+      // Honest: warn but don't block — a corrupt rule file should not
+      // brick the harness.
+      console.warn(`[WOTANN] approval-rule-gate evaluate failed: ${(err as Error).message}`);
+    }
+    return { action: "allow" };
+  },
+};
+
 // ── Smart Doom-Loop Detection (standard) — Jaccard-similarity variant ──
 
 /**
@@ -1318,6 +1372,7 @@ export function registerBuiltinHooks(
   engine.register(archivePreflightGuard);
   engine.register(focusModeToggle);
   engine.register(mcpAutoApproval);
+  engine.register(approvalRuleGate);
 
   // Strict profile
   engine.register(completionVerifier);

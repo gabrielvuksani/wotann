@@ -2208,8 +2208,44 @@ export class WotannRuntime {
           )
         : "";
 
+      // ── Phase-13: reflection-buffer prepend ──
+      // Retrieve up to 3 relevant past-mistake entries and format as a
+      // prompt-injectable block. Honest no-op when empty. Tag-match
+      // surface is intentionally simple — callers `buffer.add()` with
+      // tags like "bash" / "typescript" so retrieval stays scoped.
+      let reflectionBlock = "";
+      try {
+        const reflections = this.reflectionBuffer.retrieve({
+          query: options.prompt.slice(0, 200),
+          limit: 3,
+        });
+        if (reflections.length > 0) {
+          reflectionBlock = this.reflectionBuffer.formatForPrompt(reflections);
+        }
+      } catch (err) {
+        console.warn(`[WOTANN] reflection-buffer retrieve failed: ${(err as Error).message}`);
+      }
+
+      // ── Phase-13: policy-injector for τ-bench taskClass ──
+      // When `options.taskClass === "tau-bench-retail" | "tau-bench-airline"`
+      // prepend the built-in policy document to the system prompt. Other
+      // task classes pass through unchanged. Honest: on unknown domain
+      // we log and leave the prompt untouched.
+      let policyPrefix = "";
+      try {
+        if (options.taskClass === "tau-bench-retail") {
+          policyPrefix = injectPolicyByDomain("", "retail");
+        } else if (options.taskClass === "tau-bench-airline") {
+          policyPrefix = injectPolicyByDomain("", "airline");
+        }
+      } catch (err) {
+        console.warn(`[WOTANN] policy-injector failed: ${(err as Error).message}`);
+      }
+
       // Build the full system prompt with mode instructions + reasoning guidance
       const fullSystemPrompt = [
+        policyPrefix,
+        reflectionBlock,
         securityPrompt,
         options.systemPrompt ?? this.systemPrompt,
         memoryActivation.prompt,

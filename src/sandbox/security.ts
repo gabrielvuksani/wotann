@@ -15,6 +15,20 @@ import { platform } from "node:os";
 import { existsSync, realpathSync } from "node:fs";
 import { resolve, relative, normalize } from "node:path";
 import type { RiskLevel, PermissionMode, PermissionDecision } from "../core/types.js";
+import {
+  ApprovalRuleEngine,
+  type ApprovalRule,
+  type ApprovalAction,
+  type EvaluationResult,
+} from "./approval-rules.js";
+import {
+  proposeRule,
+  draftToRule,
+  appendPersistedRule,
+  loadPersistedRules,
+  type ApprovedAction,
+  type RuleDraft,
+} from "./request-rule.js";
 
 export type PlatformSandbox = "landlock" | "seatbelt" | "docker" | "none";
 
@@ -390,3 +404,83 @@ export function isWithinWorkspace(filePath: string, workspaceRoot: string): bool
 
   return true;
 }
+
+// ── Phase 13 Wave 3B: Codex approval-rule parity ────────
+
+/**
+ * Per-process singleton approval engine. Session-scoped rules live here;
+ * persistent rules are hydrated lazily from ~/.wotann/approval-rules.json
+ * on first access. Callers (hook gate, CLI `wotann approve`) reach for
+ * this via `getApprovalRuleEngine()` rather than instantiating their own.
+ */
+let APPROVAL_RULE_ENGINE: ApprovalRuleEngine | null = null;
+let APPROVAL_ENGINE_HYDRATED = false;
+
+export function getApprovalRuleEngine(): ApprovalRuleEngine {
+  if (!APPROVAL_RULE_ENGINE) {
+    APPROVAL_RULE_ENGINE = new ApprovalRuleEngine();
+  }
+  if (!APPROVAL_ENGINE_HYDRATED) {
+    APPROVAL_ENGINE_HYDRATED = true;
+    try {
+      const persisted = loadPersistedRules();
+      APPROVAL_RULE_ENGINE.loadSerialized(persisted);
+    } catch (err) {
+      // Honest: log but don't throw — a malformed rules file shouldn't
+      // brick every tool call. Callers still get an empty-rule engine.
+      console.warn(`[WOTANN] approval-rules hydrate failed: ${(err as Error).message}`);
+    }
+  }
+  return APPROVAL_RULE_ENGINE;
+}
+
+/**
+ * Evaluate a proposed tool call against all active approval rules.
+ * Returns `allow`/`deny`/`ask` — the hook gate calls this first so an
+ * earlier "always approve this command" rule short-circuits before
+ * the manual prompt fires.
+ */
+export function evaluateApprovalRules(toolName: string, input: unknown): EvaluationResult {
+  return getApprovalRuleEngine().evaluate(toolName, input);
+}
+
+/**
+ * Propose a Codex-style rule draft from a just-approved action. Called
+ * after a user manually approves a prompt so the UI can offer "save
+ * this rule?" without mutating state. Pure — returns only the draft.
+ */
+export function proposeApprovalRuleFromAction(approved: ApprovedAction): RuleDraft {
+  return proposeRule(approved);
+}
+
+/**
+ * Accept a user-chosen rule draft: add it to the session engine AND
+ * persist it to ~/.wotann/approval-rules.json so future sessions
+ * inherit the user's choice. Refuses empty-matching patterns (handled
+ * internally by appendPersistedRule).
+ */
+export function acceptApprovalRuleDraft(draft: RuleDraft, reason?: string): ApprovalRule {
+  const rule = draftToRule(draft, reason);
+  const engine = getApprovalRuleEngine();
+  engine.addRule(rule);
+  if (rule.scope === "persistent") {
+    try {
+      appendPersistedRule({
+        id: rule.id,
+        ...(rule.toolName !== undefined ? { toolName: rule.toolName } : {}),
+        patternSource: rule.pattern instanceof RegExp ? rule.pattern.source : rule.pattern,
+        ...(rule.pattern instanceof RegExp ? { patternFlags: rule.pattern.flags } : {}),
+        patternIsRegex: rule.pattern instanceof RegExp,
+        action: rule.action,
+        scope: rule.scope,
+        ...(rule.expiresAt !== undefined ? { expiresAt: rule.expiresAt } : {}),
+        ...(rule.reason !== undefined ? { reason: rule.reason } : {}),
+      });
+    } catch (err) {
+      console.warn(`[WOTANN] approval-rule persist failed: ${(err as Error).message}`);
+    }
+  }
+  return rule;
+}
+
+export type { ApprovalAction, ApprovedAction, RuleDraft, ApprovalRule };
