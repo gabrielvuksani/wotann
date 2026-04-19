@@ -669,6 +669,13 @@ export class WotannRuntime {
   // dispatch (via `route()`) and updated after (via `updateHealth()`).
   private providerBrain: ProviderBrain | null = null;
 
+  // ── Phase-13 Wave 3A per-session state ──
+  // Per-runtime instances for reflection-buffer + tool-pattern-detector.
+  // Optional web-search provider (Brave+Tavily fallback) resolved lazily.
+  private readonly reflectionBuffer = new ReflectionBuffer();
+  private readonly toolPatternDetector = new PatternDetector({ maxHistory: 500 });
+  private searchProvider: WebSearchProvider | null = null;
+
   constructor(config: RuntimeConfig) {
     this.config = config;
 
