@@ -4440,4 +4440,23 @@ program
 
 // ── Parse ───────────────────────────────────────────────────
 
+// Deep-link fast path — if the first positional arg is a `wotann://` URL,
+// parse it and dispatch via the deep-link handler BEFORE commander sees
+// the URL (commander would otherwise attempt to resolve the scheme as a
+// subcommand and abort). This lets OS handlers (launch services on macOS,
+// xdg-open on Linux, registry-handler on Windows) open links directly.
+const firstArg = process.argv[2];
+if (firstArg && firstArg.startsWith("wotann://")) {
+  const { parseDeepLink, executeDeepLink } = await import("./core/deep-link.js");
+  const req = parseDeepLink(firstArg);
+  if (!req) {
+    console.error(chalk.red(`Invalid wotann:// URL: ${firstArg}`));
+    process.exit(1);
+  }
+  const res = executeDeepLink(req, { workingDir: process.cwd() });
+  const prefix = res.success ? chalk.green("✓") : chalk.red("✗");
+  console.log(`${prefix} ${res.message}`);
+  process.exit(res.success ? 0 : 1);
+}
+
 await program.parseAsync();
