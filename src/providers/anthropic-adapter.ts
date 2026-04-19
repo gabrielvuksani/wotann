@@ -12,6 +12,11 @@ import type {
 } from "./types.js";
 import { openAIToAnthropic } from "./format-translator.js";
 import { getModelContextConfig } from "../context/limits.js";
+import {
+  annotatePromptForCaching,
+  CacheHitTracker,
+  type CacheStrategy,
+} from "./prompt-cache-warmup.js";
 
 /**
  * Minimum token length for a system block to be worth caching.
@@ -31,9 +36,20 @@ const MAX_CACHE_BREAKPOINTS = 4;
  * Split system prompt into content blocks and apply `cache_control: { type: "ephemeral" }`
  * to stable, large blocks (identity, tools, rules). Small or absent prompts pass through
  * as a plain string so we do not add overhead for trivial cases.
+ *
+ * Flow:
+ *   1. Prompts below `CACHE_MIN_CHARS` pass through as-is (no overhead).
+ *   2. Prompts with 2+ logical sections use the adapter's per-section
+ *      cache-control placement (preserves existing behavior on multi-
+ *      section system prompts with tool descriptions).
+ *   3. Single-section large prompts delegate to
+ *      `annotatePromptForCaching` from `prompt-cache-warmup.ts` so the
+ *      shared warmup/annotation policy stays the single source of truth
+ *      for cache_control placement.
  */
 function buildSystemBlocks(
   systemPrompt: string | undefined,
+  strategy: CacheStrategy = "auto",
 ): string | Anthropic.Messages.TextBlockParam[] | undefined {
   if (!systemPrompt) return undefined;
 
@@ -45,14 +61,14 @@ function buildSystemBlocks(
   const sections = systemPrompt.split(/\n{2,}/).filter((s) => s.trim().length > 0);
 
   if (sections.length <= 1) {
-    // Single large block — cache the entire system prompt
-    return [
-      {
-        type: "text" as const,
-        text: systemPrompt,
-        cache_control: { type: "ephemeral" as const },
-      },
-    ];
+    // Single-section path — delegate to the shared annotation policy so
+    // there is exactly one authority on how caching markers are placed.
+    const annotated = annotatePromptForCaching(systemPrompt, strategy);
+    return annotated.blocks.map((b) => ({
+      type: "text" as const,
+      text: b.text,
+      ...(b.cache_control ? { cache_control: { type: "ephemeral" as const } } : {}),
+    }));
   }
 
   // Multiple sections — mark the first N large blocks for caching.
@@ -67,6 +83,21 @@ function buildSystemBlocks(
       ...(shouldCache ? { cache_control: { type: "ephemeral" as const } } : {}),
     };
   });
+}
+
+/**
+ * Shared cache-hit tracker for the Anthropic adapter. Instances that
+ * need isolated telemetry can create their own; callers that just want
+ * adapter-wide stats read this singleton via `getAnthropicCacheTracker()`.
+ */
+const anthropicCacheTracker = new CacheHitTracker();
+
+/**
+ * Access the cache tracker for the Anthropic adapter. Callers (daemon,
+ * TUI cost overlay) read stats after each turn to surface hit rate.
+ */
+export function getAnthropicCacheTracker(): CacheHitTracker {
+  return anthropicCacheTracker;
 }
 
 export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
@@ -277,6 +308,23 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
         } else if (event.type === "message_stop") {
           const usage = await stream.finalMessage();
           totalTokens = (usage.usage?.input_tokens ?? 0) + (usage.usage?.output_tokens ?? 0);
+
+          // Record cache telemetry — Anthropic returns two fields on
+          // usage when prompt-caching is active:
+          //   cache_read_input_tokens     → hit (cached read)
+          //   cache_creation_input_tokens → miss (wrote to cache)
+          const u = usage.usage as
+            | {
+                cache_read_input_tokens?: number;
+                cache_creation_input_tokens?: number;
+              }
+            | undefined;
+          if (u?.cache_read_input_tokens && u.cache_read_input_tokens > 0) {
+            anthropicCacheTracker.recordHit(u.cache_read_input_tokens);
+          }
+          if (u?.cache_creation_input_tokens && u.cache_creation_input_tokens > 0) {
+            anthropicCacheTracker.recordMiss(u.cache_creation_input_tokens);
+          }
         }
       }
 
