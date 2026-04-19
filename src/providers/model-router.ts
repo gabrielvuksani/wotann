@@ -176,12 +176,27 @@ export class ModelRouter {
       ]);
     }
 
-    // Vision → prefer Claude or GPT-4V
+    // Vision → Gemini 3.1 Pro first (free tier, 1M context, native vision).
+    // Fall through to paid Claude/GPT only when Gemini is unavailable or
+    // health-degraded. Phase 4 Sprint B2 item 16: vision-model routing.
     if (task.requiresVision) {
       return this.findBestAvailable([
+        { provider: "gemini", model: "gemini-3.1-pro", tier: 1 },
+        { provider: "vertex", model: "gemini-3.1-pro", tier: 1 },
         { provider: "anthropic", model: "claude-sonnet-4-6", tier: 2 },
         { provider: "openai", model: "gpt-5.4", tier: 2 },
         { provider: "ollama", model: "qwen3.5", tier: 1 },
+      ]);
+    }
+
+    // Long-context (>128k est. tokens) → Gemini 3.1 Pro (1M context free).
+    // Without this, a long-horizon task falls back to 200k-context models
+    // and starts losing context mid-run. Phase 4 Sprint B2 item 16.
+    if (task.estimatedTokens > 128_000) {
+      return this.findBestAvailable([
+        { provider: "gemini", model: "gemini-3.1-pro", tier: 1 },
+        { provider: "vertex", model: "gemini-3.1-pro", tier: 1 },
+        { provider: "anthropic", model: "claude-sonnet-4-6", tier: 2 },
       ]);
     }
 
