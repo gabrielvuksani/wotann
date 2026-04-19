@@ -175,14 +175,24 @@ final class ChatViewModel: ObservableObject {
                     onText: { [weak self] chunk in
                         guard let self else { return }
                         self.streamingText += chunk
-                        self.appState.updateConversation(self.conversationId) { conv in
+                        let snapshot = self.streamingText
+                        // S4-22: debounced so a fast stream produces ~3
+                        // publishes/sec rather than one per token. Each
+                        // closure captures the latest `streamingText`
+                        // snapshot so replay order is deterministic.
+                        self.appState.updateConversationDebounced(self.conversationId) { conv in
                             if let idx = conv.messages.firstIndex(where: { $0.id == assistantId }) {
-                                conv.messages[idx].content = self.streamingText
+                                conv.messages[idx].content = snapshot
                             }
                         }
                     },
                     onComplete: { [weak self] tokens, cost in
                         guard let self else { return }
+                        // Flush any in-flight debounced text so the final
+                        // content is committed before we apply completion
+                        // metadata — otherwise the in-flight window could
+                        // fire after our terminal write and clobber it.
+                        self.appState.flushPendingConversationUpdates(id: self.conversationId)
                         self.appState.updateConversation(self.conversationId) { conv in
                             if let idx = conv.messages.firstIndex(where: { $0.id == assistantId }) {
                                 conv.messages[idx].isStreaming = false
@@ -197,8 +207,10 @@ final class ChatViewModel: ObservableObject {
                         HapticService.shared.trigger(.responseComplete)
                     },
                     onError: { [weak self] error in
-                        self?.errorMessage = error
-                        self?.isStreaming = false
+                        guard let self else { return }
+                        self.appState.flushPendingConversationUpdates(id: self.conversationId)
+                        self.errorMessage = error
+                        self.isStreaming = false
                         HapticService.shared.trigger(.error)
                     }
                 )

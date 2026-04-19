@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import os.log
 
 #if canImport(ActivityKit)
 import ActivityKit
@@ -48,6 +49,33 @@ final class AppState: ObservableObject {
     private var liveActivities: [UUID: Activity<TaskProgressAttributes>] = [:]
     #endif
 
+    // MARK: - Debounce State (S4-22)
+    //
+    // High-frequency streaming updates (per-token deltas from the daemon) fan
+    // into `updateConversation`. Without coalescing, every token publishes a
+    // new `conversations` array, re-rendering every ConversationRow. We batch
+    // the writes for each conversation on a 300 ms trailing window so SwiftUI
+    // receives one publish per window instead of one per token.
+    //
+    // Structural edits (add/remove) bypass debouncing so they remain visible
+    // immediately — only repeated in-place mutations on a single conversation
+    // are coalesced.
+
+    /// Pending transforms keyed by conversation id. Applied in arrival order
+    /// when the debounce task fires.
+    private var pendingConversationTransforms: [UUID: [(inout Conversation) -> Void]] = [:]
+
+    /// Per-conversation debounce task. Cancelled and replaced on each call so
+    /// only the last-scheduled task fires.
+    private var debounceTasks: [UUID: Task<Void, Never>] = [:]
+
+    /// 300 ms trailing window. Tuned so a sub-second stream produces at most
+    /// ~3 re-renders/sec while keeping the apparent latency well under one
+    /// screen refresh at 60 Hz.
+    private static let conversationDebounceNanos: UInt64 = 300_000_000
+
+    private static let appStateLog = Logger(subsystem: "com.wotann.ios", category: "AppState")
+
     /// Shared UserDefaults for widget data exchange.
     private let sharedDefaults = UserDefaults(suiteName: "group.com.wotann.shared")
 
@@ -72,6 +100,9 @@ final class AppState: ObservableObject {
         writeRecentConversationsToSharedDefaults()
     }
 
+    /// Synchronously mutate a conversation. Publishes `conversations`
+    /// immediately. Use for structural changes (title renames, archive toggles)
+    /// where the user expects an immediate UI response.
     func updateConversation(_ id: UUID, transform: (inout Conversation) -> Void) {
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         var updated = conversations
@@ -80,6 +111,65 @@ final class AppState: ObservableObject {
         updated[index] = conv
         conversations = updated
         writeRecentConversationsToSharedDefaults()
+    }
+
+    /// Debounced conversation mutation. Queues the transform on a 300 ms
+    /// trailing window keyed by conversation id so high-frequency stream deltas
+    /// coalesce into a single publish. The closure must be `@Sendable` so it
+    /// can cross the await suspension point safely.
+    ///
+    /// Ordering is preserved: queued transforms are replayed in arrival order
+    /// against whatever the current conversation happens to be when the window
+    /// fires. Callers that need immediate UI feedback should call
+    /// `updateConversation(_:transform:)` directly.
+    func updateConversationDebounced(
+        _ id: UUID,
+        transform: @escaping @Sendable (inout Conversation) -> Void
+    ) {
+        pendingConversationTransforms[id, default: []].append(transform)
+
+        debounceTasks[id]?.cancel()
+        debounceTasks[id] = Task { @MainActor [weak self] in
+            // Sleep for the trailing window. If cancelled mid-sleep the
+            // CancellationError short-circuits before we apply anything.
+            do {
+                try await Task.sleep(nanoseconds: Self.conversationDebounceNanos)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.flushPendingConversationUpdates(id: id)
+        }
+    }
+
+    /// Apply every queued transform for `id` in arrival order with a single
+    /// publish on `conversations`. Public so the UI can force a flush on view
+    /// disappearance or on force-close paths.
+    func flushPendingConversationUpdates(id: UUID) {
+        guard let transforms = pendingConversationTransforms.removeValue(forKey: id),
+              !transforms.isEmpty,
+              let index = conversations.firstIndex(where: { $0.id == id }) else {
+            debounceTasks.removeValue(forKey: id)
+            return
+        }
+        debounceTasks.removeValue(forKey: id)
+
+        var updated = conversations
+        var conv = updated[index]
+        for transform in transforms {
+            transform(&conv)
+        }
+        updated[index] = conv
+        conversations = updated
+        writeRecentConversationsToSharedDefaults()
+    }
+
+    /// Flush every pending conversation window. Call on backgrounding or before
+    /// destructive operations (archive, delete) so no streamed content is lost.
+    func flushAllPendingConversationUpdates() {
+        for id in Array(pendingConversationTransforms.keys) {
+            flushPendingConversationUpdates(id: id)
+        }
     }
 
     func removeConversation(_ id: UUID) {
