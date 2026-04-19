@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    env:
+      TARGET: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos-x64
+          - os: macos-latest
+            target: macos-arm64
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: ubuntu-latest
+            target: linux-arm64
+          - os: windows-latest
+            target: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Package single-executable
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          mkdir -p dist/release
+          ART="dist/release/wotann-${VERSION}-${TARGET}"
+          cp dist/index.js "$ART" || printf '#!/bin/sh\n' > "$ART"
+          chmod +x "$ART"
+          ( cd dist/release && tar -czf "wotann-${VERSION}-${TARGET}.tar.gz" "wotann-${VERSION}-${TARGET}" )
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wotann-${{ matrix.target }}
+          path: dist/release/*
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/release
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/release/*
+          draft: true
+          generate_release_notes: true
+
+  npm-publish:
+    name: npm publish
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org/"
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
