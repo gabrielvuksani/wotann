@@ -148,6 +148,20 @@ export class MeetingRuntime {
     return this.store;
   }
 
+  /**
+   * RPC adapter — returns a meeting with its transcript joined as a single
+   * string, or undefined if the meeting is unknown. Shape matches the
+   * `getMeetingStore` ext() callback consumed by `kairos-rpc.ts:meet.summarize`.
+   * Exposed on the runtime (not the raw store) so the store stays a thin
+   * persistence layer.
+   */
+  getMeeting(id: string): { readonly transcript: string } | undefined {
+    const segments = this.store.getTranscript(id);
+    if (segments.length === 0) return undefined;
+    const transcript = segments.map((s) => `${s.speaker}: ${s.text}`).join("\n");
+    return { transcript };
+  }
+
   /** Current meeting state, or null if none active. */
   getCurrent(): MeetingState | null {
     return this.currentMeeting;

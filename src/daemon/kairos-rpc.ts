@@ -4793,7 +4793,9 @@ export class KairosRPCHandler {
       };
       getMorningBriefing?: () => { generateBriefing: () => Promise<unknown> };
       getSessionManager?: () => { listRecent?: (n: number) => unknown[] };
-      getMeetingStore?: () => { getMeeting: (id: string) => { transcript: string } | undefined };
+      // Phase C: getMeetingStore was moved off the runtime bridge onto
+      // KairosDaemon — the runtime never owned meetings. Consumers at
+      // `meet.summarize` now read `this.daemon.getMeetingStore()`.
       abortActiveQueries?: () => void;
       updateConfig?: (patch: Record<string, unknown>) => void;
       getConfig?: () => Record<string, unknown>;
@@ -5044,7 +5046,11 @@ export class KairosRPCHandler {
       const { meetingId, transcript } = params as { meetingId?: string; transcript?: string };
       if (!this.runtime) return { error: "Runtime not initialized" };
       try {
-        const store = ext()?.getMeetingStore?.();
+        // Phase C: read the meeting store through the daemon (not through
+        // the runtime ext() bridge). The runtime never owned meetings;
+        // wiring it here closes the 4-session silent Meet bug where
+        // `getMeetingStore` always resolved to undefined.
+        const store = this.daemon?.getMeetingStore() ?? null;
         let text = transcript;
         if (!text && meetingId && store) {
           const meeting = store.getMeeting(meetingId);

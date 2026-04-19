@@ -66,6 +66,7 @@ import { PluginSandbox } from "../security/plugin-sandbox.js";
 import { ReasoningEngine } from "../identity/reasoning-engine.js";
 import { UserModel } from "../identity/user-model.js";
 import { PerceptionEngine } from "../computer-use/perception-engine.js";
+import { MeetingRuntime } from "../meet/meeting-runtime.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -212,6 +213,12 @@ export class KairosDaemon {
   private userModel: UserModel | null = null;
   private readonly perceptionEngine = new PerceptionEngine();
 
+  // Phase C: Meeting runtime composes meeting-pipeline + meeting-store +
+  // coaching-engine. Owns the SQLite connection for transcripts; exposed
+  // through getMeetingStore() so kairos-rpc `meet.summarize` can resolve
+  // transcripts by id instead of silently returning null (4-session bug).
+  private meetingRuntime: MeetingRuntime | null = null;
+
   // ── Tier 2A: Gap Analysis Modules ──────────────
   private readonly contextPressure = new ContextPressureMonitor();
   private readonly terminalMonitor = new TerminalMonitor();
@@ -351,6 +358,27 @@ export class KairosDaemon {
       // Identity: User model for preference learning + reasoning engine for thought process
       this.userModel = new UserModel(join(homedir(), ".wotann"));
       this.reasoningEngine = new ReasoningEngine();
+
+      // Phase C: Meeting runtime — owns MeetingStore (SQLite at
+      // ~/.wotann/meetings.db by default). Coaching is left disabled
+      // here (no llmQuery) so transcripts are captured + persisted
+      // without spinning the coaching timer on every daemon. Callers
+      // that want coaching construct their own runtime with an
+      // llmQuery wired to WotannRuntime.query().
+      try {
+        this.meetingRuntime = new MeetingRuntime({
+          dbPath: join(wotannDir, "meetings.db"),
+        });
+        this.appendLog({
+          type: "heartbeat",
+          message: "Phase C: MeetingRuntime initialized (transcripts persisted, coaching off)",
+        });
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `MeetingRuntime init failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
 
       this.appendLog({
         type: "heartbeat",
@@ -533,6 +561,11 @@ export class KairosDaemon {
       this.runtime.close();
       this.runtime = null;
     }
+    // Phase C: close the meeting SQLite connection + clear coaching timer
+    if (this.meetingRuntime) {
+      this.meetingRuntime.close();
+      this.meetingRuntime = null;
+    }
     this.rpcHandler = null;
 
     this.appendLog({ type: "stop", message: "KAIROS daemon stopped" });
@@ -648,6 +681,19 @@ export class KairosDaemon {
   }
   getPerceptionEngine(): PerceptionEngine {
     return this.perceptionEngine;
+  }
+
+  /**
+   * Get the MeetingRuntime adapter for RPC callers.
+   *
+   * Returns `null` (not a silent stub) when the runtime hasn't been
+   * initialized yet — callers must check and degrade gracefully. This is
+   * the channel the `getMeetingStore?` ext() callback in kairos-rpc.ts
+   * reads, making `meet.summarize` actually resolve transcripts from
+   * SQLite instead of returning undefined.
+   */
+  getMeetingStore(): MeetingRuntime | null {
+    return this.meetingRuntime;
   }
 
   getEventTriggerSystem(): EventTriggerSystem {
