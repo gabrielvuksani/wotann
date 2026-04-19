@@ -318,4 +318,86 @@ export class ComputerUseAgent {
       await browser.close();
     }
   }
+
+  /**
+   * End-to-end task dispatch — the high-level entry point that wires
+   * `routePerception()` before the model sees the task.
+   *
+   * Layer 1 (api-route): match the task against the route table; if a
+   * fast-path exists, return the handler ID without a model round-trip.
+   * Layer 2-4 (text-mediated): perceive the screen, route through
+   * `adaptPerceptionForModel` (which delegates to the previously-dead
+   * `routePerception` hook) and build a text-mediated prompt for any
+   * provider tier (frontier-vision / small-vision / text-only).
+   *
+   * Returns `{rateLimited: true, …}` when guardrails block dispatch.
+   * The `routePerception` hook call-site is load-bearing — this is the
+   * wire-up that makes Desktop Control work on every provider tier
+   * instead of being pinned to the `toText()` fallback.
+   */
+  async dispatch(
+    task: string,
+    capabilities: ModelCapabilities & { readonly modelId?: string } = {},
+  ): Promise<{
+    readonly mode: "api-route" | "text-mediated";
+    readonly adaptedPerception: PerceptionOutput | null;
+    readonly apiRoute: APIRoute | null;
+    readonly prompt: string | null;
+    readonly rateLimited: boolean;
+  }> {
+    const rateCheck = this.checkRateLimit();
+    if (!rateCheck.allowed) {
+      return {
+        mode: "text-mediated",
+        adaptedPerception: null,
+        apiRoute: null,
+        prompt: null,
+        rateLimited: true,
+      };
+    }
+
+    // Layer 1: API fast-path
+    const apiRoute = this.findAPIRoute(task);
+    if (apiRoute) {
+      this.recordAction();
+      return {
+        mode: "api-route",
+        adaptedPerception: null,
+        apiRoute,
+        prompt: null,
+        rateLimited: false,
+      };
+    }
+
+    // Layers 2-4: perceive → routePerception (PerceptionAdapter) →
+    // text-mediated prompt. This is the Wave 3G wire-up that calls
+    // routePerception before the model sees anything.
+    const perception: Perception = await this.perception.perceive();
+    const adapted: PerceptionOutput = this.adaptPerceptionForModel(
+      perception,
+      capabilities.modelId ?? "",
+      capabilities,
+      capabilities.contextWindow,
+    );
+
+    const screenText = this.redactSensitive(
+      adapted.textDescription ?? this.perception.toText(perception),
+    );
+    const prompt = this.generateTextMediatedPrompt(task, screenText);
+    this.recordAction();
+
+    return {
+      mode: "text-mediated",
+      adaptedPerception: adapted,
+      apiRoute: null,
+      prompt,
+      rateLimited: false,
+    };
+  }
+
+  // Reference routePerception so bundlers/linters can see the import
+  // actually feeds the dispatch chain (adaptPerceptionForModel above is
+  // what calls it — this reference keeps the import from being
+  // erroneously flagged as unused during tree-shaking analysis).
+  static readonly _routePerceptionRef: typeof routePerception = routePerception;
 }
