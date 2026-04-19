@@ -240,6 +240,7 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
       const decoder = new TextDecoder();
       let buffer = "";
       let totalTokens = 0;
+      let hadToolCalls = false;
 
       // ── Thinking-tag parser state ───────────────────────────
       // DeepSeek R1 Distill and Qwen3-thinking variants emit reasoning between
@@ -330,6 +331,7 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
             // Handle tool calls from models that support them
             if (chunk.message?.tool_calls) {
               for (const tc of chunk.message.tool_calls) {
+                hadToolCalls = true;
                 yield {
                   type: "tool_use",
                   content: JSON.stringify(tc.function.arguments),
@@ -360,6 +362,11 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
         model,
         provider: "ollama",
         tokensUsed: totalTokens,
+        // When the model emitted tool_calls this turn, advertise
+        // stopReason: "tool_calls" so the runtime's agent loop knows to
+        // execute tools and continue. Without this the loop treats the
+        // turn as final and dies after one tool call.
+        stopReason: hadToolCalls ? "tool_calls" : "stop",
         // Thinking transcript for the runtime to preserve in message history
         // so the next call can include the <think>…</think> block.
         ...(accumulatedThinking.length > 0 ? { thinking: accumulatedThinking } : {}),
