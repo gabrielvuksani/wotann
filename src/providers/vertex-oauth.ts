@@ -24,7 +24,20 @@ import type {
   UnifiedQueryOptions,
   StreamChunk,
   ProviderCapabilities,
+  StopReason,
 } from "./types.js";
+import { openAIToAnthropic } from "./format-translator.js";
+
+/**
+ * Map Anthropic's raw stop_reason to the normalised StopReason vocabulary.
+ * Vertex Claude streams the same values as native Anthropic — see types.ts.
+ */
+function mapStop(reason: string | undefined): StopReason {
+  if (reason === "tool_use") return "tool_calls";
+  if (reason === "max_tokens") return "max_tokens";
+  if (reason === "end_turn" || reason === "stop_sequence") return "stop";
+  return "stop";
+}
 
 interface ServiceAccountKey {
   readonly client_email: string;
@@ -176,12 +189,58 @@ export function createVertexAdapter(auth: ProviderAuth): ProviderAdapter {
       `https://${region}-aiplatform.googleapis.com/v1/projects/${project}` +
       `/locations/${region}/publishers/${publisher}/models/${model}:streamRawPredict`;
 
+    // Vertex Claude uses Anthropic's Messages API format (same schema as
+    // /v1/messages, just fronted by Google's endpoint + OAuth2). Translate
+    // the unified opts — multi-turn messages, tool_result blocks, system
+    // prompt, tools — into Anthropic's wire format. Without this, multi-turn
+    // agent loops die silently because the model only ever sees opts.prompt
+    // and never the conversation context or tool_use/tool_result history.
+    //
+    // opts.messages is translated via the shared format-translator so the
+    // Vertex path matches the native Anthropic path exactly (tool_use/tool_result
+    // preserved across provider switches). We prepend the translated history
+    // then append the current turn's user prompt.
+    const anthropicMessages: Array<{ role: "user" | "assistant"; content: unknown }> = [];
+    if (opts.messages && opts.messages.length > 0) {
+      const translated = openAIToAnthropic(
+        opts.messages
+          .filter((msg) => msg.role !== "system")
+          .map((msg) =>
+            msg.role === "tool"
+              ? {
+                  role: "tool" as const,
+                  content: msg.content,
+                  tool_call_id: msg.toolCallId,
+                }
+              : {
+                  role: msg.role,
+                  content: msg.content,
+                },
+          ),
+      );
+      for (const m of translated) {
+        anthropicMessages.push({ role: m.role, content: m.content });
+      }
+    }
+    anthropicMessages.push({ role: "user", content: opts.prompt });
+
+    const anthropicTools =
+      opts.tools && opts.tools.length > 0
+        ? opts.tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.inputSchema as Record<string, unknown>,
+          }))
+        : undefined;
+
     const body = JSON.stringify({
       anthropic_version: "vertex-2023-10-16",
-      messages: [{ role: "user", content: opts.prompt }],
+      messages: anthropicMessages,
       max_tokens: opts.maxTokens ?? 4096,
       stream: true,
       temperature: typeof opts.temperature === "number" ? opts.temperature : 0.7,
+      ...(opts.systemPrompt ? { system: opts.systemPrompt } : {}),
+      ...(anthropicTools ? { tools: anthropicTools } : {}),
     });
 
     let res: Response;
@@ -215,9 +274,30 @@ export function createVertexAdapter(auth: ProviderAuth): ProviderAdapter {
     }
 
     // Vertex Claude streams use Anthropic's event format (`data: {...}\n\n`).
+    // Full lifecycle:
+    //   message_start — message metadata (input tokens)
+    //   content_block_start — block begins; for tool_use carries name + id
+    //   content_block_delta — text_delta (assistant text) or input_json_delta
+    //                         (partial tool-argument JSON, must be concatenated)
+    //   content_block_stop — block ends; emit tool_use chunk if this was one
+    //   message_delta — final stop_reason + output tokens
+    //   message_stop — terminal marker
+    // Without the tool-use half, multi-turn tool loops silently die because
+    // the runtime never sees the model's tool calls. Mirror the native
+    // anthropic-adapter so Vertex behaves identically.
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let capturedStopReason: string | undefined;
+    const blockState = new Map<
+      number,
+      {
+        kind: "text" | "tool_use" | "thinking" | "other";
+        toolName?: string;
+        toolId?: string;
+        partialJson: string;
+      }
+    >();
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -233,15 +313,100 @@ export function createVertexAdapter(auth: ProviderAuth): ProviderAdapter {
           try {
             const json = JSON.parse(payload) as {
               type?: string;
-              delta?: { type?: string; text?: string };
-            };
-            if (json.type === "content_block_delta" && json.delta?.type === "text_delta") {
-              yield {
-                type: "text",
-                content: json.delta.text ?? "",
-                model,
-                provider: "vertex",
+              index?: number;
+              content_block?: { type?: string; name?: string; id?: string };
+              delta?: {
+                type?: string;
+                text?: string;
+                partial_json?: string;
+                stop_reason?: string;
               };
+            };
+
+            if (json.type === "message_start") {
+              // Message metadata — nothing to emit yet.
+              continue;
+            }
+
+            if (json.type === "content_block_start" && typeof json.index === "number") {
+              const block = json.content_block ?? {};
+              if (block.type === "tool_use") {
+                blockState.set(json.index, {
+                  kind: "tool_use",
+                  toolName: block.name,
+                  toolId: block.id,
+                  partialJson: "",
+                });
+              } else if (block.type === "text") {
+                blockState.set(json.index, { kind: "text", partialJson: "" });
+              } else if (block.type === "thinking") {
+                blockState.set(json.index, { kind: "thinking", partialJson: "" });
+              } else {
+                blockState.set(json.index, { kind: "other", partialJson: "" });
+              }
+              continue;
+            }
+
+            if (json.type === "content_block_delta" && typeof json.index === "number") {
+              const delta = json.delta ?? {};
+              const state = blockState.get(json.index);
+              if (delta.type === "text_delta" && typeof delta.text === "string") {
+                yield {
+                  type: "text",
+                  content: delta.text,
+                  model,
+                  provider: "vertex",
+                };
+              } else if (
+                delta.type === "input_json_delta" &&
+                typeof delta.partial_json === "string"
+              ) {
+                if (state) state.partialJson += delta.partial_json;
+              }
+              continue;
+            }
+
+            if (json.type === "content_block_stop" && typeof json.index === "number") {
+              const state = blockState.get(json.index);
+              if (state?.kind === "tool_use") {
+                let parsedInput: Record<string, unknown> = {};
+                try {
+                  parsedInput =
+                    state.partialJson.length > 0
+                      ? (JSON.parse(state.partialJson) as Record<string, unknown>)
+                      : {};
+                } catch {
+                  yield {
+                    type: "error",
+                    content: `Vertex: malformed tool_use arguments for ${state.toolName ?? "unknown"}`,
+                    model,
+                    provider: "vertex",
+                  };
+                  continue;
+                }
+                yield {
+                  type: "tool_use",
+                  content: state.partialJson,
+                  toolName: state.toolName,
+                  toolCallId: state.toolId,
+                  toolInput: parsedInput,
+                  model,
+                  provider: "vertex",
+                  stopReason: "tool_calls",
+                };
+              }
+              continue;
+            }
+
+            if (json.type === "message_delta") {
+              if (json.delta?.stop_reason) capturedStopReason = json.delta.stop_reason;
+              continue;
+            }
+
+            if (json.type === "message_stop") {
+              // Terminal marker — loop will exit on stream close. Done chunk
+              // is emitted outside the reader loop so it fires exactly once.
+              continue;
             }
           } catch {
             /* ignore malformed events */
@@ -251,7 +416,13 @@ export function createVertexAdapter(auth: ProviderAuth): ProviderAdapter {
     } finally {
       reader.releaseLock();
     }
-    yield { type: "done", content: "", model, provider: "vertex", stopReason: "stop" };
+    yield {
+      type: "done",
+      content: "",
+      model,
+      provider: "vertex",
+      stopReason: mapStop(capturedStopReason),
+    };
   }
 
   return {
