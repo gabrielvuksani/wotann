@@ -228,3 +228,36 @@ export function hasOverride(override: PromptOverride): boolean {
     override.maxTokens !== undefined
   );
 }
+
+/**
+ * Runtime-friendly shape — returns a `{prompt, override}` tuple so
+ * callers that only need the cleaned prompt + override (not the raw
+ * source nor the problems list) can destructure directly.
+ *
+ *   const { prompt, override } = extractPromptAndOverride(raw);
+ *   if (hasOverride(override)) {
+ *     config = applyOverride(sessionDefaults, override);
+ *   }
+ *
+ * Drops the `raw` and `problems` fields from the full ExtractedPrompt
+ * for call-sites that want a minimal surface. For diagnostics, call
+ * `extractOverride(raw)` directly.
+ */
+export function extractPromptAndOverride(raw: string): {
+  readonly prompt: string;
+  readonly override: PromptOverride;
+} {
+  const result = extractOverride(raw);
+  return { prompt: result.cleaned, override: result.override };
+}
+
+/**
+ * Friendly prefix matcher for known override tokens. Recognises the
+ * shorthand forms [@opus-4-7], [@sonnet], [@reasoning] that the TUI
+ * uses without waiting for the full parser to validate. Useful when
+ * the caller wants to decide whether to show "override chip" UI
+ * before dispatching the full extractOverride call.
+ */
+export function hasOverrideTag(raw: string): boolean {
+  return /\[@[a-zA-Z0-9][a-zA-Z0-9.:_-]{0,63}[^\]]*\]/.test(raw);
+}

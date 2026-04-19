@@ -6,7 +6,9 @@ import { describe, it, expect } from "vitest";
 import {
   applyOverride,
   extractOverride,
+  extractPromptAndOverride,
   hasOverride,
+  hasOverrideTag,
   type TurnDispatchConfig,
 } from "../../src/core/prompt-override.js";
 
@@ -139,5 +141,46 @@ describe("hasOverride", () => {
   it("returns true when any field is set", () => {
     expect(hasOverride({ effort: "high" })).toBe(true);
     expect(hasOverride({ temperature: 0 })).toBe(true);
+  });
+});
+
+describe("extractPromptAndOverride", () => {
+  it("returns {prompt, override} tuple shape", () => {
+    const { prompt, override } = extractPromptAndOverride("hello [@opus]");
+    expect(prompt).toBe("hello");
+    expect(override.model).toBe("opus");
+  });
+
+  it("returns empty override for plain prompts", () => {
+    const { prompt, override } = extractPromptAndOverride("just a prompt");
+    expect(prompt).toBe("just a prompt");
+    expect(hasOverride(override)).toBe(false);
+  });
+
+  it("parses [@opus-4-7] shorthand", () => {
+    const { override } = extractPromptAndOverride("do this [@opus-4-7]");
+    expect(override.model).toBe("opus-4-7");
+  });
+
+  it("parses [@sonnet] shorthand", () => {
+    const { override } = extractPromptAndOverride("[@sonnet] review");
+    expect(override.model).toBe("sonnet");
+  });
+});
+
+describe("hasOverrideTag", () => {
+  it("detects override tags", () => {
+    expect(hasOverrideTag("hello [@opus]")).toBe(true);
+    expect(hasOverrideTag("[@sonnet effort=high] prompt")).toBe(true);
+  });
+
+  it("returns false for plain prompts", () => {
+    expect(hasOverrideTag("hello world")).toBe(false);
+    expect(hasOverrideTag("")).toBe(false);
+  });
+
+  it("does not match unrelated bracket content", () => {
+    expect(hasOverrideTag("array[0]")).toBe(false);
+    expect(hasOverrideTag("[comment]")).toBe(false);
   });
 });
