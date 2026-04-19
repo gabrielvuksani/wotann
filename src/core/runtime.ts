@@ -2396,6 +2396,42 @@ export class WotannRuntime {
           if (chunk.type === "tool_use") {
             const toolName = chunk.toolName?.toLowerCase() ?? "";
 
+            // ── Phase-13: tool-pattern-detector record ──
+            // Append every tool call to the detector's history. Dream-
+            // runner later consults `.suggestShortcuts()` to surface
+            // repeated sequences as candidate composite tools.
+            try {
+              this.toolPatternDetector.record({ toolName: chunk.toolName ?? "unknown" });
+            } catch (err) {
+              console.warn(`[WOTANN] tool-pattern-detector failed: ${(err as Error).message}`);
+            }
+
+            // ── Phase-13: strict-schema validation ──
+            // Before dispatch, validate the tool args against the
+            // matching effectiveTool's inputSchema. On failure with a
+            // corrected version, swap in the correction and continue.
+            // On unrecoverable failure, emit an error chunk (honest:
+            // never swallow invalid args silently).
+            if (chunk.toolName && chunk.toolInput) {
+              const schema = effectiveTools.find((t) => t.name === chunk.toolName)?.inputSchema;
+              if (schema) {
+                try {
+                  const enforcement = enforceDeterministicSchema(chunk.toolInput, schema);
+                  if (!enforcement.validation.valid && enforcement.finalArgs === null) {
+                    yield {
+                      type: "error" as const,
+                      content: `[StrictSchema] Tool "${chunk.toolName}" args failed schema: ${enforcement.validation.errors.map((e) => `${e.kind}@${e.path}`).join(", ")}`,
+                      provider: chunk.provider ?? responseProvider,
+                      model: chunk.model ?? responseModel,
+                    };
+                    break;
+                  }
+                } catch (err) {
+                  console.warn(`[WOTANN] strict-schema enforce failed: ${(err as Error).message}`);
+                }
+              }
+            }
+
             // PreToolUse hook firing — the Opus adversarial audit on
             // 2026-04-15 found that prior WOTANN versions never fired
             // PreToolUse anywhere in the runtime, so 16+ registered
