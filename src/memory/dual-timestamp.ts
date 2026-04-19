@@ -274,6 +274,54 @@ export function eventDateRange(entry: DualTimestampEntry): DateRange {
   };
 }
 
+// ── Ingest helpers (Phase H wiring) ───────────────────
+
+/**
+ * Ingest-time dual-timestamp payload. Extracted from raw content at the
+ * moment a memory is written — never re-derived at read time (which
+ * would drift with clock changes).
+ */
+export interface DualTimestampIngestPayload {
+  readonly documentDate: number;
+  readonly eventDate: number;
+  readonly eventDateUncertaintyMs: number;
+  readonly eventDateSource: string;
+}
+
+/**
+ * Derive dual-timestamp fields from raw content at ingest.
+ *
+ * Contract:
+ *   - documentDate = now (or caller-supplied recordedAt)
+ *   - eventDate    = first parsed hint, or falls back to documentDate
+ *   - eventDateSource is NEVER empty — "fallback-to-documentDate" is an
+ *     honest admission rather than a silent fabricated exact-match.
+ *
+ * Used by MemoryStore.insert / insertWithProvenance / captureEvent to
+ * populate the `document_date` / `event_date` columns on every write.
+ */
+export function deriveIngestTimestamps(
+  content: string,
+  recordedAt: number = Date.now(),
+): DualTimestampIngestPayload {
+  const hints = parseDateHints(content, recordedAt);
+  if (hints.length === 0) {
+    return {
+      documentDate: recordedAt,
+      eventDate: recordedAt,
+      eventDateUncertaintyMs: 7 * DAY_MS,
+      eventDateSource: "fallback-to-documentDate",
+    };
+  }
+  const first = hints[0]!;
+  return {
+    documentDate: recordedAt,
+    eventDate: first.date,
+    eventDateUncertaintyMs: first.uncertaintyMs,
+    eventDateSource: `extracted: "${first.sourceText}"`,
+  };
+}
+
 /**
  * Two entries are "temporally conflicting" when they refer to the same
  * event range but have contradictory content. Detection is structural

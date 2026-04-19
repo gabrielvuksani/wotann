@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { mkdirSync, existsSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { writeFileAtomicSyncBestEffort } from "../utils/atomic-io.js";
+import { deriveIngestTimestamps } from "./dual-timestamp.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -99,6 +100,27 @@ export interface MemoryEntry {
   readonly domain?: string;
   /** MemPalace-style topic partition (room). E.g., "architecture", "bug-fix", "config" */
   readonly topic?: string;
+  /**
+   * Dual-timestamp (Phase H) — when this memory was RECORDED (unix ms).
+   * Always present after ingest; populated by deriveIngestTimestamps.
+   */
+  readonly documentDate?: number;
+  /**
+   * Dual-timestamp (Phase H) — when the event the memory refers to
+   * HAPPENED (unix ms). May equal documentDate when no hint was parsed;
+   * check eventDateSource to distinguish extracted from fallback.
+   */
+  readonly eventDate?: number;
+  /** Uncertainty in eventDate as ±ms. */
+  readonly eventDateUncertaintyMs?: number;
+  /**
+   * How eventDate was derived. Honest values:
+   *   - "extracted: \"yesterday\""        (from content)
+   *   - "fallback-to-documentDate"        (no hint parsed)
+   *   - "user-supplied"                   (caller overrode)
+   *   - ""                                (legacy row, pre-Phase-H)
+   */
+  readonly eventDateSource?: string;
 }
 
 export interface MemorySearchResult {
@@ -405,6 +427,53 @@ export class MemoryStore {
       .prepare(
         `CREATE INDEX IF NOT EXISTS idx_kg_edges_temporal ON knowledge_edges(valid_from, valid_to)`,
       )
+      .run();
+
+    // ── Dual-Timestamp Migration (Phase H Task 1) ──
+    // Records both WHEN the memory was written (document_date) and WHEN
+    // the referenced event happened (event_date). Enables queries like
+    // "what did we say last week about last year's launch?". Legacy rows
+    // leave event_date_source='' so readers can distinguish them from
+    // honestly-fallback rows.
+    this.migrateAddColumn("memory_entries", "document_date", "INTEGER");
+    this.migrateAddColumn("memory_entries", "event_date", "INTEGER");
+    this.migrateAddColumn("memory_entries", "event_date_uncertainty_ms", "INTEGER");
+    this.migrateAddColumn("memory_entries", "event_date_source", "TEXT NOT NULL DEFAULT ''");
+    this.db
+      .prepare(`CREATE INDEX IF NOT EXISTS idx_memory_event_date ON memory_entries(event_date)`)
+      .run();
+    this.db
+      .prepare(
+        `CREATE INDEX IF NOT EXISTS idx_memory_document_date ON memory_entries(document_date)`,
+      )
+      .run();
+
+    // ── Typed Relationships Migration (Phase H Task 2) ──
+    // Typed edges between memory_entries with a kind in
+    // {updates,extends,derives,unknown}. Lets us answer "what is the
+    // CURRENT policy?" by walking updates forward from the root.
+    this.db
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS memory_relationships (
+          id TEXT PRIMARY KEY,
+          from_id TEXT NOT NULL,
+          to_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          confidence REAL NOT NULL DEFAULT 0.5,
+          rationale TEXT,
+          invalidated_at INTEGER,
+          created_at INTEGER NOT NULL
+        )`,
+      )
+      .run();
+    this.db
+      .prepare(`CREATE INDEX IF NOT EXISTS idx_memrel_from ON memory_relationships(from_id)`)
+      .run();
+    this.db
+      .prepare(`CREATE INDEX IF NOT EXISTS idx_memrel_to ON memory_relationships(to_id)`)
+      .run();
+    this.db
+      .prepare(`CREATE INDEX IF NOT EXISTS idx_memrel_kind ON memory_relationships(kind)`)
       .run();
   }
 
@@ -787,11 +856,24 @@ export class MemoryStore {
   // ── Layer 2: Core Blocks CRUD ──────────────────────────────
 
   insert(entry: Omit<MemoryEntry, "createdAt" | "updatedAt">): void {
+    // Phase H Task 1: derive dual-timestamp fields from raw content so
+    // temporal queries ("what did we say last week about last year's
+    // launch?") can distinguish writing date from event date. Caller
+    // may override by passing explicit documentDate / eventDate.
+    const derived = deriveIngestTimestamps(`${entry.key} ${entry.value}`);
+    const documentDate = entry.documentDate ?? derived.documentDate;
+    const eventDate = entry.eventDate ?? derived.eventDate;
+    const eventDateUncertaintyMs = entry.eventDateUncertaintyMs ?? derived.eventDateUncertaintyMs;
+    const eventDateSource =
+      entry.eventDate !== undefined && entry.eventDateSource === undefined
+        ? "user-supplied"
+        : (entry.eventDateSource ?? derived.eventDateSource);
+
     this.db
       .prepare(
         `
-      INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, domain, topic)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, domain, topic, document_date, event_date, event_date_uncertainty_ms, event_date_source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       )
       .run(
@@ -806,6 +888,10 @@ export class MemoryStore {
         entry.tags ?? "",
         entry.domain ?? "",
         entry.topic ?? "",
+        documentDate,
+        eventDate,
+        eventDateUncertaintyMs,
+        eventDateSource,
       );
   }
 
@@ -1635,6 +1721,10 @@ export class MemoryStore {
         (row["verification_status"] as VerificationStatus | undefined) ?? "unverified",
       domain: (row["domain"] as string | undefined) ?? "",
       topic: (row["topic"] as string | undefined) ?? "",
+      documentDate: row["document_date"] as number | undefined,
+      eventDate: row["event_date"] as number | undefined,
+      eventDateUncertaintyMs: row["event_date_uncertainty_ms"] as number | undefined,
+      eventDateSource: (row["event_date_source"] as string | undefined) ?? "",
     };
   }
 
@@ -1985,12 +2075,22 @@ export class MemoryStore {
     // Check for contradictions before inserting
     const contradictions = this.detectContradictions(entry.key, entry.value);
 
-    // Insert the entry with source metadata
+    // Phase H Task 1: dual-timestamp derivation on the provenance path.
+    const derived = deriveIngestTimestamps(`${entry.key} ${entry.value}`);
+    const documentDate = entry.documentDate ?? derived.documentDate;
+    const eventDate = entry.eventDate ?? derived.eventDate;
+    const eventDateUncertaintyMs = entry.eventDateUncertaintyMs ?? derived.eventDateUncertaintyMs;
+    const eventDateSource =
+      entry.eventDate !== undefined && entry.eventDateSource === undefined
+        ? "user-supplied"
+        : (entry.eventDateSource ?? derived.eventDateSource);
+
+    // Insert the entry with source metadata + dual timestamps
     this.db
       .prepare(
         `
-      INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, source_type, source_file)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, source_type, source_file, document_date, event_date, event_date_uncertainty_ms, event_date_source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       )
       .run(
@@ -2005,6 +2105,10 @@ export class MemoryStore {
         entry.tags ?? "",
         sourceType,
         sourceFile ?? null,
+        documentDate,
+        eventDate,
+        eventDateUncertaintyMs,
+        eventDateSource,
       );
 
     // Generate and store local embedding
