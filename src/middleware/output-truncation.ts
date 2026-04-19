@@ -11,6 +11,7 @@
  */
 
 import type { Middleware, MiddlewareContext, AgentResult } from "./types.js";
+import { formatIsolatedPreview, OutputIsolationStore } from "../sandbox/output-isolator.js";
 
 // -- Types ----------------------------------------------------------------
 
@@ -49,11 +50,25 @@ export interface TruncationStats {
  * OutputTruncationMiddleware checks tool results and truncates oversized
  * outputs to prevent context window exhaustion.
  */
+/**
+ * Phase 13 Wave 3B: large-output isolation threshold. Outputs above
+ * this size bypass plain truncation and go through the output-isolator
+ * so the raw content is retained behind a handle while only a
+ * compressed head+tail preview enters the model's context.
+ */
+const ISOLATION_SIZE_BYTES = 50 * 1024;
+
 export class OutputTruncationMiddleware {
   private readonly config: TruncationConfig;
   private totalTruncations = 0;
   private totalLinesDropped = 0;
   private totalCharsDropped = 0;
+
+  // Phase 13 Wave 3B: per-session isolation store. Handles survive for
+  // the lifetime of the middleware instance. Callers can read the store
+  // via getIsolationStore() to fetch full content by handle.
+  private readonly isolationStore = new OutputIsolationStore();
+  private totalIsolations = 0;
 
   constructor(config?: Partial<TruncationConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -63,8 +78,41 @@ export class OutputTruncationMiddleware {
    * Truncate content if it exceeds configured limits.
    * Returns the original content if within limits, or a truncated version
    * with head/tail preserved and a marker in the middle.
+   *
+   * Phase 13 Wave 3B: when content exceeds ISOLATION_SIZE_BYTES we skip
+   * plain truncation and use the output-isolator so the full content is
+   * preserved behind a handle instead of permanently discarded.
    */
-  truncate(content: string): { readonly content: string; readonly truncated: boolean; readonly linesDropped: number } {
+  truncate(content: string): {
+    readonly content: string;
+    readonly truncated: boolean;
+    readonly linesDropped: number;
+  } {
+    // Phase 13 Wave 3B: for >50KB outputs, isolate instead of truncate.
+    // Honest: if isolation throws we fall through to normal truncation.
+    if (content.length >= ISOLATION_SIZE_BYTES) {
+      try {
+        const iso = this.isolationStore.isolateAndStore(content);
+        if (iso.compressionRatio < 1) {
+          this.totalIsolations++;
+          this.totalTruncations++;
+          const elided = iso.elidedLines;
+          this.totalLinesDropped += elided;
+          this.totalCharsDropped += content.length - iso.previewSize;
+          return {
+            content: formatIsolatedPreview(iso),
+            truncated: true,
+            linesDropped: elided,
+          };
+        }
+      } catch (err) {
+        // Honest warn: never silently swallow an isolation failure.
+        console.warn(
+          `[OutputTruncation] isolation failed: ${(err as Error).message}; falling back to truncate`,
+        );
+      }
+    }
+
     const lines = content.split("\n");
     const exceedsChars = content.length > this.config.maxToolOutputChars;
     const exceedsLines = lines.length > this.config.maxToolOutputLines;
@@ -95,6 +143,16 @@ export class OutputTruncationMiddleware {
     return { content: truncated, truncated: true, linesDropped: droppedCount };
   }
 
+  /** Phase 13 Wave 3B: expose the isolation store for handle-based retrieval. */
+  getIsolationStore(): OutputIsolationStore {
+    return this.isolationStore;
+  }
+
+  /** Phase 13 Wave 3B: count of isolations performed this session. */
+  getIsolationCount(): number {
+    return this.totalIsolations;
+  }
+
   /**
    * Get truncation statistics for diagnostics.
    */
@@ -123,9 +181,7 @@ export class OutputTruncationMiddleware {
  * Runs at order 6.5 (between ToolError at 6 and Summarization at 7).
  * Operates in the `after` phase to inspect and truncate tool results.
  */
-export function createOutputTruncationMiddleware(
-  instance: OutputTruncationMiddleware,
-): Middleware {
+export function createOutputTruncationMiddleware(instance: OutputTruncationMiddleware): Middleware {
   return {
     name: "OutputTruncation",
     order: 6.5,
@@ -141,9 +197,7 @@ export function createOutputTruncationMiddleware(
       return {
         ...result,
         content,
-        followUp: result.followUp
-          ? `${result.followUp}\n\n${traceNote}`
-          : traceNote,
+        followUp: result.followUp ? `${result.followUp}\n\n${traceNote}` : traceNote,
       };
     },
   };
