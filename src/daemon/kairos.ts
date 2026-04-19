@@ -75,6 +75,8 @@ import { ReasoningEngine } from "../identity/reasoning-engine.js";
 import { UserModel } from "../identity/user-model.js";
 import { PerceptionEngine } from "../computer-use/perception-engine.js";
 import { MeetingRuntime } from "../meet/meeting-runtime.js";
+import { AutoArchiveHook } from "../hooks/auto-archive.js";
+import { RateLimitResumeManager } from "../hooks/rate-limit-resume.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -231,6 +233,15 @@ export class KairosDaemon {
   // through getMeetingStore() so kairos-rpc `meet.summarize` can resolve
   // transcripts by id instead of silently returning null (4-session bug).
   private meetingRuntime: MeetingRuntime | null = null;
+
+  // Session-13: Auto-archive (Jean-inspired) + Rate-limit-resume
+  // (oh-my-claudecode-inspired) service handles. The daemon owns these
+  // so PR-merge events (via github-bot) and rate-limit hits (via router)
+  // can route into one honest state store instead of being swallowed.
+  private readonly autoArchiveHook = new AutoArchiveHook({
+    archiveDir: join(homedir(), ".wotann", "archives"),
+  });
+  private readonly rateLimitResume = new RateLimitResumeManager();
 
   // ── Tier 2A: Gap Analysis Modules ──────────────
   private readonly contextPressure = new ContextPressureMonitor();
@@ -798,6 +809,66 @@ export class KairosDaemon {
    */
   handleGithubEvent(event: GithubEvent): void {
     this.eventTriggerSystem.handleGithubEvent(event);
+    // Session-13: PR-merge events → AutoArchiveHook for session archive +
+    // branch cleanup. Honest: we only trigger on pull_request.closed
+    // events whose payload declares merged=true. Missing payload fields
+    // leave the archive unrun rather than silently succeeding.
+    if (event.type === "pull_request.closed") {
+      const payload = event.payload as Record<string, unknown> | undefined;
+      const prNumber =
+        typeof payload?.["number"] === "number" ? (payload["number"] as number) : undefined;
+      const merged = payload?.["merged"] === true;
+      if (merged && prNumber !== undefined) {
+        const branchName =
+          typeof payload["branch"] === "string" ? (payload["branch"] as string) : `pr-${prNumber}`;
+        void this.autoArchiveHook
+          .onPRMerge(prNumber, branchName)
+          .then((result) => {
+            this.appendLog({
+              type: "heartbeat",
+              message: `Auto-archive PR #${prNumber}: session=${result.sessionArchived} worktree=${result.worktreeRemoved}`,
+            });
+          })
+          .catch((err) => {
+            this.appendLog({
+              type: "error",
+              message: `Auto-archive PR #${prNumber} failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          });
+      }
+    }
+  }
+
+  /**
+   * Session-13: record a rate-limit hit into RateLimitResumeManager so
+   * the manager can plan a fallback provider or exponential backoff.
+   * Invoked by the router / adapter error path when a 429 lands.
+   */
+  recordRateLimit(
+    provider: string,
+    retryAfterMs: number,
+    snapshot: Parameters<RateLimitResumeManager["onRateLimit"]>[2],
+  ): void {
+    try {
+      const state = this.rateLimitResume.onRateLimit(provider, retryAfterMs, snapshot);
+      this.appendLog({
+        type: "heartbeat",
+        message: `Rate-limit: ${provider} retry#${state.retryCount} in ${retryAfterMs}ms`,
+      });
+    } catch (err) {
+      this.appendLog({
+        type: "error",
+        message: `Rate-limit record failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  getRateLimitResumeManager(): RateLimitResumeManager {
+    return this.rateLimitResume;
+  }
+
+  getAutoArchiveHook(): AutoArchiveHook {
+    return this.autoArchiveHook;
   }
 
   /**
