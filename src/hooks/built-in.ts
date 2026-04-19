@@ -1246,8 +1246,11 @@ export const approvalRuleGate: HookHandler = {
         };
       }
       if (result.action === "deny") {
+        // HookResult.action doesn't have "deny"; use "block" (the hook
+        // engine's semantic for refusing the tool call) so TypeScript
+        // compiles and the sender sees an honest denial.
         return {
-          action: "deny",
+          action: "block",
           message: `ApprovalRuleGate: rule "${result.matchedRuleId ?? "unknown"}" denied — ${result.reason}`,
         };
       }

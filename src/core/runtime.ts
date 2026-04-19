@@ -3013,6 +3013,25 @@ export class WotannRuntime {
         };
       }
 
+      // ── Phase-13: confidence-calibrator ──
+      // Fuse hedge-density + consistency + (optional) self-score into a
+      // band. On `reject` emit a warning chunk so callers can retry
+      // with a stronger model. Honest: no fabrication — when samples
+      // aren't available, the score reflects only hedge-density.
+      try {
+        const calibration = calibrateConfidence({ text: fullContent });
+        if (calibration.band === "reject") {
+          yield {
+            type: "text" as const,
+            content: `\n[Confidence] Low confidence (${calibration.reason}). Consider retry with stronger model.\n`,
+            provider: responseProvider,
+            model: responseModel,
+          };
+        }
+      } catch (err) {
+        console.warn(`[WOTANN] confidence-calibrator failed: ${(err as Error).message}`);
+      }
+
       // BugBot: scan response for unified diffs (must contain diff markers, not just code blocks)
       if (fullContent.includes("diff --git") || fullContent.includes("+++ b/")) {
         const bugReports = this.bugBot.analyzeDiff(fullContent);
