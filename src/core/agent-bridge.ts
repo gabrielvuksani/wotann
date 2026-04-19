@@ -16,6 +16,7 @@ import { RateLimitManager } from "../providers/rate-limiter.js";
 import { buildFallbackChain, resolveNextProvider } from "../providers/fallback-chain.js";
 import { augmentQuery, parseToolCallsFromText } from "../providers/capability-augmenter.js";
 import { AccountPool } from "../providers/account-pool.js";
+import { estimatePromptTokens, estimateCost } from "../telemetry/token-estimator.js";
 
 export interface AgentBridgeConfig {
   readonly adapters: ReadonlyMap<ProviderName, ProviderAdapter>;
@@ -24,6 +25,18 @@ export interface AgentBridgeConfig {
   readonly accountPool?: AccountPool;
   readonly defaultModel?: string;
   readonly defaultProvider?: ProviderName;
+  /**
+   * Pre-flight cost/token estimator hook. Called once per query() before
+   * the fallback chain walks. Use for budget display, cost audit, or
+   * routing-aware decisions. Optional — wire only when a consumer wants
+   * the signal (telemetry emitter, cost preview UI, etc.).
+   */
+  readonly onPreflightEstimate?: (e: {
+    readonly provider: ProviderName;
+    readonly model: string | undefined;
+    readonly estimatedTokens: number;
+    readonly estimatedCostUsd: number;
+  }) => void;
 }
 
 export interface QueryResult {
@@ -43,6 +56,7 @@ export class AgentBridge {
   private readonly accountPool: AccountPool | null;
   private readonly defaultModel: string;
   private readonly defaultProvider: ProviderName;
+  private readonly onPreflightEstimate: AgentBridgeConfig["onPreflightEstimate"] | undefined;
 
   constructor(config: AgentBridgeConfig) {
     this.adapters = config.adapters;
@@ -51,6 +65,7 @@ export class AgentBridge {
     this.accountPool = config.accountPool ?? null;
     this.defaultModel = config.defaultModel ?? "gemma4:e4b";
     this.defaultProvider = config.defaultProvider ?? ("ollama" as ProviderName);
+    this.onPreflightEstimate = config.onPreflightEstimate;
   }
 
   /**
@@ -69,6 +84,31 @@ export class AgentBridge {
     // "auto" means let the adapter pick its default — don't pass it through
     const routedModel = routing.model === "auto" ? undefined : routing.model;
     const model = options.model ?? routedModel;
+
+    // Pre-flight token + cost estimate (telemetry). Zero pricing is honest
+    // — callers wire real pricing via onPreflightEstimate when they know
+    // the active provider's per-1k rate. Wrapped in try/catch so a bad
+    // estimate never blocks a query.
+    if (this.onPreflightEstimate) {
+      try {
+        const promptText =
+          options.prompt + (options.systemPrompt ? `\n${options.systemPrompt}` : "");
+        const estimatedTokens = estimatePromptTokens(promptText);
+        const costEstimate = estimateCost({
+          prompt: promptText,
+          expectedOutputTokens: options.maxTokens ?? 1024,
+          pricing: { inputPer1k: 0, outputPer1k: 0 },
+        });
+        this.onPreflightEstimate({
+          provider: preferredProvider,
+          model,
+          estimatedTokens,
+          estimatedCostUsd: costEstimate.totalCostUsd,
+        });
+      } catch {
+        // non-fatal — estimate is best-effort telemetry
+      }
+    }
 
     // Build full fallback chain: preferred → other paid → free
     const chain = buildFallbackChain(preferredProvider, new Set(this.adapters.keys()), (p) =>
