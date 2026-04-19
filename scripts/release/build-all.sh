@@ -18,28 +18,58 @@ log() { printf "\033[0;36m[build-all]\033[0m %s\n" "$*"; }
 log "building JavaScript bundles"
 npm run build
 
-# 2. Single-binary builds via pkg or similar
-# (pkg is deprecated; we'll use Node 21's --experimental-sea instead,
-# OR Bun compile, OR Deno compile. Pick one when implementing.)
-log "creating Node SEA binaries (single-executable application)"
+# 2. Produce the SEA blob (one per version, the same blob injects into
+# the platform-specific node binary for each target).
+log "producing SEA blob from sea.config.json"
+node --experimental-sea-config sea.config.json
 
-# Placeholder targets — real implementation wires node --experimental-sea-config
-TARGETS=(
-  "macos-x64"
-  "macos-arm64"
-  "linux-x64"
-  "linux-arm64"
-  "windows-x64"
-)
+# 3. For each target, copy the local node binary + inject the blob.
+# Cross-compilation for non-host targets requires downloading the Node
+# binary for that platform; this script only produces the HOST target
+# by default. CI handles the full matrix by running on each platform.
 
-for target in "${TARGETS[@]}"; do
-  log "  target: $target (stub — add node-sea / bun / deno compile here)"
-  # Stub artifact for now — replace with real packager invocation
-  ART="$DIST/wotann-${VERSION}-${target}"
-  [ "$target" = "windows-x64" ] && ART="${ART}.exe"
-  echo "#!/bin/sh\necho 'wotann ${VERSION} (${target}) — release stub'\n" > "$ART"
-  chmod +x "$ART"
-done
+HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+case "$HOST_OS" in
+  darwin) HOST_OS="macos" ;;
+  mingw*|msys*|cygwin*) HOST_OS="windows" ;;
+esac
+HOST_ARCH="$(uname -m)"
+case "$HOST_ARCH" in
+  x86_64|amd64) HOST_ARCH="x64" ;;
+  arm64|aarch64) HOST_ARCH="arm64" ;;
+esac
+HOST_TARGET="${HOST_OS}-${HOST_ARCH}"
+
+log "building for host target: $HOST_TARGET"
+
+NODE_BIN="$(which node)"
+ART="$DIST/wotann-${VERSION}-${HOST_TARGET}"
+[ "$HOST_OS" = "windows" ] && ART="${ART}.exe"
+
+# Copy node → our binary
+cp "$NODE_BIN" "$ART"
+
+# Strip code-signing on macOS so we can re-inject (resign after)
+if [ "$HOST_OS" = "macos" ]; then
+  codesign --remove-signature "$ART" 2>/dev/null || true
+fi
+
+# Inject the SEA blob
+npx --yes postject "$ART" NODE_SEA_BLOB "$DIST/wotann.blob" \
+  --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 \
+  $([ "$HOST_OS" = "macos" ] && echo "--macho-segment-name NODE_SEA" || echo "")
+
+# Re-sign macOS binary ad-hoc (unsigned distribution requires user
+# right-click → open). Real release CI should notarize via Apple Dev ID.
+if [ "$HOST_OS" = "macos" ]; then
+  codesign --sign - "$ART" 2>/dev/null || true
+fi
+
+chmod +x "$ART"
+log "  host artifact: $ART"
+
+# Non-host targets — CI job on that platform runs the same script
+log "NOTE: non-host targets require CI runner on that platform"
 
 # 3. Archive + checksums
 log "archiving + computing checksums"

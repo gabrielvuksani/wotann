@@ -1,0 +1,8 @@
+{
+  "main": "dist/index.js",
+  "output": "dist/release/wotann.blob",
+  "disableExperimentalSEAWarning": true,
+  "useSnapshot": false,
+  "useCodeCache": true,
+  "assets": {}
+}
