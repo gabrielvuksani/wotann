@@ -21,6 +21,11 @@ const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { key: "/", ctrl: true, action: "global-search", description: "Global search" },
   { key: "i", ctrl: true, action: "context-inspect", description: "Context source inspector" },
   { key: "b", ctrl: true, action: "terminal-blocks", description: "Toggle terminal blocks view" },
+  // Wave 3G additions — command palette, clear convo, last response.
+  { key: "p", ctrl: true, action: "command-palette", description: "Open command palette" },
+  { key: "k", ctrl: true, action: "clear-conversation", description: "Clear conversation" },
+  { key: "l", ctrl: true, action: "last-response", description: "Copy last assistant response" },
+  { key: "y", ctrl: true, action: "theme-cycle", description: "Cycle Norse themes" },
   { key: "c", ctrl: true, action: "cancel", description: "Cancel / Exit" },
   { key: "d", ctrl: true, action: "exit", description: "Exit" },
   { key: "tab", action: "cycle-panel", description: "Cycle panel focus" },
