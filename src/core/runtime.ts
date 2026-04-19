@@ -114,6 +114,10 @@ import { ContextSourceInspector } from "../context/inspector.js";
 import { PersonaManager } from "../identity/persona.js";
 import { SelfHealingPipeline } from "../orchestration/self-healing-pipeline.js";
 import { LSPManager, SymbolOperations } from "../lsp/symbol-operations.js";
+import { LanguageServerRegistry } from "../lsp/server-registry.js";
+import type { BuiltLspTools } from "../lsp/agent-tools.js";
+import { AGENT_LSP_TOOL_NAMES } from "../lsp/agent-tools.js";
+import { buildLspToolsForAgent } from "./runtime-tools.js";
 import {
   applyHashEdit,
   type HashEditOperation,
@@ -347,6 +351,14 @@ export interface RuntimeConfig {
    * (~170 tokens). L2/L3 are loaded lazily on topic/deep-search triggers.
    */
   readonly progressiveContextTier?: ContextTier;
+  /**
+   * Session-13 Serena-parity: when true, the runtime constructs a
+   * `LanguageServerRegistry` + 6-tool LSP agent surface (hover,
+   * definition, document_symbols beyond the legacy 3). Defaults to
+   * `process.env.WOTANN_LSP_TOOLS === "1"` so it stays opt-in until the
+   * multi-language LSP install-hint UX is validated against real users.
+   */
+  readonly enableLspAgentTools?: boolean;
 }
 
 export interface RuntimeStatus {
@@ -569,6 +581,11 @@ export class WotannRuntime {
   private readonly contextualAbstentionEnabled: boolean;
   private readonly progressiveTier: ContextTier;
 
+  // ── Session-13: Serena-parity LSP agent tools + registry ──
+  private lspRegistry: LanguageServerRegistry | null = null;
+  private lspAgentTools: BuiltLspTools | null = null;
+  private readonly lspAgentToolsEnabled: boolean;
+
   constructor(config: RuntimeConfig) {
     this.config = config;
 
@@ -576,6 +593,8 @@ export class WotannRuntime {
     this.guardianEnabled = config.enableGuardian ?? process.env["WOTANN_GUARDIAN"] === "1";
     this.contextualAbstentionEnabled = config.enableContextualAbstention ?? true;
     this.progressiveTier = config.progressiveContextTier ?? "L1";
+    this.lspAgentToolsEnabled =
+      config.enableLspAgentTools ?? process.env["WOTANN_LSP_TOOLS"] === "1";
 
     // Initialize hook engine
     // Hook profile resolution: explicit config overrides everything,
@@ -1101,6 +1120,22 @@ export class WotannRuntime {
       }
     }
     this.pluginPanels = plugins.flatMap((plugin) => plugin.panels);
+
+    // Session-13 Serena parity — LSP agent tools. Opt-in via
+    // WOTANN_LSP_TOOLS=1. Creates a LanguageServerRegistry and the 6-tool
+    // BuiltLspTools bundle so the model can reach hover/definition/
+    // document_symbols beyond the 3 legacy tools. Honest error on init
+    // failure (no silent success), null-fields are respected downstream.
+    if (this.lspAgentToolsEnabled) {
+      try {
+        this.lspRegistry = new LanguageServerRegistry();
+        this.lspAgentTools = buildLspToolsForAgent(this.symbolOperations, this.lspRegistry);
+      } catch (err) {
+        console.warn(`[WOTANN] LSP agent-tools init failed: ${(err as Error).message}`);
+        this.lspRegistry = null;
+        this.lspAgentTools = null;
+      }
+    }
 
     // Phase H — Progressive context loader. Constructed once per runtime,
     // after MemoryStore init but before provider discovery so wake-up
@@ -2372,6 +2407,44 @@ export class WotannRuntime {
                 provider: chunk.provider ?? responseProvider,
                 model: chunk.model ?? responseModel,
               };
+            }
+
+            // ── Session-13: Serena-parity LSP agent tools ──
+            // When `enableLspAgentTools` (env WOTANN_LSP_TOOLS=1), the
+            // 6-tool bundle (find_symbol/find_references/rename_symbol/
+            // hover/definition/document_symbols) is routed through the
+            // agent-tools dispatcher, which honours multi-language LSP
+            // registry + honest `lsp_not_installed` errors. Falls through
+            // to the legacy 3-tool path when the bundle is unavailable.
+            if (this.lspAgentTools && toolName && chunk.toolInput) {
+              if (AGENT_LSP_TOOL_NAMES.includes(toolName)) {
+                try {
+                  const result = await this.lspAgentTools.dispatch(
+                    toolName,
+                    chunk.toolInput as Record<string, unknown>,
+                  );
+                  const body = result.success
+                    ? JSON.stringify(result.data)
+                    : `Error: ${result.error ?? "unknown"}`;
+                  const sanitised = await this.fireToolResultReceivedHook(
+                    toolName,
+                    `\n[${toolName}] ${body}\n`,
+                  );
+                  yield {
+                    type: "text" as const,
+                    content: sanitised.content,
+                    provider: chunk.provider ?? responseProvider,
+                    model: chunk.model ?? responseModel,
+                  };
+                  continue;
+                } catch (err) {
+                  console.warn(
+                    `[WOTANN] lsp-agent-tool dispatch failed: ${(err as Error).message}`,
+                  );
+                  // Fall through to legacy path on failure rather than
+                  // silently eating the tool call.
+                }
+              }
             }
 
             // ── Serena-style symbol tools (session-10 port) ──

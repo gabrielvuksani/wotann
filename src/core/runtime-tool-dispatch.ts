@@ -496,6 +496,20 @@ export interface ToolDispatchDeps {
   readonly planStore: PlanStoreDep | null;
   readonly lsp?: LSPManagerDep | null;
   readonly monitor?: MonitorDep | null;
+  /**
+   * Session-13 Serena-parity LSP agent tools (6 tools including hover,
+   * definition, document_symbols). When present, dispatch prefers this
+   * over the narrower LSPManagerDep for the 6 matching tool names —
+   * agents get honest `lsp_not_installed` errors for multi-language
+   * files instead of silent fallback. Lives alongside `lsp` (not a
+   * replacement) so legacy callers that only provide `lsp` keep working.
+   */
+  readonly lspAgentTools?: {
+    readonly dispatch: (
+      toolName: string,
+      input: Record<string, unknown>,
+    ) => Promise<{ success: boolean; toolName: string; data: unknown; error?: string }>;
+  } | null;
 }
 
 /**

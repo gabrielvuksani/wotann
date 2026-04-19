@@ -10,6 +10,14 @@
  */
 
 import type { ToolDefinition } from "./types.js";
+import {
+  buildLspTools,
+  AGENT_LSP_TOOL_NAMES,
+  type BuiltLspTools,
+  type LspToolDeps,
+} from "../lsp/agent-tools.js";
+import { LanguageServerRegistry } from "../lsp/server-registry.js";
+import type { SymbolOperations } from "../lsp/symbol-operations.js";
 
 // ── Dependency Interfaces ───────────────────────────────────
 // Narrow interfaces so this module doesn't pull in concrete classes.
@@ -310,3 +318,28 @@ export function buildEffectiveTools(
 
   return tools;
 }
+
+/**
+ * Serena-parity LSP tool builder — Session-13 wiring for
+ * `src/lsp/agent-tools.ts` + `src/lsp/server-registry.ts`. Constructs a
+ * `BuiltLspTools` bundle (6 tools: find_symbol, find_references,
+ * rename_symbol, hover, definition, document_symbols) with a per-runtime
+ * `LanguageServerRegistry`. The runtime wires this into tool dispatch so
+ * the model can reach multi-language LSPs with honest
+ * `lsp_not_installed` errors instead of silent fallback.
+ *
+ * Returns null if `ops` is unavailable; callers should guard accordingly.
+ */
+export function buildLspToolsForAgent(
+  ops: SymbolOperations | null,
+  registry?: LanguageServerRegistry,
+): BuiltLspTools | null {
+  if (!ops) return null;
+  const deps: LspToolDeps = {
+    ops,
+    registry: registry ?? new LanguageServerRegistry(),
+  };
+  return buildLspTools(deps);
+}
+
+export { AGENT_LSP_TOOL_NAMES };
