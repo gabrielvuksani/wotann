@@ -426,18 +426,33 @@ export class KairosDaemon {
       this.reasoningEngine = new ReasoningEngine();
 
       // Phase C: Meeting runtime — owns MeetingStore (SQLite at
-      // ~/.wotann/meetings.db by default). Coaching is left disabled
-      // here (no llmQuery) so transcripts are captured + persisted
-      // without spinning the coaching timer on every daemon. Callers
-      // that want coaching construct their own runtime with an
-      // llmQuery wired to WotannRuntime.query().
+      // ~/.wotann/meetings.db by default). Coaching is disabled by default
+      // (no llmQuery) so transcripts are captured + persisted without
+      // spinning the coaching timer on every daemon. Opt-in via
+      // MEET_COACHING=1 — when set, a lazy callable routed through
+      // WotannRuntime.query() is passed so coaching cycles can consult
+      // the model.
       try {
-        this.meetingRuntime = new MeetingRuntime({
-          dbPath: join(wotannDir, "meetings.db"),
-        });
+        const coachingEnabled = process.env["MEET_COACHING"] === "1";
+        const runtime = this.runtime;
+        const baseOpts = { dbPath: join(wotannDir, "meetings.db") };
+        const meetOpts: ConstructorParameters<typeof MeetingRuntime>[0] =
+          coachingEnabled && runtime
+            ? {
+                ...baseOpts,
+                llmQuery: async (prompt: string): Promise<string> => {
+                  let out = "";
+                  for await (const chunk of runtime.query({ prompt })) {
+                    if (chunk.type === "text") out += chunk.content;
+                  }
+                  return out;
+                },
+              }
+            : baseOpts;
+        this.meetingRuntime = new MeetingRuntime(meetOpts);
         this.appendLog({
           type: "heartbeat",
-          message: "Phase C: MeetingRuntime initialized (transcripts persisted, coaching off)",
+          message: `Phase C: MeetingRuntime initialized (transcripts persisted, coaching ${coachingEnabled && runtime ? "on" : "off"})`,
         });
       } catch (err) {
         this.appendLog({
