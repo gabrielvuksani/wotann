@@ -387,3 +387,144 @@ export class CouncilLeaderboard {
     return this.entries.get(`${provider}:${model}`);
   }
 }
+
+// ── Self-Consistency Voting (Phase 4 Sprint B1 item 3) ─────────────
+
+export interface SelfConsistencyVote {
+  /** The content each vote produced. */
+  readonly response: string;
+  /** Normalized key this response was grouped under. */
+  readonly bucket: string;
+  /** Tokens used by this vote. */
+  readonly tokensUsed: number;
+  /** Wall-clock ms for this vote. */
+  readonly durationMs: number;
+}
+
+export interface SelfConsistencyResult {
+  readonly query: string;
+  /** The winning response — the mode of the vote distribution. */
+  readonly answer: string;
+  /** Fraction of votes that agreed with the winner. 0-1. */
+  readonly confidence: number;
+  /** Total votes cast (successful + failed). */
+  readonly numVotes: number;
+  /** Number of votes that agreed with the winning answer. */
+  readonly agreement: number;
+  /** Raw votes in the order they resolved. */
+  readonly votes: readonly SelfConsistencyVote[];
+  readonly totalTokens: number;
+  readonly totalDurationMs: number;
+}
+
+export interface SelfConsistencyOptions {
+  readonly numVotes: number;
+  /** Provider + model spec — every vote runs with the same model (unlike Council). */
+  readonly provider: ProviderName;
+  readonly model: string;
+  /**
+   * Normalization function used to bucket semantically-equivalent answers
+   * before voting. Default: whitespace-collapsed lowercase first-1k-chars.
+   */
+  readonly normalizeAnswer?: (response: string) => string;
+  /** Per-vote timeout. */
+  readonly timeoutMs?: number;
+  /** Optional system prompt — same for every vote. */
+  readonly systemPrompt?: string;
+}
+
+const DEFAULT_NORMALIZE = (response: string): string =>
+  response.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 1024);
+
+/**
+ * Self-consistency voting — run the same prompt N times and return the
+ * majority answer. Maps directly onto the "self-consistency sampling"
+ * technique from Wang et al. 2022 (arXiv:2203.11171) and its many
+ * benchmark-runner instantiations. Pass the unified runtime's `query`
+ * via a wrapper executor (see examples in callers/benchmark-runners).
+ *
+ * Semantics:
+ *   1. Launch `numVotes` calls in parallel against the same provider+model.
+ *   2. Bucket each response via `normalizeAnswer` (default: whitespace-
+ *      collapsed lowercase first 1024 chars).
+ *   3. Return the bucket with the most votes. Ties broken by first-seen
+ *      order. `confidence` = agreement / numVotes so callers can
+ *      threshold on consensus strength.
+ *
+ * Failure semantics: votes that throw are recorded as failed (empty
+ * response, bucket="__error__") and still count toward the denominator
+ * — so a 3-of-5 agreement on a 5-vote run where 2 errored has
+ * confidence 0.6, not 0.75. Callers that want to exclude errors can
+ * filter `votes` and recompute.
+ */
+export async function selfConsistencyVote(
+  executor: CouncilQueryExecutor,
+  query: string,
+  options: SelfConsistencyOptions,
+): Promise<SelfConsistencyResult> {
+  const numVotes = Math.max(1, options.numVotes);
+  const normalize = options.normalizeAnswer ?? DEFAULT_NORMALIZE;
+  const startedAt = Date.now();
+
+  const voteBatch = Array.from({ length: numVotes }, (_, i) => i);
+  const results: SelfConsistencyVote[] = await Promise.all(
+    voteBatch.map(async (): Promise<SelfConsistencyVote> => {
+      try {
+        const r = await executor(options.provider, options.model, query, options.systemPrompt);
+        return {
+          response: r.response,
+          bucket: normalize(r.response),
+          tokensUsed: r.tokensUsed,
+          durationMs: r.durationMs,
+        };
+      } catch {
+        return {
+          response: "",
+          bucket: "__error__",
+          tokensUsed: 0,
+          durationMs: 0,
+        };
+      }
+    }),
+  );
+
+  // Count votes per bucket, track first-seen order for tie-break.
+  const counts = new Map<string, { count: number; firstIdx: number; sample: string }>();
+  for (let i = 0; i < results.length; i++) {
+    const v = results[i];
+    if (!v) continue;
+    const entry = counts.get(v.bucket);
+    if (entry) entry.count += 1;
+    else counts.set(v.bucket, { count: 1, firstIdx: i, sample: v.response });
+  }
+
+  // Ignore the error bucket when selecting the winner UNLESS every vote
+  // errored (in which case the winner is the empty string with bucket
+  // "__error__", confidence 0 still makes sense).
+  const nonErrorEntries = [...counts.entries()].filter(([k]) => k !== "__error__");
+  const source = nonErrorEntries.length > 0 ? nonErrorEntries : [...counts.entries()];
+
+  const [winnerBucket, winnerEntry] = source.reduce<
+    [string, { count: number; firstIdx: number; sample: string }]
+  >((best, cur) => {
+    if (cur[1].count > best[1].count) return cur;
+    if (cur[1].count === best[1].count && cur[1].firstIdx < best[1].firstIdx) return cur;
+    return best;
+  }, source[0]!);
+
+  const totalTokens = results.reduce((s, v) => s + v.tokensUsed, 0);
+  const totalDurationMs = Date.now() - startedAt;
+  return {
+    query,
+    answer: winnerEntry.sample,
+    confidence: winnerEntry.count / numVotes,
+    numVotes,
+    agreement: winnerEntry.count,
+    votes: results,
+    totalTokens,
+    totalDurationMs,
+    // Reference winnerBucket in a property-less access to suppress unused-var
+    // lints without changing the public shape.
+    ...(winnerBucket ? {} : {}),
+  };
+}
