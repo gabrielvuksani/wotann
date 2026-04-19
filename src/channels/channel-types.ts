@@ -13,13 +13,43 @@
  */
 
 export type ChannelType =
-  | "telegram" | "slack" | "discord" | "signal" | "whatsapp"
-  | "email" | "sms" | "matrix" | "teams" | "irc" | "mattermost"
-  | "webchat" | "webhook" | "voice" | "cli"
-  | "desktop-app" | "mobile-app" | "ide" | "api"
-  | "google-chat" | "line"
+  | "telegram"
+  | "slack"
+  | "discord"
+  | "signal"
+  | "whatsapp"
+  | "email"
+  | "sms"
+  | "matrix"
+  | "teams"
+  | "irc"
+  | "mattermost"
+  | "webchat"
+  | "webhook"
+  | "voice"
+  | "cli"
+  | "desktop-app"
+  | "mobile-app"
+  | "ide"
+  | "api"
+  | "google-chat"
+  | "line"
+  | "mastodon"
+  | "wechat"
+  | "viber"
+  | "dingtalk"
+  | "feishu"
   // Legacy aliases retained for backward compatibility with existing adapters
-  | "web" | "imessage";
+  | "web"
+  | "imessage";
 
 export type ChannelCategory =
-  | "messaging" | "email" | "voice" | "developer" | "web" | "desktop" | "mobile" | "iot" | "knowledge";
+  | "messaging"
+  | "email"
+  | "voice"
+  | "developer"
+  | "web"
+  | "desktop"
+  | "mobile"
+  | "iot"
+  | "knowledge";
