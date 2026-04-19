@@ -11,6 +11,7 @@
 
 import { ShadowGit } from "../utils/shadow-git.js";
 import { randomUUID } from "node:crypto";
+import { evolveCode, type DarwinianConfig } from "../learning/darwinian-evolver.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -20,6 +21,15 @@ export interface ExperimentConfig {
   readonly maxCycles: number;
   readonly timeBudgetMs: number;
   readonly constrainedFiles: readonly string[];
+  /**
+   * Phase-13 wire: evolution tier. When `"code"`, the engine routes
+   * through `learning/darwinian-evolver.ts` (genetic code mutation).
+   * When undefined or `"prompt"`, the default ModificationGenerator
+   * path runs. Honest: if tier==="code" but no evolveMutator is
+   * supplied via setEvolveMutator(), the engine still uses the default
+   * generator and logs a warn.
+   */
+  readonly tier?: "prompt" | "code";
 }
 
 export interface MetricDefinition {
@@ -131,9 +141,7 @@ export class ExperimentJournal {
   }
 
   getTotalImprovement(): number {
-    return this.entries
-      .filter((e) => e.kept)
-      .reduce((total, e) => total + e.improvement, 0);
+    return this.entries.filter((e) => e.kept).reduce((total, e) => total + e.improvement, 0);
   }
 
   getSize(): number {
@@ -150,6 +158,14 @@ export class AutoresearchEngine {
   private readonly fileWriter: FileWriter;
   private status: ExperimentStatus = "pending";
   private abortRequested = false;
+  /**
+   * Phase-13 wire: Darwinian code-mutator. When the caller supplies
+   * this via `setDarwinianMutator()`, experiments with `tier: "code"`
+   * route through `learning/darwinian-evolver.ts` instead of the
+   * default per-cycle ModificationGenerator.
+   */
+  private darwinianMutator: ((parent: string, count: number) => Promise<readonly string[]>) | null =
+    null;
 
   constructor(
     workDir: string,
@@ -173,6 +189,16 @@ export class AutoresearchEngine {
    */
   setModificationGenerator(generator: ModificationGenerator): void {
     this.modificationGenerator = generator;
+  }
+
+  /**
+   * Phase-13 wire: install a code-level mutator used when
+   * `config.tier === "code"`. Typically an LLM-backed rewriter.
+   */
+  setDarwinianMutator(
+    mutator: (parent: string, count: number) => Promise<readonly string[]>,
+  ): void {
+    this.darwinianMutator = mutator;
   }
 
   getStatus(): ExperimentStatus {
@@ -202,6 +228,53 @@ export class AutoresearchEngine {
     const initialMetric = await config.metric.evaluate(config.targetFile);
     let currentBestMetric = initialMetric;
 
+    // ── Phase-13: Darwinian code-tier evolution ──
+    // When tier==="code" AND a mutator was installed, route through
+    // evolveCode() for genetic code rewriting. Honest: if tier==="code"
+    // but no mutator, log a warn and fall back to the default loop.
+    if (config.tier === "code") {
+      if (this.darwinianMutator) {
+        try {
+          const initialCode = await this.fileReader(config.targetFile);
+          const darwinConfig: DarwinianConfig = {
+            initialCode,
+            mutate: this.darwinianMutator,
+            evaluate: async (code: string) => {
+              await this.fileWriter(config.targetFile, code);
+              const m = await config.metric.evaluate(config.targetFile);
+              return config.metric.direction === "maximize" ? m.value : -m.value;
+            },
+            maxGenerations: Math.min(config.maxCycles, 8),
+          };
+          const result = await evolveCode(darwinConfig);
+          if (result.improved) {
+            await this.fileWriter(config.targetFile, result.code);
+          } else {
+            await this.shadowGit.restore(baseCheckpoint);
+          }
+          const finalMetric = await config.metric.evaluate(config.targetFile);
+          this.status = "completed";
+          return buildSummary(
+            experimentId,
+            config,
+            journal,
+            initialMetric,
+            finalMetric,
+            result.generationsRun,
+            Date.now() - startTime,
+            this.status,
+          );
+        } catch (err) {
+          console.warn(`[autoresearch] darwinian-evolver failed: ${(err as Error).message}`);
+          // Fall through to default loop below
+        }
+      } else {
+        console.warn(
+          `[autoresearch] tier="code" but no darwinianMutator installed — falling back to default`,
+        );
+      }
+    }
+
     let completedCycles = 0;
 
     try {
@@ -218,12 +291,7 @@ export class AutoresearchEngine {
           break;
         }
 
-        const result = await this.runCycle(
-          config,
-          cycle,
-          currentBestMetric,
-          journal,
-        );
+        const result = await this.runCycle(config, cycle, currentBestMetric, journal);
 
         if (result === null) {
           // Generator exhausted — no more modifications to try
@@ -268,9 +336,7 @@ export class AutoresearchEngine {
     const currentContent = await this.fileReader(config.targetFile);
 
     // Create checkpoint before modification
-    const checkpoint = await this.shadowGit.createCheckpoint(
-      `cycle-${cycle}-before`,
-    );
+    const checkpoint = await this.shadowGit.createCheckpoint(`cycle-${cycle}-before`);
 
     // Generate modification proposal
     const proposal = await this.modificationGenerator(
@@ -340,9 +406,7 @@ export class AutoresearchEngine {
       await this.fileWriter(config.targetFile, currentContent);
     } else {
       // Create checkpoint for successful modification
-      await this.shadowGit.createCheckpoint(
-        `cycle-${cycle}-kept-${modification.id.slice(0, 8)}`,
-      );
+      await this.shadowGit.createCheckpoint(`cycle-${cycle}-kept-${modification.id.slice(0, 8)}`);
     }
 
     const diffs = computeDiff(currentContent, proposal.newContent);
