@@ -21,6 +21,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
+import { withRetries, defaultRetryPolicy, type RetryPolicy } from "./retry-strategies.js";
+import { CircuitBreaker, withBreaker } from "./circuit-breaker.js";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -1067,11 +1069,41 @@ export class ProviderService extends EventEmitter {
   /** TTL for cached discovery results — forced refresh returns earlier. */
   private readonly cacheTtlMs: number;
 
+  // ── Phase 13 Wave 3B: per-provider circuit breaker + retry policy.
+  // Each provider has its own breaker (opens on 10 rolling failures in
+  // a 60s window) so a single flaky provider cannot poison the rest.
+  // testCredential() dispatches through withBreaker + withRetries so
+  // transient 429/5xx/network errors get exponential backoff rather
+  // than fail-fast back to the UI.
+  private readonly breakers: Map<string, CircuitBreaker> = new Map();
+  private readonly retryPolicy: RetryPolicy;
+
   constructor(options: { cacheTtlMs?: number; credentialStorePath?: string } = {}) {
     super();
     this.store = new CredentialStore(options.credentialStorePath);
     this.specs = new Map(PROVIDER_SPECS.map((s) => [s.id, s]));
     this.cacheTtlMs = options.cacheTtlMs ?? 60_000;
+    this.retryPolicy = defaultRetryPolicy({ maxAttempts: 3 });
+  }
+
+  /**
+   * Phase 13 Wave 3B: Get (or lazily create) the per-provider circuit
+   * breaker. Opens on 10 rolling failures within a 60s window, so one
+   * misbehaving provider doesn't block retries on the others.
+   */
+  private getBreaker(providerId: string): CircuitBreaker {
+    let breaker = this.breakers.get(providerId);
+    if (!breaker) {
+      breaker = new CircuitBreaker({ minRequests: 10, failureThreshold: 0.5 });
+      this.breakers.set(providerId, breaker);
+    }
+    return breaker;
+  }
+
+  /** Phase 13 Wave 3B: introspect breaker state (for diagnostics). */
+  getBreakerState(providerId: string): "closed" | "open" | "half-open" | "unknown" {
+    const breaker = this.breakers.get(providerId);
+    return breaker?.getState() ?? "unknown";
   }
 
   /** Available providers (even those not configured). */
@@ -1200,7 +1232,7 @@ export class ProviderService extends EventEmitter {
           process.env[primaryEnvKey] = params.token;
         } catch (err) {
           // Non-fatal — credential is stored in credentials.json regardless.
-           
+
           console.warn(
             `[providers] providers.env write failed: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -1238,9 +1270,18 @@ export class ProviderService extends EventEmitter {
     if (!spec) return { ok: false, error: `Unknown provider: ${providerId}` };
     const state = this.states.get(providerId);
     if (!state?.credential) return { ok: false, error: "Not configured" };
+    // Phase 13 Wave 3B: wrap the call in circuit-breaker + retry policy.
+    // Breaker fails fast when a provider has been down — no thundering
+    // herd. Retry absorbs transient 429/5xx/network errors with
+    // exponential backoff. Honest bubble-up on persistent failure.
+    const breaker = this.getBreaker(providerId);
+    const credential = state.credential;
     try {
-      const models = await spec.listModels(state.credential);
-      return { ok: models.length > 0, modelCount: models.length };
+      const outcome = await withRetries(
+        () => withBreaker(() => spec.listModels(credential), breaker),
+        { policy: this.retryPolicy, maxAttempts: 3 },
+      );
+      return { ok: outcome.result.length > 0, modelCount: outcome.result.length };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
