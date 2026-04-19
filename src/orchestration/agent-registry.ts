@@ -501,6 +501,23 @@ export class AgentRegistry {
     const nextList = [...this.agents.values()].map((a) => (a.id === id ? updated : a));
     return new AgentRegistry(nextList);
   }
+
+  /**
+   * Wave 4E: add a new agent definition (e.g. an external ACP agent) to
+   * the registry. Returns a new registry with the agent appended.
+   * Honest: if an agent with the same ID already exists it will be
+   * REPLACED (last-write-wins). Callers that want strict insertion
+   * should check `has()` first.
+   *
+   * The typical flow after `wotann acp install` finishes is:
+   *   registry.withAgent(definitionFromAcpManifest(installedAgent))
+   * so the user can then `performAgentHandoff(..., 'acp:<name>', ...)`.
+   */
+  withAgent(definition: AgentDefinition): AgentRegistry {
+    const nextList = [...this.agents.values()].filter((a) => a.id !== definition.id);
+    nextList.push(definition);
+    return new AgentRegistry(nextList);
+  }
 }
 
 // ── YAML Override Loader ───────────────────────────────────────
