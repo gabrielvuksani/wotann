@@ -3740,46 +3740,150 @@ async function runLongMemEvalCommand(cliOpts: {
 }
 
 // ── wotann health ───────────────────────────────────────────
+//
+// Dual-purpose command (Phase 6):
+//   wotann health [provider]     — per-provider smoke-test battery (default)
+//   wotann health --codebase     — original codebase health analysis
+//   wotann health --dry-run      — run the smoke-test battery against the
+//                                  static capability matrix (no network)
+//
+// Putting the provider battery on the default path matches the Phase 6
+// task spec (`wotann health [<provider>]`) while preserving the prior
+// codebase-health behaviour behind a flag.
 
 program
-  .command("health")
-  .description("Run codebase health analysis")
-  .action(async () => {
-    const { analyzeCodebaseHealth } = await import("./intelligence/codebase-health.js");
-    const report = analyzeCodebaseHealth(process.cwd());
-
-    console.log(chalk.bold("\nWOTANN Codebase Health\n"));
-    console.log(chalk.dim(`  Health score: ${report.healthScore}/100`));
-    console.log(chalk.dim(`  TODO count: ${report.todoCount}`));
-    console.log(chalk.dim(`  Dead code indicators: ${report.deadCode.length}`));
-    console.log(chalk.dim(`  Type errors: ${report.typeErrors}`));
-    console.log(chalk.dim(`  Lint warnings: ${report.lintWarnings}`));
-    console.log(chalk.dim(`  Test coverage ratio: ${(report.testCoverage * 100).toFixed(0)}%`));
-    console.log(chalk.dim(`  Avg file size: ${report.avgFileSize} lines`));
-
-    if (report.largestFiles.length > 0) {
-      console.log(chalk.bold("\n  Largest files:\n"));
-      for (const f of report.largestFiles) {
-        const icon =
-          f.lineCount > 800
-            ? chalk.red("✗")
-            : f.lineCount > 400
-              ? chalk.yellow("○")
-              : chalk.green("✓");
-        console.log(`  ${icon} ${f.path} — ${f.lineCount} lines`);
+  .command("health [provider]")
+  .description("Provider health check (or codebase health with --codebase)")
+  .option("--codebase", "Run codebase health analysis instead of provider smoke tests")
+  .option("--dry-run", "Skip network calls; produce a report from the capability matrix")
+  .option("--skip-tool-call", "Skip the tool_call smoke test even if supported")
+  .option("--timeout-ms <ms>", "Per-test timeout in milliseconds", "10000")
+  .option("--json", "Emit the full report as JSON (for machine consumption)")
+  .action(
+    async (
+      providerArg: string | undefined,
+      options: {
+        codebase?: boolean;
+        dryRun?: boolean;
+        skipToolCall?: boolean;
+        timeoutMs?: string;
+        json?: boolean;
+      },
+    ) => {
+      if (options.codebase) {
+        const { analyzeCodebaseHealth } = await import("./intelligence/codebase-health.js");
+        const report = analyzeCodebaseHealth(process.cwd());
+        console.log(chalk.bold("\nWOTANN Codebase Health\n"));
+        console.log(chalk.dim(`  Health score: ${report.healthScore}/100`));
+        console.log(chalk.dim(`  TODO count: ${report.todoCount}`));
+        console.log(chalk.dim(`  Dead code indicators: ${report.deadCode.length}`));
+        console.log(chalk.dim(`  Type errors: ${report.typeErrors}`));
+        console.log(chalk.dim(`  Lint warnings: ${report.lintWarnings}`));
+        console.log(chalk.dim(`  Test coverage ratio: ${(report.testCoverage * 100).toFixed(0)}%`));
+        console.log(chalk.dim(`  Avg file size: ${report.avgFileSize} lines`));
+        if (report.largestFiles.length > 0) {
+          console.log(chalk.bold("\n  Largest files:\n"));
+          for (const f of report.largestFiles) {
+            const icon =
+              f.lineCount > 800
+                ? chalk.red("✗")
+                : f.lineCount > 400
+                  ? chalk.yellow("○")
+                  : chalk.green("✓");
+            console.log(`  ${icon} ${f.path} — ${f.lineCount} lines`);
+          }
+        }
+        if (report.circularDeps.length > 0) {
+          console.log(chalk.yellow(`\n  Circular dependencies: ${report.circularDeps.length}`));
+          for (const dep of report.circularDeps.slice(0, 5)) {
+            console.log(chalk.dim(`    ${dep}`));
+          }
+        }
+        console.log();
+        process.exit(report.healthScore >= 50 ? 0 : 1);
       }
-    }
 
-    if (report.circularDeps.length > 0) {
-      console.log(chalk.yellow(`\n  Circular dependencies: ${report.circularDeps.length}`));
-      for (const dep of report.circularDeps.slice(0, 5)) {
-        console.log(chalk.dim(`    ${dep}`));
+      // ── Provider health path ──
+      const { runHealthCheck, dryRunReportForProvider, PROVIDER_CAPABILITY_MATRIX } =
+        await import("./providers/health-check.js");
+      const { discoverProviders } = await import("./providers/discovery.js");
+      const { createProviderInfrastructure } = await import("./providers/registry.js");
+      const timeoutMs = Number.parseInt(options.timeoutMs ?? "10000", 10);
+
+      const validProviders = Object.keys(
+        PROVIDER_CAPABILITY_MATRIX,
+      ) as (keyof typeof PROVIDER_CAPABILITY_MATRIX)[];
+      const targetProvider = providerArg as (typeof validProviders)[number] | undefined;
+      if (targetProvider && !validProviders.includes(targetProvider)) {
+        console.error(chalk.red(`\nUnknown provider: ${targetProvider}`));
+        console.error(chalk.dim(`  Valid: ${validProviders.join(", ")}\n`));
+        process.exit(1);
       }
-    }
 
-    console.log();
-    process.exit(report.healthScore >= 50 ? 0 : 1);
-  });
+      type ProviderKey = (typeof validProviders)[number];
+      const providersToCheck: readonly ProviderKey[] = targetProvider
+        ? [targetProvider]
+        : validProviders;
+
+      // In non-dry-run mode, try to spin up real adapters for discovered
+      // providers so we can run live smoke tests. In dry-run mode, skip the
+      // network dance and go straight to the capability matrix.
+      const live = options.dryRun ? null : createProviderInfrastructure(await discoverProviders());
+
+      const reports: Awaited<ReturnType<typeof runHealthCheck>>[] = [];
+      for (const p of providersToCheck) {
+        const adapter = live?.adapters.get(p);
+        if (options.dryRun || !adapter) {
+          reports.push(dryRunReportForProvider(p));
+        } else {
+          // eslint-disable-next-line no-await-in-loop
+          const r = await runHealthCheck(p, adapter, {
+            skipToolCall: options.skipToolCall,
+            timeoutMs,
+          });
+          reports.push(r);
+        }
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(reports, null, 2));
+        return;
+      }
+
+      console.log(chalk.bold("\nWOTANN Provider Health\n"));
+      const statusIcon = (s: string): string =>
+        s === "ok"
+          ? chalk.green("✓")
+          : s === "degraded"
+            ? chalk.yellow("○")
+            : s === "skipped"
+              ? chalk.dim("·")
+              : chalk.red("✗");
+      for (const r of reports) {
+        const caps: string[] = [];
+        if (r.capabilities.streaming) caps.push("stream");
+        if (r.capabilities.toolCalls) caps.push("tools");
+        if (r.capabilities.vision) caps.push("vision");
+        if (r.capabilities.thinking) caps.push("think");
+        if (r.capabilities.cacheControl) caps.push("cache");
+        if (r.capabilities.computerUse) caps.push("cu");
+        console.log(
+          `  ${statusIcon(r.status)} ${chalk.bold(r.provider.padEnd(12))} ${r.status.padEnd(10)} ${r.durationMs}ms  ${chalk.dim(caps.join(","))}`,
+        );
+        for (const t of r.tests) {
+          const msg = t.error ? chalk.red(t.error) : chalk.dim(t.detail ?? "");
+          console.log(
+            `      ${statusIcon(t.status)} ${t.name.padEnd(14)} ${t.durationMs}ms  ${msg}`,
+          );
+        }
+      }
+      console.log();
+
+      // Exit code: 0 if every report is ok or skipped, 1 otherwise.
+      const failing = reports.some((r) => r.status === "fail" || r.status === "degraded");
+      process.exit(failing ? 1 : 0);
+    },
+  );
 
 // ── wotann route ────────────────────────────────────────────
 
