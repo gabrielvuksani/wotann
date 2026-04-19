@@ -37,6 +37,7 @@ import {
   type RunnerRuntime as TauBenchRunnerRuntime,
   type TauBenchDomain,
 } from "./benchmark-runners/tau-bench.js";
+import { majorityAnswer } from "../orchestration/council.js";
 
 // -- Types -------------------------------------------------------------------
 
@@ -432,6 +433,62 @@ export class BenchmarkHarness {
     } catch {
       // best-effort
     }
+    return run;
+  }
+
+  /**
+   * Run a text-only benchmark (accuracy / open-swe / terminal-bench
+   * placeholder suites) with self-consistency voting — collects N samples
+   * per test, picks the majority-vote answer via
+   * {@link majorityAnswer}, and scores against the expected string.
+   * Gate behind `BENCHMARK_VOTING=1` at the call-site. Typical numVotes = 5.
+   */
+  async runBenchmarkWithVoting(
+    type: BenchmarkType,
+    modelId: string,
+    runtime: { query(o: { prompt: string }): AsyncGenerator<{ type: string; content: string }> },
+    numVotes: number = 5,
+  ): Promise<BenchmarkRun> {
+    const tests = TEST_SUITES.get(type);
+    if (!tests) throw new Error(`Unknown benchmark type: ${type}`);
+    const startTime = Date.now();
+    const details: BenchmarkDetail[] = [];
+    let totalScore = 0;
+    let maxPossible = 0;
+    for (const test of tests) {
+      const responses: string[] = [];
+      for (let v = 0; v < Math.max(1, numVotes); v++) {
+        let acc = "";
+        try {
+          for await (const c of runtime.query({ prompt: test.prompt })) {
+            if (c.type === "text") acc += c.content;
+          }
+        } catch {
+          /* per-vote failure recorded as empty */
+        }
+        responses.push(acc);
+      }
+      const { answer, confidence } = majorityAnswer(responses);
+      const passed = answer.toLowerCase().includes(test.expected.toLowerCase());
+      const score = passed ? test.maxScore : 0;
+      details.push({ testId: test.id, passed, expected: test.expected, actual: answer, score });
+      totalScore += score;
+      maxPossible += test.maxScore;
+      void confidence; // surfaced via trajectory if callers want it
+    }
+    const percentile = maxPossible > 0 ? Math.round((totalScore / maxPossible) * 100) : 0;
+    const run: BenchmarkRun = {
+      id: randomUUID(),
+      type,
+      score: totalScore,
+      maxScore: maxPossible,
+      percentile,
+      details,
+      modelId,
+      timestamp: Date.now(),
+      durationMs: Date.now() - startTime,
+    };
+    this.persistRun(run);
     return run;
   }
 

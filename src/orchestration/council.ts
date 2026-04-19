@@ -528,3 +528,41 @@ export async function selfConsistencyVote(
     ...(winnerBucket ? {} : {}),
   };
 }
+
+/**
+ * Return the majority answer from a set of already-collected responses,
+ * without running new queries. Uses the same bucketing + tie-break rules
+ * as {@link selfConsistencyVote} (first-seen wins ties; error bucket is
+ * ignored unless every response errored). Useful when a caller already
+ * has N samples and just wants the consensus winner.
+ */
+export function majorityAnswer(
+  responses: readonly string[],
+  normalizeAnswer?: (r: string) => string,
+): { answer: string; confidence: number; agreement: number } {
+  if (responses.length === 0) return { answer: "", confidence: 0, agreement: 0 };
+  const normalize = normalizeAnswer ?? DEFAULT_NORMALIZE;
+  const counts = new Map<string, { count: number; firstIdx: number; sample: string }>();
+  for (let i = 0; i < responses.length; i++) {
+    const r = responses[i] ?? "";
+    const bucket = r.length > 0 ? normalize(r) : "__error__";
+    const entry = counts.get(bucket);
+    if (entry) entry.count += 1;
+    else counts.set(bucket, { count: 1, firstIdx: i, sample: r });
+  }
+  const nonError = [...counts.entries()].filter(([k]) => k !== "__error__");
+  const source = nonError.length > 0 ? nonError : [...counts.entries()];
+  const winner = source.reduce<[string, { count: number; firstIdx: number; sample: string }]>(
+    (best, cur) => {
+      if (cur[1].count > best[1].count) return cur;
+      if (cur[1].count === best[1].count && cur[1].firstIdx < best[1].firstIdx) return cur;
+      return best;
+    },
+    source[0]!,
+  );
+  return {
+    answer: winner[1].sample,
+    confidence: winner[1].count / responses.length,
+    agreement: winner[1].count,
+  };
+}
