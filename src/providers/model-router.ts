@@ -208,6 +208,22 @@ export class ModelRouter {
   }
 
   route(task: TaskDescriptor): RoutingDecision {
+    // Phase 13 Wave 3B: pass every route() decision through
+    // applyBudgetDowngrade before returning. When spend crosses policy
+    // thresholds (50/75/90% of budget) a cheaper-tier alternative is
+    // swapped in — but only if the user has explicitly registered that
+    // alternative. No registrations = pass-through unchanged.
+    const decision = this.routeInner(task);
+    return this.applyBudgetDowngrade(decision);
+  }
+
+  /**
+   * Internal routing — the original 5-tier logic untouched. Wrapped by
+   * `route()` so applyBudgetDowngrade fires on EVERY decision path
+   * (including the budget-exceeded fast-path which returns a free-tier
+   * candidate but still goes through the downgrader for consistency).
+   */
+  private routeInner(task: TaskDescriptor): RoutingDecision {
     // BUDGET ENFORCEMENT: if budget exceeded, force free providers only
     if (this.isBudgetExceeded()) {
       return this.findBestAvailable([
