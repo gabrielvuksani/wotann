@@ -7,6 +7,7 @@ import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } fr
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import type { HookHandler, HookPayload, HookResult } from "./engine.js";
+import { DoomLoopDetector } from "./doom-loop-detector.js";
 import { detectFrustration } from "../middleware/layers.js";
 
 // ── Secret Scanner (minimal) ────────────────────────────────
@@ -1205,6 +1206,76 @@ export const mcpAutoApproval: HookHandler = {
   },
 };
 
+// ── Smart Doom-Loop Detection (standard) — Jaccard-similarity variant ──
+
+/**
+ * Wave 3H: wrap the full {@link DoomLoopDetector} from
+ * `hooks/doom-loop-detector.ts` as a HookEngine handler. The simpler
+ * `createLoopDetector` above only catches exact repeats; this variant
+ * also detects near-identical calls (85%+ Jaccard trigram similarity)
+ * and repeating sequences like [A,B,C,A,B,C]. Runs on PreToolUse and
+ * returns `warn` when a loop is detected so the model can self-correct.
+ * Non-blocking by design — hard block escalates to the middleware
+ * pipeline's `createDoomLoopMiddleware`.
+ */
+export function createSmartDoomLoopDetector(): HookHandler {
+  const detector = new DoomLoopDetector(3);
+
+  return {
+    name: "SmartDoomLoopDetection",
+    event: "PreToolUse",
+    profile: "standard",
+    priority: 110,
+    handler(payload: HookPayload): HookResult {
+      if (!payload.toolName) return { action: "allow" };
+      const result = detector.record(payload.toolName, payload.toolInput ?? {});
+      if (result.detected) {
+        return {
+          action: "warn",
+          message:
+            detector.getReminder(result) ||
+            `Doom loop detected (${result.type}): ${payload.toolName} x${result.count}.`,
+        };
+      }
+      return { action: "allow" };
+    },
+  };
+}
+
+// ── Dangling Tool-Call Detection (standard) ──────────────────
+
+/**
+ * Wave 3H: hook-engine companion to the middleware pipeline's
+ * `DanglingToolCallMiddleware`. Runs on PreCompact — surfaces a
+ * warning when the current session's recent history still has any
+ * assistant tool_use without a matching tool_result, so callers can
+ * patch the history before compaction drops the context. Middleware
+ * does the actual splicing; this hook is the visibility signal.
+ *
+ * Detection is content-based: looks for a tool_use marker in payload
+ * content that is not followed by a tool_result marker. Cheap
+ * heuristic — precise patching is the middleware's job.
+ */
+export const danglingToolCallHook: HookHandler = {
+  name: "DanglingToolCallGuard",
+  event: "PreCompact",
+  profile: "standard",
+  handler(payload: HookPayload): HookResult {
+    const content = payload.content ?? "";
+    const toolUseCount = (content.match(/<tool_use\b/gi) ?? []).length;
+    const toolResultCount = (content.match(/<tool_result\b/gi) ?? []).length;
+    if (toolUseCount > toolResultCount) {
+      return {
+        action: "warn",
+        message:
+          `Dangling tool_use detected (${toolUseCount} use / ${toolResultCount} result). ` +
+          "Middleware pipeline will patch with placeholder tool_result before next turn.",
+      };
+    }
+    return { action: "allow" };
+  },
+};
+
 // ── Register All Built-in Hooks ─────────────────────────────
 
 import { HookEngine } from "./engine.js";
@@ -1223,6 +1294,8 @@ export function registerBuiltinHooks(
   engine.register(createCostLimiter(50));
   engine.register(createPreToolCostLimiter());
   engine.register(createLoopDetector());
+  engine.register(createSmartDoomLoopDetector());
+  engine.register(danglingToolCallHook);
   engine.register(frustrationDetector);
   engine.register(configProtection);
   engine.register(preCompactFlush);
