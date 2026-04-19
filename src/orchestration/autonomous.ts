@@ -871,6 +871,27 @@ export class AutonomousExecutor {
       // ── Verify ──
       const verification = await verifier();
 
+      // ── Phase-13: adversarial test probe ──
+      // Runs cheap-model edge-case tests against the current artifact
+      // and surfaces findings via the callback so the caller can feed
+      // them back into the next prompt as agent-visible feedback.
+      if (process.env["WOTANN_ADV_TESTS"] === "1" && callbacks?.getAdversarialContext) {
+        try {
+          const pkg = await callbacks.getAdversarialContext();
+          if (pkg) {
+            const advResult = await runAdversarialTests(pkg.context, {
+              workDir: pkg.workDir,
+              testFilePath: pkg.testFilePath,
+              testCommand: pkg.testCommand,
+              generator: pkg.generator,
+            });
+            callbacks.onAdversarialFindings?.(advResult);
+          }
+        } catch (err) {
+          console.warn(`[autonomous] adversarial-test-gen failed: ${(err as Error).message}`);
+        }
+      }
+
       // ── Record iteration with oracle policy (D13) ──
       // Track verification state + recent error so shouldEscalate() next
       // cycle has enough trajectory data to make an informed decision.
