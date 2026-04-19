@@ -470,6 +470,34 @@ export class AutonomousExecutor {
        * contract: no silent no-op, the caller always hears back.
        */
       onCrystallize?: (result: CrystallizationHookResult) => void;
+      /**
+       * Phase-13 wires. Each is opt-in via env var so default runs
+       * remain lightweight. Honest: all catch failure and warn rather
+       * than silently swallowing.
+       */
+      getPatchForScoring?: () => Promise<{
+        readonly patch: PatchDescriptor;
+        readonly workDir: string;
+        readonly threshold?: number;
+      } | null>;
+      onPatchScore?: (score: PatchScore, retryRequested: boolean) => void;
+      getAdversarialContext?: () => Promise<{
+        readonly context: AdversarialContext;
+        readonly workDir: string;
+        readonly testFilePath: string;
+        readonly testCommand: readonly string[];
+        readonly generator: AdversarialTestGenerator;
+      } | null>;
+      onAdversarialFindings?: (result: AdversarialRunResult) => void;
+      getMultiPatchCandidates?: () => Promise<{
+        readonly patches: readonly PatchDescriptor[];
+        readonly workDir: string;
+        readonly votingOptions?: VotingOptions;
+      } | null>;
+      onMultiPatchVote?: (result: VoteResult) => void;
+      saveCheckpointPath?: string;
+      trajectoryPath?: string;
+      resumeCheckpoint?: AutopilotCheckpoint;
     },
   ): Promise<AutonomousResult> {
     this.enterMode(task);
@@ -487,6 +515,16 @@ export class AutonomousExecutor {
       ? selectIntelligentFirstStrategy(task)
       : "direct";
     const filesChanged: string[] = [];
+
+    // ── Phase-13: Trajectory recorder + checkpoint-resume ──
+    // Instantiated once per run; append frames on every prompt/response.
+    // Saved to `callbacks.trajectoryPath` on complete for record+replay.
+    const trajectory = new TrajectoryRecorder(`auto-${Date.now()}`);
+    trajectory.record("prompt" as FrameKind, task.slice(0, 400), { kind: "task" });
+    if (callbacks?.resumeCheckpoint) {
+      const cp = callbacks.resumeCheckpoint;
+      trajectory.record("meta" as FrameKind, `resume from iteration ${cp.iteration}`);
+    }
 
     // ── Oracle/Worker policy (D13) ──
     // Default to cheap-model throughput with optional oracle escalation on
