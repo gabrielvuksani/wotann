@@ -22,17 +22,25 @@ import { ContextPanel } from "./ContextPanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { DiffPanel } from "./DiffPanel";
 import { ChatView } from "../chat/ChatView";
-import { SettingsView } from "../settings/SettingsView";
-import { MemoryInspector } from "../memory/MemoryInspector";
-import { CostDashboard } from "../health/CostDashboard";
-import { CommandPalette } from "../palette/CommandPalette";
 import { DisconnectedBanner } from "../shared/ErrorState";
-import { OnboardingView } from "../onboarding/OnboardingView";
 import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { QuickActionsOverlay } from "../palette/QuickActionsOverlay";
-import { MeetPanel } from "../meet/MeetPanel";
 
-/* Lazy-loaded heavy views (code-split for faster initial load) */
+/* Lazy-loaded heavy views (code-split for faster initial load).
+ *
+ * Wave-4D: SettingsView/MemoryInspector/CostDashboard/CommandPalette/
+ * OnboardingView/MeetPanel were previously eager imports — they're
+ * conditionally rendered but their modules (and every dep they pull,
+ * e.g. qrcode.react via SettingsView, the full OnboardingView wizard)
+ * landed in the entry chunk. Making them lazy drops them into their
+ * own chunks, which is the main lever for getting index.js under the
+ * 500 kB budget. */
+const SettingsView = lazy(() => import("../settings/SettingsView").then((m) => ({ default: m.SettingsView })));
+const MemoryInspector = lazy(() => import("../memory/MemoryInspector").then((m) => ({ default: m.MemoryInspector })));
+const CostDashboard = lazy(() => import("../health/CostDashboard").then((m) => ({ default: m.CostDashboard })));
+const CommandPalette = lazy(() => import("../palette/CommandPalette").then((m) => ({ default: m.CommandPalette })));
+const OnboardingView = lazy(() => import("../onboarding/OnboardingView").then((m) => ({ default: m.OnboardingView })));
+const MeetPanel = lazy(() => import("../meet/MeetPanel").then((m) => ({ default: m.MeetPanel })));
 const EditorPanel = lazy(() => import("../editor/EditorPanel").then((m) => ({ default: m.EditorPanel })));
 const ArenaView = lazy(() => import("../arena/ArenaView").then((m) => ({ default: m.ArenaView })));
 const ExploitView = lazy(() => import("../exploit/ExploitView").then((m) => ({ default: m.ExploitView })));
@@ -145,11 +153,11 @@ function WorkspaceContent({ view }: { readonly view: string }) {
     case "compare":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><ArenaView /></Suspense></ErrorBoundary>;
     case "settings":
-      return <ErrorBoundary><SettingsView /></ErrorBoundary>;
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><SettingsView /></Suspense></ErrorBoundary>;
     case "memory":
-      return <ErrorBoundary><MemoryInspector /></ErrorBoundary>;
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><MemoryInspector /></Suspense></ErrorBoundary>;
     case "cost":
-      return <ErrorBoundary><CostDashboard /></ErrorBoundary>;
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><CostDashboard /></Suspense></ErrorBoundary>;
     case "intelligence":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><IntelligenceDashboard /></Suspense></ErrorBoundary>;
     case "canvas":
@@ -217,7 +225,11 @@ export function AppShell() {
 
   // Show onboarding on first launch
   if (!onboardingComplete) {
-    return <OnboardingView />;
+    return (
+      <Suspense fallback={<ViewSkeleton />}>
+        <OnboardingView />
+      </Suspense>
+    );
   }
 
   // `data-space` drives dynamic glass tinting (liquid-glass.css). The
@@ -380,7 +392,9 @@ export function AppShell() {
 
             {/* Meet panel — slides in when meet mode is active */}
             {isMeetActive && (
-              <MeetPanel onClose={() => setLayoutMode("chat")} />
+              <Suspense fallback={<ViewSkeleton />}>
+                <MeetPanel onClose={() => setLayoutMode("chat")} />
+              </Suspense>
             )}
 
             {/* Context panel */}
@@ -410,7 +424,9 @@ export function AppShell() {
         {/* Command palette overlay */}
         {commandPaletteOpen && (
           <div role="dialog" aria-modal="true" aria-label="Command palette">
-            <CommandPalette onClose={toggleCommandPalette} />
+            <Suspense fallback={<ViewSkeleton />}>
+              <CommandPalette onClose={toggleCommandPalette} />
+            </Suspense>
           </div>
         )}
 
