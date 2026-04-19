@@ -2564,9 +2564,33 @@ export class KairosRPCHandler {
       }
     });
 
-    // Cron jobs list
+    // Cron jobs list — surface every cron-triggered automation so callers
+    // (`wotann schedule list`, TUI schedule panel, iOS bridge) see the
+    // actual state, not a stub. Wave 3H: replaces the {jobs:[]} no-op
+    // with AutomationEngine-backed enumeration. Persistence rides the
+    // existing JSON store at ~/.wotann/automations.json so daemon
+    // restarts rehydrate the jobs before the tick loop wires them up.
     this.handlers.set("cron.list", async () => {
-      return { jobs: [] };
+      if (!this.daemon) return { jobs: [] };
+      try {
+        const automations = this.daemon.getAutomationEngine().listAutomations();
+        const jobs = automations
+          .filter((a) => a.trigger.type === "cron")
+          .map((a) => ({
+            id: a.id,
+            name: a.name,
+            schedule: a.trigger.type === "cron" ? a.trigger.schedule : "",
+            enabled: a.enabled,
+            lastRunAt: a.lastRunAt,
+            runCount: a.runCount,
+          }));
+        return { jobs };
+      } catch (err) {
+        return {
+          jobs: [],
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     });
 
     // ── Automation Engine (via daemon's AutomationEngine) ──
