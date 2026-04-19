@@ -16,7 +16,7 @@ import { RateLimitManager } from "../providers/rate-limiter.js";
 import { buildFallbackChain, resolveNextProvider } from "../providers/fallback-chain.js";
 import { augmentQuery, parseToolCallsFromText } from "../providers/capability-augmenter.js";
 import { AccountPool } from "../providers/account-pool.js";
-import { SemanticCache } from "../memory/semantic-cache.js";
+import { SemanticCache, bigramEmbedding } from "../memory/semantic-cache.js";
 import { estimatePromptTokens, estimateCost } from "../telemetry/token-estimator.js";
 
 export interface AgentBridgeConfig {
@@ -426,31 +426,6 @@ export class AgentBridge {
   getAdapter(provider: ProviderName): ProviderAdapter | null {
     return this.adapters.get(provider) ?? null;
   }
-}
-
-/**
- * Phase 13 Wave-3C — lightweight surrogate embedding for semantic cache
- * dedup. 128-dim vector derived from char-bigram hashes. Not a real
- * semantic embedding, but good enough to detect near-duplicate prompts
- * for cache hits without requiring an ML dependency. Deterministic;
- * same input → same vector.
- */
-function bigramEmbedding(text: string, dim: number = 128): readonly number[] {
-  const vec = new Float32Array(dim);
-  const normalized = text.toLowerCase();
-  for (let i = 0; i < normalized.length - 1; i++) {
-    const bg = normalized.charCodeAt(i) * 256 + normalized.charCodeAt(i + 1);
-    const idx = Math.abs(bg) % dim;
-    vec[idx] = (vec[idx] ?? 0) + 1;
-  }
-  // L2 normalize so cosine similarity is well-defined.
-  let mag = 0;
-  for (const v of vec) mag += v * v;
-  mag = Math.sqrt(mag);
-  if (mag === 0) return Array.from(vec);
-  const out: number[] = new Array(dim);
-  for (let i = 0; i < dim; i++) out[i] = (vec[i] ?? 0) / mag;
-  return out;
 }
 
 function isRateLimitError(message: string): boolean {
