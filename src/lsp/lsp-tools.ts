@@ -331,3 +331,32 @@ function toPublicLocation(location: LSPLocation): Record<string, unknown> {
 // ── Convenience: tool-name list ───────────────────────
 
 export const LSP_TOOL_NAMES: readonly string[] = LSP_TOOLS.map((t) => t.name);
+
+// ── Serena-parity re-exports (Phase D LSP) ────────────
+//
+// The canonical 6-tool agent surface (`find_symbol`, `find_references`,
+// `rename_symbol`, `hover`, `definition`, `document_symbols`) is built
+// in `agent-tools.ts`. Re-export the factory + types here so existing
+// consumers that import from `lsp-tools` keep working, and so anyone
+// wiring the runtime tool registry has a single entry point.
+export { buildLspTools, AGENT_LSP_TOOL_NAMES } from "./agent-tools.js";
+export type {
+  AgentToolDefinition,
+  AgentToolParameterDefinition,
+  BuiltLspTools,
+  LspToolDeps,
+  LspToolHandler,
+  LspToolResult,
+  LspToolSuccess,
+  LspToolFailure,
+} from "./agent-tools.js";
+
+// Registry exports — the 10-server catalog + detection + lifecycle.
+export { LanguageServerRegistry, LSP_SERVER_CATALOG, lspNotInstalled } from "./server-registry.js";
+export type {
+  LspLanguage,
+  LspServerConfig,
+  LspNotInstalledError,
+  LanguageServerRegistryOptions,
+  WhichChecker,
+} from "./server-registry.js";
