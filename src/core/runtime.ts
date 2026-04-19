@@ -1409,6 +1409,25 @@ export class WotannRuntime {
       this.progressiveLoader = null;
     }
 
+    // ── Phase-13: search-providers ──
+    // When `WOTANN_SEARCH_PROVIDER=brave|tavily` is set AND a
+    // matching API key is in env, build a Brave+Tavily fallback chain
+    // with an in-memory LRU cache. Used by deep-research + optional
+    // web_fetch routing. Honest null when no key configured.
+    try {
+      if (process.env["WOTANN_SEARCH_PROVIDER"]) {
+        this.searchProvider = createDefaultWebSearchProvider();
+        if (!this.searchProvider) {
+          console.warn(
+            `[WOTANN] search-providers: WOTANN_SEARCH_PROVIDER set but no BRAVE/TAVILY API key in env`,
+          );
+        }
+      }
+    } catch (err) {
+      console.warn(`[WOTANN] search-providers init failed: ${(err as Error).message}`);
+      this.searchProvider = null;
+    }
+
     // Discover providers
     const providers = await discoverProviders();
     if (providers.length > 0) {
@@ -1739,10 +1758,22 @@ export class WotannRuntime {
             const res = await this.webFetchTool.fetch(url);
             return res.markdown || res.content;
           },
-          // No dedicated search adapter yet — when a Gemini provider is
-          // active and `google_search` grounding is wired (roadmap v0.3),
-          // this is the hook point. For now we leave search optional so
-          // callers (iOS, desktop) can inject their own.
+          // ── Phase-13: search-providers adapter ──
+          // When `WOTANN_SEARCH_PROVIDER` is configured and a key is
+          // present, deep-research routes through Brave/Tavily with
+          // LRU caching. Falls back to no-op when unconfigured.
+          ...(this.searchProvider
+            ? {
+                search: async (q: string) => {
+                  try {
+                    return await this.searchProvider!.search(q, 5);
+                  } catch (err) {
+                    console.warn(`[WOTANN] search-provider failed: ${(err as Error).message}`);
+                    return [];
+                  }
+                },
+              }
+            : {}),
         });
         if (researchResult.citations.length > 0) {
           const researchContext = `\n\n[Deep Research Context]\n${researchResult.summary.slice(0, 2000)}`;
