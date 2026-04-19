@@ -145,7 +145,7 @@ export class ExperimentJournal {
 
 export class AutoresearchEngine {
   private readonly shadowGit: ShadowGit;
-  private readonly modificationGenerator: ModificationGenerator;
+  private modificationGenerator: ModificationGenerator;
   private readonly fileReader: FileReader;
   private readonly fileWriter: FileWriter;
   private status: ExperimentStatus = "pending";
@@ -162,6 +162,17 @@ export class AutoresearchEngine {
     this.modificationGenerator = modificationGenerator;
     this.fileReader = fileReader;
     this.fileWriter = fileWriter;
+  }
+
+  /**
+   * Swap the modification generator at runtime. The default constructor
+   * accepts a no-op generator so the engine can be wired into the runtime
+   * composition root before `runtime.query` is safely bindable; callers
+   * then install the real LLM-backed generator via this setter once the
+   * runtime is fully initialised.
+   */
+  setModificationGenerator(generator: ModificationGenerator): void {
+    this.modificationGenerator = generator;
   }
 
   getStatus(): ExperimentStatus {

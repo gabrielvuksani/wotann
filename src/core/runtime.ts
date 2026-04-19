@@ -135,6 +135,7 @@ import { VectorStore, HybridMemorySearch } from "../memory/vector-store.js";
 import { RulesOfEngagement } from "../security/rules-of-engagement.js";
 import { TrainingPipeline } from "../training/pipeline.js";
 import { AutoresearchEngine } from "../training/autoresearch.js";
+import { createLlmModificationGenerator } from "../training/llm-modification-generator.js";
 import { TaskDelegationManager } from "../orchestration/task-delegation.js";
 
 // Phase E: Auto-features
@@ -931,7 +932,9 @@ export class WotannRuntime {
     // Autoresearch engine: autonomous code optimization loop
     this.autoresearchEngine = new AutoresearchEngine(
       config.workingDir,
-      async () => null, // Default no-op generator; callers provide real one via getAutoresearchEngine()
+      // Placeholder no-op generator; swapped for the real LLM-backed
+      // generator at the end of initialize() once runtime.query is bindable.
+      async () => null,
       async (path: string) => {
         const { readFile } = await import("node:fs/promises");
         return readFile(path, "utf-8");
@@ -1154,6 +1157,16 @@ export class WotannRuntime {
     if (sessionStartResult.contextPrefix) {
       this.pendingContextPrefix = sessionStartResult.contextPrefix;
     }
+
+    // Install the real LLM-backed modification generator now that the
+    // runtime is fully initialised (session + providers bound). Until
+    // this line the autoresearch engine was constructed with a no-op
+    // generator — needed to break the circular dependency between
+    // `this.query` and the engine instance. Doing the swap here unlocks
+    // Tier-4 self-evolution end-to-end. See src/training/llm-modification-generator.ts.
+    this.autoresearchEngine.setModificationGenerator(
+      createLlmModificationGenerator((opts) => this.query(opts)),
+    );
   }
 
   /** Pending context to prepend to the next query()'s user prompt. */
