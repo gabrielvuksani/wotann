@@ -16,6 +16,12 @@ import {
   type MemoryRelationship,
   type RelationshipClassifier,
 } from "./relationship-types.js";
+import {
+  EntitySchema,
+  extractEntities as extractEntitiesViaLlm,
+  type Entity,
+  type ExtractionOptions,
+} from "./entity-types.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -316,6 +322,28 @@ export class ObservationExtractor {
    * fabricated edges. Pairs from different domains are skipped to
    * avoid cross-domain noise.
    */
+  /**
+   * Phase 13 Wave-3C — Zod-validated typed entity extraction. Wraps
+   * entity-types' LLM-backed extractor and re-validates each returned
+   * entity against EntitySchema before handing it back to the caller.
+   * Re-validation catches any drift between the prompt's structural
+   * contract and what the LLM actually returned. Entities that fail
+   * validation are silently dropped (the extractor already swallows
+   * LLM-parse failures — this step only tightens post-parse rigor).
+   */
+  async extractTypedEntities(
+    observation: string,
+    options: ExtractionOptions,
+  ): Promise<readonly Entity[]> {
+    const raw = await extractEntitiesViaLlm(observation, options);
+    const validated: Entity[] = [];
+    for (const candidate of raw) {
+      const parsed = EntitySchema.safeParse(candidate);
+      if (parsed.success) validated.push(parsed.data);
+    }
+    return validated;
+  }
+
   async classifyRelationships(
     observations: readonly Observation[],
     now: number = Date.now(),
