@@ -379,6 +379,32 @@ export {
 // AutonomousExecutor (src/orchestration/autonomous.ts).
 export { PRArtifactGenerator, type PRTemplate } from "./autopilot/pr-artifacts.js";
 
+// ── Phase 14: DEAD-code resurrection — public API exposure ────
+// Makes previously-orphaned modules reachable to consumers without
+// requiring imports from src/. Each is fully implemented; wiring into
+// runtime/daemon tracked in docs/PHASE_14_PROGRESS.md.
+export {
+  crystallizeSuccess,
+  slugifyPrompt,
+  redactPrompt,
+  type CrystallizationInput,
+  type CrystallizationResult,
+} from "./skills/self-crystallization.js";
+export {
+  loadRequiredReading,
+  renderRequiredReadingBlock,
+  hasMandatoryFailures,
+  type ResolvedRequiredReading,
+  type RequiredReadingOptions,
+} from "./agents/required-reading.js";
+// Note: VisualDiffTheater is already exported earlier in this file —
+// not re-exporting here.
+export {
+  PerceptionAdapter,
+  type ModelCapabilities,
+  type PerceptionOutput,
+} from "./computer-use/perception-adapter.js";
+
 // ── Security (extended) ─────────────────────────────────
 export { SkillsGuard, type SkillScanResult } from "./security/skills-guard.js";
 export { HashAuditChain, type AuditEntry } from "./security/hash-audit-chain.js";
