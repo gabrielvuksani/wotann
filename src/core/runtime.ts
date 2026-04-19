@@ -3065,6 +3065,34 @@ export class WotannRuntime {
         };
       }
 
+      // ── Phase-13: Chain-of-Verification (CoVe) ──
+      // Opt-in via WOTANN_COVE=1. Runs the 4-step CoVe protocol on the
+      // current response using the same bridge. When revisionNeeded is
+      // true the revised answer is surfaced as a correction chunk.
+      // Honest: on any failure we warn and continue.
+      if (process.env["WOTANN_COVE"] === "1" && this.infra && fullContent.length > 0) {
+        try {
+          const judge: CoVeLlmQuery = async (p) => {
+            let out = "";
+            for await (const c of this.infra!.bridge.query({ prompt: p, model: responseModel })) {
+              if (c.type === "text") out += c.content;
+            }
+            return out;
+          };
+          const cove = await chainOfVerification(options.prompt, { llmQuery: judge });
+          if (cove.revisionNeeded) {
+            yield {
+              type: "text" as const,
+              content: `\n[CoVe] Revised answer after verification:\n${cove.finalAnswer.slice(0, 1000)}\n`,
+              provider: responseProvider,
+              model: responseModel,
+            };
+          }
+        } catch (err) {
+          console.warn(`[WOTANN] chain-of-verification failed: ${(err as Error).message}`);
+        }
+      }
+
       // ── Phase H: Guardian — LLM-as-judge auto-review ──
       // Opt-in via WOTANN_GUARDIAN=1 or config.enableGuardian. Cheap judge
       // via the same bridge we just used. No retry when `unknown`, never
