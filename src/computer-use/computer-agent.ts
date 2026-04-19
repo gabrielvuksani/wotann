@@ -4,7 +4,13 @@
  */
 
 import { PerceptionEngine } from "./perception-engine.js";
-import type { CUAction, APIRoute, CUGuardrails } from "./types.js";
+import {
+  PerceptionAdapter,
+  type ModelCapabilities,
+  type PerceptionOutput,
+} from "./perception-adapter.js";
+import type { CUAction, APIRoute, CUGuardrails, Perception } from "./types.js";
+import { routePerception } from "../runtime-hooks/dead-code-hooks.js";
 import {
   CamoufoxBrowser,
   isAvailable as isCamoufoxAvailable,
@@ -93,6 +99,7 @@ const DEFAULT_GUARDRAILS: CUGuardrails = {
 
 export class ComputerUseAgent {
   private readonly perception: PerceptionEngine;
+  private readonly perceptionAdapter: PerceptionAdapter;
   private readonly apiRoutes: readonly APIRoute[];
   private readonly guardrails: CUGuardrails;
   private actionCount: number = 0;
@@ -100,10 +107,12 @@ export class ComputerUseAgent {
 
   constructor(options?: {
     perception?: PerceptionEngine;
+    perceptionAdapter?: PerceptionAdapter;
     apiRoutes?: readonly APIRoute[];
     guardrails?: Partial<CUGuardrails>;
   }) {
     this.perception = options?.perception ?? new PerceptionEngine();
+    this.perceptionAdapter = options?.perceptionAdapter ?? new PerceptionAdapter();
     this.apiRoutes = options?.apiRoutes ?? DEFAULT_API_ROUTES;
     this.guardrails = { ...DEFAULT_GUARDRAILS, ...options?.guardrails };
   }
@@ -149,6 +158,39 @@ export class ComputerUseAgent {
    */
   recordAction(): void {
     this.actionCount++;
+  }
+
+  /**
+   * Route a raw PerceptionEngine frame through the PerceptionAdapter
+   * before model dispatch so the active provider sees a tier-appropriate
+   * payload: raw screenshots for frontier vision, Set-of-Mark + index
+   * for small vision, accessibility-tree text for text-only models.
+   *
+   * Wave 3H wiring: previously `routePerception` (runtime-hooks) was
+   * defined but never invoked. This method delegates to it so CLI /
+   * daemon callers can swap from the hard-coded `perception.toText()`
+   * path to the adapter path by passing a modelId + capabilities.
+   *
+   * Honest behaviour: throws if the adapter throws. No silent fallback.
+   */
+  adaptPerceptionForModel(
+    rawPerception: Perception,
+    modelId: string,
+    capabilities: ModelCapabilities,
+    contextWindow?: number,
+  ): PerceptionOutput {
+    return routePerception({
+      rawPerception,
+      modelId,
+      capabilities,
+      adapter: this.perceptionAdapter,
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
+    });
+  }
+
+  /** Expose the adapter for callers that need to classify models directly. */
+  getPerceptionAdapter(): PerceptionAdapter {
+    return this.perceptionAdapter;
   }
 
   /**

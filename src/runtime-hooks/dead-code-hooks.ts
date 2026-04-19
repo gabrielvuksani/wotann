@@ -40,14 +40,13 @@
  *       dispatches. Items come from the agent YAML's `required_reading:`
  *       field — file paths resolved against the workspace root.
  *
- *   (c) routePerception — TO BE WIRED in src/core/runtime.ts by the
- *       Phase C final-sweep coordinator agent. runtime.ts is 4.8K
- *       LOC and under single-agent ownership for this phase; touching
- *       it here would collide with that agent's edits. The intended
- *       call-site is WotannRuntime's Desktop Control message pump,
- *       right after PerceptionEngine emits a raw frame and before the
- *       ComputerAgent sees it — the hook re-shapes the payload for the
- *       active provider's vision tier (frontier / small-vision / text).
+ *   (c) routePerception — WIRED. Called from
+ *       src/computer-use/computer-agent.ts via
+ *       ComputerUseAgent.adaptPerceptionForModel(). The CLI `wotann cu`
+ *       command and the daemon's Desktop Control path can now pass
+ *       modelId + capabilities and get a provider-tiered payload
+ *       (frontier-vision / small-vision / text-only) instead of being
+ *       pinned to the text-only toText() branch.
  */
 
 import type {
@@ -55,6 +54,7 @@ import type {
   PerceptionOutput,
   ModelCapabilities,
 } from "../computer-use/perception-adapter.js";
+import type { Perception } from "../computer-use/types.js";
 import {
   crystallizeSuccess,
   type CrystallizationInput,
@@ -69,10 +69,25 @@ import {
 
 // ── 1. Perception adapter hook ────────────────────────
 
+/**
+ * Input shape for {@link routePerception}. `rawPerception` is the
+ * PerceptionEngine's raw output (screenshot + a11y tree + elements).
+ * `modelId` + `capabilities` let the adapter classify the tier
+ * (frontier-vision / small-vision / text-only). `contextWindow` caps
+ * the element budget.
+ *
+ * Wave 3H fix: the prior `rawOutput: PerceptionOutput` shape was
+ * upside-down — PerceptionOutput is what `adapt()` returns, not what
+ * it consumes. Taking a `Perception` matches the actual adapter
+ * contract so callers no longer need untyped casts.
+ */
 export interface PerceptionHookInput {
-  readonly rawOutput: PerceptionOutput;
+  readonly rawPerception: Perception;
+  readonly modelId: string;
   readonly capabilities: ModelCapabilities;
   readonly adapter: PerceptionAdapter;
+  /** Target model's context window. Defaults to 200k if omitted. */
+  readonly contextWindow?: number;
 }
 
 /**
@@ -81,18 +96,12 @@ export interface PerceptionHookInput {
  * (raw pixels for frontier vision, Set-of-Mark for small vision,
  * accessibility-tree text for text-only).
  *
- * Returns whatever PerceptionAdapter.adapt() returns — typed as
- * unknown because each capability tier has a different output shape.
+ * Returns the adapter's {@link PerceptionOutput} which already carries
+ * the right shape for the classified tier.
  */
-export function routePerception(input: PerceptionHookInput): unknown {
-  // PerceptionAdapter's adapt() shape isn't pinned in the surface
-  // type, so we pass through as unknown and let the caller type-assert.
-  type AdaptMethod = (raw: PerceptionOutput, caps: ModelCapabilities) => unknown;
-  const method = (input.adapter as unknown as { adapt: AdaptMethod }).adapt;
-  if (typeof method !== "function") {
-    throw new Error("routePerception: PerceptionAdapter.adapt() not available");
-  }
-  return method.call(input.adapter, input.rawOutput, input.capabilities);
+export function routePerception(input: PerceptionHookInput): PerceptionOutput {
+  const tier = input.adapter.classifyModel(input.modelId, input.capabilities);
+  return input.adapter.adapt(input.rawPerception, tier, input.contextWindow ?? 200_000);
 }
 
 // ── 2. Crystallization hook ───────────────────────────
