@@ -203,6 +203,53 @@ export async function evaluateCompletion(
 }
 
 /**
+ * Evaluate completion against a set of PRE-COLLECTED evidence records.
+ *
+ * Unlike {@link evaluateCompletion}, this variant does NOT re-run tests,
+ * lint, typecheck, browser checks, or the LLM judge. It simply computes
+ * the weighted score from the evidence the caller already produced —
+ * cheap, synchronous-as-possible, and ideal for the hot-path
+ * `verifyCompletion` call in benchmark harnesses where tests ran once
+ * as part of the task execution and we just need the verdict.
+ *
+ * Missing evidence entries for a given criterion count as failures and
+ * are appended to the returned evidence list with `evidence: "no evidence"`
+ * so the caller can audit.
+ */
+export function evaluateCompletionFromEvidence(
+  criteria: readonly CompletionCriterion[],
+  preCollectedEvidence: readonly VerificationEvidence[],
+  threshold: number,
+): { completed: boolean; score: number; evidence: readonly VerificationEvidence[] } {
+  const evidence: VerificationEvidence[] = [];
+  let totalWeight = 0;
+  let passedWeight = 0;
+  for (const criterion of criteria) {
+    totalWeight += criterion.weight;
+    const match = preCollectedEvidence.find((e) => e.criterion.type === criterion.type);
+    const passed = match?.passed === true;
+    if (passed) passedWeight += criterion.weight;
+    evidence.push(
+      match ?? {
+        criterion,
+        passed: false,
+        evidence: "no evidence",
+        durationMs: 0,
+      },
+    );
+    if (criterion.required && !passed) {
+      return {
+        completed: false,
+        score: totalWeight > 0 ? passedWeight / totalWeight : 0,
+        evidence,
+      };
+    }
+  }
+  const score = totalWeight > 0 ? passedWeight / totalWeight : 1;
+  return { completed: score >= threshold, score, evidence };
+}
+
+/**
  * Get default completion criteria for common task types.
  */
 export function getDefaultCriteria(

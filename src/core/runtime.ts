@@ -161,7 +161,11 @@ import { RulesOfEngagement } from "../security/rules-of-engagement.js";
 import { TrainingPipeline } from "../training/pipeline.js";
 import { AutoresearchEngine } from "../training/autoresearch.js";
 import { createLlmModificationGenerator } from "../training/llm-modification-generator.js";
-import { evaluateCompletion, getDefaultCriteria } from "../autopilot/completion-oracle.js";
+import {
+  evaluateCompletion,
+  evaluateCompletionFromEvidence,
+  getDefaultCriteria,
+} from "../autopilot/completion-oracle.js";
 import type { CompletionCriterion, VerificationEvidence } from "../autopilot/types.js";
 import { TaskDelegationManager } from "../orchestration/task-delegation.js";
 
@@ -1301,6 +1305,29 @@ export class WotannRuntime {
    * assemble system prompt. Must be called before querying.
    */
   async initialize(): Promise<void> {
+    // Wave 3H: load identity before every other init step so downstream
+    // subsystems (plugins, prompt assembly, LSP) see the current persona
+    // roster. PersonaManager instantiation in the ctor already scans
+    // `.wotann/identity/personas/*.yaml` once; this second pass picks up
+    // personas that were dropped in after the runtime booted (common for
+    // `wotann init` runs that install defaults post-construct). Assembled
+    // system-prompt bootstrap files (CLAUDE.md / AGENTS.md / WOTANN.md /
+    // .wotann/rules/*.md) are read separately by assembleSystemPromptParts
+    // lower in initialize().
+    try {
+      // Re-scan the persona dir in case defaults landed after ctor.
+      // The manager's public API is immutable — we rebuild a sibling
+      // instance and swap in, preserving the ctor contract.
+      const refreshedPersonas = new PersonaManager(
+        join(this.config.workingDir, ".wotann", "identity"),
+      );
+      if (refreshedPersonas.getCount() > this.personaManager.getCount()) {
+        this.personaManager = refreshedPersonas;
+      }
+    } catch (err) {
+      console.warn(`[WOTANN] persona-manager refresh failed: ${(err as Error).message}`);
+    }
+
     const pluginManager = new PluginManager(join(this.config.workingDir, ".wotann", "plugins"));
     const plugins = await pluginManager.loadInstalled();
     for (const plugin of plugins) {
@@ -4406,6 +4433,14 @@ export class WotannRuntime {
       criteria?: readonly CompletionCriterion[];
       taskType?: "code" | "ui" | "docs" | "test";
       threshold?: number;
+      /**
+       * When supplied, verifyCompletion skips the expensive re-run path
+       * (tests, lint, typecheck) and delegates to
+       * `evaluateCompletionFromEvidence` which just scores the existing
+       * evidence. Use when the caller already ran the tests as part of
+       * task execution — avoids duplicate test runs.
+       */
+      preCollectedEvidence?: readonly VerificationEvidence[];
     } = {},
   ): Promise<{
     completed: boolean;
@@ -4414,6 +4449,11 @@ export class WotannRuntime {
   }> {
     const criteria = options.criteria ?? getDefaultCriteria(options.taskType ?? "code");
     const threshold = options.threshold ?? 0.75;
+
+    // Fast path: when the caller already has evidence, don't re-run tests.
+    if (options.preCollectedEvidence && options.preCollectedEvidence.length > 0) {
+      return evaluateCompletionFromEvidence(criteria, options.preCollectedEvidence, threshold);
+    }
 
     const llmJudge = async (
       judgeTask: string,
