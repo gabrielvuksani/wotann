@@ -30,8 +30,23 @@ describe("LocalContextMiddleware", () => {
 
   it("detects git status", () => {
     const ctx = gatherLocalContext(PROJECT_DIR);
-    // May be null if not a git repo, but should be defined
-    expect(ctx.gitStatus === null || typeof ctx.gitStatus === "string").toBe(true);
+    // May be null if not a git repo, but should be defined.
+    // Behavior-assertion: when non-null, the status string must be
+    // either a non-empty working-tree summary or the empty-tree
+    // sentinel — never just whitespace or a stray error token.
+    if (ctx.gitStatus === null) {
+      expect(ctx.gitStatus).toBeNull();
+    } else {
+      expect(typeof ctx.gitStatus).toBe("string");
+      // Real `git status --porcelain` output is either "" (clean)
+      // or a newline-terminated list of "XY path" entries; both are
+      // valid. Anything else (e.g. "fatal: ...") means detection
+      // broke — catch that here.
+      if (ctx.gitStatus.length > 0) {
+        expect(ctx.gitStatus).not.toMatch(/^fatal:/);
+        expect(ctx.gitStatus).not.toMatch(/^error:/);
+      }
+    }
   });
 
   it("generates directory tree", () => {

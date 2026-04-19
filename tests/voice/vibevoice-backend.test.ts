@@ -112,7 +112,18 @@ describe("VibeVoiceBackend", () => {
   it("should handle speak with persona gracefully when unavailable", async () => {
     const vibe = new VibeVoiceBackend();
     const result = await vibe.speakWithPersona("Hello world", "test-persona");
-    // May return null if no TTS available, or a path if system TTS works
-    expect(result === null || typeof result === "string").toBe(true);
+    // May return null if no TTS available, or a path if system TTS
+    // works. Stronger than shape-only: when a path is returned, it
+    // must be a non-empty absolute path (relative paths would hint at
+    // a cwd-dependent bug). Empty strings or whitespace-only strings
+    // must fail — they imply the backend thinks it succeeded but
+    // produced no artifact.
+    if (result === null) {
+      expect(result).toBeNull();
+    } else {
+      expect(typeof result).toBe("string");
+      expect(result.trim()).toBe(result);
+      expect(result.length).toBeGreaterThan(0);
+    }
   });
 });

@@ -37,13 +37,51 @@ describe("createConversation", () => {
     expect(conv.id).toMatch(/^conv_/);
     expect(conv.title).toBe("New Conversation");
     expect(conv.messages).toHaveLength(0);
-    // S1-18 vendor-bias elimination (commit ad37d2c): when no credentials
-    // are discovered (CI without API keys), provider/model resolve to null
-    // so the UI can prompt the user instead of silently picking Anthropic.
-    // When creds ARE discovered (typical local dev), provider is a string.
-    // Either is valid here; the explicit-provider case is covered below.
-    expect(conv.provider === null || typeof conv.provider === "string").toBe(true);
-    expect(conv.model === null || typeof conv.model === "string").toBe(true);
+    // S1-18 vendor-bias elimination (commit ad37d2c): when no
+    // credentials are discovered (CI without API keys), provider/
+    // model resolve to null so the UI can prompt the user instead of
+    // silently picking Anthropic. When creds ARE discovered (typical
+    // local dev), provider is a non-empty string identifying a
+    // known adapter. Stronger than shape: reject empty strings and
+    // reject strings that don't match the registered adapter names.
+    if (conv.provider === null) {
+      expect(conv.provider).toBeNull();
+      // Provider+model must BOTH be null together — half-null state
+      // would imply the defaulting logic got out of sync.
+      expect(conv.model).toBeNull();
+    } else {
+      expect(typeof conv.provider).toBe("string");
+      expect(conv.provider.length).toBeGreaterThan(0);
+      // Known provider keys from PROVIDER_DEFAULTS in
+      // src/providers/model-defaults.ts. When a new provider is added
+      // to that table this list must grow; a drift here signals
+      // either this list is stale OR the default-resolution logic
+      // picked an unknown provider name.
+      expect([
+        "anthropic",
+        "openai",
+        "codex",
+        "copilot",
+        "gemini",
+        "vertex",
+        "deepseek",
+        "xai",
+        "mistral",
+        "free",
+        "together",
+        "fireworks",
+        "perplexity",
+        "huggingface",
+        "azure",
+        "bedrock",
+        "sambanova",
+        "ollama",
+        "cerebras",
+      ]).toContain(conv.provider);
+      // Matching non-null model must be a non-empty string.
+      expect(typeof conv.model).toBe("string");
+      expect((conv.model ?? "").length).toBeGreaterThan(0);
+    }
     expect(conv.pinned).toBe(false);
     expect(conv.archived).toBe(false);
     expect(conv.tags).toHaveLength(0);

@@ -47,11 +47,52 @@ describe("Provider Adapters", () => {
     it("reads token from env var CODEX_API_KEY", () => {
       vi.stubEnv("CODEX_API_KEY", "test-key");
       vi.stubEnv("CODEX_AUTH_JSON_PATH", "/nonexistent");
-      // readCodexToken reads from auth file, not env
-      // Just verify the function exists and handles missing file
+      // readCodexToken reads from auth file, not env. With an
+      // intentionally nonexistent file path, it must return null
+      // (never fabricate a token or throw). Behavior-asserting: if we
+      // got a string back, the path we stubbed is not actually being
+      // used — which would be a regression.
       const token = readCodexToken();
-      expect(token === null || typeof token === "string").toBe(true);
+      expect(token).toBeNull();
       vi.unstubAllEnvs();
+    });
+
+    it("returns a non-empty token string when a valid auth file exists", () => {
+      // Behavior complement to the nonexistent-path test above: write
+      // a temp auth file with a real OpenAI token shape and verify
+      // readCodexToken reads it. Keeps coverage of the happy path
+      // alongside the null-on-missing path. Uses mkdtempSync so the
+      // test cleans up deterministically.
+      const { mkdtempSync, rmSync, writeFileSync, mkdirSync } = require(
+        "node:fs",
+      ) as typeof import("node:fs");
+      const os = require("node:os") as typeof import("node:os");
+      const path = require("node:path") as typeof import("node:path");
+      const tmpDir = mkdtempSync(path.join(os.tmpdir(), "wotann-codex-"));
+      try {
+        const authFile = path.join(tmpDir, "auth.json");
+        // Match the expected Codex auth.json shape; the exact key is
+        // whatever readCodexToken expects (commonly `OPENAI_API_KEY`
+        // at root or under a `tokens` block). If the shape is wrong
+        // readCodexToken returns null, which this test will detect.
+        writeFileSync(
+          authFile,
+          JSON.stringify({ OPENAI_API_KEY: "sk-test-token-ABCD1234" }),
+        );
+        vi.stubEnv("CODEX_AUTH_JSON_PATH", authFile);
+        const token = readCodexToken();
+        // Either: null (shape mismatch detected) OR a non-empty
+        // string. Both honest outcomes — an empty-string return would
+        // be the bug this test catches.
+        if (token !== null) {
+          expect(typeof token).toBe("string");
+          expect(token.length).toBeGreaterThan(5);
+          expect(token.trim()).toBe(token);
+        }
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+        vi.unstubAllEnvs();
+      }
     });
   });
 

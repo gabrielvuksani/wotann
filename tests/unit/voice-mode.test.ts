@@ -32,14 +32,32 @@ describe("Voice Mode", () => {
   it("detects TTS provider on macOS", async () => {
     const voice = new VoiceMode();
     const tts = await voice.detectTTSProvider();
-    // On macOS, `say` should be available; on CI/Linux, may be null
-    expect(typeof tts === "string" || tts === null).toBe(true);
+    // On macOS, `say` should be available; on CI/Linux, may be null.
+    // Stronger than shape-only: when non-null, the string MUST
+    // identify a real backend known to the TTS dispatcher — no empty
+    // strings or whitespace-only values allowed (would silently kill
+    // the speakTTS flow). Valid backends per voice-mode.ts:398-419.
+    if (tts !== null) {
+      expect(typeof tts).toBe("string");
+      expect(tts.trim().length).toBeGreaterThan(0);
+      expect(["openai-tts", "elevenlabs", "system", "piper"]).toContain(tts);
+    } else {
+      expect(tts).toBeNull();
+    }
   });
 
   it("detects STT provider", async () => {
     const voice = new VoiceMode();
     const stt = await voice.detectSTTProvider();
-    expect(typeof stt === "string" || stt === null).toBe(true);
+    // Same behavior-assertion: valid string identifying a known STT
+    // backend (voice-mode.ts:115-133) or explicit null.
+    if (stt !== null) {
+      expect(typeof stt).toBe("string");
+      expect(stt.trim().length).toBeGreaterThan(0);
+      expect(["openai-whisper-api", "whisper", "system", "deepgram"]).toContain(stt);
+    } else {
+      expect(stt).toBeNull();
+    }
   });
 
   it("reports capabilities", async () => {
