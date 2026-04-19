@@ -901,7 +901,16 @@ program
     }
 
     const state = await perception.perceive();
-    const screenText = agent.redactSensitive(perception.toText(state));
+    // Wave 3D wire-up: route the raw perception through PerceptionAdapter
+    // (via routePerception) before model dispatch. Falls back to the raw
+    // toText() path if the adapter throws so the CLI never breaks.
+    let screenText: string;
+    try {
+      const adapted = agent.adaptPerceptionForModel(state, "", {});
+      screenText = agent.redactSensitive(adapted.textDescription ?? perception.toText(state));
+    } catch {
+      screenText = agent.redactSensitive(perception.toText(state));
+    }
     const prompt = agent.generateTextMediatedPrompt(task, screenText);
     agent.recordAction();
 
