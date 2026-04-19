@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import type { DragEvent as ReactDragEvent, ChangeEvent as ReactChangeEvent } from "react";
+import type { DragEvent as ReactDragEvent, ChangeEvent as ReactChangeEvent, JSX as ReactJSX } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface ImportedComponentSummary {
@@ -92,7 +92,7 @@ async function callImportBundle(path: string): Promise<ImportSummary> {
   }
 }
 
-export function DesignHandoffImporter(): JSX.Element {
+export function DesignHandoffImporter(): ReactJSX.Element {
   const [state, setState] = useState<ImportState>(INITIAL_STATE);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
