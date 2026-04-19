@@ -1,13 +1,15 @@
 /**
- * Top header — Chat|Editor pills + Terminal/Diff toggle icons.
+ * Top header — Header renders 4 primary tabs: Chat / Editor / Workshop / Exploit.
  *
  * Layout:
- * [hamburger] [Chat|Editor] (spacer) [Terminal] [Diff] [Model] [Notif] [Settings] [Cmd+K]
+ * [hamburger] [Chat|Editor|Workshop|Exploit] (spacer) [Terminal] [Diff] [Model]
+ *             [Context] [Notif] [Settings] [Cmd+K]
  *
- * The 4-tab header (Chat|Editor|Workshop|Exploit) is eliminated.
- * Workshop is accessed via the Worker Pill in the sidebar.
- * Exploit is accessed via the command palette or settings.
- * Terminal + Diff are independent toggle icon buttons.
+ * The four primary view pills map to ⌘1–⌘4 keyboard shortcuts. Terminal
+ * and Diff are independent toggle icon buttons that work on top of any
+ * active view. Workshop + Exploit were previously hidden behind the
+ * sidebar Worker Pill / command palette; session-10 UX audit TD-3.1
+ * restored them as first-class top-level tabs.
  */
 
 import { useState } from "react";

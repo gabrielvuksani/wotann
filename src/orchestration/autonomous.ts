@@ -38,6 +38,10 @@ import {
   type OracleConsultation,
   type OracleResponse,
 } from "../autopilot/oracle-worker.js";
+import {
+  crystallizeSuccessHook,
+  type CrystallizationHookResult,
+} from "../runtime-hooks/dead-code-hooks.js";
 
 export interface AutonomousConfig {
   readonly maxCycles: number;
@@ -420,6 +424,29 @@ export class AutonomousExecutor {
         consultation: OracleConsultation,
         oracleModel: string,
       ) => Promise<OracleResponse>;
+      /**
+       * Crystallization input provider (Phase C wire-up).
+       *
+       * On success the executor calls crystallizeSuccessHook to turn the
+       * run into an auto-skill file. The executor knows cycle count +
+       * filesChanged but not the tool-call sequence or diff summary —
+       * callers supply those via this hook. Returning `null` disables
+       * crystallization for this run (e.g. dry-run, hostile prompt).
+       */
+      getCrystallizationContext?: () => Promise<{
+        readonly toolCalls: readonly string[];
+        readonly diffSummary: string;
+        readonly title?: string;
+        readonly score?: number;
+      } | null>;
+      /**
+       * Result notification from crystallizeSuccessHook. Called on EVERY
+       * success path — both when a skill was crystallized and when the
+       * run was ineligible. Callers can surface a `crystallize_skipped`
+       * UI event when `eligible: false`. This is the honest-stubs
+       * contract: no silent no-op, the caller always hears back.
+       */
+      onCrystallize?: (result: CrystallizationHookResult) => void;
     },
   ): Promise<AutonomousResult> {
     this.enterMode(task);
@@ -851,6 +878,42 @@ export class AutonomousExecutor {
             );
             continue;
           }
+        }
+
+        // ── Crystallize the successful run into an auto-skill (Phase C) ──
+        // Tier-4 self-evolution activates here: a task that passed all gates
+        // is converted into a SKILL.md the next similar prompt can consult.
+        // The caller supplies tool-call sequence + diff summary (which the
+        // executor doesn't track itself); eligibility thresholds are the
+        // wire-up defaults (minCycles=3, minFilesChanged=1, minScore=0.8).
+        // Never silent: `onCrystallize` is always called on success runs so
+        // a `crystallize_skipped` event can surface when ineligible.
+        try {
+          const ctx = callbacks?.getCrystallizationContext
+            ? await callbacks.getCrystallizationContext()
+            : null;
+          if (ctx) {
+            const crystallization = await crystallizeSuccessHook({
+              input: {
+                prompt: task,
+                toolCalls: ctx.toolCalls,
+                diffSummary: ctx.diffSummary,
+                ...(ctx.title !== undefined ? { title: ctx.title } : {}),
+                cyclesConsumed: cycles.length,
+                filesChanged: filesChanged.length,
+                ...(ctx.score !== undefined ? { score: ctx.score } : {}),
+              },
+              eligibility: { minCycles: 3, minFilesChanged: 1, minScore: 0.8 },
+            });
+            callbacks?.onCrystallize?.(crystallization);
+          }
+        } catch (err) {
+          // Crystallization failures must not regress a passing run —
+          // surface through the callback, never throw.
+          callbacks?.onCrystallize?.({
+            eligible: false,
+            reason: `crystallize_skipped: hook threw ${err instanceof Error ? err.message : String(err)}`,
+          });
         }
 
         this.exitMode();

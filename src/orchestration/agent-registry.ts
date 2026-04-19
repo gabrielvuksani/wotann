@@ -11,6 +11,9 @@
  *   - sonnet: Specialist on-demand (computer-use)
  */
 
+import { requiredReadingHook } from "../runtime-hooks/dead-code-hooks.js";
+import type { RequiredReadingItem } from "../agents/required-reading.js";
+
 export type AgentModel = "opus" | "sonnet" | "haiku" | "local";
 
 export type AgentTier = "planning" | "implementation" | "utility" | "specialist";
@@ -39,6 +42,13 @@ export interface AgentDefinition {
   readonly timeout: number;
   /** Optional provider/model override supplied via YAML agent spec. */
   readonly modelOverride?: AgentModelOverride;
+  /**
+   * Optional required_reading list (E13) loaded from the agent's YAML
+   * spec. When present, AgentRegistry.spawnWithContext() prepends the
+   * rendered block to the system prompt. Strings are mandatory file
+   * paths; objects carry `optional: true` flags for best-effort reads.
+   */
+  readonly requiredReading?: readonly RequiredReadingItem[];
 }
 
 export interface SpawnConfig {
@@ -54,6 +64,14 @@ export interface SpawnConfig {
   readonly task: string;
   /** Per-agent model override; present only when YAML specified one. */
   readonly modelOverride?: AgentModelOverride;
+  /**
+   * required_reading items carried through to the dispatcher (E13).
+   * AgentBridge/runtime uses these to re-resolve the block at dispatch
+   * time with workspace-specific options; the static prompt string in
+   * `systemPrompt` already has the block prepended for callers that
+   * don't want to re-resolve.
+   */
+  readonly requiredReading?: readonly RequiredReadingItem[];
 }
 
 // ── Agent Definitions ──────────────────────────────────────────
@@ -73,6 +91,7 @@ function defineAgent(partial: {
   readonly maxTurns?: number;
   readonly timeout?: number;
   readonly modelOverride?: AgentModelOverride;
+  readonly requiredReading?: readonly RequiredReadingItem[];
 }): AgentDefinition {
   return {
     id: partial.id,
@@ -85,6 +104,9 @@ function defineAgent(partial: {
     maxTurns: partial.maxTurns ?? DEFAULT_MAX_TURNS,
     timeout: partial.timeout ?? DEFAULT_TIMEOUT,
     ...(partial.modelOverride ? { modelOverride: partial.modelOverride } : {}),
+    ...(partial.requiredReading && partial.requiredReading.length > 0
+      ? { requiredReading: partial.requiredReading }
+      : {}),
   };
 }
 
@@ -333,6 +355,12 @@ export class AgentRegistry {
   /**
    * Produce a SpawnConfig for the AgentBridge to use when launching an agent.
    * Returns undefined if the agent ID is not registered.
+   *
+   * NOTE: this synchronous variant does NOT resolve `requiredReading` into
+   * the system prompt (that requires file IO). Callers that want the full
+   * prepended prompt must await {@link spawnWithContext}. The raw
+   * `requiredReading` list is still carried through on the SpawnConfig so
+   * a dispatcher that prefers late-binding can resolve it itself.
    */
   spawn(id: string, task: string): SpawnConfig | undefined {
     const agent = this.agents.get(id);
@@ -349,7 +377,59 @@ export class AgentRegistry {
       timeout: agent.timeout,
       task,
       ...(agent.modelOverride ? { modelOverride: agent.modelOverride } : {}),
+      ...(agent.requiredReading && agent.requiredReading.length > 0
+        ? { requiredReading: agent.requiredReading }
+        : {}),
     };
+  }
+
+  /**
+   * Async variant of {@link spawn} (Phase C wire-up). Resolves the
+   * agent's `required_reading` list into a prompt block via
+   * {@link requiredReadingHook} and returns a SpawnConfig whose
+   * `systemPrompt` already has the block prepended.
+   *
+   * Contract:
+   *   const prepend = await requiredReadingHook({items, options})
+   *   systemPrompt = prepend + "\n\n" + systemPrompt
+   *
+   * Missing workspaceRoot ⇒ skip resolution (the dispatcher can still
+   * read the raw `requiredReading` list off the returned config).
+   * Empty list ⇒ identical output to the sync spawn().
+   */
+  async spawnWithContext(
+    id: string,
+    task: string,
+    options?: {
+      readonly workspaceRoot?: string;
+      readonly defaultMaxCharsPerFile?: number;
+      readonly totalBudgetChars?: number;
+    },
+  ): Promise<SpawnConfig | undefined> {
+    const base = this.spawn(id, task);
+    if (!base) return undefined;
+
+    const items = base.requiredReading ?? [];
+    if (items.length === 0 || !options?.workspaceRoot) {
+      return base;
+    }
+
+    const prepend = await requiredReadingHook({
+      items,
+      options: {
+        workspaceRoot: options.workspaceRoot,
+        ...(options.defaultMaxCharsPerFile !== undefined
+          ? { defaultMaxCharsPerFile: options.defaultMaxCharsPerFile }
+          : {}),
+        ...(options.totalBudgetChars !== undefined
+          ? { totalBudgetChars: options.totalBudgetChars }
+          : {}),
+      },
+    });
+
+    if (!prepend) return base;
+
+    return { ...base, systemPrompt: prepend + "\n\n" + base.systemPrompt };
   }
 
   /** Check if an agent ID is registered. */
@@ -374,6 +454,25 @@ export class AgentRegistry {
     const nextList = [...this.agents.values()].map((a) => (a.id === id ? updated : a));
     return new AgentRegistry(nextList);
   }
+
+  /**
+   * Apply a per-agent `required_reading` list (E13 / Phase C). Same
+   * immutable-update pattern as {@link withModelOverride}: returns a new
+   * registry; the original is untouched. Empty list removes the field.
+   */
+  withRequiredReading(id: string, items: readonly RequiredReadingItem[]): AgentRegistry {
+    const existing = this.agents.get(id);
+    if (!existing) return this;
+    const updated: AgentDefinition =
+      items.length > 0
+        ? { ...existing, requiredReading: items }
+        : (() => {
+            const { requiredReading: _omit, ...rest } = existing;
+            return rest;
+          })();
+    const nextList = [...this.agents.values()].map((a) => (a.id === id ? updated : a));
+    return new AgentRegistry(nextList);
+  }
 }
 
 // ── YAML Override Loader ───────────────────────────────────────
@@ -394,12 +493,19 @@ export class AgentRegistry {
 interface ParsedAgentSpec {
   readonly name: string;
   readonly model?: AgentModelOverride;
+  readonly requiredReading?: readonly RequiredReadingItem[];
 }
 
 /**
- * Parse an agent-spec YAML string. Only supports the structure documented
- * above (flat `name` key + nested `model.*` keys). Returns null on shapes
- * that do not match so callers can skip malformed specs gracefully.
+ * Parse an agent-spec YAML string. Supports:
+ *   - flat `name: <string>` key
+ *   - nested `model.*` block (provider, name, thinkingTokens)
+ *   - `required_reading:` list (E13 / Phase C). Entries may be bare
+ *     strings or inline-flow objects like
+ *     `{path: docs/foo.md, optional: true}`.
+ *
+ * Returns null on shapes that do not match so callers can skip malformed
+ * specs gracefully.
  */
 export function parseAgentSpecYaml(source: string): ParsedAgentSpec | null {
   const lines = source.split(/\r?\n/);
@@ -408,6 +514,8 @@ export function parseAgentSpecYaml(source: string): ParsedAgentSpec | null {
   let modelName: string | undefined;
   let thinkingTokens: number | undefined;
   let inModelBlock = false;
+  let inRequiredReadingBlock = false;
+  const requiredReading: RequiredReadingItem[] = [];
 
   for (const rawLine of lines) {
     // Strip comments first, but preserve strings — specs never need `#` mid-value.
@@ -417,6 +525,7 @@ export function parseAgentSpecYaml(source: string): ParsedAgentSpec | null {
     const indent = line.length - line.trimStart().length;
     if (indent === 0) {
       inModelBlock = false;
+      inRequiredReadingBlock = false;
       const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/);
       if (!match) continue;
       const key = match[1]!;
@@ -425,6 +534,8 @@ export function parseAgentSpecYaml(source: string): ParsedAgentSpec | null {
         name = stripQuotes(value);
       } else if (key === "model" && value === "") {
         inModelBlock = true;
+      } else if (key === "required_reading" && value === "") {
+        inRequiredReadingBlock = true;
       }
       continue;
     }
@@ -440,6 +551,16 @@ export function parseAgentSpecYaml(source: string): ParsedAgentSpec | null {
         const n = Number(value);
         if (Number.isFinite(n)) thinkingTokens = n;
       }
+      continue;
+    }
+
+    if (inRequiredReadingBlock) {
+      // List entries: `  - <path>` or `  - {path: x, optional: true}`
+      const listMatch = line.match(/^\s+-\s+(.*)$/);
+      if (!listMatch) continue;
+      const entry = listMatch[1]!.trim();
+      const parsed = parseRequiredReadingEntry(entry);
+      if (parsed !== null) requiredReading.push(parsed);
     }
   }
 
@@ -452,7 +573,91 @@ export function parseAgentSpecYaml(source: string): ParsedAgentSpec | null {
           ...(thinkingTokens !== undefined ? { thinkingTokens } : {}),
         }
       : undefined;
-  return { name, ...(model ? { model } : {}) };
+  return {
+    name,
+    ...(model ? { model } : {}),
+    ...(requiredReading.length > 0 ? { requiredReading } : {}),
+  };
+}
+
+/**
+ * Parse a single `required_reading:` list entry. Supports:
+ *   - `docs/foo.md` → mandatory string path
+ *   - `"docs/foo.md"` → quoted string path
+ *   - `{path: docs/foo.md, optional: true, maxChars: 2000, label: "Foo"}`
+ *     → inline-flow object
+ *
+ * Returns null for unparseable entries so one bad line doesn't drop the
+ * whole list.
+ */
+function parseRequiredReadingEntry(raw: string): RequiredReadingItem | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+
+  // Inline-flow object: {path: x, optional: true, ...}
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    const inner = trimmed.slice(1, -1).trim();
+    if (inner === "") return null;
+
+    let path: string | undefined;
+    let optional: boolean | undefined;
+    let maxChars: number | undefined;
+    let label: string | undefined;
+
+    for (const piece of splitFlowPairs(inner)) {
+      const colonAt = piece.indexOf(":");
+      if (colonAt === -1) continue;
+      const key = piece.slice(0, colonAt).trim();
+      const value = stripQuotes(piece.slice(colonAt + 1).trim());
+      if (key === "path") path = value;
+      else if (key === "optional") optional = value === "true";
+      else if (key === "maxChars") {
+        const n = Number(value);
+        if (Number.isFinite(n)) maxChars = n;
+      } else if (key === "label") label = value;
+    }
+
+    if (!path) return null;
+    return {
+      path,
+      ...(optional !== undefined ? { optional } : {}),
+      ...(maxChars !== undefined ? { maxChars } : {}),
+      ...(label !== undefined ? { label } : {}),
+    };
+  }
+
+  // Bare string entry — mandatory path.
+  return stripQuotes(trimmed);
+}
+
+/**
+ * Split an inline-flow payload on top-level commas only so that quoted
+ * commas inside values are preserved. Keeps the parser zero-dep.
+ */
+function splitFlowPairs(inner: string): string[] {
+  const out: string[] = [];
+  let buf = "";
+  let quote: '"' | "'" | null = null;
+  for (const ch of inner) {
+    if (quote) {
+      buf += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      buf += ch;
+      continue;
+    }
+    if (ch === ",") {
+      if (buf.trim() !== "") out.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf.trim() !== "") out.push(buf);
+  return out;
 }
 
 function stripQuotes(raw: string): string {
@@ -464,9 +669,9 @@ function stripQuotes(raw: string): string {
 
 /**
  * Load all `<id>.yaml` specs from a directory and fold their model
- * overrides into the given registry. Missing directory = no-op. Invalid
- * specs are logged and skipped so one bad file doesn't break the whole
- * load.
+ * overrides + required_reading into the given registry. Missing
+ * directory = no-op. Invalid specs are logged and skipped so one bad
+ * file doesn't break the whole load.
  */
 export async function loadAgentSpecsFromDir(
   registry: AgentRegistry,
@@ -493,9 +698,14 @@ export async function loadAgentSpecsFromDir(
     try {
       const source = readFileSync(join(directory, entry), "utf-8");
       const parsed = parseAgentSpecYaml(source);
-      if (!parsed || !parsed.model) continue;
+      if (!parsed) continue;
       if (!next.has(parsed.name)) continue;
-      next = next.withModelOverride(parsed.name, parsed.model);
+      if (parsed.model) {
+        next = next.withModelOverride(parsed.name, parsed.model);
+      }
+      if (parsed.requiredReading && parsed.requiredReading.length > 0) {
+        next = next.withRequiredReading(parsed.name, parsed.requiredReading);
+      }
     } catch (err) {
       console.error(
         `[AgentRegistry] Failed to parse ${entry}:`,

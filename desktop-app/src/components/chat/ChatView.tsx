@@ -131,7 +131,7 @@ function WelcomeScreen() {
 
         {/* Description */}
         <p style={{ fontSize: 15, color: "var(--color-text-secondary)", lineHeight: 1.5, marginBottom: 24, maxWidth: 380, margin: "0 auto 24px" }}>
-          Multi-provider AI with autonomous agents, desktop control, and full tool use.
+          Multi-provider AI with full tool use, autonomous agents, and desktop control — all running locally on your machine.
         </p>
 
         {/* Quick actions — compact 2x3 grid */}
