@@ -17,6 +17,12 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
+import {
+  classifyProvider,
+  getUsageProfile,
+  type BillingModel,
+  type UsageProfile,
+} from "../providers/usage-intelligence.js";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -54,6 +60,33 @@ export interface ImportResult {
   readonly skillsImported: number;
   readonly settingsMerged: number;
   readonly warnings: readonly string[];
+}
+
+/**
+ * Per-provider usage hint derived at discovery time. Merges each
+ * detected provider's billing classification (from usage-intelligence)
+ * into a record the runtime consumes to enable maxPowerMode,
+ * showCostWarnings, and task routing defaults.
+ */
+export interface UsageDiscoveryHint {
+  readonly providerId: string;
+  readonly billingModel: BillingModel;
+  readonly profile: UsageProfile;
+  readonly source: "env-api-key" | "env-subscription" | "local-binary" | "free-tier";
+}
+
+/**
+ * Aggregate of per-provider hints for the current environment.
+ * Consumers use this to decide defaults for:
+ *   - maxPowerMode — always true when any subscription/local present
+ *   - showCostWarnings — true iff ANY pay-per-token API key is set
+ */
+export interface UsageDiscoveryResult {
+  readonly hints: readonly UsageDiscoveryHint[];
+  readonly maxPowerMode: boolean;
+  readonly showCostWarnings: boolean;
+  readonly hasSubscription: boolean;
+  readonly hasApiKey: boolean;
 }
 
 export type AgentTool =
@@ -134,10 +167,7 @@ export class ConfigDiscovery {
    * Scan home directory and project directory for agent tool configs.
    * Returns all discovered configurations across all known tools.
    */
-  discover(
-    homeDir: string,
-    projectDir: string,
-  ): DiscoveryResult {
+  discover(homeDir: string, projectDir: string): DiscoveryResult {
     const startTime = Date.now();
     const configs: DiscoveredConfig[] = [];
     const searchDirs = deduplicatePaths([homeDir, projectDir]);
@@ -225,12 +255,76 @@ export class ConfigDiscovery {
     };
   }
 
+  /**
+   * Inspect process environment variables to detect which providers
+   * the user has credentials or local binaries for, then classify each
+   * via `usage-intelligence`. Emits `{maxPowerMode: true}` when any
+   * subscription/local provider is present, and `{showCostWarnings: true}`
+   * when the user has configured a raw pay-per-token API key.
+   *
+   * No I/O beyond reading `env` — safe to call at startup and at
+   * every config-reload without cost.
+   */
+  discoverUsageProfile(env: NodeJS.ProcessEnv = process.env): UsageDiscoveryResult {
+    const hints: UsageDiscoveryHint[] = [];
+
+    const push = (providerId: string, source: UsageDiscoveryHint["source"]): void => {
+      const billing = classifyProvider(providerId);
+      const profile = getUsageProfile(providerId);
+      hints.push({ providerId, billingModel: billing, profile, source });
+    };
+
+    // Subscription / managed auth — via env hints or local tokens.
+    if (env["CLAUDE_CODE_SUBSCRIPTION"] || env["ANTHROPIC_SUBSCRIPTION_TOKEN"]) {
+      push("anthropic-subscription", "env-subscription");
+    }
+    if (env["OPENAI_SESSION_KEY"] || env["CODEX_SESSION"]) {
+      push("codex", "env-subscription");
+    }
+    if (env["GITHUB_COPILOT_TOKEN"] || env["COPILOT_SESSION"]) {
+      push("copilot", "env-subscription");
+    }
+
+    // Pay-per-token API keys.
+    if (env["ANTHROPIC_API_KEY"]) push("anthropic", "env-api-key");
+    if (env["OPENAI_API_KEY"]) push("openai", "env-api-key");
+    if (env["AZURE_OPENAI_API_KEY"]) push("azure", "env-api-key");
+    if (env["AWS_ACCESS_KEY_ID"] && env["AWS_SECRET_ACCESS_KEY"]) {
+      push("bedrock", "env-api-key");
+    }
+    if (env["GOOGLE_APPLICATION_CREDENTIALS"]) push("vertex", "env-api-key");
+
+    // Free tiers / local.
+    if (env["GEMINI_API_KEY"] || env["GOOGLE_API_KEY"]) push("gemini", "free-tier");
+    if (env["GROQ_API_KEY"] || env["CEREBRAS_API_KEY"] || env["OPENROUTER_API_KEY"]) {
+      push("free", "free-tier");
+    }
+    if (env["OLLAMA_HOST"] || env["OLLAMA_MODELS"]) {
+      push("ollama", "local-binary");
+    }
+
+    // Aggregate
+    const hasSubscription = hints.some((h) => h.billingModel === "subscription");
+    const hasLocal = hints.some((h) => h.billingModel === "local");
+    const hasFree = hints.some((h) => h.billingModel === "free");
+    const hasApiKey = hints.some((h) => h.billingModel === "api");
+    const maxPowerMode = hasSubscription || hasLocal || hasFree || hasApiKey;
+    // Cost warnings only when ALL-subscription isn't the case — if a
+    // user has a raw API key anywhere, warn before expensive ops.
+    const showCostWarnings = hasApiKey;
+
+    return {
+      hints,
+      maxPowerMode,
+      showCostWarnings,
+      hasSubscription,
+      hasApiKey,
+    };
+  }
+
   // ── Private Helpers ────────────────────────────────────────
 
-  private scanToolDirectory(
-    toolDef: ToolDefinition,
-    toolPath: string,
-  ): DiscoveredConfig | null {
+  private scanToolDirectory(toolDef: ToolDefinition, toolPath: string): DiscoveredConfig | null {
     const configFiles: string[] = [];
     const settings: Record<string, unknown> = {};
 
@@ -344,9 +438,7 @@ function deduplicatePaths(paths: readonly string[]): readonly string[] {
 /**
  * Extract settings that are safe to import (exclude secrets, tokens, API keys).
  */
-function extractSafeSettings(
-  settings: Record<string, unknown>,
-): Record<string, unknown> {
+function extractSafeSettings(settings: Record<string, unknown>): Record<string, unknown> {
   const secretPatterns = /key|token|secret|password|credential|auth/i;
   const safe: Record<string, unknown> = {};
 

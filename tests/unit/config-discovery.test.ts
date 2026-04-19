@@ -296,4 +296,87 @@ describe("ConfigDiscovery", () => {
       expect(result.warnings.some((w) => w.includes("not found"))).toBe(true);
     });
   });
+
+  describe("discoverUsageProfile", () => {
+    it("returns empty when no env vars are set", () => {
+      const discovery = new ConfigDiscovery();
+      const result = discovery.discoverUsageProfile({});
+      expect(result.hints).toHaveLength(0);
+      expect(result.maxPowerMode).toBe(false);
+      expect(result.showCostWarnings).toBe(false);
+      expect(result.hasSubscription).toBe(false);
+      expect(result.hasApiKey).toBe(false);
+    });
+
+    it("emits maxPowerMode=true when subscription is present", () => {
+      const discovery = new ConfigDiscovery();
+      const result = discovery.discoverUsageProfile({
+        CLAUDE_CODE_SUBSCRIPTION: "1",
+      });
+      expect(result.hasSubscription).toBe(true);
+      expect(result.maxPowerMode).toBe(true);
+      expect(result.showCostWarnings).toBe(false);
+      expect(result.hints[0]?.providerId).toBe("anthropic-subscription");
+      expect(result.hints[0]?.billingModel).toBe("subscription");
+    });
+
+    it("emits showCostWarnings=true when raw API key is set", () => {
+      const discovery = new ConfigDiscovery();
+      const result = discovery.discoverUsageProfile({
+        ANTHROPIC_API_KEY: "sk-ant-fake",
+      });
+      expect(result.hasApiKey).toBe(true);
+      expect(result.showCostWarnings).toBe(true);
+      expect(result.maxPowerMode).toBe(true);
+      expect(result.hints[0]?.providerId).toBe("anthropic");
+      expect(result.hints[0]?.billingModel).toBe("api");
+    });
+
+    it("identifies free-tier providers (gemini, groq)", () => {
+      const discovery = new ConfigDiscovery();
+      const result = discovery.discoverUsageProfile({
+        GEMINI_API_KEY: "g-fake",
+        GROQ_API_KEY: "gr-fake",
+      });
+      expect(result.maxPowerMode).toBe(true);
+      expect(result.showCostWarnings).toBe(false);
+      const ids = result.hints.map((h) => h.providerId);
+      expect(ids).toContain("gemini");
+      expect(ids).toContain("free");
+    });
+
+    it("identifies local Ollama via OLLAMA_HOST", () => {
+      const discovery = new ConfigDiscovery();
+      const result = discovery.discoverUsageProfile({
+        OLLAMA_HOST: "http://localhost:11434",
+      });
+      expect(result.maxPowerMode).toBe(true);
+      expect(result.showCostWarnings).toBe(false);
+      expect(result.hints[0]?.providerId).toBe("ollama");
+      expect(result.hints[0]?.source).toBe("local-binary");
+    });
+
+    it("mixes subscription + API key — maxPowerMode AND showCostWarnings both true", () => {
+      const discovery = new ConfigDiscovery();
+      const result = discovery.discoverUsageProfile({
+        CLAUDE_CODE_SUBSCRIPTION: "1",
+        OPENAI_API_KEY: "sk-openai-fake",
+      });
+      expect(result.hasSubscription).toBe(true);
+      expect(result.hasApiKey).toBe(true);
+      expect(result.maxPowerMode).toBe(true);
+      expect(result.showCostWarnings).toBe(true);
+    });
+
+    it("each hint carries its classified profile", () => {
+      const discovery = new ConfigDiscovery();
+      const result = discovery.discoverUsageProfile({
+        ANTHROPIC_API_KEY: "sk-ant-fake",
+      });
+      const hint = result.hints[0]!;
+      expect(hint.profile.billingModel).toBe("api");
+      expect(hint.profile.maxPowerMode).toBe(true);
+      expect(hint.profile.showCostWarnings).toBe(true);
+    });
+  });
 });
