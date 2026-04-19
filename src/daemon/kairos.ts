@@ -62,6 +62,11 @@ import { ContextPressureMonitor } from "./context-pressure.js";
 import { TerminalMonitor } from "./terminal-monitor.js";
 import { FileDependencyGraph } from "./file-dep-graph.js";
 import { discoverModels } from "../providers/dynamic-discovery.js";
+import {
+  optimizeSkillPrompt,
+  createLlmPromptMutator,
+  buildBasicEvaluator,
+} from "../skills/skill-optimizer.js";
 // S5-3: MCPMarketplace removed — hardcoded 5 entries + fake registry URL
 // (`registry.wotann.com` never existed). The real integration is
 // MCPRegistry in ../marketplace/registry.ts, which actually imports MCP
@@ -193,6 +198,7 @@ export class KairosDaemon {
   private ambientTickCounter = 0;
   private heartbeatTickCounter = 0;
   private lastDreamDate: string | null = null;
+  private lastSkillOptDate: string | null = null;
 
   // PWR cycle: discuss→plan→implement→review→uat→ship phase transitions
   private readonly pwrEngine = new PWREngine();
@@ -1420,6 +1426,11 @@ export class KairosDaemon {
       this.checkAndRunCodebaseHealth(now);
     }
 
+    // Skill prompt optimization — nightly, once per day (between 2AM-4AM)
+    if (this.runtime && now.getHours() >= 2 && now.getHours() < 4) {
+      this.checkAndRunSkillOptimization(now);
+    }
+
     // Living Spec divergence check — every 100th tick (~25 minutes at 15s intervals)
     this.specTickCounter++;
     if (this.specTickCounter % 100 === 0) {
@@ -1603,6 +1614,83 @@ export class KairosDaemon {
         type: "error",
         message: `Codebase health check failed: ${err instanceof Error ? err.message : String(err)}`,
       });
+    }
+  }
+
+  /**
+   * Nightly skill prompt optimization — wires `skills/skill-optimizer.ts`
+   * into the daemon. Picks the first N registered skills (no invocation
+   * tracking source yet — honest note; pending a dedicated usage meter)
+   * and logs a report. Full GEPA optimization is opt-in via
+   * `WOTANN_SKILL_OPT=gepa`; absent the flag the run is a dry-enumeration
+   * so the hook is live without spinning LLM calls every night.
+   */
+  private checkAndRunSkillOptimization(now: Date): void {
+    const today = now.toISOString().slice(0, 10);
+    if (this.lastSkillOptDate === today) return;
+    if (!this.runtime) return;
+    this.lastSkillOptDate = today;
+
+    try {
+      const registry = this.runtime.getSkillRegistry();
+      const summaries = registry.getSummaries().slice(0, 3);
+      const mode = process.env["WOTANN_SKILL_OPT"] === "gepa" ? "gepa" : "dry";
+      this.appendLog({
+        type: "heartbeat",
+        message: `Nightly skill-optimizer ${mode}: picked top ${summaries.length} skills (no invocation-count source yet)`,
+        data: { skills: summaries.map((s) => s.name), mode },
+      });
+      if (mode === "gepa") void this.runSkillOptimizationGepa(summaries.map((s) => s.name));
+    } catch (err) {
+      this.appendLog({
+        type: "error",
+        message: `Skill optimization failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  private async runSkillOptimizationGepa(skillNames: readonly string[]): Promise<void> {
+    if (!this.runtime) return;
+    const rt = this.runtime;
+    const llmQuery = async (prompt: string, opts: { maxTokens: number }): Promise<string> => {
+      let accum = "";
+      for await (const chunk of rt.query({ prompt, maxTokens: opts.maxTokens })) {
+        if (chunk.type === "text") accum += chunk.content;
+      }
+      return accum;
+    };
+    const mutate = createLlmPromptMutator(llmQuery);
+    const evaluate = buildBasicEvaluator(
+      {
+        query: async (p) => {
+          let out = "";
+          for await (const c of rt.query({ prompt: p })) if (c.type === "text") out += c.content;
+          return out;
+        },
+      },
+      [{ input: "ping", expectedContains: "pong" }],
+    );
+    for (const name of skillNames) {
+      const loaded = rt.getSkillRegistry().loadSkill(name);
+      if (!loaded) continue;
+      try {
+        const result = await optimizeSkillPrompt({
+          initialPrompt: loaded.content,
+          mutate,
+          evaluate,
+          maxGenerations: 2,
+          populationSize: 2,
+        });
+        this.appendLog({
+          type: "heartbeat",
+          message: `Skill-optimizer: ${name} improved=${result.improved} fitness ${result.baselineFitness.toFixed(2)} -> ${result.fitness.toFixed(2)}`,
+        });
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `Skill-optimizer failed for ${name}: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     }
   }
 
