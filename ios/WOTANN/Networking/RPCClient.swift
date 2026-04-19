@@ -80,6 +80,14 @@ final class RPCClient: ObservableObject {
     // MARK: Send
 
     func send(_ method: String, params: [String: RPCValue]? = nil) async throws -> RPCResponse {
+        // S4-14: refuse to dispatch if the device reports no usable network.
+        // Exempt the ping method so latency polling can still attempt a
+        // heartbeat if the OS is briefly uncertain about reachability (the
+        // websocket layer will itself time out if the path is truly down).
+        if method != "ping" {
+            try ConnectivityMonitor.shared.assertConnected(label: method)
+        }
+
         do {
             return try await sendOnce(method, params: params)
         } catch {

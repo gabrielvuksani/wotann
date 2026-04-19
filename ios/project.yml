@@ -135,6 +135,9 @@ targets:
         type: group
         buildPhase: sources
       - path: WOTANN/Networking/StreamHandler.swift
+      # S4-14: RPCClient consults ConnectivityMonitor before dispatching
+      # so the intents extension needs the same monitor.
+      - path: WOTANN/Services/ConnectivityMonitor.swift
     settings:
       base:
         SUPPORTED_PLATFORMS: "iphonesimulator iphoneos"
