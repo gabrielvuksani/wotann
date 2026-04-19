@@ -230,7 +230,9 @@ export class ComputerUseAgent {
    * Python package is installed. Falls back to standard Playwright/Chromium
    * otherwise. Checks guardrails before navigating.
    */
-  browseUrl(url: string): { page: PageResult; text: TextResult | null; stealth: boolean } {
+  async browseUrl(
+    url: string,
+  ): Promise<{ page: PageResult; text: TextResult | null; stealth: boolean }> {
     // Check guardrails
     if (this.isBlockedDomain(url)) {
       return {
@@ -254,7 +256,7 @@ export class ComputerUseAgent {
     const useStealth = isCamoufoxAvailable();
     const browser = new CamoufoxBrowser({ headless: true, humanize: useStealth });
 
-    const launched = browser.launch();
+    const launched = await browser.launch();
     if (!launched) {
       return {
         page: { url, title: "", success: false, error: "Failed to launch browser" },
@@ -263,14 +265,15 @@ export class ComputerUseAgent {
       };
     }
 
-    const page = browser.newPage(url);
-    let text: TextResult | null = null;
-    if (page.success) {
-      text = browser.getText();
+    try {
+      const page = await browser.newPage(url);
+      let text: TextResult | null = null;
+      if (page.success) {
+        text = await browser.getText();
+      }
+      return { page, text, stealth: useStealth };
+    } finally {
+      await browser.close();
     }
-
-    browser.close();
-
-    return { page, text, stealth: useStealth };
   }
 }

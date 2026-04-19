@@ -832,10 +832,10 @@ export async function fetchWebContent(
  * @param url - The URL to navigate to
  * @returns The page result with title and success status
  */
-export function launchStealthBrowser(url: string): PageResult {
+export async function launchStealthBrowser(url: string): Promise<PageResult> {
   const browser = new CamoufoxBrowser({ headless: true, humanize: true });
 
-  const launched = browser.launch();
+  const launched = await browser.launch();
   if (!launched) {
     return {
       url,
@@ -845,10 +845,10 @@ export function launchStealthBrowser(url: string): PageResult {
     };
   }
 
-  const result = browser.newPage(url);
-
-  // Close after navigation — each call is a one-shot subprocess
-  browser.close();
-
-  return result;
+  try {
+    return await browser.newPage(url);
+  } finally {
+    // Close the persistent driver subprocess now that this one-shot op is done.
+    await browser.close();
+  }
 }
