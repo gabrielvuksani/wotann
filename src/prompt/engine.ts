@@ -9,6 +9,8 @@ import { parse as parseYaml } from "yaml";
 import { ModelPromptFormatter } from "./model-formatter.js";
 import type { ModelFormatConfig, ToolDescriptor } from "./model-formatter.js";
 import { traceInstructions, type InstructionSource } from "./instruction-provenance.js";
+import { wrapWithThinkInCode, type ThinkInCodeOptions } from "./think-in-code.js";
+import { compileTemplate, type CompiledTemplate } from "./template-compiler.js";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -526,4 +528,59 @@ export function formatToolDescriptionsForModel(
  */
 export function getModelFormatConfig(modelId: string): ModelFormatConfig {
   return modelFormatter.getFormatConfig(modelId);
+}
+
+// ── Phase 13 Wave-3C — Think-in-code + template wrapping ──────
+
+/**
+ * Phase 13 Wave-3C — wrap an assembled system prompt with a think-in-code
+ * directive. Callers opt in for reasoning-heavy tasks (math, debugging,
+ * multi-step planning) where +2-5% task success justifies the extra
+ * reasoning tokens. Pure — returns a new string; no mutation.
+ */
+export function wrapPromptWithThinkInCode(
+  prompt: string,
+  options: ThinkInCodeOptions = {},
+): string {
+  return wrapWithThinkInCode(prompt, options);
+}
+
+// Module-level template registry so callers don't re-compile on every
+// render. Keyed by template name. Compilation is a one-shot cost; render
+// is pure and hot-path safe.
+const TEMPLATE_REGISTRY: Map<string, CompiledTemplate<Record<string, unknown>>> = new Map();
+
+/**
+ * Phase 13 Wave-3C — register a typed user-prompt template for later
+ * pattern-matched compilation. Prompts that match the template pattern
+ * can be rendered via renderUserTemplate(name, vars). Over-registering
+ * an existing name replaces the prior template. Returns the compiled
+ * template handle.
+ */
+export function registerUserTemplate<V extends Record<string, unknown>>(
+  name: string,
+  source: string,
+  options: { readonly strict?: boolean } = {},
+): CompiledTemplate<V> {
+  const compiled = compileTemplate<V>(source, options);
+  TEMPLATE_REGISTRY.set(name, compiled as CompiledTemplate<Record<string, unknown>>);
+  return compiled;
+}
+
+/**
+ * Render a previously-registered user template with the given variables.
+ * Returns null when the template name is unknown — honest miss rather
+ * than fabricated output.
+ */
+export function renderUserTemplate<V extends Record<string, unknown>>(
+  name: string,
+  vars: V,
+): string | null {
+  const compiled = TEMPLATE_REGISTRY.get(name) as CompiledTemplate<V> | undefined;
+  return compiled ? compiled.render(vars) : null;
+}
+
+/** Clear the template registry — primarily for test isolation. */
+export function clearUserTemplates(): void {
+  TEMPLATE_REGISTRY.clear();
 }
