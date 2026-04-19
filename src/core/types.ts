@@ -123,6 +123,13 @@ export interface WotannQueryOptions {
     readonly kvCacheType: string;
     readonly flashAttention: boolean;
   };
+  /**
+   * Phase-13 wire: task-class tag. When set to "tau-bench-retail" or
+   * "tau-bench-airline", the runtime prepends the built-in τ-bench
+   * policy document to the system prompt via policy-injector. Other
+   * strings are passed through unchanged (future task-type routing).
+   */
+  readonly taskClass?: "tau-bench-retail" | "tau-bench-airline" | string;
 }
 
 // ── Tool Types ──────────────────────────────────────────────
