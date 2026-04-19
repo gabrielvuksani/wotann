@@ -148,6 +148,7 @@
 		CF8CC29F03A7EE59B96038ED /* WOTANNWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91970939E16FE1FF8AF08D8C /* WOTANNWatchApp.swift */; };
 		D05531BF06FD020A4325BE87 /* AgentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 773471553AF410408E96A632 /* AgentRow.swift */; };
 		D37C0F031AE32EABC89CC558 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5EA8ED3C46E34C217DC9906 /* MarkdownView.swift */; };
+		D482B4D4DCDC0ED3A3EF2BDF /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80FEAB65125D51F4349D403B /* LiveActivityManager.swift */; };
 		D7B9EB89239758BBCF0F2C2A /* DispatchComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64652E5E2C9C5206F40AE7FF /* DispatchComposer.swift */; };
 		DA26FD22682FF3AF5EB51FF6 /* WOTANNApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C97237B85B61F2D27207DF /* WOTANNApp.swift */; };
 		DAF5C6C1AA00339232EB1692 /* WebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614A3CF377AB282F4EC259AA /* WebSocketClient.swift */; };
@@ -284,6 +285,7 @@
 		7CA913FB6F34E3EE31044AA2 /* CostWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostWidget.swift; sourceTree = "<group>"; };
 		7F0B5B7E2D8D66209D1CBA27 /* HeroAsk.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroAsk.swift; sourceTree = "<group>"; };
 		80CCBB631AFE4063CE846F87 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
+		80FEAB65125D51F4349D403B /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
 		81F687B73AF01D49E756D61A /* ConnectionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionManager.swift; sourceTree = "<group>"; };
 		838F52E129844764764DBF15 /* CostViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostViewModel.swift; sourceTree = "<group>"; };
 		858AA65551925BEBA0EA15AB /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
@@ -358,7 +360,7 @@
 		FC4279027D915B49348FAA83 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
 		FD4FCFB6760540EF97A7DA40 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FF2C467534932F2AF3DCB79A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		"TEMP_42C199A8-4003-4D4F-A80D-F761E27AA1FA" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+		"TEMP_1A14E0C5-A351-440A-9185-5643081295A7" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -484,6 +486,7 @@
 				E35578B937A1B6B65955180A /* Haptics.swift */,
 				8F6F9658FE45E7FE8311F9EB /* HapticService.swift */,
 				36E5C03AEA8B07FACAC501D6 /* HealthKitService.swift */,
+				80FEAB65125D51F4349D403B /* LiveActivityManager.swift */,
 				0B71A549F1B1CF80DA2FCC16 /* LocalSendService.swift */,
 				310AB0D5FB3641506FFCB027 /* NFCPairingService.swift */,
 				B2901E175D942A163F3E0637 /* NodeCapabilityService.swift */,
@@ -901,10 +904,10 @@
 			path = Dashboard;
 			sourceTree = "<group>";
 		};
-		"TEMP_C39C2A34-6E35-454A-82D4-07F1490F065F" /* ios */ = {
+		"TEMP_A4805C2E-7178-4112-A6CA-4C1CB7A517A6" /* ios */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_42C199A8-4003-4D4F-A80D-F761E27AA1FA" /* Local.xcconfig */,
+				"TEMP_1A14E0C5-A351-440A-9185-5643081295A7" /* Local.xcconfig */,
 			);
 			path = ios;
 			sourceTree = "<group>";
@@ -1181,6 +1184,7 @@
 				1DFA4133059A447B8F8FB65B /* HomeView.swift in Sources */,
 				ACE160DE9818A098FC0B25C0 /* IntelligenceDashboardView.swift in Sources */,
 				C6D37DF08E7E309327EBD44E /* KeychainManager.swift in Sources */,
+				D482B4D4DCDC0ED3A3EF2BDF /* LiveActivityManager.swift in Sources */,
 				C97535C1C7CBB9374DA8CF0D /* LiveAgentsStrip.swift in Sources */,
 				EBC08C53232FDF7C5AA0B5FB /* LoadingIndicator.swift in Sources */,
 				B038DB6D5D3F891F43BCE49F /* LocalSendService.swift in Sources */,
@@ -1373,7 +1377,7 @@
 		};
 		35715A6A8931B13D7362B776 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_42C199A8-4003-4D4F-A80D-F761E27AA1FA" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_1A14E0C5-A351-440A-9185-5643081295A7" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -1550,7 +1554,7 @@
 		};
 		E96B011291432A6F1F017F8B /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_42C199A8-4003-4D4F-A80D-F761E27AA1FA" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_1A14E0C5-A351-440A-9185-5643081295A7" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

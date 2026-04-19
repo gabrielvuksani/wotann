@@ -249,7 +249,7 @@ struct MorningBriefingView: View {
             let uptimeHours = rpcDouble(obj["uptimeHours"])
             let highlights = obj["highlights"]?.arrayValue?.compactMap(\.stringValue) ?? []
 
-            briefing = DailyBriefing(
+            let result = DailyBriefing(
                 ciStatus: CIStatus(passed: ciPassed, total: ciTotal),
                 prsMerged: prsMerged,
                 issuesAssigned: issuesAssigned,
@@ -258,10 +258,37 @@ struct MorningBriefingView: View {
                 uptimeHours: uptimeHours,
                 highlights: highlights
             )
+            briefing = result
+
+            // S5-11: surface the briefing on the Lock Screen so the user can
+            // glance at CI status without launching the app. One activity per
+            // day — keyed on `todayString` — so we don't flood the stack when
+            // the view re-mounts on tab switches.
+            presentBriefingLiveActivity(briefing: result)
         } catch {
             // Briefing unavailable -- silently hide the card
             briefing = nil
         }
+    }
+
+    /// Raise a Lock Screen / Dynamic Island presentation of the briefing
+    /// summary. Guarded on a once-per-day user-default flag so repeat mounts
+    /// (tab switches, scene re-foreground) do not repeatedly re-launch the
+    /// same activity.
+    private func presentBriefingLiveActivity(briefing: DailyBriefing) {
+        let key = "liveActivity.briefingPresented.\(todayString)"
+        if UserDefaults.standard.bool(forKey: key) { return }
+
+        let summary = "\(briefing.ciStatus.passed)/\(briefing.ciStatus.total) CI · "
+            + "\(briefing.prsMerged) PRs · "
+            + "\(briefing.agentsCompleted) agents"
+
+        LiveActivityManager.shared.startBriefing(
+            id: UUID(),
+            summary: summary,
+            cost: briefing.yesterdayCost
+        )
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     /// Extract an Int from an RPCValue that may be `.int` or `.double`.

@@ -2,10 +2,6 @@ import Foundation
 import Combine
 import os.log
 
-#if canImport(ActivityKit)
-import ActivityKit
-#endif
-
 // MARK: - ProviderInfo
 
 /// Describes a provider available on the desktop WOTANN instance.
@@ -44,10 +40,10 @@ final class AppState: ObservableObject {
     /// Observer for reconnect-triggered re-syncs.
     private var reconnectSubscription: AnyCancellable?
 
-    #if canImport(ActivityKit)
-    /// Tracks running Live Activities keyed by task ID.
-    private var liveActivities: [UUID: Activity<TaskProgressAttributes>] = [:]
-    #endif
+    // S5-11: Live Activities are managed by `LiveActivityManager.shared`.
+    // Keeping a thin reference on AppState avoids threading it through every
+    // call site while preserving the single source of truth in the manager.
+    private let liveActivities = LiveActivityManager.shared
 
     // MARK: - Debounce State (S4-22)
     //
@@ -212,14 +208,30 @@ final class AppState: ObservableObject {
             }
         }
 
-        #if canImport(ActivityKit)
-        // Update or end Live Activity based on agent state
+        // S5-11: Live Activity lifecycle mirrors agent status transitions.
+        // LiveActivityManager.shared is the owner; AppState just forwards
+        // state. Unknown ids are no-ops so dispatching from non-started
+        // paths is safe.
         if agent.status == .completed || agent.status == .failed || agent.status == .cancelled {
-            endTaskActivity(taskId: id)
+            liveActivities.end(
+                id: id,
+                outcome: LiveActivityOutcome(
+                    progress: agent.progress,
+                    status: agent.status.displayName,
+                    cost: agent.cost,
+                    elapsedSeconds: Int(agent.duration)
+                )
+            )
         } else {
-            updateTaskActivity(taskId: id, progress: agent.progress, status: agent.status.displayName)
+            liveActivities.updateTaskRun(
+                id: id,
+                title: agent.title,
+                progress: agent.progress,
+                status: agent.status.displayName,
+                cost: agent.cost,
+                elapsedSeconds: Int(agent.duration)
+            )
         }
-        #endif
     }
 
     func addAgent(_ agent: AgentTask) {
@@ -228,9 +240,14 @@ final class AppState: ObservableObject {
         agents = updated
         writeAgentStatusToSharedDefaults()
 
-        #if canImport(ActivityKit)
-        startTaskActivity(taskId: agent.id, taskName: agent.title)
-        #endif
+        // S5-11: surface the new task in Dynamic Island + Lock Screen so the
+        // user sees progress without returning to the app.
+        liveActivities.startTaskRun(
+            id: agent.id,
+            title: agent.title,
+            provider: agent.provider,
+            model: agent.model
+        )
     }
 
     // MARK: - Sync
@@ -337,76 +354,10 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - Live Activity
-
-    #if canImport(ActivityKit)
-
-    /// Start a Live Activity for a running task.
-    /// Shows progress in Dynamic Island and on the Lock Screen.
-    func startTaskActivity(taskId: UUID, taskName: String) {
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-
-        let attributes = TaskProgressAttributes(
-            taskId: taskId.uuidString,
-            provider: currentProvider,
-            model: currentModel
-        )
-        let initialState = TaskProgressAttributes.ContentState(
-            taskTitle: taskName,
-            progress: 0,
-            status: "Starting",
-            cost: 0,
-            elapsedSeconds: 0
-        )
-
-        do {
-            let activity = try Activity<TaskProgressAttributes>.request(
-                attributes: attributes,
-                content: .init(state: initialState, staleDate: nil),
-                pushType: nil
-            )
-            liveActivities[taskId] = activity
-        } catch {
-            // Activity request failed -- non-fatal.
-        }
-    }
-
-    /// Update a running Live Activity with new progress and status.
-    func updateTaskActivity(taskId: UUID, progress: Double, status: String) {
-        guard let activity = liveActivities[taskId] else { return }
-
-        let agent = agents.first { $0.id == taskId }
-        let updatedState = TaskProgressAttributes.ContentState(
-            taskTitle: agent?.title ?? "Task",
-            progress: progress,
-            status: status,
-            cost: agent?.cost ?? 0,
-            elapsedSeconds: Int(agent?.duration ?? 0)
-        )
-
-        Task {
-            await activity.update(.init(state: updatedState, staleDate: nil))
-        }
-    }
-
-    /// End a Live Activity for a completed or cancelled task.
-    func endTaskActivity(taskId: UUID) {
-        guard let activity = liveActivities.removeValue(forKey: taskId) else { return }
-
-        let agent = agents.first { $0.id == taskId }
-        let finalState = TaskProgressAttributes.ContentState(
-            taskTitle: agent?.title ?? "Task",
-            progress: agent?.progress ?? 1.0,
-            status: agent?.status.displayName ?? "Completed",
-            cost: agent?.cost ?? 0,
-            elapsedSeconds: Int(agent?.duration ?? 0)
-        )
-
-        Task {
-            await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .default)
-        }
-    }
-
-    #endif
+    //
+    // S5-11: the concrete `Activity<TaskProgressAttributes>` surface lives in
+    // `LiveActivityManager`. The forwarding paths in `updateAgent` / `addAgent`
+    // are the only integration points on AppState.
 
     // MARK: - Widget Shared Defaults
 
