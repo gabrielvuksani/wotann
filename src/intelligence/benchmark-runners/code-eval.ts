@@ -58,6 +58,8 @@ export interface CodeEvalTaskResult {
   readonly samplesTried: number;
   /** Number of samples that passed verification. */
   readonly samplesPassed: number;
+  /** True iff the FIRST sample passed — drives pass@1 (vs pass@k). */
+  readonly firstSamplePassed: boolean;
   readonly error?: string;
 }
 
@@ -233,16 +235,15 @@ export async function runCodeEval(
       durationMs,
       samplesTried,
       samplesPassed,
+      firstSamplePassed: firstSampleCompleted,
       ...(error !== undefined ? { error } : {}),
     };
-    // Reference firstSampleCompleted in pass@1 accumulation below.
-    void firstSampleCompleted;
     results.push(result);
   }
 
   const finishedAt = Date.now();
   const completedTasks = results.filter((r) => r.completed).length;
-  const firstSamplePasses = results.filter((r) => r.samplesPassed > 0 && r.samplesTried > 0).length;
+  const firstSamplePasses = results.filter((r) => r.firstSamplePassed).length;
   const byContamination: Record<ContaminationRisk, { total: number; completed: number }> = {
     low: { total: 0, completed: 0 },
     medium: { total: 0, completed: 0 },
