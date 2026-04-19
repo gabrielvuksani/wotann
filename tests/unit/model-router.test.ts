@@ -253,4 +253,93 @@ describe("ModelRouter", () => {
       expect(status.exceeded).toBe(false);
     });
   });
+
+  describe("budget downgrade wiring", () => {
+    const opus = { id: "claude-opus-4-6", tier: "frontier" as const, avgCostPer1kTokens: 0.015 };
+    const sonnet = { id: "claude-sonnet-4-6", tier: "fast" as const, avgCostPer1kTokens: 0.003 };
+    const haiku = { id: "claude-haiku-4-5", tier: "small" as const, avgCostPer1kTokens: 0.0008 };
+    const free = { id: "llama-free", tier: "free" as const, avgCostPer1kTokens: 0 };
+
+    it("no downgrade below 50% budget", () => {
+      const router = makeRouter();
+      router.setCostBudget(10);
+      router.recordCost(2);
+      router.registerDowngradeAlternatives([opus, sonnet, haiku, free]);
+
+      const decision = router.downgradeIfNeeded({ preferred: opus });
+      expect(decision.downgradeSteps).toBe(0);
+      expect(decision.model.id).toBe("claude-opus-4-6");
+    });
+
+    it("downgrades one tier at 50-75% spend", () => {
+      const router = makeRouter();
+      router.setCostBudget(10);
+      router.recordCost(5);
+      router.registerDowngradeAlternatives([opus, sonnet, haiku, free]);
+
+      const decision = router.downgradeIfNeeded({ preferred: opus });
+      expect(decision.model.id).toBe("claude-sonnet-4-6");
+      expect(decision.downgradeSteps).toBe(1);
+    });
+
+    it("downgrades two tiers at 75-90% spend", () => {
+      const router = makeRouter();
+      router.setCostBudget(10);
+      router.recordCost(7.5);
+      router.registerDowngradeAlternatives([opus, sonnet, haiku, free]);
+
+      const decision = router.downgradeIfNeeded({ preferred: opus });
+      expect(decision.model.id).toBe("claude-haiku-4-5");
+      expect(decision.downgradeSteps).toBe(2);
+    });
+
+    it("locks to free at 90%+ spend", () => {
+      const router = makeRouter();
+      router.setCostBudget(10);
+      router.recordCost(9.5);
+      router.registerDowngradeAlternatives([opus, sonnet, haiku, free]);
+
+      const decision = router.downgradeIfNeeded({ preferred: opus });
+      expect(decision.model.id).toBe("llama-free");
+    });
+
+    it("applyBudgetDowngrade mutates RoutingDecision when needed", () => {
+      const router = makeRouter();
+      router.setCostBudget(10);
+      router.recordCost(5);
+      router.registerDowngradeAlternatives([opus, sonnet, haiku, free]);
+
+      const original = {
+        tier: 3 as const,
+        provider: "anthropic" as const,
+        model: "claude-opus-4-6",
+        cost: 0.015,
+      };
+      const adjusted = router.applyBudgetDowngrade(original);
+      expect(adjusted.model).toBe("claude-sonnet-4-6");
+      expect(adjusted.cost).toBe(0.003);
+    });
+
+    it("applyBudgetDowngrade passes decision through when not registered", () => {
+      const router = makeRouter();
+      router.setCostBudget(10);
+      router.recordCost(8);
+      const original = {
+        tier: 3 as const,
+        provider: "anthropic" as const,
+        model: "some-unregistered-model",
+        cost: 0.01,
+      };
+      const adjusted = router.applyBudgetDowngrade(original);
+      expect(adjusted).toEqual(original);
+    });
+
+    it("registerDowngradeAlternative stores a single model", () => {
+      const router = makeRouter();
+      router.registerDowngradeAlternative(opus);
+      const alts = router.getDowngradeAlternatives();
+      expect(alts).toHaveLength(1);
+      expect(alts[0]?.id).toBe("claude-opus-4-6");
+    });
+  });
 });

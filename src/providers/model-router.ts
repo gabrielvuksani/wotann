@@ -6,6 +6,12 @@
 import type { ProviderName, RoutingDecision, TaskDescriptor, ModelTier } from "../core/types.js";
 import type { ProviderHealthScore } from "./types.js";
 import type { RepoModelOutcome, RepoModelPerformanceRecord } from "./model-performance.js";
+import {
+  decideModel,
+  buildTierMap,
+  type ModelTierInfo,
+  type DowngradeDecision,
+} from "./budget-downgrader.js";
 
 interface RouterConfig {
   readonly availableProviders: ReadonlySet<ProviderName>;
@@ -22,11 +28,69 @@ export class ModelRouter {
   private readonly config: RouterConfig;
   private readonly healthScores: Map<string, ProviderHealthScore> = new Map();
   private readonly repoPerformance: Map<string, RepoModelPerformanceRecord> = new Map();
+  private readonly downgradeAlternatives: Map<string, ModelTierInfo> = new Map();
   private totalCost = 0;
   private costBudget = Infinity;
 
   constructor(config: RouterConfig) {
     this.config = config;
+  }
+
+  /**
+   * Register a known model so the budget downgrader can resolve a
+   * cheaper alternative when spend crosses policy thresholds. Callers
+   * register each (provider, model, tier, cost) they intend to dispatch
+   * to; the router then has enough info to softly downgrade BEFORE
+   * picking the final model.
+   */
+  registerDowngradeAlternative(info: ModelTierInfo): void {
+    this.downgradeAlternatives.set(info.id, info);
+  }
+
+  registerDowngradeAlternatives(alternatives: readonly ModelTierInfo[]): void {
+    for (const alt of alternatives) this.registerDowngradeAlternative(alt);
+  }
+
+  getDowngradeAlternatives(): readonly ModelTierInfo[] {
+    return [...this.downgradeAlternatives.values()];
+  }
+
+  /**
+   * Before picking a model, consult the budget downgrader. Returns the
+   * (possibly downgraded) model to use alongside a reason for telemetry.
+   * Pure projection — caller decides whether to act on the decision.
+   */
+  downgradeIfNeeded(ctx: {
+    readonly preferred: ModelTierInfo;
+    readonly spent?: number;
+    readonly budget?: number;
+  }): DowngradeDecision {
+    const spent = ctx.spent ?? this.totalCost;
+    const budget = ctx.budget ?? this.costBudget;
+    const alternatives = this.getDowngradeAlternatives();
+    const tierMap = buildTierMap(alternatives);
+    return decideModel({ preferred: ctx.preferred, spent, budget, alternatives }, tierMap);
+  }
+
+  /**
+   * Best-effort adjustment of a RoutingDecision before dispatch. If the
+   * downgrader flags a cheaper tier, the returned decision uses that
+   * alternative. If no registration exists for the preferred/alt pair,
+   * the original decision passes through unchanged.
+   */
+  applyBudgetDowngrade(decision: RoutingDecision): RoutingDecision {
+    const preferred = this.downgradeAlternatives.get(decision.model);
+    if (!preferred) return decision;
+
+    const result = this.downgradeIfNeeded({ preferred });
+    if (result.downgradeSteps === 0 || result.model.id === decision.model) {
+      return decision;
+    }
+    return {
+      ...decision,
+      model: result.model.id,
+      cost: result.model.avgCostPer1kTokens,
+    };
   }
 
   /**
