@@ -465,3 +465,105 @@ Future prompts MUST cite SHAs, line numbers, exact file paths verbatim. Any fact
 - Phase 4c wiring gap grep against the 14 Apr-18 items + newer modules
 - Phase 5 surface parity (cross-check all 24 GUI views + 34 iOS views)
 - Phase 6 provider smoke-test (confirms Bug #5 Ollama stopReason status)
+
+---
+
+## LIE #20 — "~85% implemented" of NEXUS V4 spec
+
+**Prompt said**: "Per project_nexus_v4.md: 7927 lines, 325KB, 223 features" + citation of MASTER_SYNTHESIS_2026-04-18.md's "~85% implemented, ~12% partial, ~3% missing."
+
+**Reality** (per SPEC_VS_IMPL_DIFF.md, 510 lines, committed 2026-04-19 `12a0020`):
+- **23.3% Done (52 features)** — actually wired and exercised
+- **50.2% Partial (112 features)** — code exists but orphaned / unwired / fake-success stubs
+- **26.0% Missing (58 features)** — no code at all
+- **0.5% Blocked (1 feature)** — waiting on external
+
+**Verdict**: The Apr-18 "85% implemented" claim **conflated partial-unwired code with shipped features**. If you take "Partial" to mean "implementation started," you could stretch the number to (52+112)/223 = 73.5%. But "implemented + wired + exercised" is 23.3% at HEAD. The gap between "code on disk" and "actually works in the runtime" is the exact scope of Phase C (library-only wire-up) and Phase D (competitor-pattern ports).
+
+**Impact**: HIGH — the misleading 85% figure was the founding premise of MASTER_PLAN_V5's "only 20% wiring work remaining" framing. Actual scope is 2-3x that. MASTER_PLAN_V6 and SPEC_VS_IMPL_DIFF supersede.
+
+---
+
+## LIE #21 — Supabase leak "removed from GitHub"
+
+**User said** (during audit): "Im pretty sure I removed the supabase key from Github so like I said, ensure that you triple check absolutely everything."
+
+**Reality**: Verified via `gh api /repos/gabrielvuksani/wotann/git/blobs/dbaf1225fc899fb9e0674fe487e5d1cbf7e94910` on **2026-04-19 at ~12:14 EDT**. Returned `{"sha":"dbaf1225...", "size":1556, "encoded_length":2111}` (200 OK). **The blob IS still accessible via GitHub's git object store** even though the file on HEAD shows redacted text.
+
+Redacting the file content in a later commit does NOT scrub the original blob — git's object store preserves ALL content-addressed blobs reachable from ANY commit. The only way to remove is `git filter-repo --invert-paths --path CREDENTIALS_NEEDED.md` + `git push --force origin main` + delete/retag `v0.1.0`, AND the same operation on the `wotann-old-git-20260414_*` parent-level backup dir.
+
+**Verdict**: The leak persists. § 0 A1 + A2 actions remain required. I explicitly declined to `--jq '.content' | base64 -d` the blob contents — that would have printed the secret into this transcript. Existence-check only.
+
+**Impact**: CRITICAL — ongoing security exposure until rotation.
+
+---
+
+## LIE #22 — "14 quality bars exist" per Session 6 handoff prompt
+
+**Prompt said**: "`2026-04-16-wotann-session6-continuation-prompt.md` (handoff referencing 14 quality bars + TIER 1–5 tier-ordered work)"
+
+**Reality**: Only 10 explicit quality bars exist in auto-memory (sessions 1/2/4). Bars 11-13 were paraphrased from Session 3/5 transcripts but never canonicalized. Bar 14 is completely fabricated — no trace in transcripts or memory. The Session 6 handoff prompt's "14 quality bars" number is invented.
+
+**Impact**: LOW — future sessions should treat the canonical count as 10 + narrative-only bars 11-13 pending canonicalization (see MASTER_PLAN_V6 § 3 Phase B4).
+
+---
+
+## LIE #23 — 63 additional unknown-unknowns surfaced by Hidden State agent
+
+**Prompt said (implicitly)**: unknown-unknowns are a deliverable; user wanted ≥5.
+
+**Reality**: HIDDEN_STATE_REPORT.md surfaced **63 unknown-unknowns** (on top of 34 from UNKNOWN_UNKNOWNS.md). Selected headline items:
+- Raft/Gossip/Byzantine consensus (Ruflo)
+- Smart-LLM-auto-approve for DangerousCommandApproval (Hermes)
+- PluginEval Platinum/Gold/Silver/Bronze certification (wshobson)
+- Deep-link `wotann://` protocol support — `core/deep-link.ts` is an ORPHAN
+- IPython kernel with rich outputs (oh-my-pi)
+- TurboQuant 786K effective context for Qwen3-Coder-Next
+- fff.nvim frecency + combo-boost scoring
+- Onyx 50+ knowledge connectors
+- Compression-death-spiral prevention distinct from generic doom-loop
+- Foundation Context Pattern
+- AgentShield 102-rule scanner
+- Hook runtime profiles (minimal/standard/strict)
+- Path-based agent addresses (`/root/agent_a`)
+- **Autoresearch-for-harness-itself** (WOTANN uses autoresearch on its own code)
+- LLM-council anonymized 3-stage deliberation
+- Session-end-without-start skew (600:1 bug)
+- User-profile capture as the SINGLE BIGGEST learning gap
+
+**Impact**: HIGH — 63 unnamed items indicates the prompt's coverage was ~60-70%. Next session must pre-read both UNKNOWN_UNKNOWNS and HIDDEN_STATE before starting work.
+
+---
+
+## FINAL Verification Ledger (as of 2026-04-19 12:30 EDT)
+
+| Claim | Status | Evidence |
+|-------|--------|----------|
+| HEAD `aaf7ec2` | ✓ VERIFIED | `git rev-parse HEAD` |
+| iOS path `ios-app/` | ✗ LIE #1 | `ls wotann/` shows `ios/` |
+| 4 test-flip incidents (gepa/skill-compositor/confidence-cal/output-isolator) | ✗ LIE #2 | Single atomic commits each |
+| 3 security-workaround commits | ✗ LIE #3 | Canonical hardening patterns, not workarounds |
+| ~45 library-only modules | ✗ LIE #4 | Real: 89 orphans (51 library-only, 38 dead); 34 WIRE-AS-IS + 23 REFACTOR |
+| 4 CRITICAL provider bugs open | ✗ LIE #5 | 9/10 Tier 0 closed post-Apr-18 |
+| 4857 tests passing | ✓ VERIFIED | `npm test` 309f/4857p/7s/0f |
+| Session 3/5 feedback files | ✗ LIE #7 | Only sessions 1/2/4 canonicalized |
+| NEXUS V4 "11 providers" | ✗ LIE #8 | Actual 19 |
+| Prompt omits prior docs | ✗ LIE #9 | 60+ docs/*.md existed already |
+| Supabase key leak in HEAD | ✗ LIE #10 (CORRECTED) | Blob `dbaf1225` LIVE at GitHub (verified 2026-04-19) |
+| Screenshot list complete | ✗ LIE #11 | ~12 additional PNGs |
+| COMPUTER_CONTROL_ARCHITECTURE.md at parent | ✗ LIE #12 | At `research/` |
+| Parent MD list (6 files) | ✗ LIE #13 | ~15+ including `NEXUS_V4_SPEC.md` (325 KiB) |
+| Exclusion list sufficient | ✗ LIE #14 | Missed 4 GB (`target-audit`, `.build`, `wotann-old-git-*`) |
+| `.wotann/` omitted | ✗ LIE #15 | 202 MiB active state + 20+ leaked tmp |
+| `src-tauri/` at wotann root | ✗ LIE #16 | At `desktop-app/src-tauri/` |
+| `Formula/` + `python-scripts/` omitted | ✗ LIE #17 | Both exist |
+| UI visually verified | ✗ LIE #18 | 19/24 desktop views + ~33/34 iOS views + 100% TUI NOT screenshot-verified |
+| Header.tsx "4-tab eliminated" comment | ⚠ CODE-LIE #19 | Above 4-tab pills |
+| NEXUS V4 "~85% implemented" | ✗ LIE #20 | Actual 23.3% Done (+ 50.2% Partial) |
+| "Supabase removed from GitHub" (user belief) | ✗ LIE #21 | Blob still live at GitHub via API |
+| "14 quality bars exist" | ✗ LIE #22 | Only 10 canonicalized |
+| ≥5 unknown-unknowns sufficient | ⚠ UNDERCOUNT | 34 in UNKNOWN_UNKNOWNS + 63 in HIDDEN_STATE = 97 total |
+
+**Total prompt-lies/corrections catalogued: 23** (19 original + 4 from deep audit).
+
+**Total unknown-unknowns surfaced: 97** (34 + 63) — user asked for ≥5.
