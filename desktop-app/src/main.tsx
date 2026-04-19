@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import "./styles/globals.css";
 import "./styles/wotann-tokens.css";
+import "./styles/liquid-glass.css";
 import { injectValknutKeyframes } from "./components/wotann/ValknutSpinner";
 
 // Inject the Valknut + RuneForge keyframes once at boot so signature

@@ -220,6 +220,15 @@ export function AppShell() {
     return <OnboardingView />;
   }
 
+  // `data-space` drives dynamic glass tinting (liquid-glass.css). The
+  // four primary spaces each project a different tint so glass chrome
+  // tracks the active mode. Anything else maps to "chat" for a safe
+  // default instead of unstyled neutral.
+  const glassSpace: "chat" | "editor" | "workshop" | "exploit" =
+    currentView === "editor" || currentView === "workshop" || currentView === "exploit"
+      ? currentView
+      : "chat";
+
   return (
     <ErrorBoundary>
       <div
@@ -227,6 +236,7 @@ export function AppShell() {
         style={{ background: "var(--color-bg-primary)", color: "var(--color-text-primary)" }}
         role="application"
         aria-label="WOTANN Desktop"
+        data-space={glassSpace}
       >
         {/* Ambient glow */}
         <div
@@ -302,8 +312,10 @@ export function AppShell() {
           <div className="flex-1 flex min-h-0">
             {/* Main workspace + terminal (vertical stack) */}
             <div className="flex-1 flex flex-col min-w-0 min-h-0">
-              {/* Workspace view (takes remaining height) */}
-              <div className="flex-1 min-h-0 flex flex-col">
+              {/* Workspace view (takes remaining height).
+                  `key={currentView}` forces React to re-mount so the
+                  view-enter animation replays on every tab switch. */}
+              <div key={currentView} className="flex-1 min-h-0 flex flex-col view-enter">
                 <WorkspaceContent view={currentView} />
               </div>
 

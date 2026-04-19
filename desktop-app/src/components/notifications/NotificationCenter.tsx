@@ -119,8 +119,8 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="absolute right-0 top-full mt-1 overflow-hidden z-50 flex flex-col animate-slideDown focus:outline-none"
-      style={{ width: 360, maxHeight: 520, background: "#1C1C1E", borderRadius: 12, border: "1px solid var(--border-subtle)", boxShadow: "var(--shadow-xl)" }}
+      className="absolute right-0 top-full mt-1 overflow-hidden z-50 flex flex-col animate-slideDown focus:outline-none notification-glass"
+      style={{ width: 360, maxHeight: 520, borderRadius: 12, border: "1px solid var(--border-subtle)" }}
       role="dialog"
       aria-modal="true"
       aria-label="Notification center"

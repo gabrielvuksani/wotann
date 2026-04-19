@@ -460,7 +460,7 @@ export function ChatView() {
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 animate-fadeIn">
           <button
             onClick={scrollToBottom}
-            className="scroll-bottom-btn"
+            className="scroll-bottom-btn floating-glass"
             style={{
               width: 36,
               height: 36,
@@ -468,11 +468,7 @@ export function ChatView() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: "var(--surface-3)",
               color: "var(--color-text-secondary)",
-              boxShadow: "var(--shadow-md)",
-              backdropFilter: "blur(12px)",
-              WebkitBackdropFilter: "blur(12px)",
               cursor: "pointer",
               transition: "all 200ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}

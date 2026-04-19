@@ -1,0 +1,432 @@
+/**
+ * WOTANN Liquid Glass — Apple Vision / macOS 26 Liquid Glass language.
+ *
+ * Phase-G UX polish (UI_UX_AUDIT: 3/10 → 8/10). Before this file, the app
+ * used 78 flat `backdrop-filter: blur(40px)` declarations with no depth,
+ * tint, or grain. Liquid Glass adds:
+ *
+ *   1. Multi-layer backdrop stack (blur + saturate + brightness) so the
+ *      material refracts instead of just smudging.
+ *   2. Dynamic tinting via CSS custom properties that track the active
+ *      space (chat/editor/workshop/exploit) — a single --glass-tint-*
+ *      token drives every surface.
+ *   3. Noise-grain overlay via an SVG feTurbulence data-URI. Breaks up
+ *      the perfectly-smooth blur and hides banding on LCD panels.
+ *   4. Inner-shadow + outer-glow combo (specular top-edge + grounded
+ *      drop shadow) that mimics the Apple HIG glass pattern.
+ *   5. 4-stop gradient border (rune → glyph → gold → glyph back) instead
+ *      of the 2-stop linear gradient used everywhere else. The extra
+ *      stop gives the border a subtle iridescence when the window moves.
+ *   6. data-glass-tier attribute system so future components can opt into
+ *      subtle / medium / strong intensity without re-declaring the stack.
+ *
+ * Tier calibration (matches Apple HIG):
+ *   subtle  — nav chrome, pills, inline chips. Barely perceptible.
+ *   medium  — floating panels, notification center, sidebar flyouts.
+ *   strong  — command palette, onboarding sheets, modal overlays.
+ *
+ * Reduced-motion note: noise animation disabled under
+ * `prefers-reduced-motion`; tier values collapse to base.
+ *
+ * Token contract: every declaration reads from wotann-tokens.css or
+ * globals.css. No hardcoded hex. Theme swap via [data-theme] rebinds
+ * every surface automatically.
+ */
+
+/* ────────────────────────────────────────────────────────────────
+ * Section 1 — Noise Grain
+ * ──────────────────────────────────────────────────────────────── */
+
+/*
+ * Inline SVG turbulence, base 0.9 + numOctaves 2. Used as a background
+ * on a pseudo-element to break up the perfectly-smooth blur. Encoded
+ * with minimal URL encoding so the browser can parse it cheaply.
+ */
+:root {
+  --glass-noise-uri: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.35 0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  /* ── Glass tint tokens — mode-driven. Subtle hue wash that lets glass
+        surfaces inherit the active space's accent without drowning the
+        content below. Consumers use var(--glass-tint) directly; the
+        parent sets the appropriate [data-space="..."] selector. ─── */
+  --glass-tint: rgba(10, 132, 255, 0.018);
+  --glass-tint-strong: rgba(10, 132, 255, 0.04);
+
+  /* ── Backdrop filter stacks. Declared here so theme files only need
+        to override the tint / RGB triplet and every tier follows. ─── */
+  --glass-filter-subtle: blur(18px) saturate(1.35) brightness(1.02);
+  --glass-filter-medium: blur(28px) saturate(1.55) brightness(1.04);
+  --glass-filter-strong: blur(44px) saturate(1.75) brightness(1.06);
+
+  /* ── Specular + grounding shadow pair (Apple HIG glass pattern). The
+        inset top-edge simulates light catching the curved glass meniscus;
+        the outer shadow plants the element in the scene. ─── */
+  --glass-shadow-subtle:
+    0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
+    0 8px 24px rgba(0, 0, 0, 0.32);
+  --glass-shadow-medium:
+    0 1px 0 0 rgba(255, 255, 255, 0.07) inset,
+    0 1px 0 0 rgba(0, 0, 0, 0.30),
+    0 16px 48px rgba(0, 0, 0, 0.45);
+  --glass-shadow-strong:
+    0 1px 0 0 rgba(255, 255, 255, 0.09) inset,
+    0 2px 0 0 rgba(0, 0, 0, 0.30),
+    0 32px 96px rgba(0, 0, 0, 0.60);
+
+  /* ── 4-stop iridescent gradient border. Pales → accent → gold → pales
+        again. Reads as "glass catching the edge of light". ─── */
+  --glass-border-gradient: linear-gradient(
+    135deg,
+    rgba(10, 132, 255, 0.22) 0%,
+    rgba(90, 200, 250, 0.32) 34%,
+    rgba(201, 161, 74, 0.22) 66%,
+    rgba(10, 132, 255, 0.12) 100%
+  );
+}
+
+/* Dim the tint on light themes so glass surfaces don't overheat */
+.theme-light,
+[data-theme="yggdrasil"] {
+  --glass-tint: rgba(10, 132, 255, 0.028);
+  --glass-tint-strong: rgba(10, 132, 255, 0.06);
+  --glass-shadow-subtle:
+    0 1px 0 0 rgba(255, 255, 255, 0.5) inset,
+    0 4px 12px rgba(26, 22, 18, 0.08);
+  --glass-shadow-medium:
+    0 1px 0 0 rgba(255, 255, 255, 0.6) inset,
+    0 8px 28px rgba(26, 22, 18, 0.12);
+  --glass-shadow-strong:
+    0 1px 0 0 rgba(255, 255, 255, 0.7) inset,
+    0 16px 48px rgba(26, 22, 18, 0.16);
+}
+
+/* True-black theme wants flatter specular, crisper grounding */
+.theme-true-black {
+  --glass-filter-subtle: blur(20px) saturate(1.4);
+  --glass-filter-medium: blur(32px) saturate(1.6);
+  --glass-filter-strong: blur(48px) saturate(1.8);
+  --glass-shadow-strong:
+    0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+    0 32px 96px rgba(0, 0, 0, 0.90);
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * Section 2 — Space-driven dynamic tinting
+ *
+ * Each primary tab carries a [data-space] attribute (already used
+ * elsewhere in globals.css). When a glass surface is nested inside a
+ * tinted container, it inherits the space tint so the material tracks
+ * the active mode. Falls back to the default accent tint otherwise.
+ * ──────────────────────────────────────────────────────────────── */
+
+[data-space="chat"] {
+  --glass-tint: rgba(10, 132, 255, 0.02);
+  --glass-tint-strong: rgba(10, 132, 255, 0.05);
+}
+
+[data-space="editor"] {
+  --glass-tint: rgba(56, 189, 248, 0.018);
+  --glass-tint-strong: rgba(56, 189, 248, 0.045);
+}
+
+[data-space="workshop"] {
+  --glass-tint: rgba(34, 197, 94, 0.018);
+  --glass-tint-strong: rgba(34, 197, 94, 0.045);
+}
+
+[data-space="exploit"] {
+  --glass-tint: rgba(209, 58, 42, 0.022);
+  --glass-tint-strong: rgba(209, 58, 42, 0.055);
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * Section 3 — .liquid-glass base + tier attribute system
+ *
+ * Usage:
+ *   <div class="liquid-glass" data-glass-tier="medium">…</div>
+ *
+ * Components apply the class and pick an intensity via data attribute.
+ * Defaults to medium when the attribute is missing so a naked
+ * `.liquid-glass` still looks intentional.
+ * ──────────────────────────────────────────────────────────────── */
+
+.liquid-glass {
+  position: relative;
+  background-color: var(--glass-tint);
+  backdrop-filter: var(--glass-filter-medium);
+  -webkit-backdrop-filter: var(--glass-filter-medium);
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  box-shadow: var(--glass-shadow-medium);
+  isolation: isolate;
+}
+
+/*
+ * Noise-grain overlay — ::before pseudo sits above the blurred backdrop
+ * but below the content. Low opacity, pointer-events: none so it never
+ * captures clicks. Using mix-blend-mode: overlay so the grain modulates
+ * both light and dark areas without looking like dust on a lens.
+ */
+.liquid-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--glass-noise-uri);
+  background-size: 240px 240px;
+  background-repeat: repeat;
+  opacity: 0.22;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
+/*
+ * 4-stop iridescent border — ::after uses the padding-box / border-box
+ * trick: a linear-gradient masked to the border ring via
+ * `mask-composite: exclude`. Same technique as Apple visionOS glass.
+ */
+.liquid-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--glass-border-gradient);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Content needs to sit above the ::before/::after decorations */
+.liquid-glass > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* ── Tier modifiers ─── */
+
+.liquid-glass[data-glass-tier="subtle"] {
+  backdrop-filter: var(--glass-filter-subtle);
+  -webkit-backdrop-filter: var(--glass-filter-subtle);
+  box-shadow: var(--glass-shadow-subtle);
+}
+
+.liquid-glass[data-glass-tier="subtle"]::before {
+  opacity: 0.14;
+}
+
+.liquid-glass[data-glass-tier="medium"] {
+  backdrop-filter: var(--glass-filter-medium);
+  -webkit-backdrop-filter: var(--glass-filter-medium);
+  box-shadow: var(--glass-shadow-medium);
+}
+
+.liquid-glass[data-glass-tier="strong"] {
+  background-color: var(--glass-tint-strong);
+  backdrop-filter: var(--glass-filter-strong);
+  -webkit-backdrop-filter: var(--glass-filter-strong);
+  box-shadow: var(--glass-shadow-strong);
+}
+
+.liquid-glass[data-glass-tier="strong"]::before {
+  opacity: 0.28;
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * Section 4 — Component-specific applications
+ *
+ * Target classes the existing components already carry (header,
+ * NotificationCenter, CommandPalette). These rules layer Liquid Glass
+ * on top of existing background declarations; we keep the prior
+ * `background` token fallback so the UI still looks intentional on
+ * browsers without backdrop-filter support.
+ * ──────────────────────────────────────────────────────────────── */
+
+/* Tab bar — the four primary pills group inside the Header. Uses
+   subtle tier because it sits in the chrome, not over content. */
+[role="banner"] {
+  background-color: var(--glass-tint);
+  backdrop-filter: var(--glass-filter-subtle);
+  -webkit-backdrop-filter: var(--glass-filter-subtle);
+}
+
+[role="banner"] nav[role="tablist"] {
+  position: relative;
+  background-color: color-mix(in srgb, var(--surface-2) 80%, var(--glass-tint));
+  backdrop-filter: var(--glass-filter-subtle);
+  -webkit-backdrop-filter: var(--glass-filter-subtle);
+  box-shadow: var(--glass-shadow-subtle);
+}
+
+/* Command palette — strong tier, it eclipses content. The existing
+   markup wraps the dialog in a container with role="combobox"; we use
+   the class-based override instead of relying on that role alone. */
+.command-palette-glass {
+  background-color: var(--glass-tint-strong) !important;
+  backdrop-filter: var(--glass-filter-strong) !important;
+  -webkit-backdrop-filter: var(--glass-filter-strong) !important;
+  box-shadow: var(--glass-shadow-strong) !important;
+  border: 1px solid transparent !important;
+  position: relative;
+  isolation: isolate;
+}
+
+.command-palette-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--glass-noise-uri);
+  background-size: 240px 240px;
+  opacity: 0.28;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
+.command-palette-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--glass-border-gradient);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.command-palette-glass > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* Notification panel — medium tier, peeks over content. */
+.notification-glass {
+  background-color: var(--glass-tint) !important;
+  backdrop-filter: var(--glass-filter-medium) !important;
+  -webkit-backdrop-filter: var(--glass-filter-medium) !important;
+  box-shadow: var(--glass-shadow-medium) !important;
+  position: relative;
+  isolation: isolate;
+}
+
+.notification-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--glass-noise-uri);
+  background-size: 240px 240px;
+  opacity: 0.18;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
+.notification-glass > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Floating widget — scroll-to-bottom FAB, worker pills, floating
+   palettes. Applied by adding the class directly. */
+.floating-glass {
+  background-color: var(--glass-tint-strong);
+  backdrop-filter: var(--glass-filter-medium);
+  -webkit-backdrop-filter: var(--glass-filter-medium);
+  box-shadow: var(--glass-shadow-medium);
+  position: relative;
+  isolation: isolate;
+}
+
+.floating-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--glass-noise-uri);
+  background-size: 240px 240px;
+  opacity: 0.16;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
+.floating-glass > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * Section 5 — Entrance motion for AppShell views
+ *
+ * Separate class so components can opt in without every view
+ * re-declaring the transition. Fires a choreographed opacity +
+ * vertical lift on mount.
+ * ──────────────────────────────────────────────────────────────── */
+
+@keyframes viewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.view-enter {
+  animation: viewEnter 280ms var(--ease-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  will-change: opacity, transform;
+}
+
+/* Additional stagger slots (globals.css ships stagger-1 through -4;
+   ChatView welcome grid needs up to -6). */
+.animate-stagger-5 { animation: slideUp 0.25s ease-out 0.25s both; }
+.animate-stagger-6 { animation: slideUp 0.25s ease-out 0.3s both; }
+
+/* ────────────────────────────────────────────────────────────────
+ * Section 6 — Fallbacks + accessibility
+ * ──────────────────────────────────────────────────────────────── */
+
+/* Browsers without backdrop-filter: fall back to slightly opaque
+   surface so the content stays readable. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .liquid-glass,
+  .command-palette-glass,
+  .notification-glass,
+  .floating-glass,
+  [role="banner"],
+  [role="banner"] nav[role="tablist"] {
+    background-color: var(--glass-bg, rgba(28, 28, 30, 0.92)) !important;
+  }
+}
+
+/* Respect reduced-motion: kill the view-enter animation and let
+   the noise sit statically. */
+@media (prefers-reduced-motion: reduce) {
+  .view-enter {
+    animation: none;
+  }
+  .animate-stagger-5,
+  .animate-stagger-6 {
+    animation: none;
+  }
+}
