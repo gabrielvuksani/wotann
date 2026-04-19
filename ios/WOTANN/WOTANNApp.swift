@@ -135,6 +135,39 @@ struct WOTANNApp: App {
         // which fails with NECP address-in-use if the app relaunches quickly or
         // a second instance is running (e.g. simulator + device).
         connectionManager.autoDiscover()
+
+        // Debug-only: if the test runner / fastlane passes
+        // `WOTANN_DIAG_DUMP_AT_LAUNCH=1` we open the diagnostic share sheet
+        // on launch so the log can be retrieved without manual user action.
+        // This is strictly opt-in: default launches never trigger the sheet.
+        // See `Tests/Infrastructure/DiagnosticLogger.swift` for the logger
+        // implementation and `Tests/PhysicalDeviceTestChecklist.md` for the
+        // intended usage.
+        maybePresentDiagnosticDumpAtLaunch()
+    }
+
+    /// When `WOTANN_DIAG_DUMP_AT_LAUNCH=1` is set in the process environment,
+    /// schedule a share of the diagnostic log shortly after launch. We delay
+    /// so the SwiftUI scene has time to mount a root view controller for the
+    /// share sheet to present on.
+    ///
+    /// Silently no-ops when the flag is unset OR when there is no log file
+    /// yet (the logger writes a heartbeat inside `share()` to avoid a silent
+    /// failure in that second case).
+    private func maybePresentDiagnosticDumpAtLaunch() {
+        guard ProcessInfo.processInfo.environment["WOTANN_DIAG_DUMP_AT_LAUNCH"] == "1" else {
+            return
+        }
+        DiagnosticLogger.shared.log(
+            feature: "diagnostic-logger",
+            severity: .info,
+            message: "WOTANN_DIAG_DUMP_AT_LAUNCH=1 — scheduling share on launch"
+        )
+        // 1.5 s is enough for the SwiftUI WindowGroup to finalise its root VC
+        // even on cold starts with MLX warm-up still in flight.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            _ = DiagnosticLogger.shared.share()
+        }
     }
 
     // MARK: - Scene Phase
