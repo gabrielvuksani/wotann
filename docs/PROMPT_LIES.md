@@ -211,20 +211,54 @@ There are **49 files in `wotann/docs/`**. The audit prompt implicitly told a fre
 
 ---
 
-## LIE #10 — Supabase key leak framing
+## LIE #10 — Supabase key leak framing (CORRECTED — MY PRELIMINARY WAS WRONG)
 
 **Prompt said**: "possible Supabase key leak — triple-check".
 
-**Reality at HEAD**:
-- `src/desktop/supabase-relay.ts` exists and uses **only `process.env.SUPABASE_URL` / `process.env.SUPABASE_ANON_KEY`** with empty-string defaults (lines 95-107). No hardcoded keys.
-- `src/daemon/kairos.ts:21,161,299-301,596` wires `SupabaseRelay` through the runtime.
-- Initial grep for `eyJ[A-Za-z0-9_-]{40,}` across current HEAD returns only **false positives**: (a) `package-lock.json` SHA-512 integrity hashes, (b) `src/cli/debug-share.ts:195` defensive regex that STRIPS JWTs from shared logs, (c) `src/security/secret-scanner.ts:52` detection pattern.
-- `git log --all -p -- src/desktop/supabase-relay.ts | grep -E "eyJ..."` returns no matches (no Supabase JWT ever committed).
-- No `.env` / `.env.local` / `.env.production` files committed in history (verified).
+**My preliminary finding (WRONG)**: "NO Supabase key leak detected in HEAD or history. The user's concern appears unfounded." — **This was a false conclusion from a shallow scan**. Deep git-archaeology (Agent B, commit `e0cb9ac` writing `docs/GIT_ARCHAEOLOGY.md`) confirmed a REAL LEAK.
 
-**Verdict**: **NO Supabase key leak detected** in HEAD or history. The user's concern appears unfounded. Agent B's deep git archaeology will confirm or refute definitively.
+### What's actually leaked (confirmed 2026-04-19)
 
-**Impact**: MEDIUM (rotating a key you didn't leak wastes cycles; NOT rotating a key you did leak is catastrophic). The eventual Agent-B report supersedes this preliminary finding.
+- **Key**: `sb_publishable_dXK***d5LT` (prefix `sb_publishable_*` = Supabase publishable/anon key — NOT the `sb_secret_*` service-role key).
+- **Project URL**: `https://djr***fgegvri.supabase.co`
+- **Blob**: `dbaf1225fc899fb9e0674fe487e5d1cbf7e94910` (reachable via `git cat-file -p`)
+- **Commits containing the blob**: `993d661` (initial import), `cb55d53`, `c691db1`, `93e1967`
+- **Visibility**: repo `github.com/gabrielvuksani/wotann` is PUBLIC — anyone can clone and extract.
+- **The `v0.1.0` tag still points at a commit in this set**.
+
+### Why my initial scan missed it
+
+- I grep'd for `eyJ[A-Za-z0-9_-]{40,}` (JWT pattern) — Supabase publishable keys have format `sb_publishable_<base62>`, not JWT.
+- I grep'd current HEAD, not reachable blobs.
+- I saw the GAP_AUDIT_2026-04-15.md "[REDACTED]" text and assumed the secret was purged — redaction at the text level is cosmetic; the git blob persists.
+- I did not grep `sb_publishable_`, `sb_secret_`, `SUPABASE_ANON_KEY=`, or fetch blobs by hash.
+
+### Severity assessment
+
+- `sb_publishable_*` is the ANON key — designed to be exposed client-side. Its access is limited by the project's Row-Level-Security (RLS) policies.
+- If RLS is tight (all tables have restrictive SELECT/INSERT/UPDATE/DELETE policies keyed on `auth.uid()` or similar), leak risk ≈ nuisance-level (attacker can only see what RLS allows anon users).
+- If RLS is weak or absent on any table, leak risk is HIGH — attacker reads or writes data freely.
+- Even at low-severity, hygiene dictates rotation.
+
+### Actions required (ONLY Gabriel can do these; I'm blocked by action_types)
+
+1. **Audit RLS policies** at `https://supabase.com/dashboard/project/<project-id>/auth/policies` — confirm every table is locked to authenticated users or has explicit policy.
+2. **Rotate the anon key** (Supabase dashboard → Settings → API → Anon key → Reset).
+3. **Scrub history**: `git filter-repo --invert-paths --path CREDENTIALS_NEEDED.md` (file exists in blob history even if absent on HEAD); force-push `main`; delete the old `v0.1.0` tag and re-tag at a clean SHA.
+4. **Enable secret-scanning custom patterns** in GH repo settings for `sb_publishable_*` and `sb_secret_*` — GitHub's default patterns don't match Supabase's prefix format (confirmed via `gh api /repos/gabrielvuksani/wotann/secret-scanning/alerts` returned `[]`).
+5. **Post-rotation**: audit `src/desktop/supabase-relay.ts` usage to ensure it still reads from env (which it does — lines 95-107 use `process.env.SUPABASE_URL` / `SUPABASE_ANON_KEY` with empty defaults).
+
+### Unmet-until-rotation deferral
+
+Gabriel's `docs/GAP_AUDIT_2026-04-15.md` already lists this rotation as a pending manual action from session 3 — it has been open ~4 sessions. The audit prompt is correct to re-flag it as a blocker.
+
+### Additional leaked path to check
+
+The `wotann-old-git-20260414_114728/` backup dir (685 MiB, per LIE #14) contains an OLD `.git/` tree pre-rewrite. Even if `main`'s `.git/` is scrubbed, this backup likely preserves the blob. **Agent B should re-run the secret scan against this dir** before declaring full remediation.
+
+**Verdict**: LIE #10 is TRUE after all — Supabase anon key IS leaked in git history. My preliminary finding was wrong due to incomplete pattern matching. Lesson: scan by prefix (`sb_publishable_`, `sb_secret_`), not just JWT regex. Scan reachable blobs, not just HEAD. Don't trust "[REDACTED]" text without blob-level verification.
+
+**Impact**: HIGH (user must rotate). Severity conditional on RLS tightness.
 
 ---
 
@@ -399,7 +433,7 @@ Not strictly a prompt-lie, but a CODE-lie discovered by Agent E that the prompt 
 | Session 3/5 feedback files exist | ✗ LIE #7 | Only sessions 1/2/4 have feedback files |
 | NEXUS V4 "11 providers" | ✗ LIE #8 | ProviderName union has 19 |
 | Prompt omits prior docs | ✗ LIE #9 | 49 files in `docs/` unmentioned |
-| Supabase key leak | ✗ LIE #10 (preliminary) | No keys in HEAD or history; Agent B confirming on wotann-old-git backup |
+| Supabase key leak | ⚠ **CONFIRMED** (LIE #10 corrected) | `sb_publishable_dXK***d5LT` in blob `dbaf1225...` reachable via commits `993d661`/`cb55d53`/`c691db1`/`93e1967`; public repo; rotation required |
 | Screenshot list complete | ✗ LIE #11 | ~12 additional PNGs at parent root |
 | `COMPUTER_CONTROL_ARCHITECTURE.md` at parent | ✗ LIE #12 | Actually at `research/`; 48 KiB is right |
 | Parent MD list (6 files) | ✗ LIE #13 | Actually ~15+ including `NEXUS_V4_SPEC.md` (325 KiB) |
