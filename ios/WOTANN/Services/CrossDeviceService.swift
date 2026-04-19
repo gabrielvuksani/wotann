@@ -38,11 +38,16 @@ class CrossDeviceService: ObservableObject {
 
     /// Create a handoff activity for the current conversation.
     /// The desktop WOTANN app can pick this up via NSUserActivity.
-    func startHandoff(conversationId: String, prompt: String) {
+    ///
+    /// S4-15: takes `UUID` directly so callers cannot slip in an ad-hoc
+    /// `"conv-<timestamp>"` string. The activity payload serialises the UUID
+    /// to its canonical string form for NSUserActivity userInfo.
+    func startHandoff(conversationId: UUID, prompt: String) {
+        let idString = conversationId.uuidString
         let activity = NSUserActivity(activityType: "com.wotann.conversation")
         activity.title = "Continue in WOTANN"
         activity.userInfo = [
-            "conversationId": conversationId,
+            "conversationId": idString,
             "prompt": prompt,
             "timestamp": Date().timeIntervalSince1970,
         ]
@@ -50,7 +55,7 @@ class CrossDeviceService: ObservableObject {
         activity.isEligibleForSearch = true
         activity.isEligibleForPublicIndexing = false
         activity.becomeCurrent()
-        handoffActivity = conversationId
+        handoffActivity = idString
     }
 
     /// Stop the current handoff activity.

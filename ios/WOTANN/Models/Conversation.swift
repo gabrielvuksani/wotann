@@ -3,6 +3,13 @@ import Foundation
 // MARK: - Conversation
 
 /// A conversation synced from the desktop WOTANN instance.
+///
+/// S4-15: conversation identifiers are always Swift `UUID()` values. Incoming
+/// RPC payloads sometimes carry non-UUID string ids (e.g. server-generated
+/// `"conv-<timestamp>"`), which RPCClient normalises through `stableUUID` so
+/// the native-side model never leaks an ad-hoc string format. Callers that
+/// need to construct a conversation client-side rely on the default UUID
+/// initializer — do NOT pass through arbitrary strings.
 struct Conversation: Identifiable, Codable, Hashable {
     let id: UUID
     var title: String

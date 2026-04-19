@@ -20,6 +20,7 @@ const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { key: "v", ctrl: true, action: "voice-capture", description: "Capture voice prompt" },
   { key: "/", ctrl: true, action: "global-search", description: "Global search" },
   { key: "i", ctrl: true, action: "context-inspect", description: "Context source inspector" },
+  { key: "b", ctrl: true, action: "terminal-blocks", description: "Toggle terminal blocks view" },
   { key: "c", ctrl: true, action: "cancel", description: "Cancel / Exit" },
   { key: "d", ctrl: true, action: "exit", description: "Exit" },
   { key: "tab", action: "cycle-panel", description: "Cycle panel focus" },

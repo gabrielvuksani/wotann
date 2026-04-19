@@ -21,6 +21,8 @@ import { AgentStatusPanel, type SubagentStatus } from "./components/AgentStatusP
 import { HistoryPicker } from "./components/HistoryPicker.js";
 import { MessageActions, type MessageAction } from "./components/MessageActions.js";
 import { ContextSourcePanel, type ContextSource } from "./components/ContextSourcePanel.js";
+import { TerminalBlocksView } from "./components/TerminalBlocksView.js";
+import type { Block } from "./terminal-blocks/block.js";
 import type { AgentMessage, ProviderName, ProviderStatus } from "../core/types.js";
 import type { WotannRuntime } from "../core/runtime.js";
 import type {
@@ -143,6 +145,13 @@ export function WotannApp({
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [showHistoryPicker, setShowHistoryPicker] = useState(false);
   const [showContextPanel, setShowContextPanel] = useState(false);
+  // Terminal Blocks overlay (Warp-style OSC 133 blocks — Phase D).
+  // The block stream is sourced externally (shell integration piping OSC 133
+  // into the runtime); the TUI holds a snapshot here. For now we expose the
+  // overlay with whatever blocks have been registered; future work threads
+  // the parser through the runtime's shell-tool middleware.
+  const [showTerminalBlocks, setShowTerminalBlocks] = useState(false);
+  const [terminalBlocks] = useState<readonly Block[]>([]);
   const [showMessageActions, setShowMessageActions] = useState(false);
   const [isIncognito, setIsIncognito] = useState(false);
 
@@ -281,6 +290,9 @@ export function WotannApp({
         case "context-inspect":
           setShowContextPanel((prev) => !prev);
           break;
+        case "terminal-blocks":
+          setShowTerminalBlocks((prev) => !prev);
+          break;
         case "history-search":
           if (history.length > 0) {
             setShowHistoryPicker((prev) => !prev);
@@ -290,6 +302,7 @@ export function WotannApp({
           setShowHistoryPicker(false);
           setShowContextPanel(false);
           setShowMessageActions(false);
+          setShowTerminalBlocks(false);
           break;
         case "voice-capture":
           void handleVoiceCapture();
@@ -2922,6 +2935,8 @@ export function WotannApp({
           maxTokens={runtime.getMaxContextTokens()}
         />
       )}
+
+      {showTerminalBlocks && <TerminalBlocksView blocks={terminalBlocks} />}
 
       {showMessageActions &&
         messages.length > 0 &&
