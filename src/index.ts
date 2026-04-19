@@ -3381,6 +3381,87 @@ program
     console.log();
   });
 
+// ── wotann bench (Phase 4 real-runner leaderboard flow) ─────
+
+program
+  .command("bench <flavour>")
+  .description(
+    "Run a Phase-4 real benchmark (terminal-bench | aider-polyglot | humaneval-plus | mbpp-plus | livecodebench)",
+  )
+  .option("-n, --limit <number>", "Max tasks to run (default: all)", (v) => parseInt(v, 10))
+  .option("-s, --seed <number>", "Deterministic shuffle seed", (v) => parseInt(v, 10))
+  .option("-m, --model <id>", "Model override for the agent attempts")
+  .option("-t, --threshold <number>", "CompletionOracle score threshold (0-1, default 0.75)", (v) =>
+    parseFloat(v),
+  )
+  .option("-b, --budget <ms>", "Total wall-clock budget across all tasks (ms)", (v) =>
+    parseInt(v, 10),
+  )
+  .action(
+    async (
+      flavour: string,
+      cliOpts: {
+        limit?: number;
+        seed?: number;
+        model?: string;
+        threshold?: number;
+        budget?: number;
+      },
+    ) => {
+      const validFlavours = [
+        "terminal-bench",
+        "aider-polyglot",
+        "humaneval-plus",
+        "mbpp-plus",
+        "livecodebench",
+      ] as const;
+      type Flavour = (typeof validFlavours)[number];
+      if (!(validFlavours as readonly string[]).includes(flavour)) {
+        console.error(chalk.red(`Invalid flavour: ${flavour}. Valid: ${validFlavours.join(", ")}`));
+        process.exit(1);
+      }
+      const typedFlavour = flavour as Flavour;
+
+      const { BenchmarkHarness } = await import("./intelligence/benchmark-harness.js");
+      const { createRuntime } = await import("./core/runtime.js");
+      // createRuntime already calls initialize() internally.
+      const runtime = await createRuntime(process.cwd());
+
+      const harness = new BenchmarkHarness(process.cwd());
+      console.log(chalk.bold(`\nWOTANN Bench — ${typedFlavour}\n`));
+      console.log(chalk.dim(`  Limit:     ${cliOpts.limit ?? "all"}`));
+      console.log(chalk.dim(`  Seed:      ${cliOpts.seed ?? "deterministic-order"}`));
+      console.log(chalk.dim(`  Model:     ${cliOpts.model ?? "runtime-default"}`));
+      console.log(chalk.dim(`  Threshold: ${cliOpts.threshold ?? 0.75}`));
+      if (cliOpts.budget !== undefined) console.log(chalk.dim(`  Budget:    ${cliOpts.budget} ms`));
+      console.log();
+      console.log(chalk.dim("  Running...\n"));
+
+      const runOpts: {
+        modelId: string;
+        limit?: number;
+        seed?: number;
+        threshold?: number;
+        totalBudgetMs?: number;
+      } = {
+        modelId: cliOpts.model ?? "default",
+      };
+      if (cliOpts.limit !== undefined) runOpts.limit = cliOpts.limit;
+      if (cliOpts.seed !== undefined) runOpts.seed = cliOpts.seed;
+      if (cliOpts.threshold !== undefined) runOpts.threshold = cliOpts.threshold;
+      if (cliOpts.budget !== undefined) runOpts.totalBudgetMs = cliOpts.budget;
+
+      const run = await harness.runRealBenchmark(typedFlavour, runtime, runOpts);
+
+      console.log(chalk.bold("  Results:\n"));
+      console.log(chalk.dim(`  Run ID:      ${run.id}`));
+      console.log(chalk.dim(`  Score:       ${run.score}/${run.maxScore}`));
+      console.log(chalk.dim(`  Pass rate:   ${run.percentile}%`));
+      console.log(chalk.dim(`  Wall clock:  ${(run.durationMs / 1000).toFixed(1)}s`));
+      console.log();
+    },
+  );
+
 // ── wotann health ───────────────────────────────────────────
 
 program
