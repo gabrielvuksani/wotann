@@ -22,7 +22,8 @@ import { HistoryPicker } from "./components/HistoryPicker.js";
 import { MessageActions, type MessageAction } from "./components/MessageActions.js";
 import { ContextSourcePanel, type ContextSource } from "./components/ContextSourcePanel.js";
 import { TerminalBlocksView } from "./components/TerminalBlocksView.js";
-import type { Block } from "./terminal-blocks/block.js";
+import { BlockBuffer, type Block } from "./terminal-blocks/block.js";
+import { Osc133Parser } from "./terminal-blocks/osc-133-parser.js";
 import type { AgentMessage, ProviderName, ProviderStatus } from "../core/types.js";
 import type { WotannRuntime } from "../core/runtime.js";
 import type {
@@ -146,12 +147,15 @@ export function WotannApp({
   const [showHistoryPicker, setShowHistoryPicker] = useState(false);
   const [showContextPanel, setShowContextPanel] = useState(false);
   // Terminal Blocks overlay (Warp-style OSC 133 blocks — Phase D).
-  // The block stream is sourced externally (shell integration piping OSC 133
-  // into the runtime); the TUI holds a snapshot here. For now we expose the
-  // overlay with whatever blocks have been registered; future work threads
-  // the parser through the runtime's shell-tool middleware.
+  // Session-13: Osc133Parser + BlockBuffer are now live. The parser
+  // consumes raw terminal bytes from `WOTANN_OSC133_FIFO` (a named pipe
+  // the user pipes shell output through) and the buffer emits completed
+  // `Block` records into state. Opt-in via env var — when unset the
+  // overlay stays empty and Ctrl-B shows "no blocks yet" as before.
   const [showTerminalBlocks, setShowTerminalBlocks] = useState(false);
-  const [terminalBlocks] = useState<readonly Block[]>([]);
+  const [terminalBlocks, setTerminalBlocks] = useState<readonly Block[]>([]);
+  const osc133ParserRef = useRef<Osc133Parser | null>(null);
+  const blockBufferRef = useRef<BlockBuffer | null>(null);
   const [showMessageActions, setShowMessageActions] = useState(false);
   const [isIncognito, setIsIncognito] = useState(false);
 
@@ -172,6 +176,48 @@ export function WotannApp({
   useEffect(() => {
     if (messages.length > 0 && showStartup) setShowStartup(false);
   }, [messages.length, showStartup]);
+
+  // Session-13: OSC 133 stream → BlockBuffer → Block[]. Opt-in via
+  // WOTANN_OSC133_FIFO (a named pipe the user creates with mkfifo).
+  // Honest: when the env var is not set, the parser stays unwired and
+  // the overlay renders the empty array. Failure to open the FIFO
+  // logs a warning rather than silently failing.
+  useEffect(() => {
+    const fifoPath = process.env["WOTANN_OSC133_FIFO"];
+    if (!fifoPath) return;
+    osc133ParserRef.current = new Osc133Parser();
+    blockBufferRef.current = new BlockBuffer();
+    const completed: Block[] = [];
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { createReadStream } = await import("node:fs");
+        const stream = createReadStream(fifoPath, { encoding: "utf-8" });
+        stream.on("data", (chunk: string | Buffer) => {
+          if (cancelled) return;
+          const text = typeof chunk === "string" ? chunk : chunk.toString("utf-8");
+          const events = osc133ParserRef.current?.feed(text) ?? [];
+          for (const ev of events) {
+            const block = blockBufferRef.current?.consume(ev);
+            if (block) {
+              completed.push(block);
+              setTerminalBlocks([...completed]);
+            }
+          }
+        });
+        stream.on("error", (err) => {
+          console.warn(`[WOTANN] OSC 133 FIFO error: ${err.message}`);
+        });
+      } catch (err) {
+        console.warn(`[WOTANN] OSC 133 FIFO open failed: ${(err as Error).message}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      osc133ParserRef.current = null;
+      blockBufferRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     themeManagerRef.current.persist({ panel: activePanel });
