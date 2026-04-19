@@ -125,6 +125,55 @@ function buildPlanAdvanceTool(): ToolDefinition {
 }
 
 /**
+ * Build the monitor tool definition (Session-6 Claude Code v2.1.98 port).
+ * Wraps a long-running child process so every stdout/stderr line becomes
+ * a discrete transcript event — avoids the sleep-poll loops that make
+ * agents feel sluggish. TerminalBench "no sleep-poll" gap closure.
+ *
+ * Streaming contract: the runtime emits one text chunk per stdout/stderr
+ * line as events arrive, then a final `{exitCode, signal, totalDurationMs}`
+ * summary when the process terminates. The `maxDurationMs` cap is honoured
+ * by `spawnMonitor()` itself (SIGTERM on timeout); we surface it through
+ * the schema so the model can request a tight budget for fast tasks.
+ */
+function buildMonitorTool(): ToolDefinition {
+  return {
+    name: "monitor",
+    description:
+      "Spawn a command and stream its stdout/stderr lines as discrete events. " +
+      "Use for long-running processes (tail logs, watch tests, follow a dev server, " +
+      "babysit CI) instead of sleeping and polling. Terminates when the process exits " +
+      "or when `maxDurationMs` elapses (whichever comes first). Returns one event per " +
+      "line plus a final exit summary with exitCode, signal, and totalDurationMs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description: "Executable to spawn (e.g. `npm`, `tail`, `node`).",
+        },
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: "Positional arguments passed to the command.",
+        },
+        cwd: {
+          type: "string",
+          description: "Working directory for the child process (defaults to runtime cwd).",
+        },
+        maxDurationMs: {
+          type: "number",
+          description:
+            "Wall-clock cap in milliseconds. 0 or omitted = unlimited. The runtime " +
+            "enforces its own 10-minute ceiling so runaway monitors cannot stall a session.",
+        },
+      },
+      required: ["command"],
+    },
+  };
+}
+
+/**
  * Build the find_symbol tool definition (Serena port).
  * Exposes workspace-wide symbol search as a first-class agent tool so
  * the model can target by name rather than reading whole files.
@@ -208,6 +257,7 @@ export const RUNTIME_TOOL_NAMES = [
   "find_symbol",
   "find_references",
   "rename_symbol",
+  "monitor",
 ] as const;
 
 export type RuntimeToolName = (typeof RUNTIME_TOOL_NAMES)[number];
@@ -239,6 +289,11 @@ export function buildEffectiveTools(
 
   // web_fetch: always registered
   tools.push(buildWebFetchTool());
+
+  // monitor: always registered. The spawn() syscall is gated by the
+  // sandbox permission layer at dispatch time — registration here only
+  // advertises the tool to the model.
+  tools.push(buildMonitorTool());
 
   // plan tools: only when PlanStore is available
   if (deps.planStoreAvailable) {

@@ -12,6 +12,7 @@
 
 import type { ProviderName, AgentMessage } from "./types.js";
 import type { WebFetchResult } from "../tools/web-fetch.js";
+import type { MonitorEvent, MonitorOptions, MonitorSession } from "../tools/monitor.js";
 
 // ── Tool Timing Tracker ─────────────────────────────────────
 
@@ -107,6 +108,21 @@ export interface WebFetchDep {
   fetch(url: string): Promise<WebFetchResult>;
 }
 
+/**
+ * Minimal surface the monitor dispatcher needs. Kept as a function-typed
+ * dep (not a class) so tests can inject a fake session factory without
+ * spawning real processes. The runtime wires this to `spawnMonitor` from
+ * `src/tools/monitor.ts`.
+ */
+export interface MonitorDep {
+  spawn(options: MonitorOptions): MonitorSession;
+}
+
+/** Hard ceiling on monitor wall-clock to protect runaway sessions. */
+export const MONITOR_MAX_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+/** Soft cap on per-event lines collected into a single result envelope. */
+export const MONITOR_MAX_EVENTS_PER_RESULT = 500;
+
 export interface PlanStoreDep {
   createPlan(title: string, description: string): { readonly title: string; readonly id: string };
   listPlans(): readonly {
@@ -160,6 +176,192 @@ export async function dispatchWebFetch(
       model: ctx.responseModel,
     };
   }
+}
+
+// ── monitor ─────────────────────────────────────────────────
+
+/**
+ * Parse and validate the monitor tool input from the LLM. Returns a
+ * ready-to-use `MonitorOptions` or a string error describing the
+ * validation failure. The `null`-vs-string contract matches the
+ * `null over silent success` quality bar — we never fabricate defaults
+ * when `command` is missing.
+ */
+function parseMonitorInput(
+  input: Record<string, unknown>,
+): { readonly options: MonitorOptions } | { readonly error: string } {
+  const command = input["command"];
+  if (typeof command !== "string" || command.trim().length === 0) {
+    return { error: "missing or empty `command` argument" };
+  }
+  const rawArgs = input["args"];
+  let args: readonly string[] | undefined;
+  if (rawArgs !== undefined) {
+    if (!Array.isArray(rawArgs)) return { error: "`args` must be an array of strings" };
+    if (!rawArgs.every((a): a is string => typeof a === "string")) {
+      return { error: "`args` must be an array of strings" };
+    }
+    args = rawArgs;
+  }
+  const cwd = typeof input["cwd"] === "string" ? (input["cwd"] as string) : undefined;
+  let maxDurationMs: number | undefined;
+  if (typeof input["maxDurationMs"] === "number") {
+    const requested = input["maxDurationMs"] as number;
+    if (!Number.isFinite(requested) || requested < 0) {
+      return { error: "`maxDurationMs` must be a non-negative finite number" };
+    }
+    // Clamp to the runtime ceiling; 0 means "unlimited" up to the ceiling.
+    maxDurationMs =
+      requested === 0 ? MONITOR_MAX_DURATION_MS : Math.min(requested, MONITOR_MAX_DURATION_MS);
+  } else {
+    maxDurationMs = MONITOR_MAX_DURATION_MS;
+  }
+  const options: MonitorOptions = {
+    command,
+    ...(args !== undefined ? { args } : {}),
+    ...(cwd !== undefined ? { cwd } : {}),
+    maxDurationMs,
+  };
+  return { options };
+}
+
+/**
+ * Format a monitor event into a human-readable line for transcript
+ * inclusion. Exported for reuse by the streaming variant and tests.
+ */
+export function formatMonitorEvent(event: MonitorEvent): string {
+  switch (event.type) {
+    case "stdout":
+      return `  [out ${event.elapsedMs}ms] ${event.line}`;
+    case "stderr":
+      return `  [err ${event.elapsedMs}ms] ${event.line}`;
+    case "error":
+      return `  [error ${event.elapsedMs}ms] ${event.line}`;
+    case "truncated":
+      return `  [truncated — buffer cap reached, older lines dropped]`;
+    case "exit":
+      return `  [exit ${event.elapsedMs}ms] code=${event.exitCode ?? "null"} signal=${event.signal ?? "null"}`;
+  }
+}
+
+/**
+ * Stream monitor events as individual ToolDispatchResult chunks. The
+ * runtime can `yield` each chunk into its own stream loop so the agent
+ * sees lines as they arrive — no sleep-poll. Terminates after the
+ * `exit` event or when `MONITOR_MAX_EVENTS_PER_RESULT` events have been
+ * emitted (hard cap to keep a runaway process from flooding the
+ * transcript). The final summary line includes totalDurationMs.
+ */
+export async function* dispatchMonitorStream(
+  input: Record<string, unknown>,
+  monitor: MonitorDep,
+  ctx: ToolDispatchContext,
+): AsyncGenerator<ToolDispatchResult> {
+  const parsed = parseMonitorInput(input);
+  if ("error" in parsed) {
+    yield {
+      type: "text",
+      content: `\n[monitor] Error: ${parsed.error}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+    return;
+  }
+
+  let session: MonitorSession;
+  try {
+    session = monitor.spawn(parsed.options);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    yield {
+      type: "text",
+      content: `\n[monitor] Spawn failed: ${msg}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+    return;
+  }
+
+  // Header line — announces which session is streaming so a downstream
+  // reader can attribute lines back to the right process.
+  yield {
+    type: "text",
+    content: `\n[monitor ${session.id}] streaming ${parsed.options.command}${(parsed.options.args ?? []).length > 0 ? " " + (parsed.options.args ?? []).join(" ") : ""}\n`,
+    provider: ctx.responseProvider,
+    model: ctx.responseModel,
+  };
+
+  let emitted = 0;
+  let totalDurationMs = 0;
+  let exitCode: number | null = null;
+  let exitSignal: NodeJS.Signals | null = null;
+  try {
+    for await (const event of session.events) {
+      emitted += 1;
+      totalDurationMs = event.elapsedMs;
+      if (event.type === "exit") {
+        exitCode = event.exitCode ?? null;
+        exitSignal = event.signal ?? null;
+      }
+      yield {
+        type: "text",
+        content: `${formatMonitorEvent(event)}\n`,
+        provider: ctx.responseProvider,
+        model: ctx.responseModel,
+      };
+      if (emitted >= MONITOR_MAX_EVENTS_PER_RESULT) {
+        // Too many events — stop the process and announce the truncation.
+        await session.stop();
+        yield {
+          type: "text",
+          content: `\n[monitor ${session.id}] hit per-result cap (${MONITOR_MAX_EVENTS_PER_RESULT}); process terminated\n`,
+          provider: ctx.responseProvider,
+          model: ctx.responseModel,
+        };
+        break;
+      }
+      if (event.type === "exit") break;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    yield {
+      type: "text",
+      content: `\n[monitor ${session.id}] Stream error: ${msg}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+
+  // Final summary — the agent gets a single line it can grep for.
+  yield {
+    type: "text",
+    content: `\n[monitor ${session.id}] exit: exitCode=${exitCode ?? "null"} signal=${exitSignal ?? "null"} totalDurationMs=${totalDurationMs}\n`,
+    provider: ctx.responseProvider,
+    model: ctx.responseModel,
+  };
+}
+
+/**
+ * Collect monitor events into a single ToolDispatchResult. Used by the
+ * unified `dispatchRuntimeTool` entry point which returns a single
+ * result; the streaming variant above is exposed for the runtime's main
+ * stream loop when true per-event yields are desired.
+ */
+export async function dispatchMonitor(
+  input: Record<string, unknown>,
+  monitor: MonitorDep,
+  ctx: ToolDispatchContext,
+): Promise<ToolDispatchResult> {
+  const parts: string[] = [];
+  for await (const chunk of dispatchMonitorStream(input, monitor, ctx)) {
+    parts.push(chunk.content);
+  }
+  return {
+    type: "text",
+    content: parts.join(""),
+    provider: ctx.responseProvider,
+    model: ctx.responseModel,
+  };
 }
 
 // ── plan_create ─────────────────────────────────────────────
@@ -293,6 +495,7 @@ export interface ToolDispatchDeps {
   readonly webFetch: WebFetchDep;
   readonly planStore: PlanStoreDep | null;
   readonly lsp?: LSPManagerDep | null;
+  readonly monitor?: MonitorDep | null;
 }
 
 /**
@@ -333,6 +536,10 @@ export async function dispatchRuntimeTool(
     case "rename_symbol":
       if (!deps.lsp) return null;
       return dispatchRenameSymbol(input, deps.lsp, ctx);
+
+    case "monitor":
+      if (!deps.monitor) return null;
+      return dispatchMonitor(input, deps.monitor, ctx);
 
     default:
       return null;
