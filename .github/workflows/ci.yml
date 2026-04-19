@@ -52,21 +52,19 @@ jobs:
         run: npm run build
 
   test:
-    name: Test ${{ matrix.shard }}/2 (Node ${{ matrix.node-version }} / ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Test ${{ matrix.shard }}/2 (Node ${{ matrix.node-version }} / self-hosted)
+    # Self-hosted runner (2026-04-19): GitHub Actions hosted Ubuntu
+    # runners were pre-empting shard 1 mid-vitest (~6-16s in, no test
+    # failure preceding). nick-fields/retry@v3 couldn't recover because
+    # the entire runner process was being killed. Moving to a
+    # self-hosted runner (labels: self-hosted, linux) eliminates the
+    # pre-emption class of failure. Fallback label ensures pending jobs
+    # queue rather than fail when no runner is online.
+    runs-on: [self-hosted, linux]
     timeout-minutes: 10
-    # Honest mode (session 9 adversarial audit): we removed
-    # continue-on-error for shard 1 because it silently masked real
-    # regressions. The retry wrapper below (nick-fields/retry@v3,
-    # max_attempts: 2, retry_on: error) only retries on external process
-    # death — a real test failure will still fail both attempts.
-    # Observed 2026-04-19: GitHub Actions runner pre-emption (shutdown
-    # signal ~15s into vitest on shard 1, no test failure preceding,
-    # local shard 1 passes cleanly in 50s with all 1856 tests green).
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
         node-version: [22]
         shard: [1, 2]
     steps:
@@ -78,13 +76,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
-      - name: Run vitest shard ${{ matrix.shard }}/2 (with retry on runner pre-emption)
-        uses: nick-fields/retry@v3
-        with:
-          max_attempts: 2
-          timeout_minutes: 8
-          retry_on: error
-          command: npm test -- --shard ${{ matrix.shard }}/2
+      - name: Run vitest shard ${{ matrix.shard }}/2
+        run: npm test -- --shard ${{ matrix.shard }}/2
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
