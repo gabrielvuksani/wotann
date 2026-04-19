@@ -1,0 +1,296 @@
+/**
+ * wotann mcp-server — expose WOTANN as an MCP server (Phase 5C).
+ *
+ * The inverse of an MCP client: WOTANN is HOSTED by another tool
+ * (Cursor, Claude-Code, Zed, etc.) over stdio. The host invokes
+ * WOTANN's tools — memory_search, find_symbol, run_workflow, etc. —
+ * as first-class tool calls in its own agent loop.
+ *
+ * This means a user can add WOTANN's memory + symbol index + workflow
+ * runner to their existing agent without replacing it. One day you
+ * use Cursor; the next day you use WOTANN standalone. Same skills,
+ * same memory, same tools.
+ *
+ * Protocol: MCP 2024-11-05 JSON-RPC over stdio. Implements:
+ *   - initialize
+ *   - tools/list
+ *   - tools/call
+ *   - prompts/list (minimal; returns [])
+ *   - resources/list (minimal; returns [])
+ *   - shutdown
+ *
+ * Callers provide a ToolHostAdapter with the actual WOTANN tool
+ * implementations. This module owns ONLY the MCP protocol wire.
+ *
+ * Security: the server trusts the calling MCP client (it's running in
+ * the user's own process). No auth. Tool execution permissions are the
+ * client's responsibility.
+ */
+
+import { createInterface, type Interface } from "node:readline";
+import type { Readable, Writable } from "node:stream";
+
+// ── Types ──────────────────────────────────────────────
+
+export const MCP_PROTOCOL_VERSION = "2024-11-05";
+
+export interface McpServerInfo {
+  readonly name: string;
+  readonly version: string;
+}
+
+export interface McpToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: {
+    readonly type: "object";
+    readonly properties: Record<string, unknown>;
+    readonly required?: readonly string[];
+    readonly additionalProperties?: boolean;
+  };
+}
+
+export interface McpToolCallResult {
+  readonly content: ReadonlyArray<{ readonly type: "text"; readonly text: string }>;
+  readonly isError?: boolean;
+}
+
+export interface ToolHostAdapter {
+  readonly listTools: () => readonly McpToolDefinition[];
+  readonly callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
+}
+
+export interface McpServerOptions {
+  readonly info: McpServerInfo;
+  readonly adapter: ToolHostAdapter;
+  readonly stdin?: Readable;
+  readonly stdout?: Writable;
+  readonly stderr?: Writable;
+}
+
+// ── JSON-RPC envelope ─────────────────────────────────
+
+interface JsonRpcRequest {
+  readonly jsonrpc: "2.0";
+  readonly id?: string | number | null;
+  readonly method: string;
+  readonly params?: unknown;
+}
+
+interface JsonRpcResponse {
+  readonly jsonrpc: "2.0";
+  readonly id: string | number | null;
+  readonly result?: unknown;
+  readonly error?: { readonly code: number; readonly message: string; readonly data?: unknown };
+}
+
+// ── Server ─────────────────────────────────────────────
+
+export class WotannMcpServer {
+  private readonly info: McpServerInfo;
+  private readonly adapter: ToolHostAdapter;
+  private readonly stdin: Readable;
+  private readonly stdout: Writable;
+  private readonly stderr: Writable;
+  private rl: Interface | null = null;
+  private initialized = false;
+  private closed = false;
+
+  constructor(options: McpServerOptions) {
+    this.info = options.info;
+    this.adapter = options.adapter;
+    this.stdin = options.stdin ?? process.stdin;
+    this.stdout = options.stdout ?? process.stdout;
+    this.stderr = options.stderr ?? process.stderr;
+  }
+
+  /**
+   * Start the stdio loop. Returns a promise that resolves when stdin
+   * closes (client disconnected).
+   */
+  async run(): Promise<void> {
+    this.rl = createInterface({ input: this.stdin, crlfDelay: Infinity });
+    return new Promise((resolvePromise) => {
+      this.rl!.on("line", (line) => {
+        this.handleLine(line).catch((err) => {
+          this.log("handler error", err);
+        });
+      });
+      this.rl!.on("close", () => {
+        this.closed = true;
+        resolvePromise();
+      });
+    });
+  }
+
+  /** For testing: process a single request line synchronously. */
+  async handleRequest(line: string): Promise<string | null> {
+    const captured: string[] = [];
+    const originalStdout = this.stdout;
+    // Replace stdout with a capture buffer for this call
+    (this as unknown as { stdout: Writable }).stdout = {
+      write: (chunk: string | Buffer) => {
+        captured.push(typeof chunk === "string" ? chunk : chunk.toString());
+        return true;
+      },
+    } as Writable;
+    try {
+      await this.handleLine(line);
+    } finally {
+      (this as unknown as { stdout: Writable }).stdout = originalStdout;
+    }
+    return captured.length > 0 ? captured.join("") : null;
+  }
+
+  private async handleLine(line: string): Promise<void> {
+    if (this.closed) return;
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    let req: JsonRpcRequest;
+    try {
+      req = JSON.parse(trimmed) as JsonRpcRequest;
+    } catch (e) {
+      this.sendResponse({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32700, message: `parse error: ${(e as Error).message}` },
+      });
+      return;
+    }
+
+    if (req.jsonrpc !== "2.0") {
+      this.sendResponse({
+        jsonrpc: "2.0",
+        id: req.id ?? null,
+        error: { code: -32600, message: "invalid request: missing jsonrpc: 2.0" },
+      });
+      return;
+    }
+
+    try {
+      const result = await this.dispatch(req.method, req.params);
+      // Notifications (no id) do not get a response
+      if (req.id !== undefined && req.id !== null) {
+        this.sendResponse({ jsonrpc: "2.0", id: req.id, result });
+      }
+    } catch (e) {
+      if (req.id !== undefined && req.id !== null) {
+        this.sendResponse({
+          jsonrpc: "2.0",
+          id: req.id,
+          error: { code: -32603, message: (e as Error).message },
+        });
+      }
+    }
+  }
+
+  private async dispatch(method: string, params: unknown): Promise<unknown> {
+    switch (method) {
+      case "initialize": {
+        this.initialized = true;
+        return {
+          protocolVersion: MCP_PROTOCOL_VERSION,
+          capabilities: {
+            tools: {},
+            prompts: {},
+            resources: {},
+          },
+          serverInfo: this.info,
+        };
+      }
+      case "initialized":
+      case "notifications/initialized":
+        return null;
+      case "tools/list": {
+        return { tools: this.adapter.listTools() };
+      }
+      case "tools/call": {
+        const p = (params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
+        if (!p.name) throw new Error("tools/call: name is required");
+        const result = await this.adapter.callTool(p.name, p.arguments ?? {});
+        return result;
+      }
+      case "prompts/list":
+        return { prompts: [] };
+      case "resources/list":
+        return { resources: [] };
+      case "shutdown":
+        this.closed = true;
+        this.rl?.close();
+        return null;
+      case "ping":
+        return {};
+      default:
+        throw new Error(`method not implemented: ${method}`);
+    }
+  }
+
+  private sendResponse(response: JsonRpcResponse): void {
+    this.stdout.write(`${JSON.stringify(response)}\n`);
+  }
+
+  private log(label: string, data: unknown): void {
+    // Logs go to stderr so they don't corrupt the JSON-RPC stream
+    this.stderr.write(`[mcp-server] ${label}: ${String(data)}\n`);
+  }
+
+  get isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  get isClosed(): boolean {
+    return this.closed;
+  }
+}
+
+// ── Default adapter wiring ────────────────────────────
+
+/**
+ * Compose a default ToolHostAdapter from a set of tool providers.
+ * Each provider ships a list of tools + a callTool function scoped
+ * to its own namespace.
+ */
+export interface ToolProvider {
+  readonly tools: readonly McpToolDefinition[];
+  readonly callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
+}
+
+export function composeAdapter(providers: readonly ToolProvider[]): ToolHostAdapter {
+  const toolMap = new Map<string, ToolProvider>();
+  const allTools: McpToolDefinition[] = [];
+  for (const provider of providers) {
+    for (const tool of provider.tools) {
+      if (toolMap.has(tool.name)) {
+        throw new Error(`composeAdapter: duplicate tool name "${tool.name}"`);
+      }
+      toolMap.set(tool.name, provider);
+      allTools.push(tool);
+    }
+  }
+  return {
+    listTools: () => allTools,
+    callTool: async (name, args) => {
+      const provider = toolMap.get(name);
+      if (!provider) {
+        return {
+          content: [{ type: "text", text: `unknown tool: ${name}` }],
+          isError: true,
+        };
+      }
+      return provider.callTool(name, args);
+    },
+  };
+}
+
+/**
+ * Wrap any arbitrary adapter with a "text" response formatter for
+ * simple scalar outputs. Turns a string/number/object into a
+ * conformant McpToolCallResult.
+ */
+export function makeTextResult(text: string, isError?: boolean): McpToolCallResult {
+  return {
+    content: [{ type: "text", text }],
+    ...(isError !== undefined ? { isError } : {}),
+  };
+}
