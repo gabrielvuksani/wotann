@@ -267,35 +267,6 @@ const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     },
     required: ["block", "key", "value"],
   },
-  {
-    name: "memory_search_in_domain",
-    description:
-      "Search memory within an explicit domain (and optional topic) partition. " +
-      "Use when the scope is known (e.g. 'auth', 'deploy') — partition filtering " +
-      "runs before FTS5 for +12-34% precision over the generic memory_search.",
-    parameters: {
-      query: { type: "string", description: "Search query text" },
-      domain: {
-        type: "string",
-        description: "Domain partition — required. Examples: 'memory', 'auth', 'deploy'.",
-      },
-      topic: {
-        type: "string",
-        description: "Optional topic partition within the domain.",
-      },
-      limit: {
-        type: "number",
-        description: "Maximum results to return (default: 10)",
-        default: 10,
-      },
-      minFreshness: {
-        type: "number",
-        description: "Minimum freshness score 0-1 (default: 0.1)",
-        default: 0.1,
-      },
-    },
-    required: ["query", "domain"],
-  },
 ];
 
 // ── Memory Toolkit ───────────────────────────────────────
