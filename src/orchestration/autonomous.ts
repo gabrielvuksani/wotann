@@ -964,10 +964,53 @@ export class AutonomousExecutor {
         await callbacks.onCheckpoint(this.modeState);
       }
 
+      // ── Phase-13: autopilot-checkpoint (persistent state via
+      // `callbacks.saveCheckpointPath`). Complementary to the in-memory
+      // onCheckpoint hook above — writes a JSON file atomically so a
+      // crashed process can resume from this iteration.
+      if (callbacks?.saveCheckpointPath) {
+        try {
+          const cp: AutopilotCheckpoint = {
+            version: CHECKPOINT_VERSION,
+            taskId: `auto-${startTime}`,
+            savedAt: new Date().toISOString(),
+            iteration: cycle,
+            continuesSoFar: cycle,
+            elapsedMs: Date.now() - startTime,
+            usdSpent: totalCost,
+            evidence: [],
+            artifacts: [],
+            lastPrompt: currentPrompt.slice(0, 2000),
+            lastResponse: output.slice(0, 2000),
+            workingTreeHash: "",
+          };
+          const fname = checkpointFilename(cp.taskId);
+          await saveCheckpoint(`${callbacks.saveCheckpointPath}/${fname}`, cp);
+        } catch (err) {
+          console.warn(`[autonomous] checkpoint save failed: ${(err as Error).message}`);
+        }
+      }
+
       // ── Success check ──
       const testsOk = !this.config.runTests || verification.testsPass;
       const typecheckOk = !this.config.runTypecheck || verification.typecheckPass;
       const lintOk = !this.config.runLint || verification.lintPass;
+
+      // Phase-13 patch-scorer gate: even with passing verification, if
+      // the scorer reported the patch is below threshold we retry.
+      if (testsOk && typecheckOk && lintOk && patchScoreRetry) {
+        consecutiveFailures++;
+        this.recordCircuitFailure();
+        currentPrompt = buildRecoveryPrompt(
+          task,
+          `Patch-scorer flagged regression below threshold. Revise the diff.`,
+          cycle,
+          this.config.maxCycles,
+          currentStrategy,
+          consecutiveFailures,
+        );
+        continue;
+      }
 
       if (testsOk && typecheckOk && lintOk) {
         this.recordCircuitSuccess();
