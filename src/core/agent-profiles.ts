@@ -87,6 +87,30 @@ export function allProfiles(): readonly AgentProfile[] {
 }
 
 /**
+ * Set the active profile by name. Returns the profile itself (for
+ * symmetry with `cycleProfile` so callers can chain). Type-safe
+ * rejection of unknown names is enforced at compile time by
+ * `AgentProfileName`; at runtime we still guard against bad strings
+ * from deserialised config.
+ */
+export function setProfile(name: string): AgentProfile {
+  if (name !== "write" && name !== "ask" && name !== "minimal") {
+    throw new Error(`Unknown agent profile: "${name}". Valid options: write, ask, minimal.`);
+  }
+  return AGENT_PROFILES[name];
+}
+
+/**
+ * Parse an untrusted profile name (from deserialised config or a user
+ * command) and return the profile, or null if the input is unknown.
+ * Safer than `setProfile` when the caller wants a best-effort merge.
+ */
+export function parseProfileName(raw: unknown): AgentProfileName | null {
+  if (raw !== "write" && raw !== "ask" && raw !== "minimal") return null;
+  return raw;
+}
+
+/**
  * Check whether a profile permits a specific tool. Returns true when
  * allowedTools is "all" OR the tool is in the explicit allow list.
  */

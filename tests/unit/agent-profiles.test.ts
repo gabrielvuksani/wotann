@@ -9,9 +9,11 @@ import {
   applyProfile,
   cycleProfile,
   getProfile,
+  parseProfileName,
   profilePermitsTool,
   renderProfileList,
   renderProfileSwitch,
+  setProfile,
 } from "../../src/core/agent-profiles.js";
 
 describe("AGENT_PROFILES invariants", () => {
@@ -113,5 +115,31 @@ describe("renderers", () => {
     expect(out).toMatch(/Write/);
     expect(out).toMatch(/Ask/);
     expect(out).toMatch(/Minimal/);
+  });
+});
+
+describe("setProfile + parseProfileName", () => {
+  it("setProfile returns profile for valid names", () => {
+    expect(setProfile("write").name).toBe("write");
+    expect(setProfile("ask").name).toBe("ask");
+    expect(setProfile("minimal").name).toBe("minimal");
+  });
+
+  it("setProfile throws on unknown profile", () => {
+    expect(() => setProfile("invalid")).toThrow(/Unknown agent profile/);
+    expect(() => setProfile("")).toThrow();
+  });
+
+  it("parseProfileName returns name for valid inputs", () => {
+    expect(parseProfileName("write")).toBe("write");
+    expect(parseProfileName("ask")).toBe("ask");
+    expect(parseProfileName("minimal")).toBe("minimal");
+  });
+
+  it("parseProfileName returns null for unknown inputs", () => {
+    expect(parseProfileName("invalid")).toBeNull();
+    expect(parseProfileName(42)).toBeNull();
+    expect(parseProfileName(undefined)).toBeNull();
+    expect(parseProfileName(null)).toBeNull();
   });
 });
