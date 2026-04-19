@@ -2332,7 +2332,17 @@ export class WotannRuntime {
       // tool set — the whole feature was dead code. Now the fake tools
       // are appended to `effectiveTools` so the model sees them and
       // any distillation attempt captures them as noise.
-      if (this.config.enableAntiDistillation) {
+      //
+      // Wave-3E wiring (spec priority #7): honor the
+      // `WOTANN_ANTI_DISTILLATION=1` env var as an opt-in alongside the
+      // config flag. Env-var opt-in lets operators enable distillation
+      // defence without rebuilding config, matching the pattern used by
+      // other security-posture env vars (WOTANN_ALLOW_DESTRUCTIVE,
+      // WOTANN_UNIFIED_EXEC_ALLOW_BARE, etc.).
+      const antiDistillEnabled =
+        this.config.enableAntiDistillation === true ||
+        process.env["WOTANN_ANTI_DISTILLATION"] === "1";
+      if (antiDistillEnabled) {
         const fakeTools = generateFakeTools(2);
         for (const fake of fakeTools) {
           effectiveTools.push({
