@@ -750,6 +750,42 @@ export class AutonomousExecutor {
       totalTokens += tokensUsed;
       this.heartbeat();
 
+      trajectory.record("response" as FrameKind, output.slice(0, 400), { cycle, tokensUsed });
+
+      // ── Phase-13: hidden-test-aware patch scoring ──
+      let patchScoreRetry = false;
+      if (process.env["WOTANN_PATCH_SCORE"] === "1" && callbacks?.getPatchForScoring) {
+        try {
+          const pkg = await callbacks.getPatchForScoring();
+          if (pkg) {
+            const score = await scorePatch(pkg.patch, { workDir: pkg.workDir });
+            const threshold = pkg.threshold ?? 0;
+            patchScoreRetry = score.compositeScore < threshold;
+            callbacks.onPatchScore?.(score, patchScoreRetry);
+          }
+        } catch (err) {
+          console.warn(`[autonomous] patch-scorer failed: ${(err as Error).message}`);
+        }
+      }
+
+      // ── Phase-13: sandboxed multi-patch voting ──
+      const multiN = Number(process.env["WOTANN_MULTI_PATCH"] ?? "0");
+      if (multiN > 1 && callbacks?.getMultiPatchCandidates) {
+        try {
+          const pkg = await callbacks.getMultiPatchCandidates();
+          if (pkg && pkg.patches.length > 1) {
+            const voteResult = await voteOnPatches(
+              pkg.patches,
+              { workDir: pkg.workDir },
+              pkg.votingOptions ?? {},
+            );
+            callbacks.onMultiPatchVote?.(voteResult);
+          }
+        } catch (err) {
+          console.warn(`[autonomous] multi-patch-voter failed: ${(err as Error).message}`);
+        }
+      }
+
       // ── DoomLoop detection (pattern-based, not just exact match) ──
       recentOutputs.push(output.slice(0, 500));
       if (recentOutputs.length > 10) recentOutputs.shift();
