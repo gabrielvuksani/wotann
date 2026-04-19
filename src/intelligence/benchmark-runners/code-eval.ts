@@ -196,8 +196,10 @@ export async function runCodeEval(
           .filter((s) => s.length > 0)
           .join("\n");
 
-        const queryOpts: WotannQueryOptions = { prompt: samplePrompt };
-        if (opts.model) queryOpts.model = opts.model;
+        const queryOpts: WotannQueryOptions = {
+          prompt: samplePrompt,
+          ...(opts.model ? { model: opts.model } : {}),
+        };
         for await (const chunk of runtime.query(queryOpts)) {
           if (Date.now() > deadline) break;
           if (chunk.type === "text") transcript.push(chunk.content);

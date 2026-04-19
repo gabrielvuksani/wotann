@@ -180,8 +180,10 @@ export async function runAiderPolyglot(
           ``,
           `Respond with a minimal diff hunk in unified diff format. Do not rewrite the whole file unless asked.`,
         ].join("\n");
-        const queryOpts: WotannQueryOptions = { prompt: attemptPrompt };
-        if (opts.model) queryOpts.model = opts.model;
+        const queryOpts: WotannQueryOptions = {
+          prompt: attemptPrompt,
+          ...(opts.model ? { model: opts.model } : {}),
+        };
         for await (const chunk of runtime.query(queryOpts)) {
           if (Date.now() > deadline) break;
           if (chunk.type === "text") transcript.push(chunk.content);
@@ -204,8 +206,10 @@ export async function runAiderPolyglot(
           ``,
           `Respond with the COMPLETE revised file contents. No diff markers.`,
         ].join("\n");
-        const queryOpts: WotannQueryOptions = { prompt: fallbackPrompt };
-        if (opts.model) queryOpts.model = opts.model;
+        const queryOpts: WotannQueryOptions = {
+          prompt: fallbackPrompt,
+          ...(opts.model ? { model: opts.model } : {}),
+        };
         for await (const chunk of runtime.query(queryOpts)) {
           if (Date.now() > deadline) break;
           if (chunk.type === "text") transcript.push(chunk.content);
