@@ -127,7 +127,65 @@ export const ACP_METHODS = {
   ToolCallResult: "tools/result",
   PromptPartial: "prompt/partial",
   PromptComplete: "prompt/complete",
+  // Codex-parity thread ops — see src/core/conversation-branching.ts
+  ThreadFork: "thread/fork",
+  ThreadRollback: "thread/rollback",
+  ThreadList: "thread/list",
+  ThreadSwitch: "thread/switch",
 } as const;
+
+export interface AcpThreadForkParams {
+  readonly sessionId: string;
+  readonly name: string;
+  /** Optional — fork from a specific turn. Default = current head. */
+  readonly fromTurnId?: string;
+}
+
+export interface AcpThreadForkResult {
+  readonly branchId: string;
+  readonly name: string;
+  readonly forkPoint: string | null;
+  readonly inheritedTurnCount: number;
+}
+
+export interface AcpThreadRollbackParams {
+  readonly sessionId: string;
+  /**
+   * Either `n` (drop N most recent turns) OR `toTurnId` (drop
+   * everything after a specific turn). Exactly one required.
+   */
+  readonly n?: number;
+  readonly toTurnId?: string;
+}
+
+export interface AcpThreadRollbackResult {
+  readonly droppedTurnCount: number;
+  readonly droppedTurnIds: readonly string[];
+}
+
+export interface AcpThreadListParams {
+  readonly sessionId: string;
+}
+
+export interface AcpThreadListResult {
+  readonly branches: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly turnCount: number;
+    readonly forkPoint: string | null;
+    readonly isActive: boolean;
+  }>;
+}
+
+export interface AcpThreadSwitchParams {
+  readonly sessionId: string;
+  readonly nameOrId: string;
+}
+
+export interface AcpThreadSwitchResult {
+  readonly switched: boolean;
+  readonly activeBranchId: string;
+}
 
 export const ACP_PROTOCOL_VERSION = "0.2.0";
 
