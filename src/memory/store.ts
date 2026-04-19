@@ -36,6 +36,15 @@ import {
   type MemPalacePath,
   type MemPalaceQuery,
 } from "./mem-palace.js";
+import {
+  hybridFusion as rrfFusion,
+  temporalFiltered,
+  metadataOnly,
+  summaryOnly,
+  type SearchHit,
+  type SearchableEntry,
+  type TemporalFilter,
+} from "./extended-search-types.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -1534,6 +1543,73 @@ export class MemoryStore {
       return palaceIsUnder(rowPath, path);
     });
     return filtered.slice(0, limit);
+  }
+
+  /**
+   * Phase 13 Wave-3C — extended search modes (Cognee parity). Dispatches
+   * to extended-search-types for non-default modes: temporal-filtered,
+   * summary-only, metadata-only, hybrid-fusion. Default mode falls
+   * through to FTS5 search. Non-default modes return an empty list when
+   * the store has no entries matching the mode's criteria.
+   */
+  searchExtended(
+    query: string,
+    options: {
+      readonly mode?:
+        | "default"
+        | "temporal-filtered"
+        | "summary-only"
+        | "metadata-only"
+        | "hybrid-fusion";
+      readonly limit?: number;
+      readonly temporal?: TemporalFilter;
+      readonly metadata?: Readonly<Record<string, unknown>>;
+      readonly secondaryRanking?: readonly MemorySearchResult[];
+    } = {},
+  ): readonly MemorySearchResult[] {
+    const mode = options.mode ?? "default";
+    const limit = options.limit ?? 10;
+    if (mode === "default") return this.search(query, limit);
+
+    const ftsHits = this.search(query, limit * 2);
+    const entries: SearchableEntry[] = ftsHits.map((h) => ({
+      id: h.entry.id,
+      content: h.entry.value,
+      ...(h.entry.documentDate ? { timestamp: h.entry.documentDate } : {}),
+      ...(h.entry.tags ? { metadata: { type: h.entry.tags } } : {}),
+    }));
+    const byId = new Map<string, MemorySearchResult>(ftsHits.map((h) => [h.entry.id, h]));
+
+    let hits: readonly SearchHit[] = [];
+    if (mode === "temporal-filtered" && options.temporal) {
+      hits = temporalFiltered(entries, options.temporal);
+    } else if (mode === "summary-only") {
+      hits = summaryOnly(entries);
+    } else if (mode === "metadata-only" && options.metadata) {
+      hits = metadataOnly(entries, options.metadata);
+    } else if (mode === "hybrid-fusion" && options.secondaryRanking) {
+      const primary: SearchHit[] = ftsHits.map((h, rank) => ({
+        entry: {
+          id: h.entry.id,
+          content: h.entry.value,
+          ...(h.entry.documentDate ? { timestamp: h.entry.documentDate } : {}),
+        },
+        score: 1 / (rank + 1),
+      }));
+      const secondary: SearchHit[] = options.secondaryRanking.map((h, rank) => ({
+        entry: {
+          id: h.entry.id,
+          content: h.entry.value,
+          ...(h.entry.documentDate ? { timestamp: h.entry.documentDate } : {}),
+        },
+        score: 1 / (rank + 1),
+      }));
+      hits = rrfFusion([primary, secondary]);
+    }
+    return hits
+      .map((hit) => byId.get(hit.entry.id))
+      .filter((r): r is MemorySearchResult => r !== undefined)
+      .slice(0, limit);
   }
 
   /** Get all unique domains in the memory store. */
