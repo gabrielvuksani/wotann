@@ -29,6 +29,13 @@ import { writeFileAtomicSyncBestEffort } from "../utils/atomic-io.js";
 import { deriveIngestTimestamps } from "./dual-timestamp.js";
 import type { MemoryRelationship, MemoryRelationshipKind } from "./relationship-types.js";
 import { clampContextTokens, cleanContext } from "./contextual-embeddings.js";
+import {
+  fromStoreFields as palaceFromStoreFields,
+  toStoreFields as palaceToStoreFields,
+  isUnder as palaceIsUnder,
+  type MemPalacePath,
+  type MemPalaceQuery,
+} from "./mem-palace.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -1485,6 +1492,48 @@ export class MemoryStore {
       score: (r["score"] as number) ?? 0,
       snippet: (r["snippet"] as string) ?? "",
     }));
+  }
+
+  /**
+   * Phase 13 Wave-3C — MemPalace-aware search. Gated by MEMORY_PALACE=1
+   * env. When enabled, accepts a MemPalacePath/Query and routes through
+   * searchPartitioned with domain/topic derived from the palace path
+   * (hall → domain, wing[/room] → topic). The palace-style hierarchy
+   * then post-filters results so wing=X/room=Y queries only return
+   * entries recorded under X/Y, not X alone. When MEMORY_PALACE is
+   * unset, falls back to standard search (no regression).
+   */
+  searchPalace(
+    query: string,
+    palace: MemPalaceQuery = {},
+    limit: number = 10,
+  ): readonly MemorySearchResult[] {
+    if (process.env["MEMORY_PALACE"] !== "1") {
+      return this.search(query, limit);
+    }
+    const path: MemPalacePath = { hall: palace.hall ?? "" };
+    const { domain, topic } = palace.hall
+      ? palaceToStoreFields({
+          hall: palace.hall,
+          ...(palace.wing ? { wing: palace.wing } : {}),
+          ...(palace.room ? { room: palace.room } : {}),
+        })
+      : { domain: "", topic: undefined };
+    const hits = this.searchPartitioned(query, {
+      limit: limit * 2,
+      ...(domain ? { domain } : {}),
+      ...(topic ? { topic } : {}),
+    });
+    if (!palace.hall) return hits.slice(0, limit);
+    // Post-filter: require the row's palace-path to fall under the query.
+    const filtered = hits.filter((h) => {
+      const rowPath = palaceFromStoreFields({
+        domain: h.entry.domain ?? "",
+        topic: h.entry.topic,
+      });
+      return palaceIsUnder(rowPath, path);
+    });
+    return filtered.slice(0, limit);
   }
 
   /** Get all unique domains in the memory store. */
