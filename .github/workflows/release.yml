@@ -45,7 +45,10 @@ jobs:
           VERSION="${REF_NAME#v}"
           mkdir -p dist/release
           ART="dist/release/wotann-${VERSION}-${TARGET}"
-          cp dist/index.js "$ART" || printf '#!/bin/sh\n' > "$ART"
+          # Honest failure: if dist/index.js is missing, the build is broken — fail loudly.
+          # No more printf'ing an empty sh shim that silently ships a non-functional binary.
+          test -f dist/index.js || { echo "::error::dist/index.js missing — build failed, refusing to ship empty shim"; exit 1; }
+          cp dist/index.js "$ART"
           chmod +x "$ART"
           ( cd dist/release && tar -czf "wotann-${VERSION}-${TARGET}.tar.gz" "wotann-${VERSION}-${TARGET}" )
       - name: Upload artifacts

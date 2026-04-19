@@ -75,7 +75,7 @@ Sprint 6: Differentiation (Phase 8 + Phase 11 + Phase 14 + Phase 15)
 ```
 src/
   core/           — Agent bridge, session, config, types (WotannRuntime)
-  providers/      — 11 adapters, router, rate limiter, format translator
+  providers/      — 19 adapters, router, rate limiter, format translator, capability augmenter + equalizer
   middleware/     — 16-layer pipeline + TTSR
   intelligence/   — 7 native overrides + accuracy boost + context relevance
   orchestration/  — Coordinator, waves, PWR, Ralph, graph DSL, self-healing
