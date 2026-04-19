@@ -118,6 +118,7 @@ import { LanguageServerRegistry } from "../lsp/server-registry.js";
 import type { BuiltLspTools } from "../lsp/agent-tools.js";
 import { AGENT_LSP_TOOL_NAMES } from "../lsp/agent-tools.js";
 import { buildLspToolsForAgent } from "./runtime-tools.js";
+import { loadToolsWithOptions, type McpTier, type LoadToolsResult } from "../mcp/tool-loader.js";
 import {
   applyHashEdit,
   type HashEditOperation,
@@ -585,6 +586,13 @@ export class WotannRuntime {
   private lspRegistry: LanguageServerRegistry | null = null;
   private lspAgentTools: BuiltLspTools | null = null;
   private readonly lspAgentToolsEnabled: boolean;
+
+  // ── Session-13: task-master parity tiered MCP tools ──
+  // `WOTANN_MCP_TIER=core` (default) saves ~7k tokens vs `all` by only
+  // exposing the 7 daily-workflow tools to the model. Tier resolution
+  // honours env var, with a config override path later.
+  private mcpTools: readonly LoadToolsResult["tools"][number][] = [];
+  private mcpTier: McpTier | null = null;
 
   constructor(config: RuntimeConfig) {
     this.config = config;
@@ -1093,6 +1101,21 @@ export class WotannRuntime {
     return this.imageGenRouter;
   }
 
+  /**
+   * Session-13: tiered MCP tool surface for the active runtime.
+   * Defaults to "core" (7 tools). Set `WOTANN_MCP_TIER=standard` for 14
+   * tools or `WOTANN_MCP_TIER=all` for the full 42+ surface (trades ~7k
+   * tokens for completeness). Empty array if the resolver failed.
+   */
+  getMcpTools(): readonly LoadToolsResult["tools"][number][] {
+    return this.mcpTools;
+  }
+
+  /** Session-13: currently-resolved MCP tier, or null if resolver failed. */
+  getMcpTier(): McpTier | null {
+    return this.mcpTier;
+  }
+
   /** Get the cost tracker (daily/weekly/monthly aggregates + recording). */
   getCostTracker(): CostTracker {
     return this.costTracker;
@@ -1135,6 +1158,25 @@ export class WotannRuntime {
         this.lspRegistry = null;
         this.lspAgentTools = null;
       }
+    }
+
+    // Session-13 task-master parity — tiered MCP tool loading.
+    // `WOTANN_MCP_TIER=core` (default) surfaces 7 tools to the model;
+    // `standard` adds 7 more; `all` exposes the full 42+ surface (~8k
+    // tokens). Honest warn on resolver failure — no fabricated registry.
+    try {
+      const envTier = process.env["WOTANN_MCP_TIER"];
+      const rawTier =
+        envTier === "core" || envTier === "standard" || envTier === "all"
+          ? (envTier as McpTier)
+          : undefined;
+      const loaded = loadToolsWithOptions(rawTier ? { tier: rawTier } : {});
+      this.mcpTools = loaded.tools;
+      this.mcpTier = loaded.tier;
+    } catch (err) {
+      console.warn(`[WOTANN] mcp tool-loader init failed: ${(err as Error).message}`);
+      this.mcpTools = [];
+      this.mcpTier = null;
     }
 
     // Phase H — Progressive context loader. Constructed once per runtime,
