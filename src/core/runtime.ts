@@ -127,6 +127,11 @@ import {
 } from "../memory/hybrid-retrieval-v2.js";
 import type { SearchableEntry } from "../memory/extended-search-types.js";
 import {
+  scrubPaths as sandboxScrubPaths,
+  makeDefaultConfig as makeSandboxVirtualPathConfig,
+  type VirtualPathsConfig,
+} from "../sandbox/virtual-paths.js";
+import {
   applyHashEdit,
   type HashEditOperation,
   type HashEditResult,
@@ -375,6 +380,13 @@ export interface RuntimeConfig {
    * or the config flag.
    */
   readonly useHybridV2?: boolean;
+  /**
+   * Session-13 deer-flow parity: scrub physical paths (`/Users/alice/...`)
+   * to virtual `/mnt/user-data/*` in tool-result transcripts before they
+   * reach the model. Defaults to true — agents should never see the
+   * user's home directory in transcripts.
+   */
+  readonly virtualPathsEnabled?: boolean;
 }
 
 export interface RuntimeStatus {
@@ -621,6 +633,13 @@ export class WotannRuntime {
   // too few hits (honest graceful degradation, never silent success).
   private readonly hybridV2Enabled: boolean;
 
+  // ── Session-13: deer-flow virtual-paths scrub config ──
+  // Per-session bucket config; used to rewrite `/Users/alice/project/src`
+  // to `/mnt/user-data/project/src` in every tool-result transcript
+  // the model sees. Defaults to `virtualPathsEnabled = true`.
+  private readonly virtualPathsEnabled: boolean;
+  private readonly sandboxVirtualPathConfig: VirtualPathsConfig;
+
   constructor(config: RuntimeConfig) {
     this.config = config;
 
@@ -631,6 +650,8 @@ export class WotannRuntime {
     this.lspAgentToolsEnabled =
       config.enableLspAgentTools ?? process.env["WOTANN_LSP_TOOLS"] === "1";
     this.hybridV2Enabled = config.useHybridV2 ?? process.env["WOTANN_HYBRID_V2"] === "1";
+    this.virtualPathsEnabled = config.virtualPathsEnabled ?? true;
+    this.sandboxVirtualPathConfig = makeSandboxVirtualPathConfig(config.workingDir);
 
     // Initialize hook engine
     // Hook profile resolution: explicit config overrides everything,
@@ -3858,13 +3879,27 @@ export class WotannRuntime {
     toolName: string,
     rawContent: string,
   ): Promise<{ content: string; blocked: boolean }> {
+    // Session-13 deer-flow parity — scrub physical paths to virtual
+    // /mnt/user-data/* in every tool-result transcript before the
+    // hook engine sees it. Disabled when virtualPathsEnabled=false.
+    // Honest: on scrub failure we keep the original content instead of
+    // silently dropping tool output.
+    let contentForHooks = rawContent;
+    if (this.virtualPathsEnabled) {
+      try {
+        contentForHooks = sandboxScrubPaths(rawContent, this.sandboxVirtualPathConfig);
+      } catch (err) {
+        console.warn(`[WOTANN] virtual-paths scrub failed: ${(err as Error).message}`);
+        contentForHooks = rawContent;
+      }
+    }
     if (this.config.enableHooks === false) {
-      return { content: rawContent, blocked: false };
+      return { content: contentForHooks, blocked: false };
     }
     const result = await this.hookEngine.fire({
       event: "ToolResultReceived",
       toolName,
-      content: rawContent,
+      content: contentForHooks,
       sessionId: this.session.id,
       timestamp: Date.now(),
     });
@@ -3875,7 +3910,7 @@ export class WotannRuntime {
         blocked: true,
       };
     }
-    return { content: rawContent, blocked: false };
+    return { content: contentForHooks, blocked: false };
   }
   getCanvasEditor(): CanvasEditor {
     return this.canvasEditor;
