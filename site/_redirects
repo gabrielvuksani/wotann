@@ -28,5 +28,9 @@
 /conduct         https://github.com/gabrielvuksani/wotann/blob/main/CODE_OF_CONDUCT.md  302
 /contributing    https://github.com/gabrielvuksani/wotann/blob/main/CONTRIBUTING.md     302
 
-# --- Fallback: unknown paths -> root (so /anything lands on the marketing page)
-/*               /  200
+# NOTE: No SPA-style /* → / fallback. The previous catch-all was
+# rewriting every request (including /assets/style.css) to index.html,
+# so static assets were served with content-type: text/html and the
+# browser refused them under nosniff. Unknown paths return Cloudflare's
+# default 404 now — correct for a static marketing site without
+# client-side routing.
