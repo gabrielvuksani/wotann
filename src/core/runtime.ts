@@ -27,6 +27,7 @@ import { HookEngine } from "../hooks/engine.js";
 import { registerBuiltinHooks, clearReadTrackingForSession } from "../hooks/built-in.js";
 import { ActiveMemoryEngine } from "../memory/active-memory.js";
 import { Observer } from "../memory/observer.js";
+import { Reflector, type ReflectorJudge } from "../memory/reflector.js";
 import { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
 import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pipeline.js";
 import { assembleSystemPromptParts, wrapPromptWithThinkInCode } from "../prompt/engine.js";
@@ -535,6 +536,14 @@ export class WotannRuntime {
    * Never blocks the main query loop.
    */
   private observer: Observer;
+  /**
+   * Reflector — LLM-judge promotion/demotion of Observer's buffered
+   * observations. Nullable until `enableReflector(judge)` wires a
+   * provider-specific judge callback. Deliberately opt-in: the
+   * Reflector costs one LLM call per reflection cycle, so consumers
+   * must decide when the budget is worth it.
+   */
+  private reflector: Reflector | null = null;
   private branchManager: ConversationBranchManager;
   private crossSessionLearner: CrossSessionLearner;
   private capabilityEqualizer: CapabilityEqualizer;
@@ -3963,6 +3972,20 @@ export class WotannRuntime {
         /* honest fallback: observer must never block the turn */
       }
 
+      // P1-M1: Reflector — opt-in promotion cycle. Only fires when
+      // a judge has been wired via enableReflector() AND the turn
+      // count has crossed the reflect-every-N-turns threshold. Awaits
+      // the cycle so the next turn sees the updated core_blocks,
+      // but failures are honestly surfaced (not thrown) so a judge
+      // error doesn't derail the turn.
+      if (this.reflector && this.reflector.shouldReflect(this.session.id)) {
+        try {
+          await this.reflector.reflect(this.session.id);
+        } catch {
+          /* honest fallback: reflector must never block the turn */
+        }
+      }
+
       if (truncationWarning) {
         yield {
           type: "error",
@@ -3979,6 +4002,48 @@ export class WotannRuntime {
         streamCheckpointStore.markInterrupted(streamCheckpoint.id, streamInterruptedReason);
       }
     }
+  }
+
+  // ── P1-M1: Observer / Reflector (Mastra OM) ────────────
+
+  /**
+   * Enable the Reflector with a provider-specific LLM judge. Until
+   * this is called, the Observer still runs per-turn (feeding the
+   * `working` layer) but no promotion to `core_blocks` happens.
+   *
+   * The judge is intentionally caller-provided so the Reflector
+   * stays provider-agnostic. Use `buildJudgeFromLlm` from
+   * `src/memory/reflector.ts` for a default implementation.
+   */
+  enableReflector(judge: ReflectorJudge, reflectEveryNTurns: number = 16): void {
+    if (!this.memoryStore) {
+      // Honest refusal — without a store, promotion has nowhere to go.
+      throw new Error("enableReflector: memory store is not initialised");
+    }
+    this.reflector = new Reflector({
+      store: this.memoryStore,
+      observer: this.observer,
+      judge,
+      reflectEveryNTurns,
+    });
+  }
+
+  /**
+   * Disable the Reflector. The Observer continues to run.
+   * Idempotent.
+   */
+  disableReflector(): void {
+    this.reflector = null;
+  }
+
+  /** Expose the Observer for tests and advanced consumers. */
+  getObserver(): Observer {
+    return this.observer;
+  }
+
+  /** Expose the Reflector (nullable when not wired) for introspection. */
+  getReflector(): Reflector | null {
+    return this.reflector;
   }
 
   // ── Mode Management ────────────────────────────────────
