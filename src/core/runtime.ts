@@ -28,6 +28,7 @@ import { registerBuiltinHooks, clearReadTrackingForSession } from "../hooks/buil
 import { ActiveMemoryEngine } from "../memory/active-memory.js";
 import { Observer } from "../memory/observer.js";
 import { Reflector, type ReflectorJudge } from "../memory/reflector.js";
+import { buildStablePrefix } from "../memory/stable-prefix.js";
 import { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
 import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pipeline.js";
 import { assembleSystemPromptParts, wrapPromptWithThinkInCode } from "../prompt/engine.js";
@@ -1749,8 +1750,18 @@ export class WotannRuntime {
     // Phase 3: Progressive context wake-up payload (L0 identity + L1 critical facts, ~170 tokens)
     const wakeUpPayload = this.contextLoader.generateWakeUpPayload();
 
+    // P1-M1: Mastra-style stable prefix — render core_blocks into a
+    // byte-identical text section that sits INSIDE the cache-stable
+    // region. This is the memory counterpart to `basePrompt.cachedPrefix`;
+    // because core_blocks only changes at Reflector promotion, the
+    // resulting segment stays cache-stable across many turns.
+    const stablePrefixSegments = buildStablePrefix(this.memoryStore, {
+      sessionId: this.session.id,
+    });
+
     this.systemPrompt = [
       basePrompt.cachedPrefix,
+      stablePrefixSegments.stablePrefix,
       basePrompt.dynamicSuffix,
       modeInstructions,
       this.localContextPrompt,
@@ -4084,8 +4095,16 @@ export class WotannRuntime {
       mode: "careful",
     });
     const modeInstructions = this.modeCycler.getMergedInstructions();
+    // Re-render stable prefix so mode changes still see the latest
+    // core_blocks. The segment remains byte-identical unless the
+    // Reflector has promoted new entries between calls — that's the
+    // designed cache-invalidation boundary.
+    const stablePrefixSegments = buildStablePrefix(this.memoryStore, {
+      sessionId: this.session.id,
+    });
     this.systemPrompt = [
       basePrompt.cachedPrefix,
+      stablePrefixSegments.stablePrefix,
       basePrompt.dynamicSuffix,
       modeInstructions,
       this.localContextPrompt,
