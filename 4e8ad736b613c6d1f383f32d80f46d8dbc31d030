@@ -1,0 +1,1 @@
+ERRATA 2026-04-20: commit message describes P0-2 guardedFetch work, but actual diff is P0-3 plugin-scanner rename. See docs/internal/TIER1_COMMIT_RACE_ERRATA.md.
