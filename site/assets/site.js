@@ -122,9 +122,17 @@
     else if (os.indexOf("linux") >= 0) os = "linux";
     else os = "unknown";
 
-    // Matchers in priority order. DMG > tar.gz > raw for a given OS.
+    // Matchers in priority order.
+    // macOS: ZIP first (no Gatekeeper "malware" warning on Sequoia+),
+    //        then DMG, then tar.gz, then raw binary.
+    // Linux/Windows: tar.gz first for integrity, fall back to raw.
     var matchers = {
-      macos: [/macos-arm64\.dmg$/i, /macos-arm64\.tar\.gz$/i, /macos-arm64$/i],
+      macos: [
+        /macos-arm64-installer\.zip$/i,
+        /macos-arm64\.dmg$/i,
+        /macos-arm64\.tar\.gz$/i,
+        /macos-arm64$/i,
+      ],
       linux: [/linux-x64\.tar\.gz$/i, /linux-x64$/i],
       windows: [/windows-x64\.exe$/i, /windows-x64\.exe\.tar\.gz$/i],
       unknown: [],
