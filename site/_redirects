@@ -1,0 +1,32 @@
+# ============================================================
+# WOTANN site — Cloudflare Pages redirects
+# Docs: https://developers.cloudflare.com/pages/configuration/redirects/
+#
+# Syntax: <source> <destination> [status]
+# Default status: 302 (temporary). Use 301 for permanent.
+# ============================================================
+
+# --- Canonical host: apex. www.wotann.com -> wotann.com
+# Handled by Cloudflare Bulk Redirects or a Redirect Rule in the dashboard;
+# Pages' _redirects only rewrites paths, not hosts. Left here as a reminder.
+
+# --- Docs: point to the docs/ folder on the repo.
+/docs            https://github.com/gabrielvuksani/wotann/tree/main/docs  302
+/docs/*          https://github.com/gabrielvuksani/wotann/tree/main/docs/:splat  302
+
+# --- Source shortcuts
+/github          https://github.com/gabrielvuksani/wotann                    302
+/repo            https://github.com/gabrielvuksani/wotann                    302
+/source          https://github.com/gabrielvuksani/wotann                    302
+
+# --- Releases shortcut
+/releases        https://github.com/gabrielvuksani/wotann/releases           302
+/download        https://github.com/gabrielvuksani/wotann/releases/latest    302
+
+# --- Legal shortcuts
+/license         https://github.com/gabrielvuksani/wotann/blob/main/LICENSE  302
+/conduct         https://github.com/gabrielvuksani/wotann/blob/main/CODE_OF_CONDUCT.md  302
+/contributing    https://github.com/gabrielvuksani/wotann/blob/main/CONTRIBUTING.md     302
+
+# --- Fallback: unknown paths -> root (so /anything lands on the marketing page)
+/*               /  200

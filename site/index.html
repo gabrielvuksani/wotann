@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="color-scheme" content="dark light" />
+
+<title>WOTANN — The All-Father of AI Agent Harnesses</title>
+<meta name="description" content="WOTANN is a unified AI agent harness. 19 providers with one router, 8-layer memory, Ralph autopilot, Tauri desktop and iOS surfaces — free-tier first, zero lock-in. Open source under MIT." />
+<meta name="author" content="Gabriel Vuksani" />
+<meta name="keywords" content="ai agent, agent harness, llm framework, multi-provider, claude, gpt, gemini, ollama, open source, autonomous agents, ai tools" />
+
+<link rel="canonical" href="https://wotann.com/" />
+
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://wotann.com/" />
+<meta property="og:title" content="WOTANN — The All-Father of AI Agent Harnesses" />
+<meta property="og:description" content="One install. Every model. Every channel. Full autonomy. Open-source AI agent harness — free-tier first, zero lock-in." />
+<meta property="og:image" content="https://wotann.com/assets/og-image.svg" />
+<meta property="og:site_name" content="WOTANN" />
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="WOTANN — The All-Father of AI Agent Harnesses" />
+<meta name="twitter:description" content="One install. Every model. Every channel. Full autonomy." />
+<meta name="twitter:image" content="https://wotann.com/assets/og-image.svg" />
+
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+<link rel="alternate icon" href="/assets/favicon.svg" />
+<link rel="apple-touch-icon" href="/assets/favicon.svg" />
+
+<link rel="preconnect" href="https://github.com" crossorigin />
+
+<link rel="stylesheet" href="/assets/style.css" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "WOTANN",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows, iOS",
+  "description": "Unified AI agent harness. One install. Every model. Every channel. Full autonomy.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "url": "https://wotann.com",
+  "sameAs": ["https://github.com/gabrielvuksani/wotann"],
+  "author": { "@type": "Person", "name": "Gabriel Vuksani" },
+  "license": "https://opensource.org/licenses/MIT"
+}
+</script>
+</head>
+
+<body>
+
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<header class="site-header" role="banner">
+  <div class="container header-inner">
+    <a class="logo" href="/" aria-label="WOTANN home">
+      <svg class="logo-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+        <circle cx="20" cy="20" r="19" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M8 14 L14 30 L20 14 L26 30 L32 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="logo-text">WOTANN</span>
+    </a>
+
+    <nav class="nav" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#pricing">Pricing</a>
+      <a class="nav-github" href="https://github.com/gabrielvuksani/wotann" rel="noopener" aria-label="WOTANN on GitHub">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="currentColor">
+          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58v-2.17c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.09 1.85 1.24 1.85 1.24 1.08 1.83 2.82 1.3 3.51 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.48-1.33-5.48-5.95 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.53.11-3.19 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.3-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.89.12 3.2.77.84 1.24 1.92 1.24 3.22 0 4.63-2.81 5.64-5.5 5.94.43.37.82 1.1.82 2.22v3.29c0 .32.22.7.82.58A12 12 0 0 0 24 12c0-6.63-5.37-12-12-12Z"/>
+        </svg>
+        GitHub
+      </a>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle color theme">
+        <span class="theme-icon moon" aria-hidden="true">☾</span>
+        <span class="theme-icon sun" aria-hidden="true">☀</span>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero">
+  <div class="container">
+    <div class="hero-badges">
+      <span class="badge">Open source · MIT</span>
+      <span class="badge">v0.4.0 released</span>
+      <span class="badge">Free tier first-class</span>
+    </div>
+
+    <h1 class="hero-title">
+      <span class="hero-title-gold">WOTANN</span>
+      <span class="hero-title-sub">The All-Father of AI agent harnesses.</span>
+    </h1>
+
+    <p class="hero-tagline">
+      <strong>One install. Every model. Every channel. Full autonomy.</strong><br/>
+      The harness that treats the LLM as just the inference call — memory, tools, sandbox, orchestration and learning all live above it.
+    </p>
+
+    <div class="install-box" role="region" aria-labelledby="install-heading">
+      <div class="install-heading" id="install-heading">One-line install · macOS &amp; Linux</div>
+      <div class="install-line">
+        <code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/gabrielvuksani/wotann/main/install.sh | bash</code>
+        <button type="button" class="copy-btn" data-copy-target="install-cmd" aria-label="Copy install command">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+          <span class="copy-label">Copy</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="https://github.com/gabrielvuksani/wotann" rel="noopener">
+        Star on GitHub
+      </a>
+      <a class="btn btn-secondary" href="https://github.com/gabrielvuksani/wotann/releases/latest" rel="noopener">
+        Download v0.4.0
+      </a>
+      <a class="btn btn-ghost" href="#features">See what's inside →</a>
+    </div>
+
+    <p class="hero-fineprint">
+      Runs <strong>entirely locally by default</strong> via Ollama + free tiers. Drop an API key to upgrade selectively — no lock-in, no telemetry unless you opt in.
+    </p>
+  </div>
+</section>
+
+<section class="strip" aria-label="At a glance">
+  <div class="container strip-grid">
+    <div class="strip-item"><span class="strip-num">19</span><span class="strip-lbl">Providers</span></div>
+    <div class="strip-item"><span class="strip-num">25+</span><span class="strip-lbl">Channels</span></div>
+    <div class="strip-item"><span class="strip-num">8</span><span class="strip-lbl">Memory layers</span></div>
+    <div class="strip-item"><span class="strip-num">7</span><span class="strip-lbl">Surfaces</span></div>
+    <div class="strip-item"><span class="strip-num">5 860</span><span class="strip-lbl">Tests passing</span></div>
+    <div class="strip-item"><span class="strip-num">$0</span><span class="strip-lbl">To start</span></div>
+  </div>
+</section>
+
+<section id="features" class="features">
+  <div class="container">
+    <h2 class="section-title">Why WOTANN</h2>
+    <p class="section-lede">
+      Most agent frameworks lock you to a vendor, degrade quietly when a model can't tool-call, and hand you a single UI. WOTANN inverts that. It lives at the layer above inference so your choice of model is always a drop-in.
+    </p>
+
+    <div class="feature-grid">
+
+      <article class="feature-card">
+        <div class="feature-icon feature-icon--rune" aria-hidden="true">ᚱ</div>
+        <h3>19-provider router</h3>
+        <p>Anthropic · OpenAI · Codex OAuth · Copilot · Gemini · Groq · Ollama · Bedrock · Vertex · HuggingFace · Azure · DeepSeek · Perplexity · xAI · Together · Fireworks · SambaNova · Cerebras · Mistral — one router, automatic fallback chaining.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon feature-icon--rune" aria-hidden="true">ᚲ</div>
+        <h3>Capability augmentation</h3>
+        <p>Tool-calling, vision (OCR + accessibility tree), and extended thinking are synthesized for any model that lacks them natively. A 3B local Gemma gets the same scaffolding as Claude Opus.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon feature-icon--rune" aria-hidden="true">ᛟ</div>
+        <h3>8-layer memory</h3>
+        <p>SQLite + FTS5 + vector + graph-RAG + episodic + semantic + temporal + working + archival. One search API across all layers; context replay under an explicit token budget.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon feature-icon--rune" aria-hidden="true">ᛏ</div>
+        <h3>Ralph autopilot with proof</h3>
+        <p>Verify-fix loop, self-healing provider fallback, 8-strategy escalation, doom-loop detector. Every completion ships a <em>proof bundle</em> — tests, typecheck, diff, optional screenshots.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon feature-icon--rune" aria-hidden="true">ᛗ</div>
+        <h3>Multi-surface, one brain</h3>
+        <p>CLI · TUI · Tauri 2 desktop · iOS · Apple Watch · CarPlay · Widgets · Live Activities · Share Extension · Siri Intents. Same session, same memory, same agent.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon feature-icon--rune" aria-hidden="true">ᚠ</div>
+        <h3>Free-tier first-class</h3>
+        <p>Ollama + Groq + Gemini 2.5 Flash free tier give the full experience. No paywall to the good features, no quiet model downgrades when you're on a subscription.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon feature-icon--rune" aria-hidden="true">ᚷ</div>
+        <h3>25+ channel adapters</h3>
+        <p>Telegram · Slack · Discord · Signal · WhatsApp · iMessage · Teams · Matrix · Email · SMS · Webhooks · GitHub bot · IDE bridge · IRC · Google Chat · and more.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon feature-icon--rune" aria-hidden="true">ᚨ</div>
+        <h3>Intelligence you can inspect</h3>
+        <p>Guardian post-response LLM-as-judge. Self-consistency voting. Council deliberation with chairman synthesis. Dream pipeline nightly consolidation at 02:00–04:00.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon feature-icon--rune" aria-hidden="true">ᛉ</div>
+        <h3>Privacy by default</h3>
+        <p>Telemetry is opt-out and triple-gated (<code>DO_NOT_TRACK</code>, <code>WOTANN_NO_TELEMETRY</code>, sentinel file). Runs locally by default. No phone-home. Session token auth on every RPC call.</p>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<section class="comparison">
+  <div class="container">
+    <h2 class="section-title">WOTANN vs typical agent frameworks</h2>
+    <div class="compare-scroll">
+    <table class="compare-table">
+      <thead>
+        <tr><th>&nbsp;</th><th>Most agents</th><th>WOTANN</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Provider</th><td>Locked to one vendor</td><td><strong>19 providers</strong> via one router · Anthropic &amp; OpenAI subscriptions <em>or</em> API keys</td></tr>
+        <tr><th scope="row">Capabilities</th><td>Tool-calling · vision · thinking are gated by model</td><td><strong>All three injected</strong> for any model — even a 3B local Gemma</td></tr>
+        <tr><th scope="row">Free tier</th><td>An afterthought</td><td><strong>First-class</strong> — Ollama + Groq + Gemini 2.5 Flash give the full experience</td></tr>
+        <tr><th scope="row">Memory</th><td>Short-lived prompt context</td><td><strong>8-layer persistent</strong> — SQLite + FTS5 + vector + graph-RAG + episodic + temporal + provenance</td></tr>
+        <tr><th scope="row">Surfaces</th><td>One UI</td><td><strong>7 surfaces</strong> — CLI · TUI · Desktop · iOS · Watch · CarPlay · 25+ channels</td></tr>
+        <tr><th scope="row">Autonomy</th><td>Vibes</td><td><strong>Proof bundles</strong> (tests + typecheck + diff + screenshots) on every completion</td></tr>
+        <tr><th scope="row">Lock-in</th><td>Total</td><td><strong>Zero</strong> — swap models mid-session, export all state</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<section id="surfaces" class="surfaces">
+  <div class="container">
+    <h2 class="section-title">Seven surfaces. One memory.</h2>
+    <p class="section-lede">Same conversation, same agent, same history — wherever you touch it.</p>
+
+    <div class="surfaces-grid">
+      <div class="surface-card"><span class="surface-tag">Terminal</span><h3>CLI</h3><p>78+ commands. <code>wotann init</code>, <code>wotann engine</code>, <code>wotann autonomous</code>, <code>wotann arena</code>, <code>wotann link</code>, <code>wotann cost</code>.</p></div>
+      <div class="surface-card"><span class="surface-tag">Terminal</span><h3>TUI</h3><p>Ink-rendered REPL · Obsidian Precision theme · voice push-to-talk · slash commands · OSC 133 blocks.</p></div>
+      <div class="surface-card"><span class="surface-tag">Desktop</span><h3>Tauri 2 App</h3><p>Chat · Editor (Monaco) · Workshop · Exploit · Trust · Integrations · Command palette ⌘K · Computer Use panel.</p></div>
+      <div class="surface-card"><span class="surface-tag">Mobile</span><h3>iOS companion</h3><p>SwiftUI main app · work tab with filter pills · onboarding wizard · pairing via PIN or Bonjour.</p></div>
+      <div class="surface-card"><span class="surface-tag">Apple</span><h3>Watch · CarPlay</h3><p>Quick actions (tests / build / lint / approve / voice). Hands-free dispatch with list + detail templates.</p></div>
+      <div class="surface-card"><span class="surface-tag">Apple</span><h3>Widgets · Siri</h3><p>Cost + agent status widgets · Dynamic Island · Share Extension · AskWOTANN · CheckCost · EnhancePrompt.</p></div>
+      <div class="surface-card"><span class="surface-tag">Messaging</span><h3>25+ channels</h3><p>Telegram · Slack · Discord · Signal · WhatsApp · iMessage · Teams · Matrix · Email · SMS · Webhooks · GitHub bot · IDE bridge · IRC · Google Chat · Mastodon · WeChat · LINE · …</p></div>
+      <div class="surface-card"><span class="surface-tag">Always-on</span><h3>KAIROS daemon</h3><p>15s tick · cron · heartbeat · event triggers · session-token RPC. Runs at <code>~/.wotann/kairos.sock</code>.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="install-section">
+  <div class="container">
+    <h2 class="section-title">Install</h2>
+
+    <div class="install-methods">
+      <div class="install-method">
+        <div class="install-method-header"><span class="install-method-tag">Recommended</span><h3>One-line install</h3></div>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/gabrielvuksani/wotann/main/install.sh | bash</code></pre>
+        <p>Detects your platform, downloads the SEA binary (Node is bundled — no system Node needed), places it on your <code>$PATH</code>.</p>
+      </div>
+
+      <div class="install-method">
+        <div class="install-method-header"><span class="install-method-tag">Node</span><h3>via npm</h3></div>
+        <pre><code>npm install -g wotann</code></pre>
+        <p>Requires Node <strong>≥ 20</strong>. Ships as an ESM package with a single <code>wotann</code> binary. Works everywhere npm works.</p>
+      </div>
+
+      <div class="install-method">
+        <div class="install-method-header"><span class="install-method-tag">In early testing</span><h3>Homebrew</h3></div>
+        <pre><code>brew tap gabrielvuksani/wotann
+brew install wotann</code></pre>
+        <p>Formula is in <code>Formula/wotann.rb</code> with the v0.4.0 macOS arm64 SHA. Tap repo publication lands in the next release.</p>
+      </div>
+    </div>
+
+    <h3 class="install-sub">Then</h3>
+    <pre class="install-session"><code>wotann init           <span class="cmt"># initialize a workspace</span>
+wotann engine         <span class="cmt"># start the always-on daemon</span>
+wotann                <span class="cmt"># launch the TUI</span></code></pre>
+
+    <p class="install-note">
+      That's the whole setup. Drop API keys later to upgrade selectively:
+    </p>
+    <pre class="install-session"><code>export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+export GEMINI_API_KEY=AIza...
+
+<span class="cmt"># Or stay free</span>
+ollama pull qwen2.5-coder:7b
+wotann                   <span class="cmt"># auto-detects Ollama</span></code></pre>
+  </div>
+</section>
+
+<section id="pricing" class="pricing">
+  <div class="container">
+    <h2 class="section-title">Pricing</h2>
+    <p class="section-lede">WOTANN itself is free and open source under the MIT license. You pay only the model providers you choose to use — and all of them are optional.</p>
+
+    <div class="pricing-grid">
+      <article class="price-card">
+        <h3>Free forever</h3>
+        <p class="price-num">$0</p>
+        <ul>
+          <li>Full feature set</li>
+          <li>Every provider · every surface · every channel</li>
+          <li>Local models via Ollama</li>
+          <li>Groq + Gemini 2.5 Flash free tiers supported natively</li>
+          <li>8-layer memory · proof bundles · Ralph autopilot</li>
+          <li>All future releases</li>
+        </ul>
+        <a class="btn btn-primary" href="https://github.com/gabrielvuksani/wotann" rel="noopener">Get it on GitHub</a>
+      </article>
+
+      <article class="price-card price-card-emphasis">
+        <h3>Bring-your-own-keys</h3>
+        <p class="price-num">Pay providers directly</p>
+        <ul>
+          <li>Use any of 19 providers</li>
+          <li>Anthropic · OpenAI · Gemini keys · subscriptions · OAuth</li>
+          <li>Automatic fallback so you never pay twice for the same request</li>
+          <li>Cost preview before execution</li>
+          <li>No WOTANN subscription. Ever.</li>
+        </ul>
+        <a class="btn btn-secondary" href="https://github.com/gabrielvuksani/wotann/blob/main/docs/AUTH.md" rel="noopener">See provider setup</a>
+      </article>
+    </div>
+
+    <p class="pricing-fineprint">
+      No phone-home. No analytics pings. No crash reporting without consent. Telemetry is opt-out and triple-gated.
+    </p>
+  </div>
+</section>
+
+<section class="cta-band">
+  <div class="container cta-band-inner">
+    <h2>Ready?</h2>
+    <p>Single command on a fresh Mac or Linux box — five minutes to your first autonomous task.</p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="https://github.com/gabrielvuksani/wotann" rel="noopener">Star WOTANN on GitHub</a>
+      <a class="btn btn-secondary" href="https://github.com/gabrielvuksani/wotann/releases/latest" rel="noopener">Download v0.4.0</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer" role="contentinfo">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <a class="logo" href="/" aria-label="WOTANN home">
+        <svg class="logo-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+          <circle cx="20" cy="20" r="19" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M8 14 L14 30 L20 14 L26 30 L32 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="logo-text">WOTANN</span>
+      </a>
+      <p class="footer-tag">The All-Father of AI agent harnesses. Built in Toronto · MIT licensed.</p>
+      <blockquote class="soul-quote">
+        "Think like Odin: see the whole board, pay the price for true knowledge, speak directly, build what will last, and let Huginn and Muninn carry the memory forward."
+      </blockquote>
+    </div>
+
+    <nav class="footer-nav" aria-label="Footer">
+      <div class="footer-col">
+        <h4>Project</h4>
+        <a href="https://github.com/gabrielvuksani/wotann">GitHub</a>
+        <a href="https://github.com/gabrielvuksani/wotann/releases">Releases</a>
+        <a href="https://github.com/gabrielvuksani/wotann/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/gabrielvuksani/wotann/blob/main/ROADMAP.md">Roadmap</a>
+      </div>
+      <div class="footer-col">
+        <h4>Docs</h4>
+        <a href="https://github.com/gabrielvuksani/wotann#readme">README</a>
+        <a href="https://github.com/gabrielvuksani/wotann/blob/main/docs/AUTH.md">Auth</a>
+        <a href="https://github.com/gabrielvuksani/wotann/blob/main/docs/SURFACE_PARITY_REPORT.md">Surface parity</a>
+        <a href="https://github.com/gabrielvuksani/wotann/blob/main/docs/CAPABILITY_ADAPTATION_MATRIX.md">Capability matrix</a>
+      </div>
+      <div class="footer-col">
+        <h4>Community</h4>
+        <a href="https://github.com/gabrielvuksani/wotann/blob/main/CONTRIBUTING.md">Contributing</a>
+        <a href="https://github.com/gabrielvuksani/wotann/blob/main/CODE_OF_CONDUCT.md">Code of conduct</a>
+        <a href="https://github.com/gabrielvuksani/wotann/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/gabrielvuksani/wotann/issues">Issues</a>
+      </div>
+    </nav>
+
+    <div class="footer-legal">
+      <span>© 2026 Gabriel Vuksani · <a href="https://github.com/gabrielvuksani/wotann/blob/main/LICENSE">MIT License</a></span>
+      <span class="footer-stack">Built with TypeScript · SwiftUI · Rust · Tauri 2 · Ink</span>
+    </div>
+  </div>
+</footer>
+
+<script src="/assets/site.js" defer></script>
+</body>
+</html>
