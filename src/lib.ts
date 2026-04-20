@@ -40,8 +40,11 @@ export {
 } from "./providers/account-pool.js";
 export {
   CredentialPool,
+  CredentialPoolExhausted,
   type CredentialPoolConfig,
   type RotationStrategy,
+  type ExhaustionReason,
+  type MarkExhaustedOptions,
 } from "./providers/credential-pool.js";
 export {
   buildFallbackChain,
