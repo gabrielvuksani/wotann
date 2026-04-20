@@ -969,11 +969,24 @@ export class MemoryStore {
       }
     }
 
+    // Phase 2 P1-M8 Fix A — write BOTH confidence columns so read-back
+    // matches caller intent. Prior to this fix `confidence_level`,
+    // `freshness_score`, and `verification_status` were never written by
+    // insert(), so `rowToEntry` always returned confidence_level=0.5 (the
+    // column default). Reflector.promote and consolidateAutoCaptures both
+    // pass explicit confidenceLevel signals that were being silently
+    // dropped. Preserves the split semantics:
+    //   - confidence       = caller-supplied raw score (stays stable)
+    //   - confidence_level = working value the verify pipeline mutates
+    //                        (seeded from caller at insert time)
+    const confidenceLevel = entry.confidenceLevel ?? entry.confidence ?? 0.5;
+    const freshnessScore = entry.freshnessScore ?? 1.0;
+    const verificationStatus = entry.verificationStatus ?? "unverified";
     this.db
       .prepare(
         `
-      INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, domain, topic, document_date, event_date, event_date_uncertainty_ms, event_date_source)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, domain, topic, document_date, event_date, event_date_uncertainty_ms, event_date_source, freshness_score, confidence_level, verification_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       )
       .run(
@@ -992,6 +1005,9 @@ export class MemoryStore {
         eventDate,
         eventDateUncertaintyMs,
         eventDateSource,
+        freshnessScore,
+        confidenceLevel,
+        verificationStatus,
       );
   }
 
@@ -2877,12 +2893,18 @@ export class MemoryStore {
         ? "user-supplied"
         : (entry.eventDateSource ?? derived.eventDateSource);
 
-    // Insert the entry with source metadata + dual timestamps
+    // Insert the entry with source metadata + dual timestamps.
+    // Phase 2 P1-M8 Fix A — see insert() above; mirror the same confidence
+    // column contract so the provenance path doesn't silently drop
+    // confidenceLevel/freshnessScore/verificationStatus.
+    const confidenceLevel = entry.confidenceLevel ?? entry.confidence ?? 0.5;
+    const freshnessScore = entry.freshnessScore ?? 1.0;
+    const verificationStatus = entry.verificationStatus ?? "unverified";
     this.db
       .prepare(
         `
-      INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, source_type, source_file, document_date, event_date, event_date_uncertainty_ms, event_date_source)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memory_entries (id, layer, block_type, key, value, session_id, verified, confidence, tags, source_type, source_file, document_date, event_date, event_date_uncertainty_ms, event_date_source, freshness_score, confidence_level, verification_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       )
       .run(
@@ -2901,6 +2923,9 @@ export class MemoryStore {
         eventDate,
         eventDateUncertaintyMs,
         eventDateSource,
+        freshnessScore,
+        confidenceLevel,
+        verificationStatus,
       );
 
     // Generate and store local embedding

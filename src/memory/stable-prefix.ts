@@ -156,10 +156,13 @@ export function buildStablePrefix(
   }
 
   // Sort entries within a block by (-confidence, id) so repeated
-  // reads produce byte-identical output. `MemoryEntry.confidence` is
-  // the column `insert()` populates; `confidenceLevel` is a separate
-  // DB column that verify-pipelines write — we read both and prefer
-  // the richer `confidence` when present (honest data preference).
+  // reads produce byte-identical output. `confidence` is the caller-
+  // supplied raw score at insert; `confidenceLevel` is the verify
+  // pipeline's working value (seeded from `confidence` on insert,
+  // mutated by verifyMemoryAgainstCodebase). Post-P1-M8 both columns
+  // are reliably populated, so either works — we keep `confidence`
+  // preference for parity with older rows where the verify pipeline
+  // hasn't run yet.
   const confidenceOf = (entry: MemoryEntry): number =>
     typeof entry.confidence === "number" ? entry.confidence : entry.confidenceLevel;
   for (const list of grouped.values()) {
