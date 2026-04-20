@@ -2354,6 +2354,78 @@ memoryCmd
     store.close();
   });
 
+memoryCmd
+  .command("export")
+  .description("Export memory to a portable memvid JSON file for sharing/backup")
+  .option("--out <path>", "Output path (default: ./.wotann/memvid-export.json)")
+  .option("--min-confidence <n>", "Only export entries with confidence >= n", parseFloat)
+  .option("--category <cat>", "Filter to a single block_type / category")
+  .option("--tags <csv>", "Comma-separated tags to filter by")
+  .action(
+    async (options: {
+      out?: string;
+      minConfidence?: number;
+      category?: string;
+      tags?: string;
+    }) => {
+      const { MemoryStore } = await import("./memory/store.js");
+      const { writeFileSync } = await import("node:fs");
+      const dbPath = join(process.cwd(), ".wotann", "memory.db");
+      const outPath = options.out ?? join(process.cwd(), ".wotann", "memvid-export.json");
+      const store = new MemoryStore(dbPath);
+      try {
+        const memvidFile = store.exportToMemvid({
+          ...(options.minConfidence !== undefined ? { minConfidence: options.minConfidence } : {}),
+          ...(options.category ? { filterCategory: options.category } : {}),
+          ...(options.tags
+            ? { filterTags: options.tags.split(",").map((t) => t.trim()) }
+            : {}),
+          outputPath: outPath,
+        });
+        writeFileSync(outPath, JSON.stringify(memvidFile, null, 2));
+        console.log(
+          chalk.green(
+            `Exported ${memvidFile.header.entryCount} entries to ${outPath}`,
+          ),
+        );
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+memoryCmd
+  .command("import <path>")
+  .description("Import memory entries from a memvid JSON export")
+  .action(async (path: string) => {
+    const { MemoryStore } = await import("./memory/store.js");
+    const { readFileSync, existsSync } = await import("node:fs");
+    const dbPath = join(process.cwd(), ".wotann", "memory.db");
+    if (!existsSync(path)) {
+      console.error(chalk.red(`File not found: ${path}`));
+      process.exit(1);
+    }
+    const raw = readFileSync(path, "utf-8");
+    const memvidFile = JSON.parse(raw);
+    const store = new MemoryStore(dbPath);
+    try {
+      const result = store.importFromMemvid(memvidFile);
+      console.log(chalk.bold("\nMemvid Import\n"));
+      console.log(chalk.dim(`  Source: ${path}`));
+      console.log(chalk.dim(`  Imported: ${result.imported}`));
+      console.log(chalk.dim(`  Skipped: ${result.skipped}`));
+      console.log(chalk.dim(`  Duplicates: ${result.duplicates}`));
+      if (result.errors.length > 0) {
+        console.log(chalk.yellow(`  Errors: ${result.errors.length}`));
+        for (const e of result.errors.slice(0, 5)) {
+          console.log(chalk.yellow(`    ${e}`));
+        }
+      }
+    } finally {
+      store.close();
+    }
+  });
+
 // ── wotann skills ────────────────────────────────────────────
 
 const skillsCmd = program.command("skills").description("Skill management");

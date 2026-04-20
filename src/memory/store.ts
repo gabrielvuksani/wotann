@@ -71,6 +71,21 @@ import {
   computeContentSha,
   type IndexerOptions,
 } from "./incremental-indexer.js";
+import {
+  hybridSearch as hybridRetrieverSearch,
+  createLexicalRetriever,
+  createVectorRetriever,
+  type Retriever,
+  type Reranker,
+  type HybridRetrievalConfig,
+  type HybridResult,
+} from "./hybrid-retrieval.js";
+import {
+  MemvidBackend,
+  type MemvidFile,
+  type MemvidExportOptions,
+  type MemvidImportResult,
+} from "./memvid-backend.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -2386,6 +2401,177 @@ export class MemoryStore {
     return results;
   }
 
+  // ── Memvid portable export/import (Phase 2 P1-M7) ──────────
+
+  /**
+   * Phase 2 P1-M7: export all non-archived memory_entries to a
+   * portable MemvidFile (JSON). Useful for sharing memory between
+   * machines or backing up for review.
+   *
+   * Wires the orphan MemvidBackend into the MemoryStore export path.
+   * The returned MemvidFile can be written to disk with
+   * `JSON.stringify(file, null, 2)` or passed to another
+   * store.importFromMemvid() on a different machine.
+   */
+  exportToMemvid(options?: MemvidExportOptions & { readonly outputPath?: string }): MemvidFile {
+    const { outputPath, ...exportOptions } = options ?? {};
+    // Build a transient memvid backend. We don't persist to disk from
+    // the store itself (caller decides where to write).
+    const tempPath = outputPath ?? join(process.cwd(), ".wotann", "memvid-export.json");
+    const backend = new MemvidBackend(tempPath);
+
+    const rows = this.db
+      .prepare(
+        `SELECT id, key, value, tags, confidence, block_type, domain, topic, updated_at
+         FROM memory_entries WHERE archived = 0`,
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    for (const r of rows) {
+      backend.save({
+        key: String(r["key"]),
+        value: String(r["value"]),
+        category: String(r["block_type"] ?? "general"),
+        tags: (r["tags"] as string | null) ? (r["tags"] as string).split(",").filter(Boolean) : [],
+        confidence: Number(r["confidence"] ?? 1.0),
+        metadata: {
+          sourceId: String(r["id"]),
+          ...(r["domain"] ? { domain: String(r["domain"]) } : {}),
+          ...(r["topic"] ? { topic: String(r["topic"]) } : {}),
+        },
+      });
+    }
+
+    return backend.export(exportOptions);
+  }
+
+  /**
+   * Phase 2 P1-M7: import entries from a MemvidFile into memory_entries.
+   * Delegates per-entry de-dup to the MemvidBackend then replays
+   * unique entries into the store as core_blocks rows.
+   *
+   * Returns a MemvidImportResult with imported / skipped / duplicate
+   * counts. The import is idempotent-by-key for the memvid layer but
+   * creates fresh memory_entries rows (caller can dedupe via domain
+   * or block_type after the fact).
+   */
+  importFromMemvid(file: MemvidFile): MemvidImportResult {
+    let imported = 0;
+    let duplicates = 0;
+    const errors: string[] = [];
+
+    const insertTx = this.db.transaction(() => {
+      for (const entry of file.entries) {
+        try {
+          const existing = this.db
+            .prepare(`SELECT id FROM memory_entries WHERE key = ? LIMIT 1`)
+            .get(entry.key) as { id: string } | undefined;
+          if (existing) {
+            duplicates++;
+            continue;
+          }
+          this.insert({
+            id: randomUUID(),
+            layer: "core_blocks",
+            blockType: blockTypeFromMemvid(entry.category),
+            key: entry.key,
+            value: entry.value,
+            verified: false,
+            confidence: entry.confidence,
+            tags: entry.tags.join(","),
+            freshnessScore: 1.0,
+            confidenceLevel: entry.confidence,
+            verificationStatus: "unverified",
+          });
+          imported++;
+        } catch (err) {
+          errors.push(
+            `Failed to import "${entry.key}": ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    });
+    insertTx();
+
+    return { imported, skipped: errors.length, duplicates, errors };
+  }
+
+  // ── Hybrid Retriever Framework (Phase 2 P1-M7) ─────────────
+
+  /**
+   * Phase 2 P1-M7: pluggable retriever-chain search.
+   *
+   * Wraps `hybrid-retrieval.hybridSearch`: a generic retriever-framework
+   * with RRF fusion + optional reranker. Complements the existing
+   * `hybridSearch()` (which hard-codes FTS5 + vector + recency + freq)
+   * by letting callers supply arbitrary Retriever / Reranker
+   * combinations.
+   *
+   * Default retrievers: the lexical retriever from hybrid-retrieval.
+   * Callers can pass additional retrievers (e.g. a dense-vector one) or
+   * a reranker via the `config` param.
+   */
+  async hybridRetrieverSearch(
+    query: string,
+    config?: Partial<HybridRetrievalConfig> & { readonly limit?: number },
+  ): Promise<HybridResult> {
+    // Pull all non-archived entries into the searchable shape.
+    const rows = this.db
+      .prepare(
+        `SELECT id, key, value, tags, domain, topic, document_date
+         FROM memory_entries WHERE archived = 0 ORDER BY updated_at DESC LIMIT 500`,
+      )
+      .all() as Array<Record<string, unknown>>;
+    const entries = rows.map((r) => ({
+      id: String(r["id"]),
+      content: `${String(r["key"] ?? "")} ${String(r["value"] ?? "")}`.trim(),
+      ...(r["tags"] ? { metadata: { tags: String(r["tags"]) } } : {}),
+      ...(r["document_date"] ? { timestamp: Number(r["document_date"]) } : {}),
+    }));
+
+    const retrievers = config?.retrievers ?? [createLexicalRetriever()];
+    const merged: HybridRetrievalConfig = {
+      retrievers,
+      ...(config?.reranker ? { reranker: config.reranker } : {}),
+      ...(config?.fusionK !== undefined ? { fusionK: config.fusionK } : {}),
+      ...(config?.topKBeforeRerank !== undefined
+        ? { topKBeforeRerank: config.topKBeforeRerank }
+        : {}),
+      topK: config?.topK ?? config?.limit ?? 10,
+      ...(config?.parallel !== undefined ? { parallel: config.parallel } : {}),
+    };
+    return hybridRetrieverSearch(query, entries, merged);
+  }
+
+  /**
+   * Phase 2 P1-M7: factory for a default lexical retriever. Thin
+   * convenience so callers can build a HybridRetrievalConfig without
+   * importing hybrid-retrieval directly.
+   */
+  createLexicalRetriever(): Retriever {
+    return createLexicalRetriever();
+  }
+
+  /**
+   * Phase 2 P1-M7: factory for a default vector retriever backed by
+   * a caller-supplied embedding function.
+   */
+  createVectorRetriever(embed: (text: string) => Promise<readonly number[]>): Retriever {
+    return createVectorRetriever({ embed });
+  }
+
+  /**
+   * Phase 2 P1-M7: reranker used by the retriever-chain API when
+   * supplied. Kept as a pass-through (caller implements their own).
+   */
+  applyReranker(
+    query: string,
+    hits: HybridResult["hits"],
+    reranker: Reranker,
+  ): Promise<readonly HybridResult["hits"][number][]> {
+    return reranker.rerank(query, hits);
+  }
+
   // ── Memory Freshness Scoring ───────────────────────────────
 
   /**
@@ -2962,4 +3148,24 @@ export class MemoryStore {
 function entityNameOf(entity: Entity): string {
   if (entity.type === "file") return entity.path;
   return entity.name;
+}
+
+/**
+ * Map a memvid category string onto a valid MemoryBlockType. Unknown
+ * categories fall back to `reference`.
+ */
+function blockTypeFromMemvid(category: string): MemoryBlockType {
+  const valid: readonly MemoryBlockType[] = [
+    "user",
+    "feedback",
+    "project",
+    "reference",
+    "cases",
+    "patterns",
+    "decisions",
+    "issues",
+  ];
+  return (valid as readonly string[]).includes(category)
+    ? (category as MemoryBlockType)
+    : "reference";
 }
