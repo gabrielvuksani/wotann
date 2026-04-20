@@ -189,11 +189,31 @@ if [ "$HOST_OS" = "macos" ]; then
   fi
 fi
 
-# Preflight: the Node binary we copied must contain the SEA fuse sentinel.
-# Some distributions (including Homebrew's Node on macOS as of Apr 2026)
-# ship Node without SEA support compiled in, which would cause postject to
-# fail with "Could not find the sentinel NODE_SEA_FUSE_...". Detect this
-# up front so the failure surface is obvious.
+# Preflight 1: a self-contained SEA binary must NOT have @rpath dylib
+# dependencies on a dylib that ships only on the build machine. Homebrew's
+# Node on macOS is a 68-KB shim linking to @rpath/libnode.141.dylib — if
+# we ship a copy of that as the artifact, the user's machine won't have
+# libnode and the binary SIGKILLs (exit 137). Detect before postject runs.
+#
+# Allowlist: /usr/lib/* and /System/Library/* are always present on macOS
+# targets, so references to those are fine. Also allow self-references
+# (the binary's own install-name line, which starts with its own path).
+if [ "$HOST_OS" = "macos" ] && command -v otool >/dev/null 2>&1; then
+  DANGLING_DYLIBS=$(otool -L "$ART" 2>/dev/null | grep -E "^\s*@rpath/" | grep -v "^$ART:" || true)
+  if [ -n "$DANGLING_DYLIBS" ]; then
+    # Clean up the stub we just copied so it doesn't linger and mislead
+    # downstream tools (tar, verify, CI upload) into thinking we succeeded.
+    rm -f "$ART"
+    fail "BLOCKED-NEEDS-SEA-NODE: the copied Node binary ($NODE_BIN) has @rpath dylib dependencies that won't resolve on a user's machine:
+$DANGLING_DYLIBS
+Root cause: this Node was built as a dylib-linked launcher (typical of Homebrew Node 22+), not a statically-linked executable. Shipping a copy produces a binary that SIGKILLs (exit 137) anywhere that lacks the dylib. Fix: install an official Node.js release from https://nodejs.org/ (the .pkg installer ships a statically-linked \`node\` at /usr/local/bin/node on Intel or /opt/nodejs/bin/node on arm64), then re-run with PATH adjusted so \`which node\` resolves to the official binary. Recommended fallback: run scripts/release/pkg-bundle.sh instead of SEA." 3
+  fi
+fi
+
+# Preflight 2: the Node binary we copied must contain the SEA fuse sentinel.
+# Some distributions ship Node without SEA support compiled in (the fuse lives
+# in libnode.*.dylib instead of the launcher), which would cause postject to
+# fail with "Could not find the sentinel NODE_SEA_FUSE_...". Detect up front.
 #
 # Note: `grep -q` exits early after finding a match, which makes `strings`
 # receive SIGPIPE. Under `set -o pipefail` that registers as a pipeline
@@ -202,7 +222,9 @@ fi
 SEA_FUSE="NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2"
 FUSE_HITS=$(strings "$ART" 2>/dev/null | grep -cF "$SEA_FUSE" || true)
 if [ "${FUSE_HITS:-0}" = "0" ]; then
-  fail "BLOCKED-NEEDS-SEA-NODE: the copied Node binary ($NODE_BIN) does not contain the SEA fuse sentinel ($SEA_FUSE). This Node was built without Single Executable Application support. Use an official Node.js release from nodejs.org (v20+ includes SEA) or rebuild Node from source with --enable-sea, then retry. Recommended fallback: ship via install.sh instead of SEA." 3
+  # Clean up the stub so no stale 50-KB file remains after the failure.
+  rm -f "$ART"
+  fail "BLOCKED-NEEDS-SEA-NODE: the copied Node binary ($NODE_BIN) does not contain the SEA fuse sentinel ($SEA_FUSE). This Node was built without Single Executable Application support, or the fuse lives in a dylib and not the executable. Use an official Node.js release from https://nodejs.org/ (v20+ includes SEA, statically-linked), or rebuild Node from source with --enable-sea. Recommended fallback: run scripts/release/pkg-bundle.sh (uses @yao-pkg/pkg, static bundle, no dylib dependency)." 3
 fi
 
 # Build postject argv. macho-segment-name flag only on macOS.
@@ -215,33 +237,53 @@ if [ "$HOST_OS" = "macos" ]; then
 fi
 
 log "injecting SEA blob via postject"
+# --overwrite tells postject it's OK to replace an existing segment of the
+# same name (NODE_SEA_BLOB). Without it a second injection into the same
+# file would fail. We wipe the file above anyway, but including --overwrite
+# makes the behaviour idempotent and guards against partial-state races.
+POSTJECT_ARGS+=(--overwrite)
 if ! npx --yes postject "${POSTJECT_ARGS[@]}"; then
-  fail "postject injection failed — binary may be partially modified" 3
+  # Clean up so no half-injected binary lingers and deceives CI.
+  rm -f "$ART"
+  fail "postject injection failed — binary removed to prevent shipping a stub. Check output above for the exact postject error." 3
+fi
+
+# Sanity check: the blob must actually have been injected into the binary.
+# Postject can exit 0 even when injection is a no-op (for example, if the
+# fuse sentinel scan happens to match zero bytes in a stripped binary).
+# Verify the injected segment is present and has expected size.
+POST_SIZE=$(wc -c < "$ART" | tr -d ' ')
+BLOB_SIZE=$(wc -c < "$BLOB_OUT" | tr -d ' ')
+# The final binary should be at least (node size) + (blob size) - overhead.
+# If it's smaller than the blob alone, something's wrong.
+if [ "$POST_SIZE" -lt "$BLOB_SIZE" ]; then
+  rm -f "$ART"
+  fail "post-injection binary ($POST_SIZE bytes) is smaller than the SEA blob ($BLOB_SIZE bytes) — injection didn't actually embed the bundle. This usually means the fuse sentinel wasn't found in the copied Node binary (see preflight warnings above)." 3
 fi
 
 # macOS: re-sign ad-hoc so the binary launches without quarantine prompts.
+# Must happen AFTER postject so codesign sees the final byte stream and
+# generates a signature that matches.
 if [ "$HOST_OS" = "macos" ]; then
   if command -v codesign >/dev/null 2>&1; then
-    codesign --sign - "$ART" 2>/dev/null || log "WARN: ad-hoc codesign failed (non-fatal for development builds)"
+    codesign --force --sign - "$ART" 2>/dev/null || log "WARN: ad-hoc codesign failed (non-fatal for development builds)"
   fi
 fi
 
-# ── Step 5: Smoke-test the binary ──────────────────────────────────
+# ── Step 5: Smoke-test the binary via verify-binary.sh ─────────────
+# Delegates to the standalone verifier so CI, manual downloads, and this
+# script all exercise the same contract (size ≥ 1 MB, file type matches
+# platform, --version prints expected, --help runs, no dangling @rpath).
 if [ "$SKIP_VERIFY" = "1" ]; then
   log "WARN: WOTANN_SKIP_VERIFY=1 — skipping binary smoke test"
 else
-  log "smoke-testing binary: $ART --version"
-  # Capture output; fail hard if the binary doesn't run or version is wrong.
-  # If the preflight under plain Node passed but the SEA binary fails here,
-  # the most likely cause is that an external native binding couldn't resolve
-  # relative to the SEA binary's cwd — the install.sh path is the safer fallback.
-  if ! OUT=$("$ART" --version 2>&1); then
-    fail "BLOCKED-NATIVE-BINDINGS: binary failed to execute: $OUT. Preflight under plain Node passed, so the native bindings (better-sqlite3, magika, onnxruntime-node, sharp) likely cannot resolve from the SEA binary's working directory. Recommended fallback: ship via install.sh instead of SEA." 4
+  log "smoke-testing binary via scripts/release/verify-binary.sh"
+  if ! bash "$SCRIPT_DIR_SEA/verify-binary.sh" "$ART" "$VERSION"; then
+    # Clean up so no broken binary remains on disk to be tarred/uploaded.
+    rm -f "$ART"
+    fail "BLOCKED-NATIVE-BINDINGS: binary failed smoke test. Preflight under plain Node passed, so the native bindings (better-sqlite3, magika, onnxruntime-node, sharp) likely cannot resolve from the SEA binary's working directory — or the injection didn't actually embed the blob. Recommended fallback: run scripts/release/pkg-bundle.sh or ship via install.sh." 4
   fi
-  if ! echo "$OUT" | grep -qF "$VERSION"; then
-    fail "binary --version output ($OUT) does not contain expected version ($VERSION)" 4
-  fi
-  log "smoke-test PASS — binary reports version: $OUT"
+  log "smoke-test PASS"
 fi
 
 # ── Step 6: Summary ────────────────────────────────────────────────

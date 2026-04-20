@@ -51,13 +51,39 @@ if [ ! -f "$SCRIPT_DIR/esbuild-cjs.mjs" ]; then
 fi
 node "$SCRIPT_DIR/esbuild-cjs.mjs" || fail "esbuild-cjs.mjs failed — CJS bundle not produced" $?
 
-# ── Step 3: SEA bundle ────────────────────────────────────────────
+# ── Step 3: SEA bundle (with optional pkg fallback) ───────────────
+# Default: SEA only. Fails loudly when blocked by Node-install limitations,
+# so the failure surface is visible in CI logs.
+#
+# Opt-in pkg fallback: set WOTANN_ALLOW_PKG_FALLBACK=1 in CI where the
+# host lacks a SEA-capable Node (Homebrew on arm64 in particular). The
+# fallback runs scripts/release/pkg-bundle.sh (using @yao-pkg/pkg) only
+# when sea-bundle.sh exits with BLOCKED-NEEDS-SEA-NODE (exit code 3).
+# Other SEA failures (2, 4) still propagate — those indicate real bugs.
 log "step 3/4: SEA bundle via sea-bundle.sh"
 if [ ! -x "$SCRIPT_DIR/sea-bundle.sh" ]; then
   fail "missing or non-executable: $SCRIPT_DIR/sea-bundle.sh" 1
 fi
-# Propagate non-zero exit so CI fails rather than silently shipping half-built binary.
-bash "$SCRIPT_DIR/sea-bundle.sh" || fail "SEA bundling failed — see above" $?
+
+SEA_RC=0
+bash "$SCRIPT_DIR/sea-bundle.sh" || SEA_RC=$?
+
+if [ "$SEA_RC" -ne 0 ]; then
+  # Exit 3 = BLOCKED-NEEDS-SEA-NODE / BLOCKED-NEEDS-POSTJECT / injection failure.
+  # Only the first is legitimately a "host limitation" where pkg is a valid
+  # fallback. But distinguishing them reliably requires parsing stderr, so
+  # we trigger the fallback on 3 regardless and let pkg-bundle.sh's own
+  # error reporting do the talking if pkg also fails.
+  if [ "$SEA_RC" = "3" ] && [ "${WOTANN_ALLOW_PKG_FALLBACK:-0}" = "1" ]; then
+    log "SEA blocked (exit 3) — falling back to pkg-bundle.sh (WOTANN_ALLOW_PKG_FALLBACK=1)"
+    if [ ! -x "$SCRIPT_DIR/pkg-bundle.sh" ]; then
+      fail "missing or non-executable: $SCRIPT_DIR/pkg-bundle.sh" 1
+    fi
+    bash "$SCRIPT_DIR/pkg-bundle.sh" || fail "pkg bundling (fallback) also failed — see above" $?
+  else
+    fail "SEA bundling failed (exit $SEA_RC) — see above. To opt-in to the pkg fallback set WOTANN_ALLOW_PKG_FALLBACK=1." "$SEA_RC"
+  fi
+fi
 
 # ── Host target detection (for archive naming) ────────────────────
 HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"

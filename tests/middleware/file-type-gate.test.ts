@@ -28,12 +28,16 @@ function baseContext(overrides: Partial<MiddlewareContext> = {}): MiddlewareCont
 }
 
 describe("file-type-gate — extension fallback", () => {
-  // First test in the suite triggers Magika model cold-load (~10MB dynamic
-  // import); extend timeout to 30s so it never flakes on slower CI.
-  // Subsequent tests in this file benefit from the warm cache.
+  // First test in the suite triggers Magika model cold-load. When the
+  // optional `magika` dep IS installed, `MagikaNode.create()` currently
+  // takes ~17s even on fast local disks before failing internally with
+  // `binary.find is not a function` (upstream packaging quirk), plus
+  // another ~10s when the full vitest suite is stressing the machine.
+  // Give it 60s — the subsequent 3 tests in this file hit the warm
+  // cache and return in <5ms each.
   it(
     "returns a FileTypeResult for a .pdf named file (shape contract)",
-    { timeout: 30_000 },
+    { timeout: 60_000 },
     async () => {
       // Extension fallback path returns handler:"pdf". If Magika is
       // available in the test env it may classify these 4 bytes (the

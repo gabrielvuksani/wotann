@@ -11,16 +11,32 @@ import { tmpdir } from "node:os";
 import { MemoryStore } from "../../src/memory/store.js";
 import { AuditTrail } from "../../src/telemetry/audit-trail.js";
 
-const CLI_PATH = join(__dirname, "../../src/index.ts");
 const NODE = process.execPath;
+// Prefer the pre-compiled dist/ build for e2e runs. tsx JIT-transpiles the
+// entire src/ tree (~150 files) on every invocation which makes each subprocess
+// take 3-15s before any real work starts. When the tree is already built
+// (CI / release / post-`npm run build`), use `dist/index.js` directly — one
+// Node startup, ~100ms per command. Fallback to tsx keeps the test runnable
+// in a fresh clone before the first build.
+const DIST_CLI = join(__dirname, "../../dist/index.js");
 const TSX_PATH = join(__dirname, "../../node_modules/tsx/dist/cli.mjs");
+const SRC_CLI = join(__dirname, "../../src/index.ts");
+const HAS_DIST = existsSync(DIST_CLI);
+const CLI_ARGS: readonly string[] = HAS_DIST ? [DIST_CLI] : [TSX_PATH, SRC_CLI];
+
+// Commands that import the full runtime graph (187 imports, ~20s cold-cache
+// on slow/fresh disks) need a larger headroom than the default 15s. Any
+// command that transitively imports `core/runtime.js` goes through
+// `channels/dispatch.js`, `channels/next.js`, and friends. Simple commands
+// (providers, doctor, config) stay fast.
+const CLI_TIMEOUT_MS = 45_000;
 
 function runCLI(args: string[], cwd: string): string {
   try {
-    return execFileSync(NODE, [TSX_PATH, CLI_PATH, ...args], {
+    return execFileSync(NODE, [...CLI_ARGS, ...args], {
       cwd,
       encoding: "utf-8",
-      timeout: 15_000,
+      timeout: CLI_TIMEOUT_MS,
       env: {
         ...process.env,
         // Clear provider env vars so tests are deterministic
@@ -42,7 +58,10 @@ function runCLI(args: string[], cwd: string): string {
   }
 }
 
-describe("E2E: CLI Commands", () => {
+// Each subprocess can take up to CLI_TIMEOUT_MS. A test may call runCLI more
+// than once (add → list → remove) so the vitest per-test timeout must be a
+// multiple of that. 90s is enough headroom for a triple-command test.
+describe("E2E: CLI Commands", { timeout: 90_000 }, () => {
   let tempDir: string;
 
   beforeEach(() => {
