@@ -1268,6 +1268,11 @@ export {
   type MessageHandler,
 } from "./channels/base-adapter.js";
 
+// EchoChannelAdapter — first concrete subclass of BaseChannelAdapter.
+// Reference implementation + in-process echo channel for dev-loop tests.
+// Added to close the "BaseChannelAdapter has 0 extenders" finding.
+export { EchoChannelAdapter, type EchoChannelSnapshot } from "./channels/echo-channel-adapter.js";
+
 // ── Phase G5 — Cross-Device Context ────────────────────
 export {
   CrossDeviceContextManager,

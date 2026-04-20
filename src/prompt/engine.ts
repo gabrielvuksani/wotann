@@ -11,6 +11,7 @@ import type { ModelFormatConfig, ToolDescriptor } from "./model-formatter.js";
 import { traceInstructions, type InstructionSource } from "./instruction-provenance.js";
 import { wrapWithThinkInCode, type ThinkInCodeOptions } from "./think-in-code.js";
 import { compileTemplate, type CompiledTemplate } from "./template-compiler.js";
+import { assemblePromptModules } from "./modules/index.js";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -76,6 +77,12 @@ export interface PromptAssemblyOptions {
   /** Model ID (e.g. "claude-sonnet-4-6", "gpt-4o", "gemma-3"). When set, the
    *  assembled prompt is reformatted for optimal model comprehension. */
   readonly model?: string;
+  /** Dynamic module context — provider/model/cost/surfaces/channels/skills
+   *  gathered at query time. When present, the engine appends the 17-module
+   *  assembly from `prompt/modules` (identity, tools, memory, phone, cost,
+   *  etc.) to the dynamic section. Absence means "no dynamic modules" —
+   *  the static bootstrap + rules still assemble normally. */
+  readonly moduleContext?: import("./modules/index.js").ModuleContext;
 }
 
 export interface PromptAssemblyResult {
@@ -299,6 +306,26 @@ export function assembleSystemPromptParts(options: PromptAssemblyOptions): Promp
   //     this is the compact preamble that injects inline.
   if (process.env["WOTANN_KARPATHY_MODE"] === "1") {
     dynamicParts.push(KARPATHY_PRINCIPLES_PREAMBLE);
+  }
+
+  // 2c. Dynamic prompt modules (OpenClaw + Claude Code pattern).
+  //     When the caller supplies `moduleContext`, assemble the 17
+  //     runtime modules (identity/tools/skills/capabilities/memory/
+  //     project/user/surfaces/phone/cost/mode/channels/safety/
+  //     conventions/history/security/llms-txt). Each module decides
+  //     internally whether to contribute content — empty modules cost
+  //     nothing. The assembled text goes into dynamic parts so it
+  //     stays out of the cacheable prefix.
+  if (options.moduleContext) {
+    try {
+      const moduleText = assemblePromptModules(options.moduleContext);
+      if (moduleText.length > 0 && totalChars + moduleText.length <= MAX_TOTAL_CHARS) {
+        dynamicParts.push(`# Runtime Modules\n\n${moduleText}`);
+        totalChars += moduleText.length;
+      }
+    } catch {
+      /* honest refusal: module assembly must never break the prompt */
+    }
   }
 
   // 3. Conditional rules (load by file pattern)

@@ -24,6 +24,12 @@ import {
   isConnectorTool,
   type ConnectorToolName,
 } from "../connectors/connector-tools.js";
+import {
+  buildBrowserToolDefinitions,
+  BROWSER_TOOL_NAMES,
+  isBrowserTool,
+  type BrowserToolName,
+} from "../browser/browser-tools.js";
 
 // ── Dependency Interfaces ───────────────────────────────────
 // Narrow interfaces so this module doesn't pull in concrete classes.
@@ -43,6 +49,12 @@ export interface ToolRegistryDeps {
    *  dispatch time — an unconfigured connector returns a honest
    *  `{ok:false, error:"not_configured", fix:...}` envelope. */
   readonly connectorToolsEnabled?: boolean;
+  /** Whether browser tools (goto/click/type/screenshot/read_page) should be
+   *  registered. Wave-5 completion: advertises the 5-tool surface backed by
+   *  Chrome CDP bridge with Camoufox fallback. Each call capability-gates at
+   *  dispatch time — if neither backend is reachable the dispatcher returns a
+   *  honest `{ok:false, error:"not_configured"}` envelope. */
+  readonly browserToolsEnabled?: boolean;
 }
 
 // ── Tool Definition Builders ────────────────────────────────
@@ -286,8 +298,14 @@ export type RuntimeToolName = (typeof RUNTIME_TOOL_NAMES)[number];
  * Check whether a tool name is a runtime-handled tool (includes the
  * 34-tool connector surface registered by `buildConnectorTools`).
  */
-export function isRuntimeTool(name: string): name is RuntimeToolName | ConnectorToolName {
-  return (RUNTIME_TOOL_NAMES as readonly string[]).includes(name) || isConnectorTool(name);
+export function isRuntimeTool(
+  name: string,
+): name is RuntimeToolName | ConnectorToolName | BrowserToolName {
+  return (
+    (RUNTIME_TOOL_NAMES as readonly string[]).includes(name) ||
+    isConnectorTool(name) ||
+    isBrowserTool(name)
+  );
 }
 
 /**
@@ -304,6 +322,20 @@ export function buildConnectorTools(): readonly ToolDefinition[] {
 
 export { CONNECTOR_TOOL_NAMES, isConnectorTool };
 export type { ConnectorToolName };
+
+/**
+ * Wave-5 entry point — returns the full browser-tool definition list (5 tools:
+ * goto/click/type/screenshot/read_page). Backends are Chrome CDP bridge
+ * (preferred) and Camoufox stealth browser (fallback). Registration advertises
+ * the surface; dispatch gates on reachability and honest-refuses when neither
+ * backend is up.
+ */
+export function buildBrowserTools(): readonly ToolDefinition[] {
+  return buildBrowserToolDefinitions();
+}
+
+export { BROWSER_TOOL_NAMES, isBrowserTool };
+export type { BrowserToolName };
 
 /**
  * Build the effective tool list for a query.
@@ -351,6 +383,14 @@ export function buildEffectiveTools(
   // with a `fix` pointing at the right env var.
   if (deps.connectorToolsEnabled !== false) {
     for (const t of buildConnectorTools()) tools.push(t);
+  }
+
+  // Wave-5 browser tools: registered by default. Dispatch picks Chrome CDP
+  // when available, else Camoufox when the Python driver boots, else returns
+  // honest `not_configured`. Opt-out via browserToolsEnabled:false for
+  // minimal deployments (TUI-only, headless CI).
+  if (deps.browserToolsEnabled !== false) {
+    for (const t of buildBrowserTools()) tools.push(t);
   }
 
   return tools;

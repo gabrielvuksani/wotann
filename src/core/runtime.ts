@@ -33,6 +33,14 @@ import { canBypass, executeBypass } from "../utils/wasm-bypass.js";
 import { CostTracker } from "../telemetry/cost-tracker.js";
 import { ToolTimingLogger, ToolTimingBaseline } from "../tools/tool-timing.js";
 import { MemoryStore, type AutoCaptureEntry } from "../memory/store.js";
+import {
+  UnifiedKnowledgeFabric,
+  type KnowledgeQuery,
+  type KnowledgeResult,
+  type Retriever,
+  type KnowledgeSource,
+} from "../memory/unified-knowledge.js";
+import { ContextTreeManager, type ContextEntry } from "../memory/context-tree-files.js";
 import { TFIDFIndex } from "../memory/semantic-search.js";
 import { QuantizedVectorStore } from "../memory/quantized-vector-store.js";
 import {
@@ -154,8 +162,13 @@ import { writeAutonomousProofBundle } from "../orchestration/proof-bundles.js";
 import type { AutonomousResult } from "../orchestration/autonomous.js";
 import { runArenaContest, ArenaLeaderboard } from "../orchestration/arena.js";
 import type { ArenaContestant } from "../orchestration/arena.js";
-import { runCouncil, CouncilLeaderboard } from "../orchestration/council.js";
-import type { CouncilResult, CouncilQueryExecutor } from "../orchestration/council.js";
+import { runCouncil, CouncilLeaderboard, selfConsistencyVote } from "../orchestration/council.js";
+import type {
+  CouncilResult,
+  CouncilQueryExecutor,
+  SelfConsistencyResult,
+  SelfConsistencyOptions,
+} from "../orchestration/council.js";
 import { PIIRedactor } from "../security/pii-redactor.js";
 import { VectorStore, HybridMemorySearch } from "../memory/vector-store.js";
 import { RulesOfEngagement } from "../security/rules-of-engagement.js";
@@ -227,6 +240,9 @@ import { ReflectionBuffer } from "../learning/reflection-buffer.js";
 // ── Tier 2B: LLM-invokable tools ──
 import { WebFetchTool } from "../tools/web-fetch.js";
 import { PlanStore } from "../orchestration/plan-store.js";
+import { spawnMonitor } from "../tools/monitor.js";
+import { MONITOR_MAX_DURATION_MS, MONITOR_MAX_EVENTS_PER_RESULT } from "./runtime-tool-dispatch.js";
+import { SteeringServer, type SteeringCommand } from "./steering-server.js";
 
 // ── Wired orphan modules ────────────────────────────────────
 
@@ -400,6 +416,17 @@ export interface RuntimeConfig {
    * multi-language LSP install-hint UX is validated against real users.
    */
   readonly enableLspAgentTools?: boolean;
+  /**
+   * Dual-terminal steering — GSD-inspired live state editing via
+   * `.wotann/steering/pending/*.json` command files. When true, the
+   * runtime allocates a SteeringServer and fs.watch()es for commands.
+   * Defaults to `process.env.WOTANN_STEERING === "1"` so short-lived
+   * queries don't hold an extra fd. Second-terminal writers use
+   * `SteeringServer#writeCommand` (or the forthcoming `wotann steer`
+   * CLI) to enqueue commands; autonomous phase boundaries drain
+   * `steeringCommands`.
+   */
+  readonly enableSteering?: boolean;
   /**
    * Session-13 Supermemory parity: route `searchMemory()` through the
    * BM25+dense+RRF v2 hybrid retriever. Off by default — the existing
@@ -690,11 +717,57 @@ export class WotannRuntime {
   private readonly toolPatternDetector = new PatternDetector({ maxHistory: 500 });
   private searchProvider: WebSearchProvider | null = null;
 
+  /**
+   * Dual-terminal steering — when `WOTANN_STEERING=1` (or
+   * `config.enableSteering`), the runtime allocates a SteeringServer bound
+   * to `.wotann/steering/` and starts watching for commands from a second
+   * terminal. Commands (reprioritize / pause / resume / abort / change-model
+   * / add-constraint / add-context) are captured into `steeringCommands`
+   * for autonomous phases to consult. Null when disabled — opt-in by
+   * design so the file-watcher doesn't hold fds for short-lived queries.
+   */
+  private steeringServer: SteeringServer | null = null;
+  private readonly steeringCommands: SteeringCommand[] = [];
+
+  /**
+   * Unified Knowledge Fabric — single-API search across MemoryStore +
+   * ContextTree + (future) graph-RAG / semantic / vector / FTS5 sources.
+   * Constructed eagerly in the constructor; retrievers register lazily
+   * once the subsystems they adapt are ready (post-initialize).
+   */
+  private readonly knowledgeFabric: UnifiedKnowledgeFabric = new UnifiedKnowledgeFabric();
+
+  /**
+   * Context Tree (ByteRover-inspired): persistent markdown knowledge in
+   * `.wotann/context-tree/{resources,user,agent}/*.md`. Instance is
+   * allocated in initialize() once `workingDir` is validated; null until
+   * then so a pre-init close() doesn't touch the filesystem.
+   */
+  private contextTreeManager: ContextTreeManager | null = null;
+
   constructor(config: RuntimeConfig) {
     this.config = config;
 
     // Phase H config flags (per-session state; never module-global caches).
     this.guardianEnabled = config.enableGuardian ?? process.env["WOTANN_GUARDIAN"] === "1";
+
+    // Dual-terminal steering: opt-in via WOTANN_STEERING=1 or
+    // `config.enableSteering`. Binds to `.wotann/steering/` and starts a
+    // fs.watch() + poll loop so a second terminal writing into
+    // `pending/` gets picked up at the next phase boundary. The callback
+    // pushes into `steeringCommands`; autonomous phases drain the queue
+    // and `clearProcessed` after handling to free disk slots.
+    if (config.enableSteering ?? process.env["WOTANN_STEERING"] === "1") {
+      try {
+        const steeringDir = join(config.workingDir, ".wotann", "steering");
+        this.steeringServer = new SteeringServer(steeringDir);
+        this.steeringServer.startWatching((cmd: SteeringCommand) => {
+          this.steeringCommands.push(cmd);
+        });
+      } catch (err) {
+        console.warn(`[WOTANN] SteeringServer init failed (non-fatal): ${(err as Error).message}`);
+      }
+    }
     this.contextualAbstentionEnabled = config.enableContextualAbstention ?? true;
     this.progressiveTier = config.progressiveContextTier ?? "L1";
     this.lspAgentToolsEnabled =
@@ -1013,6 +1086,88 @@ export class WotannRuntime {
       this.skillForge.setMemoryStore(this.memoryStore);
       this.instinctSystem.setMemoryStore(this.memoryStore);
       this.crossSessionLearner.setMemoryStore(this.memoryStore);
+
+      // Register MemoryStore as a retriever in the UnifiedKnowledgeFabric
+      // so `searchUnifiedKnowledge()` fans out across all sources. The
+      // adapter maps `MemoryStore.search()` (BM25 FTS5) into the fabric's
+      // `KnowledgeResult` shape with a simple trust score derived from
+      // the `score` field. Honest defaults: verificationStatus="unverified"
+      // because FTS5 has no provenance signal; callers that need stronger
+      // signals should use a richer retriever (semantic / graph-RAG).
+      const memoryRetriever: Retriever = {
+        search: async (q: string, limit: number) => {
+          if (!this.memoryStore) return [];
+          const hits = this.memoryStore.search(q, limit);
+          return hits.map(
+            (h): KnowledgeResult => ({
+              id: h.entry.id,
+              content: h.entry.value,
+              score: h.score,
+              source: "memory" as KnowledgeSource,
+              provenance: {
+                retrievedAt: Date.now(),
+                retrievalMethod: h.matchType ?? "fts5",
+                trustScore: Math.min(1, Math.max(0, h.score)),
+                freshness: 1,
+                verificationStatus:
+                  h.entry.verificationStatus === "verified" ? "verified" : "unverified",
+              },
+              metadata: {
+                key: h.entry.key,
+                layer: h.entry.layer,
+                blockType: h.entry.blockType,
+                ...(h.entry.domain !== undefined ? { domain: h.entry.domain } : {}),
+              },
+            }),
+          );
+        },
+        getEntryCount: () => this.memoryStore?.getEntryCount() ?? 0,
+      };
+      this.knowledgeFabric.registerRetriever("memory", memoryRetriever);
+    }
+
+    // Allocate ContextTreeManager and register it with the fabric once
+    // workingDir is known. The manager writes to `.wotann/context-tree/`
+    // and is search()able; wrap in a Retriever adapter that normalises
+    // ContextEntry → KnowledgeResult.
+    try {
+      const wotannDirCtx = join(this.config.workingDir, ".wotann");
+      this.contextTreeManager = new ContextTreeManager(wotannDirCtx);
+      const ctxRetriever: Retriever = {
+        search: async (q: string, limit: number) => {
+          if (!this.contextTreeManager) return [];
+          const hits = this.contextTreeManager.search(q, limit);
+          return hits.map(
+            (e: ContextEntry): KnowledgeResult => ({
+              id: e.path,
+              content: e.l1Overview.length > 0 ? e.l1Overview : e.content.slice(0, 2000),
+              score: 0.8,
+              source: "context-tree" as KnowledgeSource,
+              provenance: {
+                retrievedAt: Date.now(),
+                retrievalMethod: "context-tree-markdown",
+                trustScore: 0.9,
+                freshness: e.updatedAt > Date.now() - 7 * 86_400_000 ? 1 : 0.5,
+                verificationStatus: "unverified" as const,
+              },
+              metadata: {
+                category: e.category,
+                title: e.title,
+                updatedAt: e.updatedAt,
+                accessCount: e.accessCount,
+              },
+            }),
+          );
+        },
+        getEntryCount: () => {
+          return this.contextTreeManager?.getStats().totalEntries ?? 0;
+        },
+      };
+      this.knowledgeFabric.registerRetriever("context-tree", ctxRetriever);
+    } catch (err) {
+      console.warn(
+        `[WOTANN] ContextTreeManager init failed (non-fatal): ${(err as Error).message}`,
+      );
     }
 
     // ── Wire remaining 5 lib.ts-only modules (32→37, 86%→100%) ──
@@ -1522,10 +1677,28 @@ export class WotannRuntime {
 
     await this.qmdContext.initialize(this.config.workingDir);
 
-    // Assemble system prompt from 8-file bootstrap + mode instructions + local context
+    // Assemble system prompt from 8-file bootstrap + mode instructions +
+    // local context + 17 dynamic prompt modules (OpenClaw pattern). The
+    // modules read runtime state (provider/model/cost/surfaces/channels)
+    // and emit only the sections that apply — absent capabilities cost
+    // zero tokens.
     const basePrompt = assembleSystemPromptParts({
       workspaceRoot: this.config.workingDir,
       mode: "careful",
+      moduleContext: {
+        isMinimal: false,
+        provider: this.session.provider ?? "unknown",
+        model: this.session.model ?? "unknown",
+        contextWindow: 200_000,
+        workingDir: this.config.workingDir,
+        sessionId: this.session.id,
+        mode: "careful",
+        connectedSurfaces: [],
+        phoneConnected: false,
+        sessionCost: 0,
+        budgetRemaining: 0,
+        activeChannels: [],
+      },
     });
 
     const modeInstructions = this.modeCycler.getMergedInstructions();
@@ -2854,6 +3027,72 @@ export class WotannRuntime {
                 "plan_advance",
                 resultContent,
               );
+              yield {
+                type: "text" as const,
+                content: sanitised.content,
+                provider: chunk.provider ?? responseProvider,
+                model: chunk.model ?? responseModel,
+              };
+            }
+
+            // ── Session-6: Monitor tool (Claude Code v2.1.98 port) ──
+            // Wraps a long-running child process so stdout/stderr lines
+            // become discrete events. Collected up to a hard event cap
+            // or the tool's own duration ceiling, whichever hits first.
+            // Sandbox gates the spawn at this layer: if the agent tries
+            // to monitor a disallowed command the permission resolver
+            // denies before we ever reach `spawnMonitor`.
+            if (toolName === "monitor" && chunk.toolInput) {
+              const input = chunk.toolInput as Record<string, unknown>;
+              const command = String(input["command"] ?? "");
+              const rawArgs = input["args"];
+              const args = Array.isArray(rawArgs) ? rawArgs.map((a) => String(a)) : [];
+              const cwd = typeof input["cwd"] === "string" ? (input["cwd"] as string) : undefined;
+              const maxDurationMs =
+                typeof input["maxDurationMs"] === "number"
+                  ? Math.min(input["maxDurationMs"] as number, MONITOR_MAX_DURATION_MS)
+                  : MONITOR_MAX_DURATION_MS;
+              let resultContent: string;
+              if (!command) {
+                resultContent = `\n[monitor] Error: command is required\n`;
+              } else {
+                try {
+                  const session = spawnMonitor({
+                    command,
+                    args,
+                    cwd,
+                    maxDurationMs,
+                  });
+                  const lines: string[] = [];
+                  let eventCount = 0;
+                  for await (const ev of session.events) {
+                    eventCount += 1;
+                    if (ev.type === "exit") {
+                      lines.push(`[exit code=${ev.exitCode ?? "null"} signal=${ev.signal ?? ""}]`);
+                      break;
+                    }
+                    if (ev.type === "error") {
+                      lines.push(`[error] ${ev.line}`);
+                      break;
+                    }
+                    if (ev.type === "truncated") {
+                      lines.push(`[truncated]`);
+                      continue;
+                    }
+                    lines.push(`[${ev.type} ${ev.elapsedMs}ms] ${ev.line}`);
+                    if (eventCount >= MONITOR_MAX_EVENTS_PER_RESULT) {
+                      await session.stop();
+                      lines.push(`[capped at ${MONITOR_MAX_EVENTS_PER_RESULT} events]`);
+                      break;
+                    }
+                  }
+                  resultContent = `\n[monitor id=${session.id}]\n${lines.join("\n")}\n`;
+                } catch (err: unknown) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  resultContent = `\n[monitor] Error: ${msg}\n`;
+                }
+              }
+              const sanitised = await this.fireToolResultReceivedHook("monitor", resultContent);
               yield {
                 type: "text" as const,
                 content: sanitised.content,
@@ -5372,6 +5611,105 @@ export class WotannRuntime {
     return runCouncil(executor, query, providerPairs);
   }
 
+  /**
+   * Unified knowledge search — query across all registered retrievers
+   * (MemoryStore FTS5 + ContextTreeManager markdown files, plus whatever
+   * else gets registered in initialize()). Returns deduped, ranked results
+   * with provenance.
+   */
+  async searchUnifiedKnowledge(
+    query: string,
+    maxResults: number = 20,
+    minConfidence: number = 0,
+  ): Promise<readonly KnowledgeResult[]> {
+    const q: KnowledgeQuery = {
+      query,
+      maxResults,
+      minConfidence,
+      sources: [],
+    };
+    return this.knowledgeFabric.search(q);
+  }
+
+  /**
+   * Write-through to the ContextTreeManager — upsert a markdown entry at
+   * `.wotann/context-tree/{category}/{slug}.md`. Returns null when the
+   * manager failed to initialize (e.g. unwritable workingDir). Used by
+   * agents that discover durable project knowledge during long sessions.
+   */
+  upsertContextTree(
+    category: ContextEntry["category"],
+    title: string,
+    content: string,
+  ): ContextEntry | null {
+    if (!this.contextTreeManager) return null;
+    try {
+      return this.contextTreeManager.upsert(category, title, content);
+    } catch (err) {
+      console.warn(`[WOTANN] ContextTree upsert failed: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Run self-consistency voting — sample the SAME provider+model N times
+   * against the same prompt and return the mode of the distribution with
+   * a confidence score. Wang et al. 2022 (arXiv:2203.11171). Differs from
+   * `runCouncilDeliberation` which uses multiple providers; self-consistency
+   * is cheaper and probes a single model's answer stability. Use when the
+   * caller wants confidence calibration from one provider rather than
+   * cross-provider consensus.
+   *
+   * Fixes the session-4 false-claim (commit 2a9cf6c) where benchmark-harness
+   * was said to "wire selfConsistencyVote" but actually used majorityAnswer
+   * (votes on pre-collected responses, no query execution). This method is
+   * the real wiring — it executes fresh queries.
+   */
+  async runSelfConsistency(
+    query: string,
+    options?: {
+      readonly numVotes?: number;
+      readonly systemPrompt?: string;
+      readonly normalizeAnswer?: (response: string) => string;
+    },
+  ): Promise<SelfConsistencyResult> {
+    if (!this.infra) {
+      throw new Error("No providers configured. Run `wotann init` first.");
+    }
+
+    const bridge = this.infra.bridge;
+    const executor = async (
+      provider: ProviderName,
+      model: string,
+      executorPrompt: string,
+      systemPrompt?: string,
+    ) => {
+      const startTime = Date.now();
+      const queryResult = await bridge.querySync({
+        prompt: executorPrompt,
+        provider,
+        model,
+        systemPrompt,
+      });
+      return {
+        response: queryResult.content,
+        tokensUsed: queryResult.tokensUsed,
+        durationMs: queryResult.durationMs > 0 ? queryResult.durationMs : Date.now() - startTime,
+      };
+    };
+
+    const opts: SelfConsistencyOptions = {
+      numVotes: options?.numVotes ?? 5,
+      provider: this.session.provider,
+      model: this.session.model,
+      ...(options?.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
+      ...(options?.normalizeAnswer !== undefined
+        ? { normalizeAnswer: options.normalizeAnswer }
+        : {}),
+    };
+    return selfConsistencyVote(executor, query, opts);
+  }
+
   close(): void {
     const summary = formatSessionStats(this.session);
     // Stop hook fires first. We HONOR a block result by logging it
@@ -5404,6 +5742,13 @@ export class WotannRuntime {
     // Release per-session ReadBeforeEdit tracking so the Map doesn't grow
     // unbounded across long-running daemon lifetimes.
     clearReadTrackingForSession(this.session.id);
+
+    // Stop SteeringServer fs.watch + poll loop so file descriptors don't
+    // leak past the session. Safe to call when never started (null check).
+    if (this.steeringServer) {
+      this.steeringServer.stopWatching();
+      this.steeringServer = null;
+    }
 
     // Stop session recorder and extract learnings
     this.sessionRecorder.stop();
