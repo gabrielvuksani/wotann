@@ -31,9 +31,7 @@ export interface CodebaseHealthReport {
 
 // ── Constants ─────────────────────────────────────────────
 
-const SOURCE_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java",
-]);
+const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java"]);
 
 const TEST_PATTERNS = [
   /\.test\.[tj]sx?$/,
@@ -46,43 +44,57 @@ const MAX_HEALTHY_FILE_LINES = 400;
 const MAX_ALLOWED_FILE_LINES = 800;
 const TOP_LARGEST_COUNT = 10;
 
+// ── Options ───────────────────────────────────────────────
+
+export interface AnalyzeOptions {
+  /**
+   * When true, skip `npx tsc --noEmit` and `npx biome/eslint` subprocess
+   * spawns. Keeps the static-analysis fields (files, TODOs, dead code,
+   * circular deps, health score) accurate but reports 0 for
+   * `typeErrors` and `lintWarnings`. Cuts analysis from ~13s to ~30ms.
+   *
+   * Intended for (1) tests that don't want the npx overhead and (2)
+   * real-time UI dashboards that can't afford the spawn latency. The
+   * authoritative path (default, skipExternalTools=false) stays
+   * available for CLI audit commands.
+   */
+  readonly skipExternalTools?: boolean;
+}
+
 // ── Analysis ──────────────────────────────────────────────
 
 /**
  * Analyze a project directory and produce a health report.
  * The health score is 0-100: higher is healthier.
+ *
+ * By default, invokes `npx tsc --noEmit` and `npx biome check`
+ * (falling back to `npx eslint`) to populate `typeErrors` and
+ * `lintWarnings`. Pass `{ skipExternalTools: true }` to skip those
+ * spawns — needed for fast unit tests and real-time dashboards.
  */
 export function analyzeCodebaseHealth(
   projectDir: string,
+  options: AnalyzeOptions = {},
 ): CodebaseHealthReport {
   const sourceFiles = collectSourceFiles(projectDir, 5);
-  const testFiles = sourceFiles.filter((f) =>
-    TEST_PATTERNS.some((p) => p.test(f.path)),
-  );
-  const nonTestFiles = sourceFiles.filter(
-    (f) => !TEST_PATTERNS.some((p) => p.test(f.path)),
-  );
+  const testFiles = sourceFiles.filter((f) => TEST_PATTERNS.some((p) => p.test(f.path)));
+  const nonTestFiles = sourceFiles.filter((f) => !TEST_PATTERNS.some((p) => p.test(f.path)));
 
   // Test coverage (ratio of test files to source files)
   const testCoverage =
-    nonTestFiles.length > 0
-      ? Math.min(1, testFiles.length / nonTestFiles.length)
-      : 0;
+    nonTestFiles.length > 0 ? Math.min(1, testFiles.length / nonTestFiles.length) : 0;
 
   // Count markers (TODO/FIXME)
   const todoCount = countTodos(projectDir, sourceFiles);
 
   // Find largest files
-  const sortedBySize = [...sourceFiles].sort(
-    (a, b) => b.lineCount - a.lineCount,
-  );
+  const sortedBySize = [...sourceFiles].sort((a, b) => b.lineCount - a.lineCount);
   const largestFiles = sortedBySize.slice(0, TOP_LARGEST_COUNT);
 
   // Average file size
   const avgFileSize =
     sourceFiles.length > 0
-      ? sourceFiles.reduce((sum, f) => sum + f.lineCount, 0) /
-        sourceFiles.length
+      ? sourceFiles.reduce((sum, f) => sum + f.lineCount, 0) / sourceFiles.length
       : 0;
 
   // Dead code indicators (unused exports heuristic)
@@ -104,8 +116,8 @@ export function analyzeCodebaseHealth(
 
   return {
     testCoverage: Math.round(testCoverage * 100),
-    typeErrors: countTypeErrors(projectDir),
-    lintWarnings: countLintWarnings(projectDir),
+    typeErrors: options.skipExternalTools ? 0 : countTypeErrors(projectDir),
+    lintWarnings: options.skipExternalTools ? 0 : countLintWarnings(projectDir),
     todoCount,
     avgFileSize: Math.round(avgFileSize),
     largestFiles,
@@ -140,9 +152,7 @@ function collectSourceFiles(
       }
 
       const fullPath = join(dir, entry.name);
-      const relativePath = prefix
-        ? `${prefix}/${entry.name}`
-        : entry.name;
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
 
       if (entry.isFile() && SOURCE_EXTENSIONS.has(extname(entry.name))) {
         try {
@@ -158,9 +168,7 @@ function collectSourceFiles(
           // Skip unreadable files
         }
       } else if (entry.isDirectory()) {
-        files.push(
-          ...collectSourceFiles(fullPath, maxDepth, depth + 1, relativePath),
-        );
+        files.push(...collectSourceFiles(fullPath, maxDepth, depth + 1, relativePath));
       }
     }
   } catch {
@@ -172,10 +180,7 @@ function collectSourceFiles(
 
 // ── Detectors ─────────────────────────────────────────────
 
-function countTodos(
-  projectDir: string,
-  files: readonly FileMetric[],
-): number {
+function countTodos(projectDir: string, files: readonly FileMetric[]): number {
   let count = 0;
   const pattern = /\bTODO\b|\bFIXME\b|\bHACK\b|\bXXX\b/g;
 
@@ -219,9 +224,13 @@ function detectDeadCodeSignals(
       const importPattern = /import\s+\{([^}]+)\}/g;
       let importMatch = importPattern.exec(content);
       while (importMatch !== null) {
-        const symbols = (importMatch[1] ?? "")
-          .split(",")
-          .map((s) => s.trim().split(/\s+as\s+/)[0]?.trim() ?? "");
+        const symbols = (importMatch[1] ?? "").split(",").map(
+          (s) =>
+            s
+              .trim()
+              .split(/\s+as\s+/)[0]
+              ?.trim() ?? "",
+        );
         for (const sym of symbols) {
           if (sym) importedSymbols.add(sym);
         }

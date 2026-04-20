@@ -23,7 +23,7 @@ describe("analyzeCodebaseHealth", () => {
       'import { main } from "./index.js";\n',
     );
 
-    const report = analyzeCodebaseHealth(tempDir);
+    const report = analyzeCodebaseHealth(tempDir, { skipExternalTools: true });
     expect(report.healthScore).toBeGreaterThanOrEqual(0);
     expect(report.healthScore).toBeLessThanOrEqual(100);
     expect(report.todoCount).toBe(0);
@@ -38,7 +38,7 @@ describe("analyzeCodebaseHealth", () => {
       "// TODO: fix this\n// FIXME: also this\nexport const x = 1;\n",
     );
 
-    const report = analyzeCodebaseHealth(tempDir);
+    const report = analyzeCodebaseHealth(tempDir, { skipExternalTools: true });
     expect(report.todoCount).toBe(2);
   });
 
@@ -51,7 +51,7 @@ describe("analyzeCodebaseHealth", () => {
     writeFileSync(join(tempDir, "big.ts"), bigContent);
     writeFileSync(join(tempDir, "small.ts"), "export const y = 2;\n");
 
-    const report = analyzeCodebaseHealth(tempDir);
+    const report = analyzeCodebaseHealth(tempDir, { skipExternalTools: true });
     expect(report.largestFiles.length).toBeGreaterThan(0);
     expect(report.largestFiles[0]?.path).toBe("big.ts");
   });
@@ -66,7 +66,7 @@ describe("analyzeCodebaseHealth", () => {
       'import { login } from "./auth.js";\n',
     );
 
-    const report = analyzeCodebaseHealth(tempDir);
+    const report = analyzeCodebaseHealth(tempDir, { skipExternalTools: true });
     // 1 test file / 2 source files = 50%
     expect(report.testCoverage).toBe(50);
   });
@@ -74,7 +74,7 @@ describe("analyzeCodebaseHealth", () => {
   it("returns 0 health score for empty directory", () => {
     tempDir = mkdtempSync(join(tmpdir(), "wotann-health-"));
 
-    const report = analyzeCodebaseHealth(tempDir);
+    const report = analyzeCodebaseHealth(tempDir, { skipExternalTools: true });
     expect(report.healthScore).toBe(0);
     expect(report.avgFileSize).toBe(0);
   });
@@ -93,7 +93,7 @@ describe("analyzeCodebaseHealth", () => {
       "export { Foo } from './core/types.js';\n",
     );
 
-    const report = analyzeCodebaseHealth(tempDir);
+    const report = analyzeCodebaseHealth(tempDir, { skipExternalTools: true });
     expect(report.avgFileSize).toBeGreaterThan(0);
     expect(report.largestFiles.length).toBe(2);
   });
@@ -113,14 +113,14 @@ describe("analyzeCodebaseHealth", () => {
     );
     writeFileSync(join(tempDir, "app.ts"), "export const y = 2;\n");
 
-    const report = analyzeCodebaseHealth(tempDir);
+    const report = analyzeCodebaseHealth(tempDir, { skipExternalTools: true });
     // Should only count app.ts, not the node_modules/dist files
     expect(report.largestFiles.length).toBe(1);
     expect(report.largestFiles[0]?.path).toBe("app.ts");
   });
 
   it("handles non-existent directory gracefully", () => {
-    const report = analyzeCodebaseHealth("/nonexistent/path/xyz");
+    const report = analyzeCodebaseHealth("/nonexistent/path/xyz", { skipExternalTools: true });
     expect(report.healthScore).toBe(0);
     expect(report.todoCount).toBe(0);
   });
@@ -137,7 +137,7 @@ describe("analyzeCodebaseHealth", () => {
       'import { x } from "./messy.js";\n',
     );
 
-    const report = analyzeCodebaseHealth(tempDir);
+    const report = analyzeCodebaseHealth(tempDir, { skipExternalTools: true });
     expect(report.todoCount).toBe(10);
     // Health score should be penalized (100 - 10 TODOs = 90)
     expect(report.healthScore).toBeLessThanOrEqual(90);
