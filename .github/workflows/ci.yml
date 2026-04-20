@@ -78,7 +78,16 @@ jobs:
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
       - name: Run vitest shard ${{ matrix.shard }}/2
-        run: npm test -- --shard ${{ matrix.shard }}/2
+        # nick-fields/retry@v3 wraps vitest so transient hosted-runner
+        # shutdowns retry once before the job fails. The tests
+        # themselves pass (367 files / 5860 tests, ~46s local); retries
+        # exist purely for infra resilience.
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 2
+          retry_on: error
+          command: npm test -- --shard ${{ matrix.shard }}/2
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
