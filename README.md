@@ -135,6 +135,8 @@ Runs Ralph mode (verify-fix loop) + self-healing (provider fallback) + 8-strateg
         Inference call (the only thing the LLM does)
 ```
 
+See [`docs/SURFACE_PARITY_REPORT.md`](docs/SURFACE_PARITY_REPORT.md) for the full surface-by-surface capability matrix and [`docs/CAPABILITY_ADAPTATION_MATRIX.md`](docs/CAPABILITY_ADAPTATION_MATRIX.md) for how the harness equalizes capabilities across models of different tiers.
+
 ## Project Structure
 
 ```text
@@ -163,9 +165,9 @@ src/
 
 desktop-app/          Tauri 2 desktop (React + Rust), ⌘K command palette
 ios/                  SwiftUI app (5 targets — main / Intents / Widgets / Watch / Share)
-docs/                 Master plans, architecture audits, design system
+docs/                 Architecture references (auth, surface parity, capability adaptation, build)
+design-brief/         Design system: tokens, brand identity, surface guidelines, reference shots
 skills/               86 markdown skills (progressive disclosure)
-research/             10 cloned competitor harnesses + 30+ tracked GitHub repos
 ```
 
 ## Commands
@@ -231,20 +233,20 @@ Found a vulnerability? See [`SECURITY.md`](SECURITY.md) for responsible disclosu
 
 | Doc | What's inside |
 |---|---|
-| [`docs/DEEP_AUDIT_2026-04-13.md`](docs/DEEP_AUDIT_2026-04-13.md) | Full architecture audit — 235K LOC across 4 platforms, 76-item roadmap |
 | [`docs/AUTH.md`](docs/AUTH.md) | Daemon RPC authentication convention |
-| [`docs/MASTER_PLAN_PHASE_2.md`](docs/MASTER_PLAN_PHASE_2.md) | Premium feature roadmap (6 tiers) |
+| [`docs/SURFACE_PARITY_REPORT.md`](docs/SURFACE_PARITY_REPORT.md) | Per-surface capability matrix (CLI / TUI / Desktop / iOS / Watch / CarPlay / channels) |
+| [`docs/CAPABILITY_ADAPTATION_MATRIX.md`](docs/CAPABILITY_ADAPTATION_MATRIX.md) | How tool-calling, vision, and thinking are synthesized on providers that lack them |
+| [`docs/UI_DESIGN_SPEC_2026-04-16.md`](docs/UI_DESIGN_SPEC_2026-04-16.md) | Obsidian Precision theme — tokens, motion, and component contracts |
+| [`docs/SEA_BUILD_ENVIRONMENTAL_GATE.md`](docs/SEA_BUILD_ENVIRONMENTAL_GATE.md) | SEA (single-executable) build environmental requirements |
+| [`docs/SELF_HOSTED_RUNNER_SETUP.md`](docs/SELF_HOSTED_RUNNER_SETUP.md) | Self-hosted GitHub Actions runner setup for SEA + iOS jobs |
 | [`DECISIONS.md`](DECISIONS.md) | 39 architectural decisions with rationale |
 | [`ROADMAP.md`](ROADMAP.md) | Competitive roadmap + brainstormed features |
 | [`TERMINALBENCH_STRATEGY.md`](TERMINALBENCH_STRATEGY.md) | How the harness adds +15-25% to model benchmarks |
-| [`HANDOFF.md`](HANDOFF.md) | Operational handoff (architecture diagrams, gotchas) |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history |
 
 ## Acknowledgements
 
-WOTANN's harness ideas borrow generously from the open-source agent ecosystem. See [`research/REPOS.md`](research/REPOS.md) for the 10 competitor harnesses tracked locally and the 30+ monitored via GitHub.
-
-Notable inspirations: Hermes Agent (NousResearch), DeepAgents (LangChain), Open-SWE (LangChain), DeerFlow (ByteDance), oh-my-openagent, opcode, eigent, Aider, Cursor, Claude Code, Codex CLI, charmbracelet/crush, oraios/serena, can1357/oh-my-pi.
+WOTANN's harness ideas borrow generously from the open-source agent ecosystem. Notable inspirations: Hermes Agent (NousResearch), DeepAgents (LangChain), Open-SWE (LangChain), DeerFlow (ByteDance), oh-my-openagent, opcode, eigent, Aider, Cursor, Claude Code, Codex CLI, charmbracelet/crush, oraios/serena, can1357/oh-my-pi.
 
 ## License
 

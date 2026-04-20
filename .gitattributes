@@ -1,0 +1,112 @@
+# =============================================================================
+#  WOTANN — .gitattributes
+#  Controls line endings, merge behavior, and GitHub Linguist language stats.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Default: normalize text line endings to LF on checkin; let platforms decide
+# on checkout. Prevents CRLF churn on Windows.
+# -----------------------------------------------------------------------------
+* text=auto eol=lf
+
+# -----------------------------------------------------------------------------
+# Explicit text files (override auto-detect for ambiguous extensions).
+# -----------------------------------------------------------------------------
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.jsx       text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+*.rs        text eol=lf
+*.swift     text eol=lf
+*.py        text eol=lf
+*.sh        text eol=lf executable
+*.rb        text eol=lf
+*.html      text eol=lf
+*.css       text eol=lf
+*.svg       text eol=lf
+Dockerfile  text eol=lf
+Makefile    text eol=lf
+
+# Windows-specific scripts stay CRLF to run under cmd.exe / PowerShell.
+*.bat       text eol=crlf
+*.ps1       text eol=crlf
+
+# -----------------------------------------------------------------------------
+# Binary files — never diff, never merge line-by-line.
+# -----------------------------------------------------------------------------
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.icns      binary
+*.webp      binary
+*.pdf       binary
+*.zip       binary
+*.tar       binary
+*.tar.gz    binary
+*.tgz       binary
+*.dmg       binary
+*.gguf      binary
+*.safetensors binary
+*.ttf       binary
+*.otf       binary
+*.woff      binary
+*.woff2     binary
+*.wasm      binary
+
+# -----------------------------------------------------------------------------
+# GitHub Linguist — fix language detection on github.com.
+# Mark lockfiles, vendored code, and build outputs as generated/vendored so
+# they don't dominate the language breakdown on the repo homepage.
+# -----------------------------------------------------------------------------
+package-lock.json       linguist-generated=true
+yarn.lock               linguist-generated=true
+pnpm-lock.yaml          linguist-generated=true
+Cargo.lock              linguist-generated=true
+Package.resolved        linguist-generated=true
+*.lock                  linguist-generated=true
+
+# If any ship as part of a release bundle
+dist/**                 linguist-generated=true
+dist-cjs/**             linguist-generated=true
+build/**                linguist-generated=true
+desktop-app/dist/**     linguist-generated=true
+
+# Vendored / third-party code (if any lands here in future)
+vendor/**               linguist-vendored=true
+third_party/**          linguist-vendored=true
+**/node_modules/**      linguist-vendored=true
+
+# Auto-generated Xcode project file should not count as Objective-C
+**/*.xcodeproj/project.pbxproj   linguist-generated=true
+
+# Auto-generated type declaration files
+*.d.ts                  linguist-generated=true
+
+# Documentation is Markdown, but docs-heavy repos get mislabeled as
+# "Markdown"-primary. Tell Linguist to count docs as documentation.
+docs/**                 linguist-documentation=true
+design-brief/**         linguist-documentation=true
+*.md                    linguist-documentation=false
+README.md               linguist-documentation=true
+CHANGELOG.md            linguist-documentation=true
+CONTRIBUTING.md         linguist-documentation=true
+CODE_OF_CONDUCT.md      linguist-documentation=true
+SECURITY.md             linguist-documentation=true
+
+# Explicitly language-classify skill files (they are prose, not code)
+skills/**               linguist-documentation=true
+
+# -----------------------------------------------------------------------------
+# Merge strategy — treat changelogs and snapshots as union-mergeable so
+# parallel branches don't conflict on trivial additions.
+# -----------------------------------------------------------------------------
+CHANGELOG.md            merge=union
