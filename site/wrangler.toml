@@ -1,0 +1,16 @@
+# Cloudflare Pages config for wotann.com
+#
+# Used by Wrangler when deploying the static site in `site/` to
+# Cloudflare Pages. The dashboard "Connect to Git" flow does NOT
+# require this file — it's here for the CLI deploy path and for
+# explicit documentation of the project's Pages settings.
+#
+# Deploy from the repo root:
+#   npx wrangler pages deploy site
+#
+# Or from CI with a CLOUDFLARE_API_TOKEN secret:
+#   npx wrangler pages deploy site --project-name=wotann --branch=main
+
+name = "wotann"
+compatibility_date = "2026-04-20"
+pages_build_output_dir = "./site"
