@@ -147,7 +147,7 @@ export async function optimize<T>(config: OptimizerConfig<T>): Promise<Optimizat
   // Seed generation 0
   let population: Candidate<T>[] = config.initialPopulation
     .slice(0, populationSize)
-    .map((value, idx) => ({
+    .map((value, _idx) => ({
       id: freshId(),
       generation: 0,
       value,

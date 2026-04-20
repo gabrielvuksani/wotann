@@ -5075,7 +5075,6 @@ program
         if (options.dryRun || !adapter) {
           reports.push(dryRunReportForProvider(p));
         } else {
-          // eslint-disable-next-line no-await-in-loop
           const r = await runHealthCheck(p, adapter, {
             skipToolCall: options.skipToolCall,
             timeoutMs,

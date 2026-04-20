@@ -190,7 +190,6 @@ function commandExists(cmd: string): boolean {
 function requireFsSync(): { existsSync: (p: string) => boolean } {
   // Inline import so this module stays testable without side effects
   // at module-load time.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const fs = require("node:fs") as { existsSync: (p: string) => boolean };
   return fs;
 }

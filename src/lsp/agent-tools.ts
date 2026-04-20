@@ -44,7 +44,6 @@ import type {
   LspNotInstalledError,
   LspServerConfig,
 } from "./server-registry.js";
-import { lspNotInstalled } from "./server-registry.js";
 
 // ── Public types ─────────────────────────────────────────
 

@@ -334,9 +334,6 @@ The daemon enforces session-token auth on every RPC call. Local clients (CLI, de
 | [`docs/UI_DESIGN_SPEC_2026-04-16.md`](docs/UI_DESIGN_SPEC_2026-04-16.md) | Obsidian Precision theme — tokens, motion, component contracts |
 | [`docs/SEA_BUILD_ENVIRONMENTAL_GATE.md`](docs/SEA_BUILD_ENVIRONMENTAL_GATE.md) | Single-executable (SEA) build environment requirements |
 | [`docs/SELF_HOSTED_RUNNER_SETUP.md`](docs/SELF_HOSTED_RUNNER_SETUP.md) | Self-hosted GitHub Actions runner for SEA + iOS jobs |
-| [`DECISIONS.md`](DECISIONS.md) | 39 architectural decisions with rationale |
-| [`ROADMAP.md`](ROADMAP.md) | Competitive roadmap + brainstormed features |
-| [`TERMINALBENCH_STRATEGY.md`](TERMINALBENCH_STRATEGY.md) | How the harness adds +15–25% to model benchmarks |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history |
 
 ---

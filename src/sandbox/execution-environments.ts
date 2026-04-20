@@ -216,7 +216,6 @@ export function listAvailableBackends(
   // cheap zero-deps call. Honest: if extended module fails to load we
   // return only the core list plus a warn, never throw up.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-invalid-type-assertions
     const ext = require("./extended-backends.js") as {
       EXTENDED_EXECUTION_ENVIRONMENTS: Record<
         string,

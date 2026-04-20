@@ -165,6 +165,22 @@ core.[0-9]*
 .git-old-corrupt-*/
 
 # -----------------------------------------------------------------------------
+# Internal-only root docs (hidden from GitHub, preserved locally).
+# These live in the working tree but are not public-facing.
+# -----------------------------------------------------------------------------
+/AGENTS.md
+/CLAUDE.md
+/DECISIONS.md
+/ROADMAP.md
+/TERMINALBENCH_STRATEGY.md
+/design-brief/
+/big.txt
+/small.txt
+/p1.txt
+/p2.txt
+/p3.txt
+
+# -----------------------------------------------------------------------------
 # Finder-duplicate pattern — macOS Finder creates "foo 2.ts" when files
 # collide on save. These are duplicates of real source files and must never
 # be committed. The pattern matches any filename with " N." where N is 2-9.

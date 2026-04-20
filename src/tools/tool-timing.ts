@@ -175,9 +175,7 @@ export class ToolTimingLogger {
       };
       // Only import fs lazily — keeps the module tree-shakeable for
       // browser/ACP builds that have no filesystem.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { mkdirSync, appendFileSync } = require("node:fs") as typeof import("node:fs");
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { dirname } = require("node:path") as typeof import("node:path");
       mkdirSync(dirname(this.filePath), { recursive: true });
       appendFileSync(this.filePath, JSON.stringify(enriched) + "\n", { encoding: "utf-8" });

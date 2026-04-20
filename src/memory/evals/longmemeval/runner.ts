@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { MemoryStore } from "../../store.js";
-import type { LongMemEvalInstance, LongMemEvalTurn } from "./corpus.js";
+import type { LongMemEvalInstance } from "./corpus.js";
 import type { Hypothesis } from "./scorer.js";
 import { scoreLongMemEval, type ScoreReport } from "./scorer.js";
 import type { AgentMessage, WotannQueryOptions } from "../../../core/types.js";

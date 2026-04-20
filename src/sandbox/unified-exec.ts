@@ -387,7 +387,6 @@ function warnIfOutsideSandbox(): void {
   if (/[\\/]sandbox[\\/]executor\./.test(stack)) return;
   // Allow the module's own unit tests to exercise the bare session.
   if (/[\\/]unified-exec\.test\./.test(stack)) return;
-  // eslint-disable-next-line no-console
   console.warn(
     "[SECURITY] unified-exec called without sandbox wrapper — caller must ensure input is trusted",
   );

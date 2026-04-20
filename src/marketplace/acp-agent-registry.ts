@@ -608,7 +608,6 @@ async function verifyManifestSignature(manifest: AcpAgentManifest): Promise<bool
   if (!manifest.signature || !manifest.publicKey) return false;
   try {
     const crypto = await import("node:crypto");
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { signature: _sig, publicKey: _pk, ...rest } = manifest;
     const canonical = canonicalJson(rest);
     const publicKey = crypto.createPublicKey({
