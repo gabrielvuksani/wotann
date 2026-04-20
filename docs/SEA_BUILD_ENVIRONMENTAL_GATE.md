@@ -1,6 +1,51 @@
-# SEA Build — Environmental Gate (2026-04-19)
+# SEA Build — Environmental Gate (2026-04-19) — RESOLVED 2026-04-20
 
-## TL;DR
+## TL;DR — Current status: **WORKING**
+
+SEA binary now builds end-to-end on this machine. Last passing artifact:
+
+```
+dist/release/wotann-0.4.0-macos-arm64     204 MB, Mach-O arm64
+./dist/release/wotann-0.4.0-macos-arm64 --version → 0.4.0
+./dist/release/wotann-0.4.0-macos-arm64 --help     → CLI usage prints
+otool -L                                           → only system libs
+```
+
+`scripts/release/verify-binary.sh` passes every check: size, file type,
+`--version`, `--help`, no dangling `@rpath` dylibs. The 95 MB SEA blob
+at `dist/release/wotann.blob` was successfully injected via `postject`.
+
+## How it was resolved
+
+The Homebrew Node dylib-link problem is real and still blocks SEA on
+default-PATH builds. The fix is build-only: download a statically-
+linked Node 22 tarball from <https://nodejs.org/> and prepend it to
+`PATH` only for the `sea-bundle.sh` invocation. No root, no install,
+no changes to the developer's default Node.
+
+```bash
+# One-time: download static Node 22 portable
+mkdir -p /tmp/node22-build && cd /tmp/node22-build
+curl -sL https://nodejs.org/dist/v22.12.0/node-v22.12.0-darwin-arm64.tar.xz -o node22.tar.xz
+tar xf node22.tar.xz
+cd -
+
+# Every build:
+PATH=/tmp/node22-build/node-v22.12.0-darwin-arm64/bin:$PATH \
+  bash scripts/release/sea-bundle.sh
+```
+
+`otool -L` on the downloaded Node 22 binary lists only system libs
+(CoreFoundation, libSystem, libc++), so the copied `$ART` binary has
+no dangling `@rpath` references and runs anywhere on the same arch.
+
+CI should bake this in:
+- `runs-on: macos-14` (Apple Silicon) and `macos-13` (Intel) ship
+  static Node preinstalled at `/usr/local/bin/node` — no download step
+- `runs-on: ubuntu-24.04` and `windows-2022` also ship static Node
+  preinstalled — again no download step
+
+## History (preserved for context)
 
 The Node Single Executable Application (SEA) binary pipeline in
 `scripts/release/sea-bundle.sh` **correctly refuses** to ship a broken
