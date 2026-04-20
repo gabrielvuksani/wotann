@@ -138,7 +138,8 @@ const WORKERS: readonly WorkerConfig[] = [
 export class BackgroundWorkerManager {
   private readonly workers: Map<string, WorkerConfig>;
   private readonly lastRun: Map<string, number> = new Map();
-  private readonly results: Map<string, { success: boolean; duration: number; message: string }> = new Map();
+  private readonly results: Map<string, { success: boolean; duration: number; message: string }> =
+    new Map();
   private runtime: WotannRuntime | null = null;
 
   constructor() {
@@ -178,7 +179,9 @@ export class BackgroundWorkerManager {
    * Execute a specific worker by ID. Called from KAIROS heartbeat.
    * Each worker dispatches to the appropriate runtime subsystem.
    */
-  async executeWorker(id: string): Promise<{ success: boolean; duration: number; message: string }> {
+  async executeWorker(
+    id: string,
+  ): Promise<{ success: boolean; duration: number; message: string }> {
     const worker = this.workers.get(id);
     if (!worker || !worker.enabled) {
       return { success: false, duration: 0, message: `Worker ${id} not found or disabled` };
@@ -228,12 +231,24 @@ export class BackgroundWorkerManager {
 
       case "consolidate": {
         if (!this.runtime) return `${worker.name}: skipped (no runtime)`;
+        // P1-M8 Fix B: the nightly "consolidate" worker now drives the
+        // auto_capture -> memory_entries promotion chain (in addition to
+        // cross-session learnings). Before this, the promotion chain only
+        // ran on kairos ticks (every 8th tick); nightly consolidation was
+        // a misnomer that only extracted cross-session learnings. Now the
+        // name matches the behaviour — sibling-site alignment with
+        // kairos.ts:1554 which runs the same path every ~2 minutes.
         try {
           const learner = this.runtime.getCrossSessionLearner();
           const learnings = learner.extractLearnings("success");
-          return `${worker.name}: memory consolidation completed (${learnings.length} learnings extracted)`;
-        } catch {
-          return `${worker.name}: memory consolidation completed (memory subsystems unavailable)`;
+          const report = this.runtime.consolidateObservations(500);
+          if (!report) {
+            return `${worker.name}: learnings=${learnings.length}, promotion=skipped (no store)`;
+          }
+          return `${worker.name}: learnings=${learnings.length}, promoted read=${report.read} routed=${report.routed} failed=${report.classificationFailed}`;
+        } catch (err) {
+          // Honest failure — surface the error instead of silent success.
+          return `${worker.name}: memory consolidation failed — ${err instanceof Error ? err.message : String(err)}`;
         }
       }
 
@@ -268,7 +283,18 @@ export class BackgroundWorkerManager {
           const { join: pathJoin, extname } = await import("node:path");
 
           const workspacePath = process.cwd();
-          const scanExtensions = new Set([".ts", ".js", ".json", ".yaml", ".yml", ".env", ".toml", ".cfg", ".conf", ".ini"]);
+          const scanExtensions = new Set([
+            ".ts",
+            ".js",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".env",
+            ".toml",
+            ".cfg",
+            ".conf",
+            ".ini",
+          ]);
           const severityCounts: Record<string, number> = { critical: 0, high: 0, medium: 0 };
           let totalFindings = 0;
           let filesScanned = 0;
@@ -291,13 +317,18 @@ export class BackgroundWorkerManager {
                     const result = scanner.scanText(content, fullPath);
                     filesScanned++;
                     for (const finding of result.findings) {
-                      severityCounts[finding.severity] = (severityCounts[finding.severity] ?? 0) + 1;
+                      severityCounts[finding.severity] =
+                        (severityCounts[finding.severity] ?? 0) + 1;
                       totalFindings++;
                     }
-                  } catch { /* skip unreadable files */ }
+                  } catch {
+                    /* skip unreadable files */
+                  }
                 }
               }
-            } catch { /* skip inaccessible directories */ }
+            } catch {
+              /* skip inaccessible directories */
+            }
           };
 
           scanDir(workspacePath, 0);
@@ -332,9 +363,23 @@ export class BackgroundWorkerManager {
           const { join: pathJoin, extname } = await import("node:path");
 
           const workspacePath = process.cwd();
-          const testPatterns = [".test.ts", ".spec.ts", ".test.js", ".spec.js", ".test.tsx", ".spec.tsx"];
+          const testPatterns = [
+            ".test.ts",
+            ".spec.ts",
+            ".test.js",
+            ".spec.js",
+            ".test.tsx",
+            ".spec.tsx",
+          ];
           const sourceExtensions = new Set([".ts", ".js", ".tsx", ".jsx"]);
-          const ignoreDirs = new Set(["node_modules", ".git", "dist", "build", ".wotann", "coverage"]);
+          const ignoreDirs = new Set([
+            "node_modules",
+            ".git",
+            "dist",
+            "build",
+            ".wotann",
+            "coverage",
+          ]);
 
           const dirStats: Map<string, { sourceFiles: number; testFiles: number }> = new Map();
           let totalSourceFiles = 0;
@@ -363,7 +408,9 @@ export class BackgroundWorkerManager {
                   }
                 }
               }
-            } catch { /* skip inaccessible directories */ }
+            } catch {
+              /* skip inaccessible directories */
+            }
           };
 
           scanDir(workspacePath, 0);
@@ -375,9 +422,8 @@ export class BackgroundWorkerManager {
             .slice(0, 10)
             .map(([dir, stats]) => `${dir} (${stats.sourceFiles} files)`);
 
-          const ratio = totalSourceFiles > 0
-            ? ((totalTestFiles / totalSourceFiles) * 100).toFixed(1)
-            : "0.0";
+          const ratio =
+            totalSourceFiles > 0 ? ((totalTestFiles / totalSourceFiles) * 100).toFixed(1) : "0.0";
 
           return `${worker.name}: ${totalTestFiles} test files / ${totalSourceFiles} source files (${ratio}% ratio), ${untestedDirs.length} directories with no tests${untestedDirs.length > 0 ? `: ${untestedDirs.join(", ")}` : ""}`;
         } catch (err) {
@@ -472,7 +518,13 @@ export class BackgroundWorkerManager {
   /**
    * Get status of all workers.
    */
-  getStatus(): readonly { id: string; name: string; enabled: boolean; lastRun: number | null; lastResult: string | null }[] {
+  getStatus(): readonly {
+    id: string;
+    name: string;
+    enabled: boolean;
+    lastRun: number | null;
+    lastResult: string | null;
+  }[] {
     return [...this.workers.values()].map((w) => ({
       id: w.id,
       name: w.name,
