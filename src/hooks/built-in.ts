@@ -1227,7 +1227,6 @@ export const approvalRuleGate: HookHandler = {
     if (!toolName) return { action: "allow" };
     try {
       // Lazy import to keep hook module light at load time.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const security = require("../sandbox/security.js") as {
         evaluateApprovalRules: (
           name: string,

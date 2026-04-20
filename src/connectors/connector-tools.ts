@@ -758,7 +758,7 @@ const FIX_JIRA = "Set JIRA_DOMAIN, JIRA_EMAIL, JIRA_API_TOKEN in env";
 const FIX_LINEAR = "Set LINEAR_API_KEY in env";
 const FIX_NOTION = "Set NOTION_API_KEY in env";
 const FIX_CONFLUENCE = "Set CONFLUENCE_DOMAIN, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN in env";
-const FIX_DRIVE = "Set GOOGLE_DRIVE_ACCESS_TOKEN (or run OAuth flow) in env";
+const _FIX_DRIVE = "Set GOOGLE_DRIVE_ACCESS_TOKEN (or run OAuth flow) in env";
 const FIX_SLACK = "Set SLACK_BOT_TOKEN in env";
 
 // ── Dispatcher ──────────────────────────────────────────────
