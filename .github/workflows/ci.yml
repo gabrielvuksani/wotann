@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: ["**"]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -51,15 +52,43 @@ jobs:
       - name: Build
         run: npm run build
 
-  # Test job removed (2026-04-20): hosted-runner preemption made the
-  # job flake red on ~30-50% of runs despite the 4-shard split + retry
-  # wrapper. The tests themselves pass 5860/5860 locally in 46s; the
-  # failures were purely GitHub infra shutdown signals. For a solo-dev
-  # project at v0.4.0, typecheck + lint + build already catch the real
-  # regression classes, and the contributor is running tests locally
-  # before every push. Reintroduce with a self-hosted runner (setup doc:
-  # docs/SELF_HOSTED_RUNNER_SETUP.md) if contributor count grows or a
-  # real regression slips through build+typecheck+lint.
+  # Test job re-enabled 2026-04-20 per MASTER_PLAN_V8 §4 P0-7.
+  #
+  # IMPORTANT: this is a VISIBILITY gate, not a hard gate.
+  # `continue-on-error: true` means test failures surface in the GitHub
+  # UI (red X on the job) but DO NOT block PR merges. This restores
+  # regression visibility that was lost when the prior implementation
+  # was removed due to hosted-runner preemption flakes.
+  #
+  # Upgrade to a hard gate (remove `continue-on-error: true`) after the
+  # suite has been consistently green for 2 weeks. Track stability via
+  # the historical run list on the Actions tab.
+  #
+  # Prior context: the earlier shard+retry approach (commits 6faf04b,
+  # d3de864) was preempted ~30-50% of runs. A self-hosted runner is
+  # the long-term fix (docs/SELF_HOSTED_RUNNER_SETUP.md). For now we
+  # accept visibility-without-enforcement rather than no signal at all.
+  test:
+    name: Tests (visibility, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Rebuild native modules (better-sqlite3)
+        run: npm rebuild better-sqlite3
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
 
   desktop-typecheck:
     name: Desktop typecheck
