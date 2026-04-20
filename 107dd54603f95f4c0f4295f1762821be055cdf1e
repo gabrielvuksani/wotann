@@ -1,0 +1,1 @@
+ERRATA 2026-04-20: orphan commit, not reachable from main. P0-3 work ended up in 4e8ad73 due to an amend-race. See docs/internal/TIER1_COMMIT_RACE_ERRATA.md.
