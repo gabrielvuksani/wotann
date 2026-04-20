@@ -28,6 +28,12 @@ import type {
   StopReason,
   ToolSchema,
 } from "./types.js";
+import {
+  decodeEventStreamFrames,
+  getEventType,
+  getMessageType,
+  type EventStreamMessage,
+} from "./bedrock-eventstream.js";
 
 interface BedrockCredentials {
   readonly accessKeyId: string;
@@ -231,21 +237,6 @@ function buildBedrockRequestBody(opts: UnifiedQueryOptions): BedrockRequestBody 
 // ── Stream parser helpers ──────────────────────────────────────────
 
 /**
- * Decode a JSON-escaped string literal as seen inside a Bedrock
- * event-stream frame. JSON.parse is used because it handles \uXXXX,
- * \n, \t, and surrogate pairs correctly; a naive replace() would
- * miss edge cases. If parsing fails (malformed input), we fall back
- * to the raw string so partial text is not swallowed.
- */
-function decodeJsonString(raw: string): string {
-  try {
-    return JSON.parse(`"${raw}"`) as string;
-  } catch {
-    return raw;
-  }
-}
-
-/**
  * Map Bedrock Converse stopReason vocabulary to the runtime's
  * normalised StopReason. Unknown values default to "stop" to avoid
  * leaking provider-specific values into downstream consumers.
@@ -265,6 +256,55 @@ function mapBedrockStopReason(reason: string): StopReason {
       return "content_filter";
     default:
       return "stop";
+  }
+}
+
+// Payload shapes inside Bedrock event-stream frames. Each event-type
+// header pairs with a JSON payload whose schema below captures the
+// fields we care about. Parsing with these interfaces (rather than
+// `any`) means the TypeScript strict-mode checker flags incorrect
+// field access at compile time and the regex-era ambiguity goes away.
+interface ContentBlockStartPayload {
+  readonly start?: {
+    readonly toolUse?: { readonly toolUseId?: string; readonly name?: string };
+    readonly text?: unknown;
+  };
+  readonly contentBlockIndex?: number;
+}
+
+interface ContentBlockDeltaPayload {
+  readonly delta?: {
+    readonly text?: string;
+    readonly toolUse?: { readonly input?: string };
+  };
+  readonly contentBlockIndex?: number;
+}
+
+interface ContentBlockStopPayload {
+  readonly contentBlockIndex?: number;
+}
+
+interface MessageStopPayload {
+  readonly stopReason?: string;
+}
+
+interface ExceptionPayload {
+  readonly message?: string;
+  readonly Message?: string;
+}
+
+/**
+ * Parse an event-stream message payload into one of the known shapes.
+ * Returns null on JSON parse failure so the caller can surface a
+ * structured error without crashing the stream.
+ */
+function parseEventPayload<T>(msg: EventStreamMessage): T | null {
+  try {
+    const text = msg.payload.toString("utf-8");
+    if (text.length === 0) return null;
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
   }
 }
 
@@ -342,21 +382,27 @@ export function createBedrockAdapter(auth: ProviderAuth): ProviderAdapter {
       return;
     }
 
-    // Event-stream text scanner — still naive (does not frame AWS event
-    // binary format), but now handles both text AND tool_use events by
-    // regex-matching the JSON payloads carried inside each frame. Upgrade
-    // to a full event-stream decoder once Bedrock sees production traffic;
-    // until then this covers every message type the Converse stream emits.
+    // AWS event-stream binary framing decoder. The pre-fix version
+    // regex-scanned the raw bytes which broke on three concrete inputs:
+    //   (a) payloads straddling TCP chunk boundaries,
+    //   (b) `}"` appearing inside a JSON string value (lazy regex
+    //       terminated early and truncated the payload),
+    //   (c) binary header bytes interleaved with payload bytes
+    //       surfacing as UTF-8 replacement chars.
+    // `decodeEventStreamFrames` parses the length-prefixed framing
+    // directly, so payload byte-identity is preserved and frames are
+    // only emitted once fully received. See bedrock-eventstream.ts for
+    // the full spec + framing documentation.
     const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    // Track which text/tool_use regions we've already consumed so we don't
-    // double-emit on subsequent chunks that still contain earlier frames.
-    let scanOffset = 0;
-    // contentBlockIndex -> accumulated tool_use state. Bedrock emits toolUseId
-    // + name on contentBlockStart, then streams `input` JSON via
-    // contentBlockDelta.delta.toolUse.input, and finally contentBlockStop to
-    // signal completion. We can only safely parse the JSON once stop arrives.
+    // Binary buffer that accumulates partial frame bytes across reads.
+    // We deliberately keep this as a Buffer (not a decoded string) so
+    // multi-byte payloads survive intact.
+    let pending = Buffer.alloc(0);
+    // contentBlockIndex -> accumulated tool_use state. Bedrock emits
+    // toolUseId + name on contentBlockStart, streams `input` JSON via
+    // contentBlockDelta.delta.toolUse.input, and finally contentBlockStop
+    // to signal completion. We can only safely parse the JSON once
+    // stop arrives.
     const toolBlocks = new Map<
       number,
       { id: string; name: string; args: string; emitted: boolean }
@@ -366,102 +412,138 @@ export function createBedrockAdapter(auth: ProviderAuth): ProviderAdapter {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        // Append newly-read bytes to the pending buffer. Buffer.concat
+        // produces a fresh allocation so prior slices into `pending`
+        // are never invalidated.
+        pending = Buffer.concat([pending, Buffer.from(value)]);
 
-        // Scan only the newly appended region to avoid re-emitting older
-        // frames we've already processed in a previous loop iteration.
-        const region = buffer.slice(scanOffset);
-
-        // contentBlockStart — announces either a text block or toolUse block.
-        // We only care about toolUse here; text is emitted directly via
-        // contentBlockDelta.text (no start-tracking needed since we just
-        // stream whatever text appears).
-        const startRe =
-          /"contentBlockStart"[^}]*?"start"\s*:\s*\{[^}]*?"toolUse"\s*:\s*\{[^}]*?"toolUseId"\s*:\s*"([^"]+)"[^}]*?"name"\s*:\s*"([^"]+)"[^}]*?\}[^}]*?\}[^}]*?"contentBlockIndex"\s*:\s*(\d+)/g;
-        for (const m of region.matchAll(startRe)) {
-          const id = m[1] ?? "";
-          const name = m[2] ?? "";
-          const idx = Number(m[3] ?? "0");
-          if (!toolBlocks.has(idx)) {
-            toolBlocks.set(idx, { id, name, args: "", emitted: false });
-          }
+        let frameBatch: {
+          readonly messages: readonly EventStreamMessage[];
+          readonly remaining: Buffer;
+        };
+        try {
+          frameBatch = decodeEventStreamFrames(pending);
+        } catch (err) {
+          // Structurally-invalid frame — surface it rather than silently
+          // truncate. The stream is no longer trustworthy; stop reading.
+          yield {
+            type: "error",
+            content: `Bedrock event-stream protocol error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+            model,
+            provider: "bedrock",
+            stopReason: "error",
+          };
+          return;
         }
+        pending = Buffer.from(frameBatch.remaining);
 
-        // contentBlockDelta with text — emit immediately as a text chunk.
-        const textRe =
-          /"contentBlockDelta"[^}]*?"delta"\s*:\s*\{[^}]*?"text"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
-        for (const m of region.matchAll(textRe)) {
-          const raw = m[1] ?? "";
-          if (!raw) continue;
-          const text = decodeJsonString(raw);
-          yield { type: "text", content: text, model, provider: "bedrock" };
-        }
-
-        // contentBlockDelta with toolUse.input — accumulate partial JSON per
-        // contentBlockIndex. We can't parse until contentBlockStop arrives
-        // because the JSON is streamed as tokens.
-        const toolDeltaRe =
-          /"contentBlockDelta"[^}]*?"delta"\s*:\s*\{[^}]*?"toolUse"\s*:\s*\{[^}]*?"input"\s*:\s*"((?:[^"\\]|\\.)*)"[^}]*?\}[^}]*?\}[^}]*?"contentBlockIndex"\s*:\s*(\d+)/g;
-        for (const m of region.matchAll(toolDeltaRe)) {
-          const rawInput = m[1] ?? "";
-          const idx = Number(m[2] ?? "0");
-          const block = toolBlocks.get(idx);
-          if (!block || block.emitted) continue;
-          toolBlocks.set(idx, {
-            ...block,
-            args: block.args + decodeJsonString(rawInput),
-          });
-        }
-
-        // contentBlockStop — signal that a tool-use block's input is complete.
-        // Parse the accumulated JSON and emit a structured tool_use StreamChunk.
-        const stopRe = /"contentBlockStop"[^}]*?"contentBlockIndex"\s*:\s*(\d+)/g;
-        for (const m of region.matchAll(stopRe)) {
-          const idx = Number(m[1] ?? "0");
-          const block = toolBlocks.get(idx);
-          if (!block || block.emitted || !block.name) continue;
-          let parsedInput: Record<string, unknown> = {};
-          try {
-            parsedInput = block.args ? (JSON.parse(block.args) as Record<string, unknown>) : {};
-          } catch {
+        for (const msg of frameBatch.messages) {
+          const messageType = getMessageType(msg);
+          // Exceptions carry error payloads, not events. Surface them
+          // as error chunks. The Bedrock runtime uses `:message-type`
+          // for this dispatch — see AWS EventStream spec §3.
+          if (messageType === "exception" || messageType === "error") {
+            const err = parseEventPayload<ExceptionPayload>(msg);
+            const exceptionType = msg.headers[":exception-type"] ?? "BedrockException";
+            const errMsg = err?.message ?? err?.Message ?? "unknown";
             yield {
               type: "error",
-              content: `Bedrock: malformed tool arguments for ${block.name}`,
+              content: `Bedrock ${exceptionType}: ${errMsg}`,
               model,
               provider: "bedrock",
               stopReason: "error",
             };
-            toolBlocks.set(idx, { ...block, emitted: true });
+            stopReason = "error";
             continue;
           }
-          yield {
-            type: "tool_use",
-            content: block.args,
-            toolName: block.name,
-            toolCallId: block.id,
-            toolInput: parsedInput,
-            model,
-            provider: "bedrock",
-            stopReason: "tool_calls",
-          };
-          toolBlocks.set(idx, { ...block, emitted: true });
-          stopReason = "tool_calls";
-        }
 
-        // messageStop — final stop reason. Map Bedrock's vocab to our
-        // normalised StopReason.
-        const msgStopRe = /"messageStop"[^}]*?"stopReason"\s*:\s*"([^"]+)"/g;
-        for (const m of region.matchAll(msgStopRe)) {
-          stopReason = mapBedrockStopReason(m[1] ?? "end_turn");
-        }
+          const eventType = getEventType(msg);
+          if (!eventType) continue;
 
-        // Advance scanOffset so the next pass skips what we've already seen.
-        scanOffset = buffer.length;
-        if (buffer.length > 65_536) {
-          // Ring-buffer style trim: keep only a tail so long streams don't
-          // grow unbounded. Reset scanOffset to match the trimmed view.
-          buffer = buffer.slice(-32_768);
-          scanOffset = buffer.length;
+          if (eventType === "contentBlockStart") {
+            const p = parseEventPayload<ContentBlockStartPayload>(msg);
+            if (!p) continue;
+            const tool = p.start?.toolUse;
+            const idx = typeof p.contentBlockIndex === "number" ? p.contentBlockIndex : 0;
+            if (tool && typeof tool.toolUseId === "string" && typeof tool.name === "string") {
+              if (!toolBlocks.has(idx)) {
+                toolBlocks.set(idx, {
+                  id: tool.toolUseId,
+                  name: tool.name,
+                  args: "",
+                  emitted: false,
+                });
+              }
+            }
+            continue;
+          }
+
+          if (eventType === "contentBlockDelta") {
+            const p = parseEventPayload<ContentBlockDeltaPayload>(msg);
+            if (!p) continue;
+            const delta = p.delta;
+            if (!delta) continue;
+            if (typeof delta.text === "string" && delta.text.length > 0) {
+              yield { type: "text", content: delta.text, model, provider: "bedrock" };
+            } else if (delta.toolUse && typeof delta.toolUse.input === "string") {
+              const idx = typeof p.contentBlockIndex === "number" ? p.contentBlockIndex : 0;
+              const block = toolBlocks.get(idx);
+              if (block && !block.emitted) {
+                toolBlocks.set(idx, { ...block, args: block.args + delta.toolUse.input });
+              }
+            }
+            continue;
+          }
+
+          if (eventType === "contentBlockStop") {
+            const p = parseEventPayload<ContentBlockStopPayload>(msg);
+            if (!p) continue;
+            const idx = typeof p.contentBlockIndex === "number" ? p.contentBlockIndex : 0;
+            const block = toolBlocks.get(idx);
+            if (!block || block.emitted || !block.name) continue;
+            let parsedInput: Record<string, unknown> = {};
+            try {
+              parsedInput = block.args ? (JSON.parse(block.args) as Record<string, unknown>) : {};
+            } catch {
+              yield {
+                type: "error",
+                content: `Bedrock: malformed tool arguments for ${block.name}`,
+                model,
+                provider: "bedrock",
+                stopReason: "error",
+              };
+              toolBlocks.set(idx, { ...block, emitted: true });
+              continue;
+            }
+            yield {
+              type: "tool_use",
+              content: block.args,
+              toolName: block.name,
+              toolCallId: block.id,
+              toolInput: parsedInput,
+              model,
+              provider: "bedrock",
+              stopReason: "tool_calls",
+            };
+            toolBlocks.set(idx, { ...block, emitted: true });
+            stopReason = "tool_calls";
+            continue;
+          }
+
+          if (eventType === "messageStop") {
+            const p = parseEventPayload<MessageStopPayload>(msg);
+            if (p?.stopReason) {
+              stopReason = mapBedrockStopReason(p.stopReason);
+            }
+            continue;
+          }
+          // messageStart / messageDelta / metadata — no action needed;
+          // messageDelta can carry usage metrics but the adapter does
+          // not forward them (runtime derives usage elsewhere). Any
+          // unknown eventType is a silent no-op since Bedrock may add
+          // new events without breaking the stream contract.
         }
       }
     } finally {

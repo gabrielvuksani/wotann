@@ -58,6 +58,35 @@ interface OllamaChatChunk {
   readonly total_duration?: number;
   readonly eval_count?: number;
   readonly prompt_eval_count?: number;
+  /**
+   * Ollama 0.5+ reports an explicit reason for termination on the
+   * terminal chunk:
+   *   "stop"  → natural completion
+   *   "length" → hit the output-token ceiling (map to canonical `max_tokens`)
+   *   "load"  → model was unloaded mid-turn (rare; treat as `stop`)
+   * Older Ollama (≤0.4) omits this field and the adapter falls back
+   * to "stop" canonically when no tool_calls fired.
+   */
+  readonly done_reason?: string;
+}
+
+/**
+ * Translate Ollama's `done_reason` into the runtime's canonical
+ * StopReason vocabulary. Kept small and explicit — unknown values
+ * drop to "stop" so a new Ollama version emitting an unfamiliar
+ * token doesn't crash the agent loop.
+ */
+function mapOllamaDoneReason(reason: string | undefined): "stop" | "max_tokens" | "content_filter" {
+  switch (reason) {
+    case "length":
+      return "max_tokens";
+    case "content_filter":
+      return "content_filter";
+    case "stop":
+    case "load":
+    default:
+      return "stop";
+  }
 }
 
 /**
@@ -243,6 +272,11 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
       let inputTokens = 0;
       let outputTokens = 0;
       let hadToolCalls = false;
+      // Latest done_reason observed on a `done: true` chunk. Ollama
+      // 0.5+ reports this explicitly (e.g. "length" for token-limit
+      // truncation); older versions omit the field, in which case the
+      // adapter falls back to the tool_calls / "stop" default path.
+      let doneReason: string | undefined;
 
       // ── Thinking-tag parser state ───────────────────────────
       // DeepSeek R1 Distill and Qwen3-thinking variants emit reasoning between
@@ -349,6 +383,10 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
               inputTokens = chunk.prompt_eval_count ?? 0;
               outputTokens = chunk.eval_count ?? 0;
               totalTokens = inputTokens + outputTokens;
+              // Capture the explicit reason from Ollama 0.5+. The
+              // final `done` chunk is the authoritative source; we
+              // overwrite any earlier intermediate value.
+              if (chunk.done_reason) doneReason = chunk.done_reason;
             }
           } catch {
             // Skip malformed JSON lines — partial frames are expected while
@@ -376,8 +414,11 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
         // When the model emitted tool_calls this turn, advertise
         // stopReason: "tool_calls" so the runtime's agent loop knows to
         // execute tools and continue. Without this the loop treats the
-        // turn as final and dies after one tool call.
-        stopReason: hadToolCalls ? "tool_calls" : "stop",
+        // turn as final and dies after one tool call. Tool calls WIN
+        // over done_reason: Ollama 0.5+ may report done_reason="stop"
+        // alongside tool_calls, and the loop must see tool_calls to
+        // keep iterating.
+        stopReason: hadToolCalls ? "tool_calls" : mapOllamaDoneReason(doneReason),
         // Thinking transcript for the runtime to preserve in message history
         // so the next call can include the <think>…</think> block.
         ...(accumulatedThinking.length > 0 ? { thinking: accumulatedThinking } : {}),
