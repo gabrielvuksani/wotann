@@ -61,6 +61,7 @@ import { WorkflowDAGEngine } from "../orchestration/workflow-dag.js";
 import { ContextPressureMonitor } from "./context-pressure.js";
 import { TerminalMonitor } from "./terminal-monitor.js";
 import { FileDependencyGraph } from "./file-dep-graph.js";
+import { CronStore, type CronJobRecord } from "./cron-store.js";
 import { discoverModels } from "../providers/dynamic-discovery.js";
 import {
   optimizeSkillPrompt,
@@ -254,6 +255,21 @@ export class KairosDaemon {
   private readonly contextPressure = new ContextPressureMonitor();
   private readonly terminalMonitor = new TerminalMonitor();
   private readonly fileDependencyGraph = new FileDependencyGraph();
+
+  // Wave 4F: SQLite-backed cron persistence. Null until start() opens
+  // the `.wotann/cron.db` connection; tests that only exercise in-memory
+  // semantics (see `tests/unit/kairos.test.ts`) leave it null so the
+  // existing `state.cronJobs` array remains the source of truth.
+  private cronStore: CronStore | null = null;
+
+  // Wave 4F: heartbeat telemetry tick counter. At the 15s daemon
+  // interval, every 2nd tick (~30s) writes PID + uptime + tickCount +
+  // activeProviders + memoryMb to `.wotann/daemon.status.json` and
+  // appends a `heartbeat` event to the daily JSONL log. Callers
+  // (CLI `wotann engine status`, TUI dashboard, mobile) read the JSON
+  // file for a cheap snapshot without paying the IPC round-trip cost.
+  private telemetryTickCounter = 0;
+  private statusJsonPath: string | null = null;
   private fileWatcher: import("node:fs").FSWatcher | null = null;
   private contextPressureTickCounter = 0;
   private modelRefreshTickCounter = 0;
@@ -534,6 +550,65 @@ export class KairosDaemon {
         }
       }
 
+      // Wave 4F: record the status JSON path so tick() can emit
+      // heartbeat telemetry without recomputing it every 30 seconds.
+      this.statusJsonPath = join(wotannDir, "daemon.status.json");
+
+      // ── Wave 4F: SQLite-backed cron persistence ───────────
+      // Open the cron store BEFORE the tick loop starts so any
+      // persisted jobs are visible to getCronJobs() callers and the
+      // first tick can fire them. The store manages its own 60s
+      // interval — the daemon tick (15s) doesn't try to double-fire.
+      try {
+        this.cronStore = new CronStore(join(wotannDir, "cron.db"));
+
+        // When the store fires a job, route execution through the
+        // daemon's existing execFile path so we benefit from the
+        // identical timeout + cwd semantics already used by
+        // `executeCronJob()`. This is the one place execFile touches
+        // user input, so it stays inside the daemon (not the store).
+        this.cronStore.setExecuteHandler((job) => {
+          return this.executeCronStoreJob(job);
+        });
+
+        // Audit log stuck-job detection: write a "cron" entry with
+        // the gap so it shows up alongside normal fire events.
+        this.cronStore.setStuckJobHandler((job, gapMs) => {
+          this.appendLog({
+            type: "cron",
+            message: `Stuck cron job detected: "${job.name}" (${Math.floor(gapMs / 3_600_000)}h behind)`,
+            data: { jobId: job.id, schedule: job.schedule, gapMs },
+          });
+        });
+
+        this.cronStore.start();
+
+        // Project persisted jobs into the in-memory state so
+        // `getStatus().cronJobs` continues to reflect the full schedule
+        // set — CLI and tests shouldn't need to care whether a job came
+        // from disk or from addCronJob().
+        const persisted = this.cronStore.list();
+        if (persisted.length > 0) {
+          this.state = {
+            ...this.state,
+            cronJobs: [...this.state.cronJobs, ...persisted.map(projectRecord)],
+          };
+          this.appendLog({
+            type: "start",
+            message: `Cron store loaded: ${persisted.length} jobs rehydrated`,
+            data: { enabled: this.cronStore.countEnabled() },
+          });
+        }
+      } catch (err) {
+        // CronStore init failure must not kill the daemon — fall back
+        // to the in-memory cron path that was there before Wave 4F.
+        this.appendLog({
+          type: "error",
+          message: `CronStore init failed (in-memory fallback): ${err instanceof Error ? err.message : String(err)}`,
+        });
+        this.cronStore = null;
+      }
+
       // Phase A10: Load event triggers from config
       const triggersPath = join(wotannDir, "triggers.yaml");
       void this.eventTriggerSystem.loadConfig(triggersPath).then((count) => {
@@ -647,6 +722,11 @@ export class KairosDaemon {
     if (this.meetingRuntime) {
       this.meetingRuntime.close();
       this.meetingRuntime = null;
+    }
+    // Wave 4F: close the cron store so its WAL checkpoints flush.
+    if (this.cronStore) {
+      this.cronStore.close();
+      this.cronStore = null;
     }
     this.rpcHandler = null;
 
@@ -1320,6 +1400,17 @@ export class KairosDaemon {
     this.appendLog({ type: "tick", message: `Tick ${this.state.tickCount}` });
     this.runHeartbeatTasks(now, ["periodic", "nightly"]);
 
+    // ── Wave 4F: heartbeat telemetry (~30s cadence) ────────
+    // At the 15s default tick, every 2nd tick writes a snapshot to
+    // `.wotann/daemon.status.json` so external callers (CLI status,
+    // TUI dashboard, mobile surface) can read a cheap record without
+    // paying the IPC round-trip. The heartbeat log entry makes the
+    // cadence visible in the daily JSONL for post-hoc analysis.
+    this.telemetryTickCounter++;
+    if (this.telemetryTickCounter % 2 === 0) {
+      this.emitHeartbeatTelemetry(now);
+    }
+
     // FlowTracker: record tick event for developer flow state tracking
     this.flowTracker.track({
       type: "terminal_command",
@@ -1798,6 +1889,91 @@ export class KairosDaemon {
       ...this.state,
       cronJobs: this.state.cronJobs.filter((j) => j.id !== id),
     };
+    // Wave 4F: keep the persistent store aligned so a job removed via
+    // the in-memory API also disappears from `.wotann/cron.db`. Missing
+    // from the store is fine (jobs that were added via `addCronJob`
+    // before the store existed, or in tests).
+    if (this.cronStore) {
+      this.cronStore.remove(id);
+    }
+  }
+
+  /**
+   * Wave 4F: add a cron job that survives daemon restarts. Delegates to
+   * the SQLite-backed CronStore and mirrors the job into in-memory
+   * state so `getStatus().cronJobs` stays honest.
+   *
+   * Returns the store's assigned id so callers can reference the job
+   * later. Throws if the store isn't open (daemon not started, or
+   * init failed) — honest failure beats silently writing to an
+   * unreachable column.
+   */
+  addCronJobPersistent(params: {
+    readonly name: string;
+    readonly schedule: string;
+    readonly command: string;
+    readonly taskDesc?: string;
+    readonly enabled?: boolean;
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  }): CronJobRecord {
+    if (!this.cronStore) {
+      throw new Error(
+        "Cron store not available — daemon not started or init failed. " +
+          "Call addCronJob() for in-memory only state.",
+      );
+    }
+    const record = this.cronStore.add(params);
+    this.state = {
+      ...this.state,
+      cronJobs: [...this.state.cronJobs, projectRecord(record)],
+    };
+    this.appendLog({
+      type: "cron",
+      message: `Persistent cron job added: "${record.name}" (${record.schedule})`,
+      data: { jobId: record.id, nextFireAt: record.nextFireAt },
+    });
+    return record;
+  }
+
+  /** Wave 4F: expose the store for RPC/CLI callers. Null if not started. */
+  getCronStore(): CronStore | null {
+    return this.cronStore;
+  }
+
+  /**
+   * Wave 4F: fire a cron job sourced from the CronStore. Same execFile
+   * semantics as `executeCronJob()` but surfaces the log entry with the
+   * store-specific job id so operators can correlate audit entries.
+   *
+   * Throws through to the store so it records a "failure" row; the
+   * appendLog call remains synchronous so the trace is durable even if
+   * execFile rejects asynchronously.
+   */
+  private async executeCronStoreJob(job: CronJobRecord): Promise<void> {
+    const parts = job.command.split(/\s+/);
+    const cmd = parts[0];
+    const args = parts.slice(1);
+
+    if (!cmd) {
+      // Honest failure — don't pretend success for an empty command.
+      this.appendLog({
+        type: "error",
+        message: `Cron job "${job.name}" has empty command`,
+        data: { jobId: job.id },
+      });
+      throw new Error("empty command");
+    }
+
+    this.appendLog({
+      type: "cron",
+      message: `Executing persistent cron job: ${job.name}`,
+      data: { jobId: job.id, command: job.command },
+    });
+
+    // Short timeout (30s) matches the legacy executeCronJob path. Fire
+    // execFile — store records success/failure based on whether this
+    // promise rejects.
+    await execFileAsync(cmd, args, { timeout: 30_000, cwd: this.workingDir });
   }
 
   addHeartbeatTask(task: HeartbeatTask): void {
@@ -2127,6 +2303,89 @@ export class KairosDaemon {
     return { tmpRemoved, walRemoved, shmRemoved };
   }
 
+  // ── Wave 4F: Heartbeat Telemetry ──────────────────────────
+
+  /**
+   * Write a heartbeat snapshot to `.wotann/daemon.status.json` and
+   * append a `heartbeat` event to the daily JSONL log. Called from
+   * tick() at the 30-second cadence (every 2nd tick at 15s interval).
+   *
+   * Surfaced fields:
+   *   - pid: process id — matches `.wotann/daemon.pid`
+   *   - uptime: seconds since start()
+   *   - tickCount: monotonic count (helps detect stalled daemons)
+   *   - activeProviders: number of providers the runtime currently has
+   *   - memoryMb: RSS in MB
+   *   - cronJobsEnabled: store-backed enabled count
+   *   - status: "running" | "starting" | "stopping" | "stopped"
+   *
+   * Failure is non-fatal — a broken filesystem must not crash the
+   * daemon. The error is swallowed silently because the log path
+   * already reports status.
+   */
+  private emitHeartbeatTelemetry(now: Date): void {
+    if (!this.statusJsonPath) return;
+
+    const startedAt = this.state.startedAt;
+    const uptimeSec = startedAt ? Math.floor((now.getTime() - startedAt.getTime()) / 1000) : 0;
+    const memUsage = process.memoryUsage();
+    const memoryMb = Math.round(memUsage.rss / 1024 / 1024);
+
+    // Active provider count pulled directly from runtime when
+    // available. Falls back to 0 when runtime init failed so the
+    // JSON file remains structurally stable.
+    let activeProviders = 0;
+    try {
+      const rt = this.runtime as unknown as {
+        getStatus?: () => { providers?: readonly string[] };
+      } | null;
+      const status = rt?.getStatus?.();
+      if (status?.providers) activeProviders = status.providers.length;
+    } catch {
+      activeProviders = 0;
+    }
+
+    const cronJobsEnabled = this.cronStore?.countEnabled() ?? 0;
+
+    const snapshot = {
+      pid: process.pid,
+      status: this.state.status,
+      startedAt: startedAt?.toISOString() ?? null,
+      updatedAt: now.toISOString(),
+      uptime: uptimeSec,
+      tickCount: this.state.tickCount,
+      activeProviders,
+      memoryMb,
+      cronJobsEnabled,
+      heartbeatTasks: this.state.heartbeatTasks.length,
+    };
+
+    try {
+      // Atomic write via tmp + rename so concurrent readers never see
+      // a partial file. Reuses the same pattern as
+      // `src/daemon/start.ts::atomicWrite`.
+      const tmpPath = `${this.statusJsonPath}.tmp.${process.pid}.${now.getTime()}`;
+      const { writeFileSync, renameSync } = require("node:fs") as typeof import("node:fs");
+      writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2));
+      renameSync(tmpPath, this.statusJsonPath);
+    } catch {
+      // Telemetry failure must never crash the daemon.
+    }
+
+    this.appendLog({
+      type: "heartbeat",
+      message: `Heartbeat: uptime ${uptimeSec}s, ticks ${this.state.tickCount}, providers ${activeProviders}, mem ${memoryMb}MB`,
+      data: {
+        pid: process.pid,
+        uptime: uptimeSec,
+        tickCount: this.state.tickCount,
+        activeProviders,
+        memoryMb,
+        cronJobsEnabled,
+      },
+    });
+  }
+
   // ── Daily Log (append-only JSONL) ───────────────────────────
 
   private appendLog(entry: Omit<DailyLogEntry, "timestamp">): void {
@@ -2263,6 +2522,34 @@ export function parseHeartbeatTasks(
 
 function isHeartbeatSchedule(schedule: string): schedule is HeartbeatScheduleKind {
   return schedule === "on-wake" || schedule === "periodic" || schedule === "nightly";
+}
+
+/**
+ * Wave 4F: project a persistent `CronJobRecord` into the in-memory
+ * `CronJob` shape carried by `DaemonState.cronJobs`. Kept as a free
+ * function so tests can exercise it without constructing a daemon.
+ *
+ * The store tracks timestamps as absolute ms numbers; the in-memory
+ * shape wants a JS Date for `lastRun`. We pass `lastResult` through
+ * verbatim when non-null; otherwise omit so the in-memory shape
+ * cleanly reflects "never run yet".
+ */
+function projectRecord(record: CronJobRecord): CronJob {
+  const base: CronJob = {
+    id: record.id,
+    name: record.name,
+    schedule: record.schedule,
+    command: record.command,
+    enabled: record.enabled,
+  };
+  if (record.lastFiredAt !== null) {
+    return {
+      ...base,
+      lastRun: new Date(record.lastFiredAt),
+      ...(record.lastResult !== null ? { lastResult: record.lastResult } : {}),
+    };
+  }
+  return base;
 }
 
 function computeNextRun(schedule: HeartbeatScheduleKind, now: Date): Date | undefined {

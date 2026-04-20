@@ -2564,17 +2564,19 @@ export class KairosRPCHandler {
       }
     });
 
-    // Cron jobs list — surface every cron-triggered automation so callers
-    // (`wotann schedule list`, TUI schedule panel, iOS bridge) see the
-    // actual state, not a stub. Wave 3H: replaces the {jobs:[]} no-op
-    // with AutomationEngine-backed enumeration. Persistence rides the
-    // existing JSON store at ~/.wotann/automations.json so daemon
-    // restarts rehydrate the jobs before the tick loop wires them up.
+    // Cron jobs list — surface every cron-triggered schedule so callers
+    // (`wotann cron list`, `wotann schedule list`, TUI schedule panel,
+    // iOS bridge) see the actual state, not a stub. Wave 3H replaced
+    // the {jobs:[]} no-op with AutomationEngine-backed enumeration;
+    // Wave 4F adds the SQLite-backed CronStore jobs so both sources
+    // surface side-by-side. `source` discriminates which store the
+    // row came from ("automation" = event-driven engine, "cron" =
+    // persistent CronStore).
     this.handlers.set("cron.list", async () => {
       if (!this.daemon) return { jobs: [] };
       try {
         const automations = this.daemon.getAutomationEngine().listAutomations();
-        const jobs = automations
+        const automationJobs = automations
           .filter((a) => a.trigger.type === "cron")
           .map((a) => ({
             id: a.id,
@@ -2583,14 +2585,120 @@ export class KairosRPCHandler {
             enabled: a.enabled,
             lastRunAt: a.lastRunAt,
             runCount: a.runCount,
+            source: "automation" as const,
           }));
-        return { jobs };
+
+        const store = this.daemon.getCronStore();
+        const storeJobs = store
+          ? store.list().map((j) => ({
+              id: j.id,
+              name: j.name,
+              schedule: j.schedule,
+              command: j.command,
+              enabled: j.enabled,
+              lastFiredAt: j.lastFiredAt,
+              nextFireAt: j.nextFireAt,
+              lastResult: j.lastResult,
+              source: "cron" as const,
+            }))
+          : [];
+
+        return { jobs: [...storeJobs, ...automationJobs] };
       } catch (err) {
         return {
           jobs: [],
           error: err instanceof Error ? err.message : String(err),
         };
       }
+    });
+
+    // Wave 4F: add a cron job to the SQLite-backed CronStore so it
+    // survives daemon restarts. Returns the assigned id. Honest
+    // failure when the store isn't available (daemon not started or
+    // init failed) instead of silently discarding the add.
+    this.handlers.set("cron.add", async (params) => {
+      if (!this.daemon) throw new Error("Daemon not initialized");
+      const name = typeof params["name"] === "string" ? params["name"] : null;
+      const schedule = typeof params["schedule"] === "string" ? params["schedule"] : null;
+      const command = typeof params["command"] === "string" ? params["command"] : null;
+      if (!name || !schedule || !command) {
+        throw new Error("cron.add requires {name, schedule, command}");
+      }
+
+      const metadata =
+        params["metadata"] !== null &&
+        typeof params["metadata"] === "object" &&
+        !Array.isArray(params["metadata"])
+          ? (params["metadata"] as Record<string, unknown>)
+          : undefined;
+
+      const taskDesc = typeof params["taskDesc"] === "string" ? params["taskDesc"] : undefined;
+      const enabled = typeof params["enabled"] === "boolean" ? params["enabled"] : undefined;
+
+      const addParams: Parameters<KairosDaemon["addCronJobPersistent"]>[0] = {
+        name,
+        schedule,
+        command,
+        ...(taskDesc !== undefined ? { taskDesc } : {}),
+        ...(enabled !== undefined ? { enabled } : {}),
+        ...(metadata !== undefined ? { metadata } : {}),
+      };
+      const record = this.daemon.addCronJobPersistent(addParams);
+
+      return {
+        id: record.id,
+        name: record.name,
+        schedule: record.schedule,
+        command: record.command,
+        enabled: record.enabled,
+        nextFireAt: record.nextFireAt,
+      };
+    });
+
+    // Wave 4F: remove a cron job by id. Works against the CronStore;
+    // the AutomationEngine has its own `automations.delete` handler.
+    this.handlers.set("cron.remove", async (params) => {
+      if (!this.daemon) throw new Error("Daemon not initialized");
+      const id = typeof params["id"] === "string" ? params["id"] : null;
+      if (!id) throw new Error("cron.remove requires {id}");
+      const store = this.daemon.getCronStore();
+      if (!store) {
+        return { ok: false, reason: "cron_store_unavailable" };
+      }
+      // Keep the in-memory daemon state aligned so `getStatus()`
+      // callers don't see a stale entry after the row is deleted.
+      this.daemon.removeCronJob(id);
+      return { ok: true, id };
+    });
+
+    // Wave 4F: toggle enabled state.
+    this.handlers.set("cron.setEnabled", async (params) => {
+      if (!this.daemon) throw new Error("Daemon not initialized");
+      const id = typeof params["id"] === "string" ? params["id"] : null;
+      const enabled = typeof params["enabled"] === "boolean" ? params["enabled"] : null;
+      if (!id || enabled === null) {
+        throw new Error("cron.setEnabled requires {id, enabled}");
+      }
+      const store = this.daemon.getCronStore();
+      if (!store) {
+        return { ok: false, reason: "cron_store_unavailable" };
+      }
+      const changed = store.setEnabled(id, enabled);
+      return { ok: changed, id, enabled };
+    });
+
+    // Wave 4F: surface store-level summary for the CLI `status` view.
+    this.handlers.set("cron.status", async () => {
+      if (!this.daemon) return { available: false };
+      const store = this.daemon.getCronStore();
+      if (!store) return { available: false };
+      return {
+        available: true,
+        running: store.isRunning(),
+        dbPath: store.getDbPath(),
+        total: store.list().length,
+        enabled: store.countEnabled(),
+      };
     });
 
     // ── Automation Engine (via daemon's AutomationEngine) ──
