@@ -4605,11 +4605,15 @@ program
   });
 
 // ── wotann acp ─────────────────────────────────────────────
-// Agent Client Protocol host — speaks ACP 0.2 over stdio so IDE hosts
+// Agent Client Protocol host — speaks ACP v1 over stdio so IDE hosts
 // (Zed, Goose, Air, Kiro) can drive WOTANN as their agent backend.
+// Wave 4E adds `wotann acp list|install|uninstall|refresh` for managing
+// external ACP agents from Zed+Air's joint registry.
 
-program
-  .command("acp")
+const acpCmd = program.command("acp").description("Agent Client Protocol tools");
+
+acpCmd
+  .command("serve", { isDefault: true })
   .description("Start an Agent Client Protocol server over stdio")
   .option("--reference", "Use canned reference handlers (no runtime, for smoke-testing)", false)
   .action(async (opts: { reference?: boolean }) => {
@@ -4643,6 +4647,120 @@ program
           .then(resolve);
       });
     });
+  });
+
+acpCmd
+  .command("list")
+  .description("List installed and installable ACP agents")
+  .option("--json", "Output JSON instead of a table", false)
+  .action(async (opts: { json?: boolean }) => {
+    const { AcpAgentRegistry } = await import("./marketplace/acp-agent-registry.js");
+    const registry = new AcpAgentRegistry();
+    const available = registry.listAvailable();
+    const installed = new Map(registry.listInstalled().map((a) => [a.name, a]));
+
+    if (opts.json) {
+      const payload = available.map((m) => ({
+        manifest: m,
+        installed: installed.get(m.name) ?? null,
+      }));
+      process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+      return;
+    }
+
+    console.log(chalk.bold(`\nACP Agents (${available.length} available):\n`));
+    for (const manifest of available) {
+      const installedRec = installed.get(manifest.name);
+      const status = installedRec
+        ? installedRec.status === "INSTALLED"
+          ? chalk.green("●")
+          : chalk.yellow("◐")
+        : chalk.dim("○");
+      const statusLabel = installedRec?.status ?? "available";
+      const title = manifest.title ?? manifest.name;
+      console.log(
+        `  ${status} ${chalk.bold(manifest.name)} ${chalk.dim(`v${manifest.version}`)} — ${title}`,
+      );
+      console.log(chalk.dim(`      ${manifest.description}`));
+      console.log(
+        chalk.dim(
+          `      command: ${manifest.command} ${(manifest.args ?? []).join(" ")} • ${statusLabel}`,
+        ),
+      );
+      if (installedRec?.reason) {
+        console.log(chalk.dim(`      reason:  ${installedRec.reason}`));
+      }
+    }
+    console.log();
+    console.log(
+      chalk.dim(
+        `  Install: wotann acp install <name>    Refresh: wotann acp refresh    Remove: wotann acp uninstall <name>`,
+      ),
+    );
+    console.log();
+  });
+
+acpCmd
+  .command("install <name>")
+  .description("Install an external ACP agent by name")
+  .action(async (name: string) => {
+    const { AcpAgentRegistry } = await import("./marketplace/acp-agent-registry.js");
+    const registry = new AcpAgentRegistry();
+    const result = await registry.install(name);
+
+    const statusColor =
+      result.status === "INSTALLED"
+        ? chalk.green
+        : result.status === "BLOCKED-NOT-INSTALLED"
+          ? chalk.yellow
+          : chalk.red;
+    console.log(chalk.bold(`\nwotann acp install ${name}\n`));
+    console.log(`  Status:    ${statusColor(result.status)}`);
+    console.log(`  Version:   ${result.version}`);
+    console.log(`  Command:   ${result.command} ${result.args.join(" ")}`);
+    console.log(`  Verified:  ${result.verified ? chalk.green("yes") : chalk.dim("no")}`);
+    if (result.reason) {
+      console.log(`  Note:      ${chalk.dim(result.reason)}`);
+    }
+    console.log();
+    if (result.status !== "INSTALLED") {
+      process.exit(1);
+    }
+  });
+
+acpCmd
+  .command("uninstall <name>")
+  .description("Remove an ACP agent installation record")
+  .action(async (name: string) => {
+    const { AcpAgentRegistry } = await import("./marketplace/acp-agent-registry.js");
+    const registry = new AcpAgentRegistry();
+    const removed = registry.uninstall(name);
+    if (removed) {
+      console.log(chalk.green(`Uninstalled ACP agent: ${name}`));
+    } else {
+      console.log(chalk.dim(`No installed record for: ${name}`));
+      process.exit(1);
+    }
+  });
+
+acpCmd
+  .command("refresh")
+  .description("Fetch the latest ACP agent registry index")
+  .action(async () => {
+    const { AcpAgentRegistry } = await import("./marketplace/acp-agent-registry.js");
+    const registry = new AcpAgentRegistry();
+    const index = await registry.refreshFromRegistry();
+    if (!index) {
+      console.log(chalk.yellow("No registry reachable. Using seeded agents."));
+      process.exit(1);
+    }
+    console.log(
+      chalk.green(
+        `Refreshed ACP registry v${index.version} (${index.agents.length} agents${
+          index.updatedAt ? `, updated ${index.updatedAt}` : ""
+        })`,
+      ),
+    );
   });
 
 // ── wotann import-design ───────────────────────────────────

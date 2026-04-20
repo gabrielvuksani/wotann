@@ -678,6 +678,32 @@ export class SkillMarketplace {
   }
 
   /**
+   * Wave 4E: List ACP agents available from the registry (seeded +
+   * installed). Delegates to `AcpAgentRegistry` so the marketplace surface
+   * stays a thin facade; callers that need richer control (refresh,
+   * uninstall) should instantiate `AcpAgentRegistry` directly.
+   */
+  async listACPAgents(): Promise<readonly import("./acp-agent-registry.js").AcpAgentManifest[]> {
+    const { AcpAgentRegistry } = await import("./acp-agent-registry.js");
+    const registry = new AcpAgentRegistry();
+    return registry.listAvailable();
+  }
+
+  /**
+   * Wave 4E: Install an ACP agent by name. Returns the `InstalledAcpAgent`
+   * record — check `status === "INSTALLED"` before treating it as live.
+   * `BLOCKED-NOT-INSTALLED` is expected when the agent's binary isn't on
+   * PATH; the record still persists so the user can see what's missing.
+   */
+  async installACPAgent(
+    name: string,
+  ): Promise<import("./acp-agent-registry.js").InstalledAcpAgent> {
+    const { AcpAgentRegistry } = await import("./acp-agent-registry.js");
+    const registry = new AcpAgentRegistry();
+    return registry.install(name);
+  }
+
+  /**
    * Regenerate the marketplace manifest from current skills and plugins.
    * Scans the skills and plugins directories and writes a fresh manifest.
    *
