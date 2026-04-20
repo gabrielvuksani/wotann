@@ -18,6 +18,12 @@ import {
 } from "../lsp/agent-tools.js";
 import { LanguageServerRegistry } from "../lsp/server-registry.js";
 import type { SymbolOperations } from "../lsp/symbol-operations.js";
+import {
+  buildConnectorToolDefinitions,
+  CONNECTOR_TOOL_NAMES,
+  isConnectorTool,
+  type ConnectorToolName,
+} from "../connectors/connector-tools.js";
 
 // ── Dependency Interfaces ───────────────────────────────────
 // Narrow interfaces so this module doesn't pull in concrete classes.
@@ -31,6 +37,12 @@ export interface ToolRegistryDeps {
    *  is available — usually always true; set false to suppress in minimal
    *  deployments). Session-10 Serena port. */
   readonly lspEnabled?: boolean;
+  /** Whether connector tools (jira/linear/notion/confluence/drive/slack) should be
+   *  registered. Wave-4C: advertises the 34-tool surface to the model; each
+   *  individual call still capability-gates on the connector registry at
+   *  dispatch time — an unconfigured connector returns a honest
+   *  `{ok:false, error:"not_configured", fix:...}` envelope. */
+  readonly connectorToolsEnabled?: boolean;
 }
 
 // ── Tool Definition Builders ────────────────────────────────
@@ -271,11 +283,27 @@ export const RUNTIME_TOOL_NAMES = [
 export type RuntimeToolName = (typeof RUNTIME_TOOL_NAMES)[number];
 
 /**
- * Check whether a tool name is a runtime-handled tool.
+ * Check whether a tool name is a runtime-handled tool (includes the
+ * 34-tool connector surface registered by `buildConnectorTools`).
  */
-export function isRuntimeTool(name: string): name is RuntimeToolName {
-  return (RUNTIME_TOOL_NAMES as readonly string[]).includes(name);
+export function isRuntimeTool(name: string): name is RuntimeToolName | ConnectorToolName {
+  return (RUNTIME_TOOL_NAMES as readonly string[]).includes(name) || isConnectorTool(name);
 }
+
+/**
+ * Wave-4C entry point — returns the full connector-tool definition list
+ * (34 tools covering BOTH read and write paths for jira / linear / notion /
+ * confluence / google-drive / slack: 6+6+6+5+5+6). The runtime appends
+ * these to `effectiveTools` so the model can discover the surface; each
+ * call capability-gates at dispatch time with an honest `not_configured`
+ * envelope when auth is missing.
+ */
+export function buildConnectorTools(): readonly ToolDefinition[] {
+  return buildConnectorToolDefinitions();
+}
+
+export { CONNECTOR_TOOL_NAMES, isConnectorTool };
+export type { ConnectorToolName };
 
 /**
  * Build the effective tool list for a query.
@@ -314,6 +342,15 @@ export function buildEffectiveTools(
   // unconditionally is cheap when the model doesn't call them.
   if (deps.lspEnabled !== false) {
     tools.push(buildFindSymbolTool(), buildFindReferencesTool(), buildRenameSymbolTool());
+  }
+
+  // Wave-4C connector tools: registered by default. Each call is
+  // capability-gated at dispatch time via `dispatchConnectorTool`, so an
+  // agent on a machine without any connectors configured sees the tool
+  // advertised but calling it returns a honest `not_configured` envelope
+  // with a `fix` pointing at the right env var.
+  if (deps.connectorToolsEnabled !== false) {
+    for (const t of buildConnectorTools()) tools.push(t);
   }
 
   return tools;

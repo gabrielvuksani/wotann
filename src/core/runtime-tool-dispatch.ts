@@ -13,6 +13,15 @@
 import type { ProviderName, AgentMessage } from "./types.js";
 import type { WebFetchResult } from "../tools/web-fetch.js";
 import type { MonitorEvent, MonitorOptions, MonitorSession } from "../tools/monitor.js";
+import type { ToolTimingLogger } from "../tools/tool-timing.js";
+import { withTiming } from "../tools/tool-timing.js";
+import type { ConnectorRegistry } from "../connectors/connector-registry.js";
+import {
+  dispatchConnectorTool,
+  isConnectorTool,
+  type ConnectorToolName,
+  type ConnectorToolResult,
+} from "../connectors/connector-tools.js";
 
 // ── Tool Timing Tracker ─────────────────────────────────────
 
@@ -510,12 +519,37 @@ export interface ToolDispatchDeps {
       input: Record<string, unknown>,
     ) => Promise<{ success: boolean; toolName: string; data: unknown; error?: string }>;
   } | null;
+  /**
+   * Wave 4G: optional timing logger. When present, every dispatched tool
+   * is wrapped in `withTiming` so the elapsed ms is appended to
+   * `.wotann/tool-timing.jsonl`. Absence is graceful — dispatch works
+   * identically without a logger, just without persistent telemetry.
+   */
+  readonly timingLogger?: ToolTimingLogger | null;
+  /**
+   * Wave 4G: optional session identifier used to tag timing entries so
+   * post-session analysis can filter by session. Passed through verbatim.
+   */
+  readonly sessionId?: string;
+  /**
+   * Wave 4C: connector registry used to route jira/linear/notion/confluence/
+   * google-drive/slack tool calls. When absent or a connector is not
+   * registered, dispatch returns a honest `{ok:false, error:"not_configured",
+   * fix:...}` envelope rather than failing silently — this is the capability
+   * gate that keeps the 34-tool connector surface honest.
+   */
+  readonly connectorRegistry?: ConnectorRegistry | null;
 }
 
 /**
  * Dispatch a runtime-handled tool by name.
  * Returns null if the tool name is not a runtime tool or if dependencies
  * are unavailable (e.g., plan tools without a PlanStore).
+ *
+ * Wave 4G: every handler is wrapped in `withTiming` before invocation so
+ * when a `timingLogger` is present each dispatch appends an entry to
+ * `.wotann/tool-timing.jsonl`. This is transparent to callers — the
+ * return shape is unchanged.
  */
 export async function dispatchRuntimeTool(
   toolName: string,
@@ -523,41 +557,61 @@ export async function dispatchRuntimeTool(
   deps: ToolDispatchDeps,
   ctx: ToolDispatchContext,
 ): Promise<ToolDispatchResult | null> {
-  switch (toolName) {
-    case "web_fetch":
-      return dispatchWebFetch(input, deps.webFetch, ctx);
+  // Build the underlying handler once, then conditionally time it. A
+  // nullable handler lets us preserve the "return null when deps are
+  // missing" contract without duplicating the switch.
+  const makeHandler = (): (() => Promise<ToolDispatchResult>) | null => {
+    switch (toolName) {
+      case "web_fetch":
+        return () => dispatchWebFetch(input, deps.webFetch, ctx);
 
-    case "plan_create":
-      if (!deps.planStore) return null;
-      return dispatchPlanCreate(input, deps.planStore, ctx);
+      case "plan_create":
+        if (!deps.planStore) return null;
+        return () => Promise.resolve(dispatchPlanCreate(input, deps.planStore!, ctx));
 
-    case "plan_list":
-      if (!deps.planStore) return null;
-      return dispatchPlanList(deps.planStore, ctx);
+      case "plan_list":
+        if (!deps.planStore) return null;
+        return () => Promise.resolve(dispatchPlanList(deps.planStore!, ctx));
 
-    case "plan_advance":
-      if (!deps.planStore) return null;
-      return dispatchPlanAdvance(input, deps.planStore, ctx);
+      case "plan_advance":
+        if (!deps.planStore) return null;
+        return () => Promise.resolve(dispatchPlanAdvance(input, deps.planStore!, ctx));
 
-    case "find_symbol":
-      if (!deps.lsp) return null;
-      return dispatchFindSymbol(input, deps.lsp, ctx);
+      case "find_symbol":
+        if (!deps.lsp) return null;
+        return () => dispatchFindSymbol(input, deps.lsp!, ctx);
 
-    case "find_references":
-      if (!deps.lsp) return null;
-      return dispatchFindReferences(input, deps.lsp, ctx);
+      case "find_references":
+        if (!deps.lsp) return null;
+        return () => dispatchFindReferences(input, deps.lsp!, ctx);
 
-    case "rename_symbol":
-      if (!deps.lsp) return null;
-      return dispatchRenameSymbol(input, deps.lsp, ctx);
+      case "rename_symbol":
+        if (!deps.lsp) return null;
+        return () => dispatchRenameSymbol(input, deps.lsp!, ctx);
 
-    case "monitor":
-      if (!deps.monitor) return null;
-      return dispatchMonitor(input, deps.monitor, ctx);
+      case "monitor":
+        if (!deps.monitor) return null;
+        return () => dispatchMonitor(input, deps.monitor!, ctx);
 
-    default:
-      return null;
-  }
+      default:
+        // Wave-4C: if the tool name matches one of the 34 connector tools,
+        // route it through `dispatchConnectorTool`. The registry may be
+        // null (no connector configured on this machine) — we still
+        // dispatch so the handler can return the honest `not_configured`
+        // envelope with a `fix` pointing at the right env var.
+        if (isConnectorTool(toolName)) {
+          return () =>
+            dispatchConnectorToolAsResult(toolName, input, deps.connectorRegistry ?? null, ctx);
+        }
+        return null;
+    }
+  };
+
+  const handler = makeHandler();
+  if (!handler) return null;
+
+  const timed = withTiming(handler, toolName, deps.timingLogger ?? undefined, deps.sessionId);
+  return timed();
 }
 
 // ── Serena-style LSP symbol tool dispatchers ────────────────
@@ -672,4 +726,40 @@ async function dispatchRenameSymbol(
       model: ctx.responseModel,
     };
   }
+}
+
+// ── Wave-4C: connector tool dispatch adapter ────────────────
+
+/**
+ * Bridge `dispatchConnectorTool`'s structured `ConnectorToolResult` into
+ * the transcript-friendly `ToolDispatchResult` shape. Honest errors are
+ * serialised as JSON so the model can reason about the failure code
+ * (e.g. `not_configured` / `fix`) without losing structure. Success
+ * envelopes are serialised the same way.
+ */
+export async function dispatchConnectorToolAsResult(
+  toolName: ConnectorToolName,
+  input: Record<string, unknown>,
+  registry: ConnectorRegistry | null,
+  ctx: ToolDispatchContext,
+): Promise<ToolDispatchResult> {
+  let envelope: ConnectorToolResult<unknown>;
+  try {
+    envelope = await dispatchConnectorTool(toolName, input, registry);
+  } catch (err) {
+    // Connector dispatcher never throws under its contract; if a provider
+    // escapes that contract we surface the error honestly (no silent
+    // `ok:true` fallback).
+    envelope = {
+      ok: false,
+      error: "upstream_error",
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+  return {
+    type: "text",
+    content: `\n[${toolName}] ${JSON.stringify(envelope)}\n`,
+    provider: ctx.responseProvider,
+    model: ctx.responseModel,
+  };
 }

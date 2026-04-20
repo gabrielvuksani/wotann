@@ -2433,28 +2433,228 @@ skillsCmd
   });
 
 // ── wotann cost ──────────────────────────────────────────────
+//
+// Wave 4G: the cost command now accepts an optional `period` argument
+// (`today`, `week`, `month`) so users can pick a time window without
+// remembering a flag combination. Per-provider breakdown + cache-hit
+// ratio give the "where did the money go?" answer at a glance.
+// `--dry-run` prints the aggregated numbers without mutating state —
+// useful for verifying the bug-fix described in HIDDEN_STATE_REPORT
+// (every session previously showed 0 tokens).
 
 program
-  .command("cost")
-  .description("Show cost tracking")
-  .option("--month", "Monthly breakdown")
+  .command("cost [period]")
+  .description("Show cost tracking (period: today | week | month)")
+  .option("--month", "Monthly breakdown (deprecated alias for `month` period)")
   .option("--budget <amount>", "Set monthly budget")
-  .action(async (options: { month?: boolean; budget?: string }) => {
-    const { CostTracker } = await import("./telemetry/cost-tracker.js");
-    const tracker = new CostTracker(join(process.cwd(), ".wotann", "cost.json"));
-    if (options.budget) {
-      tracker.setBudget(parseFloat(options.budget));
-      console.log(chalk.green(`Budget set to $${options.budget}`));
-    } else {
-      console.log(chalk.bold("Cost Tracking"));
-      console.log(`  Total:  $${tracker.getTotalCost().toFixed(4)}`);
-      console.log(`  Today:  $${tracker.getTodayCost().toFixed(4)}`);
-      console.log(`  Entries: ${tracker.getEntryCount()}`);
-      if (tracker.getBudget() !== null) {
-        console.log(`  Budget: $${tracker.getBudget()!.toFixed(2)}`);
+  .option("--dry-run", "Print aggregated totals without side effects")
+  .option("--provider <name>", "Filter per-provider breakdown to a single provider")
+  .action(
+    async (
+      period: string | undefined,
+      options: { month?: boolean; budget?: string; dryRun?: boolean; provider?: string },
+    ) => {
+      const { CostTracker } = await import("./telemetry/cost-tracker.js");
+      const tracker = new CostTracker(join(process.cwd(), ".wotann", "cost.json"));
+
+      if (options.budget) {
+        tracker.setBudget(parseFloat(options.budget));
+        console.log(chalk.green(`Budget set to $${options.budget}`));
+        return;
       }
-    }
-  });
+
+      // Normalize the period. --month wins over a missing arg for
+      // backwards-compat with the old flag-only interface.
+      const resolved = (options.month ? "month" : (period ?? "today")).toLowerCase();
+      if (!["today", "week", "month"].includes(resolved)) {
+        console.log(chalk.red(`Unknown period "${resolved}". Use today|week|month.`));
+        process.exit(1);
+      }
+
+      const periodCost =
+        resolved === "today"
+          ? tracker.getTodayCost()
+          : resolved === "week"
+            ? tracker.getWeeklyCost()
+            : tracker.getMonthlyCost();
+
+      // Per-provider breakdown — scan entries, group by provider, and
+      // sum cost + input + output tokens.
+      const entries = tracker.getEntries();
+      const now = new Date();
+      const dayMs = 1000 * 60 * 60 * 24;
+      const periodDays = resolved === "today" ? 1 : resolved === "week" ? 7 : 30;
+      const cutoff = now.getTime() - dayMs * periodDays;
+      const inWindow = entries.filter((e) => e.timestamp.getTime() >= cutoff);
+
+      type Bucket = {
+        cost: number;
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens: number;
+        cacheWriteTokens: number;
+        entries: number;
+      };
+      const byProvider = new Map<string, Bucket>();
+      for (const entry of inWindow) {
+        if (options.provider && entry.provider !== options.provider) continue;
+        const existing = byProvider.get(entry.provider) ?? {
+          cost: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          entries: 0,
+        };
+        byProvider.set(entry.provider, {
+          cost: existing.cost + entry.cost,
+          inputTokens: existing.inputTokens + entry.inputTokens,
+          outputTokens: existing.outputTokens + entry.outputTokens,
+          cacheReadTokens: existing.cacheReadTokens + (entry.cacheReadTokens ?? 0),
+          cacheWriteTokens: existing.cacheWriteTokens + (entry.cacheWriteTokens ?? 0),
+          entries: existing.entries + 1,
+        });
+      }
+
+      const cacheRatio = tracker.getCacheHitRatio();
+
+      console.log(chalk.bold(`\nCost Tracking — ${resolved}\n`));
+      console.log(`  ${resolved.padEnd(7)}  $${periodCost.toFixed(4)}`);
+      console.log(
+        `  Total    $${tracker.getTotalCost().toFixed(4)}  (${tracker.getEntryCount()} entries)`,
+      );
+      console.log(`  Cache    ${(cacheRatio * 100).toFixed(1)}% hit ratio`);
+      if (tracker.getBudget() !== null) {
+        console.log(`  Budget   $${tracker.getBudget()!.toFixed(2)}`);
+      }
+      if (byProvider.size === 0) {
+        console.log(chalk.dim(`\n  No entries in the ${resolved} window.`));
+      } else {
+        console.log(chalk.bold(`\n  Per-provider breakdown (${resolved} window):`));
+        const sorted = [...byProvider.entries()].sort((a, b) => b[1].cost - a[1].cost);
+        for (const [provider, bucket] of sorted) {
+          const pct = periodCost > 0 ? ((bucket.cost / periodCost) * 100).toFixed(1) : "0.0";
+          console.log(
+            `    ${chalk.cyan(provider.padEnd(24))} $${bucket.cost.toFixed(4).padStart(10)}  ${pct.padStart(5)}%  ` +
+              `in=${bucket.inputTokens}  out=${bucket.outputTokens}  ` +
+              `cacheR=${bucket.cacheReadTokens}  cacheW=${bucket.cacheWriteTokens}  n=${bucket.entries}`,
+          );
+        }
+      }
+
+      if (options.dryRun) {
+        // --dry-run is a read-only verification path; no side effects
+        // beyond printing. Used to confirm the 0-token silent-success
+        // bug fix is live on this machine.
+        console.log(chalk.dim("\n  (dry-run: no state modified)"));
+      }
+    },
+  );
+
+// ── wotann telemetry ──────────────────────────────────────
+//
+// Wave 4G: live tail for the structured events stream written by
+// SessionRecorder.setEventsSink() into `.wotann/events.jsonl`. Mirrors
+// the ergonomics of `tail -f` but with structured filters — sessionId,
+// provider, error-only — so an operator can watch a specific agent
+// without greppy pipelines.
+
+const telemetryCmd = program.command("telemetry").description("Live telemetry streams");
+
+telemetryCmd
+  .command("tail")
+  .description("Tail .wotann/events.jsonl with optional filters")
+  .option("--session <id>", "Filter by sessionId")
+  .option("--provider <name>", "Filter by provider")
+  .option("--errors-only", "Only show error events")
+  .option("--follow", "Keep polling after initial read (default: true)", true)
+  .option("--no-follow", "Read current contents then exit")
+  .action(
+    async (options: {
+      session?: string;
+      provider?: string;
+      errorsOnly?: boolean;
+      follow?: boolean;
+    }) => {
+      const path = join(process.cwd(), ".wotann", "events.jsonl");
+      const { existsSync, statSync, createReadStream } = await import("node:fs");
+      const { setTimeout: delay } = await import("node:timers/promises");
+      const readline = await import("node:readline");
+
+      if (!existsSync(path)) {
+        console.log(chalk.dim(`No events stream at ${path}. Run a session first.`));
+        if (!options.follow) process.exit(0);
+      }
+
+      let lastSize = existsSync(path) ? statSync(path).size : 0;
+
+      const matches = (event: Record<string, unknown>): boolean => {
+        if (options.errorsOnly && event["type"] !== "error") return false;
+        const data = (event["data"] as Record<string, unknown> | undefined) ?? {};
+        if (options.session && data["sessionId"] !== options.session) return false;
+        if (options.provider && data["provider"] !== options.provider) return false;
+        return true;
+      };
+
+      const formatEvent = (event: Record<string, unknown>): string => {
+        const type = String(event["type"] ?? "event");
+        const ts = new Date(Number(event["timestamp"] ?? Date.now())).toISOString();
+        const data = (event["data"] as Record<string, unknown> | undefined) ?? {};
+        const summary =
+          type === "turn"
+            ? `${data["provider"]}/${data["model"]} in=${data["promptTokens"]} out=${data["completionTokens"]} cost=$${Number(data["costUsd"] ?? 0).toFixed(4)} tools=${data["toolCalls"]} ${data["durationMs"]}ms`
+            : type === "error"
+              ? chalk.red(`${data["source"] ?? ""}: ${data["error"] ?? ""}`)
+              : type === "tool_call"
+                ? `${data["toolName"]} ${JSON.stringify(data["input"] ?? {}).slice(0, 100)}`
+                : JSON.stringify(data).slice(0, 140);
+        return `${chalk.dim(ts)}  ${chalk.cyan(type.padEnd(14))}  ${summary}`;
+      };
+
+      const emitLine = (line: string): void => {
+        if (line.length === 0) return;
+        try {
+          const parsed = JSON.parse(line) as Record<string, unknown>;
+          if (matches(parsed)) console.log(formatEvent(parsed));
+        } catch {
+          // malformed line — skip
+        }
+      };
+
+      // Initial read from offset 0 so users see the current backlog in
+      // addition to live events.
+      if (existsSync(path)) {
+        const stream = createReadStream(path, { encoding: "utf-8" });
+        const rl = readline.createInterface({ input: stream });
+        for await (const line of rl) emitLine(line);
+      }
+
+      if (options.follow === false) return;
+
+      // Poll loop — honest, simple, avoids fs.watch flakiness across
+      // filesystems. Honors ctrl-c naturally because the process exits
+      // the event loop when stdin closes.
+      while (true) {
+        await delay(500);
+        if (!existsSync(path)) continue;
+        const size = statSync(path).size;
+        if (size <= lastSize) {
+          // File may have been truncated (or unchanged); reset offset on
+          // truncation so we don't miss new lines.
+          if (size < lastSize) lastSize = 0;
+          continue;
+        }
+        const stream = createReadStream(path, {
+          encoding: "utf-8",
+          start: lastSize,
+          end: size - 1,
+        });
+        const rl = readline.createInterface({ input: stream });
+        for await (const line of rl) emitLine(line);
+        lastSize = size;
+      }
+    },
+  );
 
 // ── wotann precommit ───────────────────────────────────────
 

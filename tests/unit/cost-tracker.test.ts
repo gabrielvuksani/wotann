@@ -81,4 +81,72 @@ describe("CostTracker", () => {
     const reader = new CostTracker(costPath);
     expect(reader.getBudget()).toBe(12.5);
   });
+
+  // Wave 4G: honest token accounting + cache telemetry tests. These
+  // cover the HIDDEN_STATE_REPORT finding: 2,225 sessions with 0 tokens
+  // because adapters never fed real split usage in and the tracker had
+  // no way to record cache hits. The 0-token record is preserved as a
+  // real data point (not a silent success), while cache reads/writes
+  // flow through to both `getEntries()` and `getCacheHitRatio()`.
+  it("preserves 0-token records as honest data (no silent success)", () => {
+    const tracker = new CostTracker();
+    const entry = tracker.record("anthropic", "claude-sonnet-4-6", 0, 0);
+    expect(entry.inputTokens).toBe(0);
+    expect(entry.outputTokens).toBe(0);
+    expect(entry.cost).toBe(0);
+    expect(tracker.getEntryCount()).toBe(1);
+  });
+
+  it("records cache read/write tokens via record() cacheTokens arg", () => {
+    const tracker = new CostTracker();
+    tracker.record("anthropic", "claude-sonnet-4-6", 1000, 500, {
+      cacheReadTokens: 400,
+      cacheWriteTokens: 200,
+    });
+    const entries = tracker.getEntries();
+    expect(entries[0]?.cacheReadTokens).toBe(400);
+    expect(entries[0]?.cacheWriteTokens).toBe(200);
+  });
+
+  it("recordTurn() accepts TurnUsage and feeds cache fields", () => {
+    const tracker = new CostTracker();
+    tracker.recordTurn("anthropic", "claude-sonnet-4-6", {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadTokens: 800,
+      cacheWriteTokens: 100,
+    });
+    const [entry] = tracker.getEntries();
+    expect(entry?.inputTokens).toBe(1000);
+    expect(entry?.cacheReadTokens).toBe(800);
+    expect(entry?.cacheWriteTokens).toBe(100);
+  });
+
+  it("getCacheHitRatio() computes cached/(cached+input)", () => {
+    const tracker = new CostTracker();
+    tracker.recordTurn("anthropic", "claude-sonnet-4-6", {
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadTokens: 1000,
+    });
+    // ratio = 1000 cached / (1000 cached + 1000 input) = 0.5
+    expect(tracker.getCacheHitRatio()).toBeCloseTo(0.5, 3);
+  });
+
+  it("getCacheHitRatio() returns 0 when no cache telemetry recorded", () => {
+    const tracker = new CostTracker();
+    tracker.record("anthropic", "claude-sonnet-4-6", 1000, 500);
+    expect(tracker.getCacheHitRatio()).toBe(0);
+  });
+
+  it("getEntries() returns a snapshot, not the live array", () => {
+    const tracker = new CostTracker();
+    tracker.record("anthropic", "claude-sonnet-4-6", 1000, 500);
+    const snap = tracker.getEntries();
+    expect(snap.length).toBe(1);
+    tracker.record("openai", "gpt-4.1", 200, 100);
+    // Original snapshot unchanged (immutable boundary).
+    expect(snap.length).toBe(1);
+    expect(tracker.getEntries().length).toBe(2);
+  });
 });

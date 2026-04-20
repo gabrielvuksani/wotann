@@ -364,6 +364,8 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
       const decoder = new TextDecoder();
       let buffer = "";
       let totalTokens = 0;
+      let inputTokens = 0;
+      let outputTokens = 0;
       let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
 
       // S1-23: Codex Responses API tool-call + reasoning events.
@@ -466,6 +468,8 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
                 | undefined;
               if (usage) {
                 totalTokens = usage["total_tokens"] ?? 0;
+                inputTokens = usage["input_tokens"] ?? usage["prompt_tokens"] ?? 0;
+                outputTokens = usage["output_tokens"] ?? usage["completion_tokens"] ?? 0;
               }
             } else if (eventType === "response.failed") {
               const error = event["error"] as Record<string, unknown> | undefined;
@@ -482,12 +486,19 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
         }
       }
 
+      // Wave 4G: surface split usage for honest cost attribution.
+      const finalInput = inputTokens > 0 ? inputTokens : Math.floor(totalTokens / 2);
+      const finalOutput = outputTokens > 0 ? outputTokens : Math.max(0, totalTokens - finalInput);
       yield {
         type: "done",
         content: "",
         model: inputModel,
         provider: "codex",
         tokensUsed: totalTokens,
+        usage: {
+          inputTokens: finalInput,
+          outputTokens: finalOutput,
+        },
         stopReason,
       };
     } catch (error) {

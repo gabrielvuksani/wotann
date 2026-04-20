@@ -194,6 +194,8 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
       const decoder = new TextDecoder();
       let buffer = "";
       let totalTokens = 0;
+      let promptTokens = 0;
+      let completionTokens = 0;
       let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
 
       // S1-22: accumulate tool-call fragments across chunks keyed by index.
@@ -270,6 +272,12 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
             if (chunk.usage?.total_tokens) {
               totalTokens = chunk.usage.total_tokens;
             }
+            if (chunk.usage?.prompt_tokens && chunk.usage.prompt_tokens > 0) {
+              promptTokens = chunk.usage.prompt_tokens;
+            }
+            if (chunk.usage?.completion_tokens && chunk.usage.completion_tokens > 0) {
+              completionTokens = chunk.usage.completion_tokens;
+            }
           } catch {
             // Skip malformed SSE chunks
           }
@@ -307,12 +315,24 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
         stopReason = "tool_calls";
       }
 
+      // Wave 4G: surface split usage on the final chunk so cost-tracker can
+      // attribute cost accurately instead of falling back to the 50/50 heuristic.
+      // `include_usage: true` returns prompt_tokens + completion_tokens on every
+      // compliant provider; we trust those when positive, else synthesise from
+      // the 50/50 split derived from total_tokens to keep downstream code honest.
+      const finalInput = promptTokens > 0 ? promptTokens : Math.floor(totalTokens / 2);
+      const finalOutput =
+        completionTokens > 0 ? completionTokens : Math.max(0, totalTokens - finalInput);
       yield {
         type: "done",
         content: "",
         model,
         provider: config.provider,
         tokensUsed: totalTokens,
+        usage: {
+          inputTokens: finalInput,
+          outputTokens: finalOutput,
+        },
         stopReason,
       };
     } catch (error) {

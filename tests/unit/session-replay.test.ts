@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { SessionRecorder, SessionPlayer } from "../../src/telemetry/session-replay.js";
 
 describe("SessionRecorder", () => {
@@ -55,6 +58,96 @@ describe("SessionRecorder", () => {
     expect(compaction.type).toBe("compaction");
     expect(compaction.data["tokensBefore"]).toBe(180_000);
     expect(compaction.data["tokensAfter"]).toBe(50_000);
+  });
+
+  // Wave 4G: structured per-turn events with full usage + cost + tool
+  // breakdown. This is the data source for `wotann cost today` and
+  // `wotann telemetry tail`, so the shape is load-bearing.
+  it("records structured turn events with full usage + cost breakdown", () => {
+    const recorder = new SessionRecorder("anthropic", "claude-sonnet-4-6");
+    recorder.start();
+
+    recorder.recordTurn({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      promptTokens: 1200,
+      completionTokens: 450,
+      cacheReadTokens: 800,
+      costUsd: 0.0123,
+      durationMs: 4321,
+      toolCalls: 3,
+    });
+
+    const session = recorder.getSession();
+    expect(session.events.length).toBe(1);
+    const event = session.events[0]!;
+    expect(event.type).toBe("turn");
+    expect(event.data["provider"]).toBe("anthropic");
+    expect(event.data["promptTokens"]).toBe(1200);
+    expect(event.data["completionTokens"]).toBe(450);
+    expect(event.data["cacheReadTokens"]).toBe(800);
+    expect(event.data["costUsd"]).toBeCloseTo(0.0123, 4);
+    expect(event.data["toolCalls"]).toBe(3);
+    expect(event.data["sessionId"]).toBe(recorder.getSessionId());
+  });
+
+  it("exposes getSessionId()", () => {
+    const recorder = new SessionRecorder("anthropic", "claude", "fixed-id-123");
+    expect(recorder.getSessionId()).toBe("fixed-id-123");
+  });
+});
+
+describe("SessionRecorder events sink", () => {
+  let tempDir: string;
+
+  afterEach(() => {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("writes each event to the JSONL sink when setEventsSink is configured", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "wotann-events-"));
+    const path = join(tempDir, ".wotann", "events.jsonl");
+
+    const recorder = new SessionRecorder("anthropic", "claude-sonnet-4-6", "sess-xyz");
+    recorder.setEventsSink(path);
+    recorder.start();
+
+    recorder.recordPrompt("hello");
+    recorder.recordTurn({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      promptTokens: 10,
+      completionTokens: 5,
+      costUsd: 0.001,
+      durationMs: 250,
+      toolCalls: 0,
+    });
+
+    expect(existsSync(path)).toBe(true);
+    const lines = readFileSync(path, "utf-8").trim().split("\n");
+    expect(lines.length).toBe(2);
+
+    const second = JSON.parse(lines[1]!) as Record<string, unknown>;
+    expect(second["type"]).toBe("turn");
+    const data = second["data"] as Record<string, unknown>;
+    expect(data["sessionId"]).toBe("sess-xyz");
+    expect(data["promptTokens"]).toBe(10);
+  });
+
+  it("disables mirroring when sink is set to null", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "wotann-events-"));
+    const path = join(tempDir, ".wotann", "events.jsonl");
+
+    const recorder = new SessionRecorder("anthropic", "claude");
+    recorder.setEventsSink(path);
+    recorder.start();
+    recorder.recordPrompt("one");
+
+    recorder.setEventsSink(null);
+    recorder.recordPrompt("two");
+
+    const lines = readFileSync(path, "utf-8").trim().split("\n");
+    expect(lines.length).toBe(1);
   });
 });
 

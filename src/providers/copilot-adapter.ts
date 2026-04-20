@@ -76,7 +76,11 @@ interface ChatCompletionChunk {
     };
     readonly finish_reason?: string | null;
   }[];
-  readonly usage?: { readonly total_tokens?: number };
+  readonly usage?: {
+    readonly total_tokens?: number;
+    readonly prompt_tokens?: number;
+    readonly completion_tokens?: number;
+  };
 }
 
 interface CachedCopilotAuth {
@@ -405,6 +409,8 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
       const decoder = new TextDecoder();
       let buffer = "";
       let totalTokens = 0;
+      let promptTokens = 0;
+      let completionTokens = 0;
       let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
 
       // S1-24: accumulate tool-call fragments (same pattern as OpenAI-compat).
@@ -463,6 +469,12 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
             else if (finish === "stop") stopReason = "stop";
 
             if (chunk.usage?.total_tokens) totalTokens = chunk.usage.total_tokens;
+            if (chunk.usage?.prompt_tokens && chunk.usage.prompt_tokens > 0) {
+              promptTokens = chunk.usage.prompt_tokens;
+            }
+            if (chunk.usage?.completion_tokens && chunk.usage.completion_tokens > 0) {
+              completionTokens = chunk.usage.completion_tokens;
+            }
           } catch {
             /* skip malformed */
           }
@@ -499,12 +511,20 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
         stopReason = "tool_calls";
       }
 
+      // Wave 4G: surface split usage for honest cost attribution.
+      const finalInput = promptTokens > 0 ? promptTokens : Math.floor(totalTokens / 2);
+      const finalOutput =
+        completionTokens > 0 ? completionTokens : Math.max(0, totalTokens - finalInput);
       yield {
         type: "done",
         content: "",
         model,
         provider: "copilot",
         tokensUsed: totalTokens,
+        usage: {
+          inputTokens: finalInput,
+          outputTokens: finalOutput,
+        },
         stopReason,
       };
     } catch (error) {

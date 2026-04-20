@@ -15,6 +15,10 @@ interface CostEntry {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cost: number;
+  /** Tokens read from prompt cache (counted toward input at a cheaper rate). */
+  readonly cacheReadTokens?: number;
+  /** Tokens written to prompt cache (usually 1.25x input rate). */
+  readonly cacheWriteTokens?: number;
 }
 
 interface SerializedCostEntry {
@@ -24,6 +28,21 @@ interface SerializedCostEntry {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cost: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheWriteTokens?: number;
+}
+
+/**
+ * Split usage breakdown sourced from a provider's final stream chunk.
+ * Wave 4G: passes the usage through without conflation so the tracker
+ * can record honest cache-hit and cache-write metrics separately from
+ * the regular input/output token counters.
+ */
+export interface TurnUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheWriteTokens?: number;
 }
 
 interface SerializedCostState {
@@ -262,7 +281,12 @@ export class CostTracker {
     model: string,
     inputTokens: number,
     outputTokens: number,
+    cacheTokens?: { cacheReadTokens?: number; cacheWriteTokens?: number },
   ): CostEntry {
+    // Wave 4G quality bar: record every turn honestly. Zero-token records
+    // are preserved as valid data points — an empty provider response
+    // should not be a silent success, so downstream tools see the 0 and
+    // can diagnose.
     const cost = this.estimateCost(model, inputTokens, outputTokens);
     const entry: CostEntry = {
       timestamp: new Date(),
@@ -271,6 +295,12 @@ export class CostTracker {
       inputTokens,
       outputTokens,
       cost,
+      ...(cacheTokens?.cacheReadTokens && cacheTokens.cacheReadTokens > 0
+        ? { cacheReadTokens: cacheTokens.cacheReadTokens }
+        : {}),
+      ...(cacheTokens?.cacheWriteTokens && cacheTokens.cacheWriteTokens > 0
+        ? { cacheWriteTokens: cacheTokens.cacheWriteTokens }
+        : {}),
     };
     this.entries.push(entry);
     this.save();
@@ -279,6 +309,47 @@ export class CostTracker {
       this.dailyStore.addCost(cost);
     }
     return entry;
+  }
+
+  /**
+   * Wave 4G: preferred entrypoint for the runtime. Accepts a structured
+   * `TurnUsage` object straight from the provider's final stream chunk
+   * so cache tokens are recorded as a first-class field. Existing
+   * `record()` callers continue to work; they just miss the cache
+   * telemetry fields.
+   */
+  recordTurn(provider: ProviderName, model: string, usage: TurnUsage): CostEntry {
+    return this.record(provider, model, usage.inputTokens, usage.outputTokens, {
+      ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+      ...(usage.cacheWriteTokens !== undefined ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
+    });
+  }
+
+  /**
+   * Compute cache-hit ratio across all recorded entries.
+   * Returns 0 when no cache activity has been recorded. The numerator is
+   * cacheReadTokens, the denominator is cacheReadTokens + inputTokens
+   * (cached + fresh input), so 0.6 means "60% of input tokens came from
+   * the cache this period."
+   */
+  getCacheHitRatio(): number {
+    let cached = 0;
+    let fresh = 0;
+    for (const entry of this.entries) {
+      cached += entry.cacheReadTokens ?? 0;
+      fresh += entry.inputTokens;
+    }
+    const total = cached + fresh;
+    return total === 0 ? 0 : cached / total;
+  }
+
+  /**
+   * Return all cost entries (read-only snapshot).
+   * Wave 4G: used by the `wotann cost` CLI so it can aggregate per-provider
+   * without leaking mutation power back into callers.
+   */
+  getEntries(): readonly CostEntry[] {
+    return [...this.entries];
   }
 
   setBudget(usd: number): void {

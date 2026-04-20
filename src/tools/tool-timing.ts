@@ -124,3 +124,105 @@ export class ToolTimingBaseline {
     return out;
   }
 }
+
+/**
+ * One row in `.wotann/tool-timing.jsonl`. Kept narrow so the JSONL file
+ * is grep-friendly and forward-compatible: new fields can be added
+ * without breaking older parsers.
+ */
+export interface ToolTimingEntry {
+  readonly timestamp: number;
+  readonly sessionId?: string;
+  readonly toolName: string;
+  readonly durationMs: number;
+  readonly success: boolean;
+  readonly errorMessage?: string;
+  readonly baselineMs?: number;
+}
+
+/**
+ * Persistent JSONL logger for tool-timing entries. Wave 4G: the runtime
+ * wraps every dispatched tool through `withTiming`, and every call lands
+ * here so post-session analysis can read `.wotann/tool-timing.jsonl` to
+ * see which tools regressed.
+ *
+ * Best-effort appending: filesystem errors are swallowed so a broken
+ * log disk never blocks a live agent turn. The baseline tracker is
+ * optional — when present the record is annotated with the rolling
+ * median so outliers are easy to spot without re-computing across the
+ * whole file.
+ */
+export class ToolTimingLogger {
+  private readonly filePath: string;
+  private readonly baseline?: ToolTimingBaseline;
+
+  constructor(filePath: string, baseline?: ToolTimingBaseline) {
+    this.filePath = filePath;
+    if (baseline) this.baseline = baseline;
+  }
+
+  /** Append one timing entry to the JSONL file. */
+  record(entry: ToolTimingEntry): void {
+    try {
+      const enriched: ToolTimingEntry = {
+        ...entry,
+        ...(this.baseline && entry.toolName
+          ? (() => {
+              const base = this.baseline!.baseline(entry.toolName);
+              return base !== undefined ? { baselineMs: base } : {};
+            })()
+          : {}),
+      };
+      // Only import fs lazily — keeps the module tree-shakeable for
+      // browser/ACP builds that have no filesystem.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { mkdirSync, appendFileSync } = require("node:fs") as typeof import("node:fs");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { dirname } = require("node:path") as typeof import("node:path");
+      mkdirSync(dirname(this.filePath), { recursive: true });
+      appendFileSync(this.filePath, JSON.stringify(enriched) + "\n", { encoding: "utf-8" });
+      if (this.baseline) this.baseline.record(entry.toolName, entry.durationMs);
+    } catch {
+      // Best-effort — never let disk failures crash the runtime.
+    }
+  }
+}
+
+/**
+ * Wave 4G helper: wraps a runtime tool handler with timing + optional
+ * JSONL logging. Thin wrapper around `withToolTiming` that also feeds
+ * each call into the provided logger so `.wotann/tool-timing.jsonl`
+ * captures every tool dispatch for post-session analysis.
+ */
+export function withTiming<Args extends unknown[], Result>(
+  handler: (...args: Args) => Promise<Result>,
+  toolName: string,
+  logger?: ToolTimingLogger,
+  sessionId?: string,
+): (...args: Args) => Promise<Result> {
+  return async (...args: Args): Promise<Result> => {
+    const start = performance.now();
+    let success = true;
+    let errorMessage: string | undefined;
+    try {
+      const result = await handler(...args);
+      return result;
+    } catch (err) {
+      success = false;
+      errorMessage = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      const durationMs = performance.now() - start;
+      if (logger) {
+        logger.record({
+          timestamp: Date.now(),
+          toolName,
+          durationMs,
+          success,
+          ...(sessionId !== undefined ? { sessionId } : {}),
+          ...(errorMessage !== undefined ? { errorMessage } : {}),
+        });
+      }
+    }
+  };
+}

@@ -93,6 +93,21 @@ export interface StreamChunk {
    * call when the model makes multiple parallel tool calls in one turn.
    */
   readonly toolCallId?: string;
+  /**
+   * Structured usage breakdown from the provider's final stream chunk.
+   * Present on "done" chunks when the adapter can surface it. Wave 4G:
+   * without these split values the cost-tracker falls back to a 50/50
+   * split of `tokensUsed` which mis-attributes cost for asymmetric
+   * prompts. Populated by Anthropic, OpenAI-compat, Copilot, Codex,
+   * Gemini adapters. The sum of input + output may be less than
+   * `tokensUsed` when `cacheReadTokens` are reported separately.
+   */
+  readonly usage?: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cacheReadTokens?: number;
+    readonly cacheWriteTokens?: number;
+  };
 }
 
 export interface ProviderAdapter {

@@ -355,6 +355,8 @@ export function createGeminiNativeAdapter(
       let buffer = "";
       let totalTokens = 0;
       let thoughtsTokens = 0;
+      let promptTokens = 0;
+      let candidatesTokens = 0;
       let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
 
       while (true) {
@@ -460,15 +462,37 @@ export function createGeminiNativeAdapter(
           if (chunk.usageMetadata?.thoughtsTokenCount) {
             thoughtsTokens = chunk.usageMetadata.thoughtsTokenCount;
           }
+          if (chunk.usageMetadata?.promptTokenCount && chunk.usageMetadata.promptTokenCount > 0) {
+            promptTokens = chunk.usageMetadata.promptTokenCount;
+          }
+          if (
+            chunk.usageMetadata?.candidatesTokenCount &&
+            chunk.usageMetadata.candidatesTokenCount > 0
+          ) {
+            candidatesTokens = chunk.usageMetadata.candidatesTokenCount;
+          }
         }
       }
 
+      // Wave 4G: surface split usage for honest cost attribution.
+      // Thoughts tokens are billed as output tokens by Google, so include
+      // them on the output side when candidatesTokens doesn't already cover.
+      const finalInput = promptTokens > 0 ? promptTokens : Math.floor(totalTokens / 2);
+      const rawOutput =
+        candidatesTokens > 0
+          ? candidatesTokens + thoughtsTokens
+          : Math.max(0, totalTokens - finalInput);
+      const finalOutput = rawOutput > 0 ? rawOutput : Math.max(0, totalTokens - finalInput);
       yield {
         type: "done",
         content: thoughtsTokens > 0 ? `[thoughts: ${thoughtsTokens} tokens]` : "",
         model,
         provider: "gemini",
         tokensUsed: totalTokens,
+        usage: {
+          inputTokens: finalInput,
+          outputTokens: finalOutput,
+        },
         stopReason,
       };
     } catch (error) {

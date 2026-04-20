@@ -189,6 +189,10 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
       // and the argument JSON is streamed as input_json_delta fragments that
       // must be concatenated before JSON.parse.
       let totalTokens = 0;
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let cacheReadTokens = 0;
+      let cacheWriteTokens = 0;
       let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
 
       // Per-block accumulators keyed by Anthropic's content block index.
@@ -307,7 +311,9 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
           else if (reason === "end_turn" || reason === "stop_sequence") stopReason = "stop";
         } else if (event.type === "message_stop") {
           const usage = await stream.finalMessage();
-          totalTokens = (usage.usage?.input_tokens ?? 0) + (usage.usage?.output_tokens ?? 0);
+          inputTokens = usage.usage?.input_tokens ?? 0;
+          outputTokens = usage.usage?.output_tokens ?? 0;
+          totalTokens = inputTokens + outputTokens;
 
           // Record cache telemetry — Anthropic returns two fields on
           // usage when prompt-caching is active:
@@ -321,9 +327,11 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
             | undefined;
           if (u?.cache_read_input_tokens && u.cache_read_input_tokens > 0) {
             anthropicCacheTracker.recordHit(u.cache_read_input_tokens);
+            cacheReadTokens = u.cache_read_input_tokens;
           }
           if (u?.cache_creation_input_tokens && u.cache_creation_input_tokens > 0) {
             anthropicCacheTracker.recordMiss(u.cache_creation_input_tokens);
+            cacheWriteTokens = u.cache_creation_input_tokens;
           }
         }
       }
@@ -334,6 +342,12 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
         model,
         provider: "anthropic",
         tokensUsed: totalTokens,
+        usage: {
+          inputTokens,
+          outputTokens,
+          ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+          ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+        },
         stopReason,
       };
     } catch (error) {

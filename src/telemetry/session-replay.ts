@@ -8,8 +8,8 @@
  * From spec §24: TerminalBench-compatible session recording.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export interface ReplayEvent {
@@ -28,7 +28,28 @@ export type ReplayEventType =
   | "provider_switch"
   | "compaction"
   | "error"
-  | "checkpoint";
+  | "checkpoint"
+  | "turn";
+
+/**
+ * Wave 4G: structured per-turn event record. Emitted once per
+ * `runtime.query()` final chunk with full usage + cost + tool-call
+ * breakdown so `.wotann/events.jsonl` carries everything a dashboard
+ * needs without re-running the session.
+ */
+export interface TurnEventData {
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheWriteTokens?: number;
+  readonly costUsd: number;
+  readonly durationMs: number;
+  readonly toolCalls: number;
+}
 
 export interface ReplaySession {
   readonly sessionId: string;
@@ -46,12 +67,33 @@ export class SessionRecorder {
   private provider: string;
   private model: string;
   private recording = false;
+  /**
+   * Wave 4G: append-only JSONL events sink. When set, every recorded
+   * event is also flushed to this file so `wotann telemetry tail` can
+   * stream live events without loading the whole session JSON.
+   */
+  private eventsFilePath: string | null = null;
 
   constructor(provider: string, model: string, sessionId?: string) {
     this.sessionId = sessionId ?? randomUUID();
     this.startedAt = Date.now();
     this.provider = provider;
     this.model = model;
+  }
+
+  /**
+   * Wave 4G: mirror every recorded event to a JSONL sink so a second
+   * process can tail the file in real time. Pass `null` to stop
+   * mirroring; pass a new path to redirect. Best-effort — disk errors
+   * are swallowed so a broken sink can never crash the runtime.
+   */
+  setEventsSink(filePath: string | null): void {
+    this.eventsFilePath = filePath;
+  }
+
+  /** Expose the session identifier so callers can tag related events. */
+  getSessionId(): string {
+    return this.sessionId;
   }
 
   /** Start recording */
@@ -105,6 +147,31 @@ export class SessionRecorder {
     return this.record("error", { error, source });
   }
 
+  /**
+   * Wave 4G: record a structured per-turn event. Called once per
+   * `runtime.query()` final chunk with the full usage + cost + tool
+   * breakdown so `.wotann/events.jsonl` carries everything a dashboard
+   * needs without re-running the session. `turnId` is a stable per-turn
+   * UUID — when absent a fresh one is minted so callers that don't
+   * thread it through still get a unique value.
+   */
+  recordTurn(turn: Omit<TurnEventData, "sessionId" | "turnId"> & { turnId?: string }): ReplayEvent {
+    const data: TurnEventData = {
+      sessionId: this.sessionId,
+      turnId: turn.turnId ?? randomUUID(),
+      provider: turn.provider,
+      model: turn.model,
+      promptTokens: turn.promptTokens,
+      completionTokens: turn.completionTokens,
+      ...(turn.cacheReadTokens !== undefined ? { cacheReadTokens: turn.cacheReadTokens } : {}),
+      ...(turn.cacheWriteTokens !== undefined ? { cacheWriteTokens: turn.cacheWriteTokens } : {}),
+      costUsd: turn.costUsd,
+      durationMs: turn.durationMs,
+      toolCalls: turn.toolCalls,
+    };
+    return this.record("turn", data as unknown as Record<string, unknown>);
+  }
+
   /** Save session to disk */
   save(directory: string): string {
     mkdirSync(directory, { recursive: true });
@@ -148,6 +215,21 @@ export class SessionRecorder {
     };
     if (this.recording) {
       this.events.push(event);
+    }
+    // Wave 4G: mirror to JSONL sink if configured. Write happens even
+    // when `recording` is false so in-process "always-on" telemetry
+    // remains captured; callers that want a hard pause should clear the
+    // sink before disabling recording. Failures are best-effort so a
+    // broken disk can't crash the query.
+    if (this.eventsFilePath) {
+      try {
+        mkdirSync(dirname(this.eventsFilePath), { recursive: true });
+        appendFileSync(this.eventsFilePath, JSON.stringify(event) + "\n", {
+          encoding: "utf-8",
+        });
+      } catch {
+        // best-effort — never let disk errors crash the query
+      }
     }
     return event;
   }
@@ -217,7 +299,12 @@ export class SessionPlayer {
   }
 
   /** Get session info */
-  getSessionInfo(): { sessionId: string; eventCount: number; provider: string; model: string } | null {
+  getSessionInfo(): {
+    sessionId: string;
+    eventCount: number;
+    provider: string;
+    model: string;
+  } | null {
     if (!this.session) return null;
     return {
       sessionId: this.session.sessionId,

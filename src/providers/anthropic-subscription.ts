@@ -193,6 +193,10 @@ export function createAnthropicSubscriptionAdapter(): ProviderAdapter {
       });
 
       let totalTokens = 0;
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let cacheReadTokens = 0;
+      let cacheWriteTokens = 0;
       let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
 
       for await (const message of q) {
@@ -244,7 +248,21 @@ export function createAnthropicSubscriptionAdapter(): ProviderAdapter {
               };
             }
           }
-          if (betaMsg.usage) totalTokens = betaMsg.usage.input_tokens + betaMsg.usage.output_tokens;
+          if (betaMsg.usage) {
+            inputTokens = betaMsg.usage.input_tokens;
+            outputTokens = betaMsg.usage.output_tokens;
+            totalTokens = inputTokens + outputTokens;
+            const u = betaMsg.usage as unknown as {
+              cache_read_input_tokens?: number;
+              cache_creation_input_tokens?: number;
+            };
+            if (u.cache_read_input_tokens && u.cache_read_input_tokens > 0) {
+              cacheReadTokens = u.cache_read_input_tokens;
+            }
+            if (u.cache_creation_input_tokens && u.cache_creation_input_tokens > 0) {
+              cacheWriteTokens = u.cache_creation_input_tokens;
+            }
+          }
 
           const rawStop = (betaMsg as unknown as { stop_reason?: string }).stop_reason;
           if (rawStop === "tool_use") stopReason = "tool_calls";
@@ -267,6 +285,12 @@ export function createAnthropicSubscriptionAdapter(): ProviderAdapter {
               content: message.result ?? "",
               provider: "anthropic",
               tokensUsed: totalTokens,
+              usage: {
+                inputTokens,
+                outputTokens,
+                ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+                ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+              },
               stopReason,
             };
           } else {

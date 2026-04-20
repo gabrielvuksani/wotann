@@ -240,6 +240,8 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
       const decoder = new TextDecoder();
       let buffer = "";
       let totalTokens = 0;
+      let inputTokens = 0;
+      let outputTokens = 0;
       let hadToolCalls = false;
 
       // ── Thinking-tag parser state ───────────────────────────
@@ -344,7 +346,9 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
             }
 
             if (chunk.done) {
-              totalTokens = (chunk.eval_count ?? 0) + (chunk.prompt_eval_count ?? 0);
+              inputTokens = chunk.prompt_eval_count ?? 0;
+              outputTokens = chunk.eval_count ?? 0;
+              totalTokens = inputTokens + outputTokens;
             }
           } catch {
             // Skip malformed JSON lines — partial frames are expected while
@@ -362,6 +366,13 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
         model,
         provider: "ollama",
         tokensUsed: totalTokens,
+        // Wave 4G: surface split usage. Ollama reports eval_count
+        // (output) + prompt_eval_count (input) separately so we can
+        // attribute them honestly.
+        usage: {
+          inputTokens,
+          outputTokens,
+        },
         // When the model emitted tool_calls this turn, advertise
         // stopReason: "tool_calls" so the runtime's agent loop knows to
         // execute tools and continue. Without this the loop treats the

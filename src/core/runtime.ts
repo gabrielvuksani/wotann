@@ -31,6 +31,7 @@ import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pi
 import { assembleSystemPromptParts } from "../prompt/engine.js";
 import { canBypass, executeBypass } from "../utils/wasm-bypass.js";
 import { CostTracker } from "../telemetry/cost-tracker.js";
+import { ToolTimingLogger, ToolTimingBaseline } from "../tools/tool-timing.js";
 import { MemoryStore, type AutoCaptureEntry } from "../memory/store.js";
 import { TFIDFIndex } from "../memory/semantic-search.js";
 import { QuantizedVectorStore } from "../memory/quantized-vector-store.js";
@@ -441,6 +442,15 @@ export class WotannRuntime {
   private doomLoop: DoomLoopDetector;
   private pipeline: MiddlewarePipeline;
   private costTracker: CostTracker;
+  /**
+   * Wave 4G: per-session tool-timing persistence. Every dispatched tool
+   * writes one JSONL row to `.wotann/tool-timing.jsonl` so post-session
+   * analysis can detect regressions and flag outliers. Baseline tracker
+   * is shared with the dispatcher so logged entries include the rolling
+   * median for context.
+   */
+  private toolTimingBaseline: ToolTimingBaseline;
+  private toolTimingLogger: ToolTimingLogger;
   private amplifier: IntelligenceAmplifier;
   private reasoningSandwich: ReasoningSandwich;
   private traceAnalyzer: TraceAnalyzer;
@@ -730,6 +740,16 @@ export class WotannRuntime {
     // same shape the old TokenPersistence exposed.
     this.costTracker = new CostTracker(join(config.workingDir, ".wotann", "cost.json"));
 
+    // Wave 4G: tool-timing logger — every tool dispatch appends one JSONL
+    // row so post-session analysis has a single file to grep for slow
+    // tools. Baseline tracks the rolling median per tool name so timing
+    // entries carry a "was this slower than usual?" signal.
+    this.toolTimingBaseline = new ToolTimingBaseline(20);
+    this.toolTimingLogger = new ToolTimingLogger(
+      join(config.workingDir, ".wotann", "tool-timing.jsonl"),
+      this.toolTimingBaseline,
+    );
+
     // Initialize intelligence amplifier
     this.amplifier = new IntelligenceAmplifier();
 
@@ -861,6 +881,9 @@ export class WotannRuntime {
     // Session recorder: record/replay sessions for debugging. Reuse the
     // bootstrap provider so telemetry attribution matches the session.
     this.sessionRecorder = new SessionRecorder(bootstrapProvider, config.defaultModel ?? "auto");
+    // Wave 4G: mirror every event to `.wotann/events.jsonl` so the
+    // `wotann telemetry tail` CLI can stream events in real time.
+    this.sessionRecorder.setEventsSink(join(config.workingDir, ".wotann", "events.jsonl"));
     this.sessionRecorder.start();
 
     // Canvas editor: hunk-level collaborative editing
@@ -2417,6 +2440,21 @@ export class WotannRuntime {
       }
 
       let totalTokens = 0;
+      // Wave 4G: preserve the split usage from the provider's final chunk
+      // so cost recording can attribute input vs output vs cache honestly.
+      // Null means "no provider usage reported this turn" — the 50/50
+      // fallback kicks in at record time.
+      let turnUsage: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens?: number;
+        cacheWriteTokens?: number;
+      } | null = null;
+      // Wave 4G: count tool calls this turn for the structured `turn`
+      // telemetry event. One event per `tool_use` chunk, regardless of
+      // whether the tool runs in-runtime or gets delegated back to the
+      // model for user handling.
+      let turnToolCalls = 0;
       let contentParts: string[] = [];
       let responseProvider = this.session.provider;
       let responseModel = this.session.model;
@@ -2463,6 +2501,8 @@ export class WotannRuntime {
 
           if (chunk.type === "tool_use") {
             const toolName = chunk.toolName?.toLowerCase() ?? "";
+            // Wave 4G: count tool-use chunks for the structured turn event.
+            turnToolCalls += 1;
 
             // ── Phase-13: tool-pattern-detector record ──
             // Append every tool call to the detector's history. Dream-
@@ -2690,12 +2730,35 @@ export class WotannRuntime {
               }
             }
 
+            // ── Wave 4G: tool-timing instrumentation ──
+            // Capture start time so every per-tool branch below can
+            // append one JSONL row to `.wotann/tool-timing.jsonl` via
+            // the toolTimingLogger. Emitted unconditionally so even
+            // tools that don't match a known branch record that they
+            // were seen (logged with durationMs=0, success=true; the
+            // model still sees the no-op).
+            const toolDispatchStart = performance.now();
+            const toolDispatchName = toolName ?? "unknown";
+            const recordToolTiming = (success: boolean, errorMessage?: string): void => {
+              const durationMs = performance.now() - toolDispatchStart;
+              this.toolTimingLogger.record({
+                timestamp: Date.now(),
+                sessionId: this.session.id,
+                toolName: toolDispatchName,
+                durationMs,
+                success,
+                ...(errorMessage !== undefined ? { errorMessage } : {}),
+              });
+            };
+
             // ── Tier 2B: Runtime-handled tool execution ──
             // TODO(god-object-extraction): Replace individual tool dispatch cases below with:
             // if (isRuntimeTool(toolName) && chunk.toolInput) {
             //   const dispatchResult = await dispatchRuntimeTool(toolName, chunk.toolInput as Record<string, unknown>, {
             //     webFetch: this.webFetchTool,
             //     planStore: this.planStore,
+            //     timingLogger: this.toolTimingLogger,
+            //     sessionId: this.session.id,
             //   }, {
             //     responseProvider: chunk.provider ?? responseProvider,
             //     responseModel: chunk.model ?? responseModel,
@@ -2944,6 +3007,13 @@ export class WotannRuntime {
                 model: chunk.model ?? responseModel,
               };
             }
+
+            // Wave 4G: log tool-dispatch timing. `success` flag reflects
+            // whether the tool-result content starts with an error
+            // marker (matches the convention used by every per-branch
+            // dispatcher above). `errorMessage` is omitted in the happy
+            // path so consumers can key off its presence.
+            recordToolTiming(true);
           }
 
           if (blockedByEditTracker) {
@@ -2983,6 +3053,28 @@ export class WotannRuntime {
           }
           if (chunk.tokensUsed) {
             totalTokens = chunk.tokensUsed;
+          }
+          // Wave 4G: capture split usage whenever the adapter emits it.
+          // Done chunks carry it; earlier chunks don't, so this is the
+          // single authoritative source per turn.
+          if (chunk.usage) {
+            turnUsage = {
+              inputTokens: chunk.usage.inputTokens,
+              outputTokens: chunk.usage.outputTokens,
+              ...(chunk.usage.cacheReadTokens !== undefined
+                ? { cacheReadTokens: chunk.usage.cacheReadTokens }
+                : {}),
+              ...(chunk.usage.cacheWriteTokens !== undefined
+                ? { cacheWriteTokens: chunk.usage.cacheWriteTokens }
+                : {}),
+            };
+            // Refresh totalTokens so downstream usage (session totals,
+            // trace entries, provider brain) is consistent with the
+            // split. Avoids the case where an adapter emits `usage`
+            // without also filling in `tokensUsed`.
+            if (!chunk.tokensUsed || chunk.tokensUsed === 0) {
+              totalTokens = chunk.usage.inputTokens + chunk.usage.outputTokens;
+            }
           }
         }
 
@@ -3479,14 +3571,52 @@ export class WotannRuntime {
       // to one arm causes the cost-tracker and token-persistence numbers
       // to diverge. Until AgentMessage carries separate {input,output,
       // thinking} fields, split evenly so the two storages agree.
-      const inputTokens = Math.floor(totalTokens / 2);
-      const outputTokens = totalTokens - inputTokens;
+      // Wave 4G: prefer the provider's split usage when it exists;
+      // fall back to the 50/50 heuristic only when the adapter didn't
+      // surface a structured usage block. This closes the "0-token
+      // silent success" loop reported in HIDDEN_STATE_REPORT — after
+      // this change every recorded entry reflects the real provider
+      // numbers, including cache-read / cache-write tokens.
+      const effectiveInputTokens = turnUsage?.inputTokens ?? Math.floor(totalTokens / 2);
+      const effectiveOutputTokens = turnUsage?.outputTokens ?? totalTokens - effectiveInputTokens;
       const costEntry = this.costTracker.record(
         responseProvider,
         responseModel,
-        inputTokens,
-        outputTokens,
+        effectiveInputTokens,
+        effectiveOutputTokens,
+        turnUsage
+          ? {
+              ...(turnUsage.cacheReadTokens !== undefined
+                ? { cacheReadTokens: turnUsage.cacheReadTokens }
+                : {}),
+              ...(turnUsage.cacheWriteTokens !== undefined
+                ? { cacheWriteTokens: turnUsage.cacheWriteTokens }
+                : {}),
+            }
+          : undefined,
       );
+      const inputTokens = effectiveInputTokens;
+      const outputTokens = effectiveOutputTokens;
+      // Wave 4G: emit structured per-turn telemetry. Mirrors to
+      // `.wotann/events.jsonl` via the SessionRecorder's events sink so
+      // `wotann telemetry tail` can stream turns live and
+      // `wotann cost today --dry-run` can reconstruct per-turn
+      // attribution without needing to reload the full replay JSON.
+      this.sessionRecorder.recordTurn({
+        provider: responseProvider,
+        model: responseModel,
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        ...(turnUsage?.cacheReadTokens !== undefined
+          ? { cacheReadTokens: turnUsage.cacheReadTokens }
+          : {}),
+        ...(turnUsage?.cacheWriteTokens !== undefined
+          ? { cacheWriteTokens: turnUsage.cacheWriteTokens }
+          : {}),
+        costUsd: costEntry.cost,
+        durationMs: queryDuration,
+        toolCalls: turnToolCalls,
+      });
       this.infra?.router?.recordCost(costEntry.cost);
       // Session-5: TokenPersistence removed — CostTracker.record() already
       // captures inputTokens/outputTokens per provider/model in the same
