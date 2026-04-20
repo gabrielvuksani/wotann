@@ -14,6 +14,7 @@ import type {
   ConnectorStatus,
   ConnectorType,
 } from "./connector-registry.js";
+import { guardedFetch } from "./guarded-fetch.js";
 
 interface ConfluencePage {
   readonly id: string;
@@ -46,7 +47,7 @@ export class ConfluenceConnector implements Connector {
     if (!email || !apiToken || !this.baseUrl) return false;
 
     try {
-      const resp = await fetch(`${this.baseUrl}/wiki/api/v2/spaces?limit=1`, {
+      const resp = await guardedFetch(`${this.baseUrl}/wiki/api/v2/spaces?limit=1`, {
         headers: this.authHeaders(email, apiToken),
       });
       this.connected = resp.ok;
@@ -75,7 +76,7 @@ export class ConfluenceConnector implements Connector {
 
     try {
       const cql = encodeURIComponent(`text ~ "${query}" AND type = page`);
-      const resp = await fetch(
+      const resp = await guardedFetch(
         `${this.baseUrl}/wiki/rest/api/content/search?cql=${cql}&limit=${limit}&expand=body.storage`,
         { headers: this.authHeaders(email, apiToken) },
       );
@@ -105,7 +106,7 @@ export class ConfluenceConnector implements Connector {
     const newDocs: ConnectorDocument[] = [];
 
     try {
-      const resp = await fetch(
+      const resp = await guardedFetch(
         `${this.baseUrl}/wiki/api/v2/pages?limit=50&sort=-modified-date&body-format=storage`,
         { headers },
       );
@@ -153,6 +154,11 @@ export class ConfluenceConnector implements Connector {
   }
 
   private stripHtml(html: string): string {
-    return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+    return html
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 }

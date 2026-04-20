@@ -16,6 +16,7 @@ import type {
   ConnectorStatus,
   ConnectorType,
 } from "./connector-registry.js";
+import { guardedFetch } from "./guarded-fetch.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -103,10 +104,7 @@ export class JiraConnector implements Connector {
     if (!this.connected) return null;
 
     try {
-      const response = await this.jiraRequest(
-        "GET",
-        `/rest/api/3/issue/${documentId}`,
-      );
+      const response = await this.jiraRequest("GET", `/rest/api/3/issue/${documentId}`);
       if (!response.ok) return null;
 
       const issue = (await response.json()) as JiraIssue;
@@ -185,8 +183,7 @@ export class JiraConnector implements Connector {
 
   private getAuthHeader(): string | null {
     const email = this.config?.credentials["email"];
-    const token = this.config?.credentials["apiToken"]
-      ?? this.config?.credentials["token"];
+    const token = this.config?.credentials["apiToken"] ?? this.config?.credentials["token"];
 
     if (!email || !token) return null;
     return `Basic ${btoa(`${email}:${token}`)}`;
@@ -200,7 +197,7 @@ export class JiraConnector implements Connector {
     }
 
     const url = `https://${domain}.atlassian.net${path}`;
-    return fetch(url, {
+    return guardedFetch(url, {
       method,
       headers: {
         Authorization: auth,
@@ -222,13 +219,11 @@ export class JiraConnector implements Connector {
         jql,
         startAt: String(startAt),
         maxResults: String(Math.min(limit - allIssues.length, MAX_RESULTS)),
-        fields: "summary,description,status,priority,issuetype,assignee,reporter,created,updated,labels,project",
+        fields:
+          "summary,description,status,priority,issuetype,assignee,reporter,created,updated,labels,project",
       });
 
-      const response = await this.jiraRequest(
-        "GET",
-        `/rest/api/3/search?${params.toString()}`,
-      );
+      const response = await this.jiraRequest("GET", `/rest/api/3/search?${params.toString()}`);
       if (!response.ok) break;
 
       const data = (await response.json()) as JiraSearchResponse;

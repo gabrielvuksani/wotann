@@ -16,6 +16,7 @@ import type {
   ConnectorStatus,
   ConnectorType,
 } from "./connector-registry.js";
+import { guardedFetch } from "./guarded-fetch.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -70,8 +71,7 @@ export class GoogleDriveConnector implements Connector {
   async connect(): Promise<boolean> {
     if (!this.config) return false;
 
-    const token = this.config.credentials["accessToken"]
-      ?? this.config.credentials["token"];
+    const token = this.config.credentials["accessToken"] ?? this.config.credentials["token"];
     if (!token) return false;
 
     // Validate token by making a simple API call
@@ -200,14 +200,12 @@ export class GoogleDriveConnector implements Connector {
   // ── Private ────────────────────────────────────────────
 
   private getAccessToken(): string {
-    return this.config?.credentials["accessToken"]
-      ?? this.config?.credentials["token"]
-      ?? "";
+    return this.config?.credentials["accessToken"] ?? this.config?.credentials["token"] ?? "";
   }
 
   private async driveRequest(path: string): Promise<Response> {
     const url = path.startsWith("http") ? path : `${DRIVE_API_BASE}${path}`;
-    return fetch(url, {
+    return guardedFetch(url, {
       headers: {
         Authorization: `Bearer ${this.getAccessToken()}`,
         Accept: "application/json",
@@ -244,9 +242,7 @@ export class GoogleDriveConnector implements Connector {
     if (exportMime) {
       // Google Workspace file — use export endpoint
       const params = new URLSearchParams({ mimeType: exportMime });
-      const response = await this.driveRequest(
-        `/files/${file.id}/export?${params.toString()}`,
-      );
+      const response = await this.driveRequest(`/files/${file.id}/export?${params.toString()}`);
       return response.ok ? response.text() : `[Failed to export: ${file.name}]`;
     }
 

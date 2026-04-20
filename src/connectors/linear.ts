@@ -14,6 +14,7 @@ import type {
   ConnectorStatus,
   ConnectorType,
 } from "./connector-registry.js";
+import { guardedFetch } from "./guarded-fetch.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -117,14 +118,11 @@ export class LinearConnector implements Connector {
   async connect(): Promise<boolean> {
     if (!this.config) return false;
 
-    const apiKey = this.config.credentials["apiKey"]
-      ?? this.config.credentials["token"];
+    const apiKey = this.config.credentials["apiKey"] ?? this.config.credentials["token"];
     if (!apiKey) return false;
 
     try {
-      const response = await this.graphql<LinearViewerResponse>(
-        `query { viewer { id name } }`,
-      );
+      const response = await this.graphql<LinearViewerResponse>(`query { viewer { id name } }`);
       if (response.data?.viewer?.id) {
         this.connected = true;
         return true;
@@ -242,16 +240,11 @@ export class LinearConnector implements Connector {
   // ── Private ────────────────────────────────────────────
 
   private getApiKey(): string {
-    return this.config?.credentials["apiKey"]
-      ?? this.config?.credentials["token"]
-      ?? "";
+    return this.config?.credentials["apiKey"] ?? this.config?.credentials["token"] ?? "";
   }
 
-  private async graphql<T>(
-    query: string,
-    variables?: Record<string, unknown>,
-  ): Promise<T> {
-    const response = await fetch(LINEAR_API_URL, {
+  private async graphql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+    const response = await guardedFetch(LINEAR_API_URL, {
       method: "POST",
       headers: {
         Authorization: this.getApiKey(),
@@ -267,9 +260,7 @@ export class LinearConnector implements Connector {
     return response.json() as Promise<T>;
   }
 
-  private async listIssues(
-    filter?: Record<string, unknown>,
-  ): Promise<readonly LinearIssue[]> {
+  private async listIssues(filter?: Record<string, unknown>): Promise<readonly LinearIssue[]> {
     const allIssues: LinearIssue[] = [];
     let cursor: string | null = null;
 

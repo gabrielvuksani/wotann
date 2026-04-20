@@ -14,6 +14,7 @@ import type {
   ConnectorStatus,
   ConnectorType,
 } from "./connector-registry.js";
+import { guardedFetch } from "./guarded-fetch.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -78,8 +79,7 @@ export class NotionConnector implements Connector {
   async connect(): Promise<boolean> {
     if (!this.config) return false;
 
-    const apiKey = this.config.credentials["apiKey"]
-      ?? this.config.credentials["token"];
+    const apiKey = this.config.credentials["apiKey"] ?? this.config.credentials["token"];
     if (!apiKey) return false;
 
     try {
@@ -196,9 +196,7 @@ export class NotionConnector implements Connector {
   // ── Private ────────────────────────────────────────────
 
   private getApiKey(): string {
-    return this.config?.credentials["apiKey"]
-      ?? this.config?.credentials["token"]
-      ?? "";
+    return this.config?.credentials["apiKey"] ?? this.config?.credentials["token"] ?? "";
   }
 
   private async notionRequest(
@@ -220,7 +218,7 @@ export class NotionConnector implements Connector {
       options.body = JSON.stringify(body);
     }
 
-    return fetch(url, options);
+    return guardedFetch(url, options);
   }
 
   private async searchPages(
@@ -266,7 +264,10 @@ export class NotionConnector implements Connector {
       cursor = data.has_more ? data.next_cursor : null;
     } while (cursor);
 
-    return allBlocks.map((block) => blockToText(block)).filter(Boolean).join("\n");
+    return allBlocks
+      .map((block) => blockToText(block))
+      .filter(Boolean)
+      .join("\n");
   }
 }
 
@@ -296,13 +297,14 @@ function pageToDocument(page: NotionPage): ConnectorDocument {
 }
 
 function blockToText(block: NotionBlock): string {
-  const richTextBlock = block.paragraph
-    ?? block.heading_1
-    ?? block.heading_2
-    ?? block.heading_3
-    ?? block.bulleted_list_item
-    ?? block.numbered_list_item
-    ?? block.toggle;
+  const richTextBlock =
+    block.paragraph ??
+    block.heading_1 ??
+    block.heading_2 ??
+    block.heading_3 ??
+    block.bulleted_list_item ??
+    block.numbered_list_item ??
+    block.toggle;
 
   if (richTextBlock) {
     const text = richTextBlock.rich_text.map((t) => t.plain_text).join("");

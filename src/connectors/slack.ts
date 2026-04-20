@@ -15,6 +15,7 @@ import type {
   ConnectorStatus,
   ConnectorType,
 } from "./connector-registry.js";
+import { guardedFetch } from "./guarded-fetch.js";
 
 const API_BASE = "https://slack.com/api";
 
@@ -34,7 +35,7 @@ export class SlackConnector implements Connector {
     if (!token) return false;
 
     try {
-      const resp = await fetch(`${API_BASE}/auth.test`, {
+      const resp = await guardedFetch(`${API_BASE}/auth.test`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       });
@@ -60,10 +61,11 @@ export class SlackConnector implements Connector {
 
   async search(query: string, limit = 10): Promise<readonly ConnectorDocument[]> {
     if (!this.connected || !this.config) return [];
-    const token = this.config.credentials["token"] ?? this.config.credentials["SLACK_BOT_TOKEN"] ?? "";
+    const token =
+      this.config.credentials["token"] ?? this.config.credentials["SLACK_BOT_TOKEN"] ?? "";
 
     try {
-      const resp = await fetch(
+      const resp = await guardedFetch(
         `${API_BASE}/search.messages?query=${encodeURIComponent(query)}&count=${limit}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
@@ -71,7 +73,14 @@ export class SlackConnector implements Connector {
 
       const data = (await resp.json()) as {
         ok: boolean;
-        messages?: { matches: readonly { ts: string; text: string; channel: { id: string; name: string }; permalink: string }[] };
+        messages?: {
+          matches: readonly {
+            ts: string;
+            text: string;
+            channel: { id: string; name: string };
+            permalink: string;
+          }[];
+        };
       };
       if (!data.ok || !data.messages) return [];
 
@@ -91,21 +100,34 @@ export class SlackConnector implements Connector {
 
   async sync(): Promise<{ added: number; updated: number; removed: number }> {
     if (!this.connected || !this.config) return { added: 0, updated: 0, removed: 0 };
-    const token = this.config.credentials["token"] ?? this.config.credentials["SLACK_BOT_TOKEN"] ?? "";
+    const token =
+      this.config.credentials["token"] ?? this.config.credentials["SLACK_BOT_TOKEN"] ?? "";
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
     const prevCount = this.documents.length;
     const newDocs: ConnectorDocument[] = [];
 
     try {
-      const channelsResp = await fetch(`${API_BASE}/conversations.list?types=public_channel&limit=20`, { headers });
+      const channelsResp = await guardedFetch(
+        `${API_BASE}/conversations.list?types=public_channel&limit=20`,
+        { headers },
+      );
       if (channelsResp.ok) {
-        const channelsData = (await channelsResp.json()) as { ok: boolean; channels?: readonly { id: string; name: string }[] };
+        const channelsData = (await channelsResp.json()) as {
+          ok: boolean;
+          channels?: readonly { id: string; name: string }[];
+        };
         if (channelsData.ok && channelsData.channels) {
           for (const channel of channelsData.channels.slice(0, 10)) {
-            const historyResp = await fetch(`${API_BASE}/conversations.history?channel=${channel.id}&limit=10`, { headers });
+            const historyResp = await guardedFetch(
+              `${API_BASE}/conversations.history?channel=${channel.id}&limit=10`,
+              { headers },
+            );
             if (historyResp.ok) {
-              const historyData = (await historyResp.json()) as { ok: boolean; messages?: readonly { ts: string; text: string; user: string }[] };
+              const historyData = (await historyResp.json()) as {
+                ok: boolean;
+                messages?: readonly { ts: string; text: string; user: string }[];
+              };
               if (historyData.ok && historyData.messages) {
                 for (const msg of historyData.messages) {
                   newDocs.push({
