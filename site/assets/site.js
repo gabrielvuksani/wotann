@@ -99,4 +99,99 @@
     }
     document.body.removeChild(ta);
   }
+
+  // ── Smart download button ────────────────────────────────────────
+  // Detects OS + preferred asset for any [data-download] link.
+  // Progressive enhancement: no-JS or offline users still get the
+  // Releases page via the button's default href.
+  var REPO = "gabrielvuksani/wotann";
+
+  function detectPlatform() {
+    var ua = navigator.userAgent;
+    var p = (navigator.userAgentData && navigator.userAgentData.platform) || "";
+
+    // Prefer the modern UA-CH hint when present.
+    var os = (p || "").toLowerCase();
+    if (!os) {
+      if (/Mac/.test(ua)) os = "macos";
+      else if (/Win/.test(ua)) os = "windows";
+      else if (/Linux/.test(ua) && !/Android/.test(ua)) os = "linux";
+      else os = "unknown";
+    } else if (os.indexOf("mac") >= 0) os = "macos";
+    else if (os.indexOf("win") >= 0) os = "windows";
+    else if (os.indexOf("linux") >= 0) os = "linux";
+    else os = "unknown";
+
+    // Matchers in priority order. DMG > tar.gz > raw for a given OS.
+    var matchers = {
+      macos: [/macos-arm64\.dmg$/i, /macos-arm64\.tar\.gz$/i, /macos-arm64$/i],
+      linux: [/linux-x64\.tar\.gz$/i, /linux-x64$/i],
+      windows: [/windows-x64\.exe$/i, /windows-x64\.exe\.tar\.gz$/i],
+      unknown: [],
+    };
+
+    var labels = {
+      macos: "Download for macOS (Apple Silicon)",
+      linux: "Download for Linux (x64)",
+      windows: "Download for Windows (x64)",
+      unknown: "Download",
+    };
+
+    return { os: os, matchers: matchers[os] || [], label: labels[os] || "Download" };
+  }
+
+  function pickAsset(assets, plat) {
+    if (!assets || !plat.matchers.length) return null;
+    for (var i = 0; i < plat.matchers.length; i++) {
+      for (var j = 0; j < assets.length; j++) {
+        if (plat.matchers[i].test(assets[j].name)) return assets[j];
+      }
+    }
+    return null;
+  }
+
+  function updateDownloadButtons() {
+    var buttons = document.querySelectorAll("[data-download]");
+    if (!buttons.length) return;
+
+    fetch("https://api.github.com/repos/" + REPO + "/releases/latest", {
+      headers: { Accept: "application/vnd.github+json" },
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error("github api " + r.status);
+        return r.json();
+      })
+      .then(function (release) {
+        var plat = detectPlatform();
+        var asset = pickAsset(release.assets, plat);
+        buttons.forEach(function (btn) {
+          if (asset) {
+            btn.href = asset.browser_download_url;
+            btn.textContent = plat.label + " · " + release.tag_name;
+            btn.setAttribute(
+              "aria-label",
+              "Download " +
+                asset.name +
+                " (" +
+                Math.round(asset.size / 1048576) +
+                " MB), " +
+                release.tag_name,
+            );
+          } else {
+            // Platform detected but no matching asset — keep Releases page
+            // fallback, update the label to show the release tag.
+            btn.textContent = "View " + release.tag_name + " releases";
+          }
+        });
+      })
+      .catch(function () {
+        /* Network error — keep the default Releases-page href + v0.4.0 text */
+      });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", updateDownloadButtons);
+  } else {
+    updateDownloadButtons();
+  }
 })();
