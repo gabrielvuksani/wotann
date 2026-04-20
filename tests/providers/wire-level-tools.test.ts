@@ -20,9 +20,21 @@
  * one representative since the compat path is shared — running 10
  * identical assertions would be noise. A dedicated compat-path test
  * captures that the shared builder always serializes tools.
+ *
+ * P1-B2 additions: Bedrock (toolConfig.tools[].toolSpec.inputSchema.json),
+ * Vertex (Anthropic-shaped tools[].input_schema), Ollama
+ * (tools[].function.parameters via /api/chat). All three adapters were
+ * covered at the stream-parser level but lacked an explicit "tools array
+ * present on the request body" assertion — a regression where the
+ * adapter's body-construction drops `tools:` wouldn't have been caught
+ * until end-to-end testing. These assertions close that gap so the
+ * regression is visible in unit-test output, not weeks later.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createAnthropicAdapter,
 } from "../../src/providers/anthropic-adapter.js";
@@ -33,6 +45,9 @@ import {
   createOpenAICompatAdapter,
 } from "../../src/providers/openai-compat-adapter.js";
 import { createGeminiNativeAdapter } from "../../src/providers/gemini-native-adapter.js";
+import { createBedrockAdapter } from "../../src/providers/bedrock-signer.js";
+import { createVertexAdapter } from "../../src/providers/vertex-oauth.js";
+import { createOllamaAdapter } from "../../src/providers/ollama-adapter.js";
 import type { ToolSchema, UnifiedQueryOptions } from "../../src/providers/types.js";
 
 const TEST_TOOL: ToolSchema = {
@@ -253,5 +268,376 @@ describe("wire-level tools serialization — every adapter family", () => {
     expect(tools.some((t) => "googleSearch" in t)).toBe(true);
     expect(tools.some((t) => "codeExecution" in t)).toBe(false);
     expect(tools.some((t) => "urlContext" in t)).toBe(false);
+  });
+
+  it("gemini-native: user tools round-trip through functionDeclarations with $ref rejected", () => {
+    // Regression-lock the P1-B2 routing: a tool schema with $ref must
+    // throw a clean error, not produce a malformed Gemini payload. The
+    // shared serializer rejects $ref; this test ensures the Gemini
+    // adapter surfaces that rejection instead of silently emitting.
+    const adapter = createGeminiNativeAdapter("AIzaTest");
+    const badTool: ToolSchema = {
+      name: "lookup",
+      description: "ref-tool",
+      inputSchema: {
+        type: "object",
+        properties: { target: { $ref: "#/$defs/T" } },
+        $defs: { T: { type: "string" } },
+      },
+    };
+    // Drive the generator; the first yield triggers body construction
+    // which calls toGeminiFunctionDeclarations which throws.
+    const run = async () => {
+      const gen = adapter.query({
+        prompt: "hi",
+        model: "gemini-2.5-pro",
+        tools: [badTool],
+        stream: true,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of gen) {
+        /* drain */
+      }
+    };
+    return expect(run()).rejects.toThrow(/\$ref/);
+  });
+});
+
+// ── Bedrock: tools[] on the Converse request body ──────────────────
+
+describe("wire-level tools serialization — Bedrock Converse", () => {
+  const originalFetch = globalThis.fetch;
+  const captured: { value?: unknown } = {};
+
+  beforeEach(() => {
+    process.env["AWS_ACCESS_KEY_ID"] = "AKIA_TEST";
+    process.env["AWS_SECRET_ACCESS_KEY"] = "secret_test";
+    process.env["AWS_REGION"] = "us-east-1";
+    captured.value = undefined;
+    globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.body && init.method === "POST") {
+        try {
+          captured.value = JSON.parse(init.body as string);
+        } catch {
+          captured.value = init.body;
+        }
+      }
+      const body = new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
+      return { ok: true, status: 200, body, text: async () => "" } as unknown as Response;
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    delete process.env["AWS_ACCESS_KEY_ID"];
+    delete process.env["AWS_SECRET_ACCESS_KEY"];
+    delete process.env["AWS_SESSION_TOKEN"];
+    delete process.env["AWS_REGION"];
+    vi.restoreAllMocks();
+  });
+
+  it("bedrock: toolConfig.tools[] present with toolSpec.inputSchema.json shape", async () => {
+    // The Bedrock Converse wire wraps the tool array under `toolConfig.tools`,
+    // and each tool is `{ toolSpec: { name, description, inputSchema: { json } } }`.
+    // The schema pass-through MUST land verbatim under `inputSchema.json`,
+    // not re-serialized into a different shape.
+    const adapter = createBedrockAdapter({
+      provider: "bedrock",
+      token: "t",
+      models: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
+    });
+    const echoSchema: ToolSchema["inputSchema"] = {
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
+    };
+    const opts: UnifiedQueryOptions = {
+      prompt: "hi",
+      model: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+      tools: [{ name: "echo", description: "Echo back", inputSchema: echoSchema }],
+      stream: true,
+    };
+    await drain(adapter.query(opts) as AsyncGenerator<{ content: string }>).catch(() => {});
+    expect(captured.value).toBeDefined();
+    const body = captured.value as {
+      toolConfig?: {
+        tools?: readonly {
+          toolSpec?: {
+            name?: string;
+            description?: string;
+            inputSchema?: { json?: Record<string, unknown> };
+          };
+        }[];
+      };
+    };
+    expect(Array.isArray(body.toolConfig?.tools)).toBe(true);
+    expect(body.toolConfig?.tools?.length).toBe(1);
+    const spec = body.toolConfig?.tools?.[0]?.toolSpec;
+    expect(spec?.name).toBe("echo");
+    expect(spec?.description).toBe("Echo back");
+    // Schema pass-through: the inner .json must match the caller's
+    // inputSchema verbatim — no key renames, no ordering changes.
+    expect(spec?.inputSchema?.json).toEqual(echoSchema);
+  });
+
+  it("bedrock: $ref in tool schema throws before hitting the wire", async () => {
+    // Shared-serializer $ref guard is the reason the Bedrock adapter now
+    // routes through toBedrockTools — a regression where the guard is
+    // bypassed would silently emit a request that Bedrock rejects with
+    // an opaque 400. This test asserts the rejection happens locally.
+    const adapter = createBedrockAdapter({
+      provider: "bedrock",
+      token: "t",
+      models: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
+    });
+    const refTool: ToolSchema = {
+      name: "lookup",
+      description: "ref",
+      inputSchema: {
+        type: "object",
+        properties: { target: { $ref: "#/$defs/T" } },
+        $defs: { T: { type: "string" } },
+      },
+    };
+    const run = async () => {
+      const gen = adapter.query({
+        prompt: "hi",
+        model: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        tools: [refTool],
+        stream: true,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of gen) {
+        /* drain */
+      }
+    };
+    await expect(run()).rejects.toThrow(/\$ref/);
+  });
+});
+
+// ── Vertex AI: tools[] on the streamRawPredict request body ────────
+
+describe("wire-level tools serialization — Vertex AI", () => {
+  const originalFetch = globalThis.fetch;
+  const captured: { value?: unknown } = {};
+  let saPath = "";
+
+  beforeEach(() => {
+    // Vertex signs a JWT before the token exchange, so we need a real
+    // RSA key in a service-account JSON. Generated fresh per test.
+    const {
+      generateKeyPairSync,
+    } = require("node:crypto") as typeof import("node:crypto");
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const pem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+    const dir = mkdtempSync(join(tmpdir(), "wotann-vertex-wirelevel-"));
+    saPath = join(dir, "sa.json");
+    writeFileSync(
+      saPath,
+      JSON.stringify({
+        client_email: "test@vertex-test.iam.gserviceaccount.com",
+        private_key: pem,
+        project_id: "vertex-test",
+        token_uri: "https://oauth2.googleapis.com/token",
+      }),
+    );
+    process.env["GOOGLE_APPLICATION_CREDENTIALS"] = saPath;
+    process.env["GOOGLE_CLOUD_PROJECT"] = "vertex-test";
+    process.env["GOOGLE_CLOUD_REGION"] = "us-central1";
+    captured.value = undefined;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      // Token exchange: respond with a fake access token.
+      if (String(url).includes("oauth2.googleapis.com/token")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ access_token: "ya29.FAKE_TOKEN", expires_in: 3600 }),
+          text: async () => "",
+        } as unknown as Response;
+      }
+      // Predict endpoint: capture the body.
+      if (init?.body) {
+        try {
+          captured.value = JSON.parse(init.body as string);
+        } catch {
+          captured.value = init.body;
+        }
+      }
+      const body = new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
+      return { ok: true, status: 200, body, text: async () => "" } as unknown as Response;
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    delete process.env["GOOGLE_APPLICATION_CREDENTIALS"];
+    delete process.env["GOOGLE_CLOUD_PROJECT"];
+    delete process.env["GOOGLE_CLOUD_REGION"];
+    vi.restoreAllMocks();
+    // Best-effort temp cleanup — we don't fail the test if unlink fails
+    // since the OS cleans tmpdir eventually.
+    try {
+      readFileSync(saPath);
+    } catch {
+      /* already gone */
+    }
+  });
+
+  it("vertex: tools[] present with Anthropic input_schema shape", async () => {
+    // Vertex Claude speaks Anthropic's wire. toVertexTools delegates to
+    // toAnthropicTools, so the wire body is exactly the Anthropic
+    // { name, description, input_schema } trio — verified here.
+    const adapter = createVertexAdapter({
+      provider: "vertex",
+      token: "unused",
+      models: ["claude-3-5-sonnet@20241022"],
+    });
+    const schema: ToolSchema["inputSchema"] = {
+      type: "object",
+      properties: { city: { type: "string" } },
+      required: ["city"],
+    };
+    const opts: UnifiedQueryOptions = {
+      prompt: "hi",
+      model: "claude-3-5-sonnet@20241022",
+      tools: [{ name: "get_weather", description: "Weather fetch", inputSchema: schema }],
+      stream: true,
+    };
+    await drain(adapter.query(opts) as AsyncGenerator<{ content: string }>).catch(() => {});
+    expect(captured.value).toBeDefined();
+    const body = captured.value as {
+      tools?: readonly {
+        name?: string;
+        description?: string;
+        input_schema?: Record<string, unknown>;
+      }[];
+    };
+    expect(Array.isArray(body.tools)).toBe(true);
+    expect(body.tools?.length).toBe(1);
+    const tool = body.tools?.[0];
+    expect(tool?.name).toBe("get_weather");
+    expect(tool?.description).toBe("Weather fetch");
+    expect(tool?.input_schema).toEqual(schema);
+  });
+});
+
+// ── Ollama: tools[] on the /api/chat request body ──────────────────
+
+describe("wire-level tools serialization — Ollama /api/chat", () => {
+  const originalFetch = globalThis.fetch;
+  const captured: { value?: unknown } = {};
+
+  beforeEach(() => {
+    captured.value = undefined;
+    globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.body && init.method === "POST") {
+        try {
+          captured.value = JSON.parse(init.body as string);
+        } catch {
+          captured.value = init.body;
+        }
+      }
+      // Ollama uses NDJSON; emit a single `done: true` line so the
+      // adapter terminates cleanly without a tool_calls path.
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              JSON.stringify({
+                message: { role: "assistant", content: "" },
+                done: true,
+                eval_count: 1,
+                prompt_eval_count: 1,
+              }) + "\n",
+            ),
+          );
+          controller.close();
+        },
+      });
+      return { ok: true, status: 200, body, text: async () => "" } as unknown as Response;
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("ollama: tools[] present with OpenAI-shaped { type, function: { name, description, parameters } }", async () => {
+    // Ollama's /api/chat mirrors OpenAI's chat-completions tool shape.
+    // toOllamaTools delegates to toOpenAITools, so each entry is the
+    // type+function wrapper with parameters = inputSchema verbatim.
+    const adapter = createOllamaAdapter("http://localhost:11434");
+    const schema: ToolSchema["inputSchema"] = {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    };
+    const opts: UnifiedQueryOptions = {
+      prompt: "hi",
+      model: "qwen3-coder:30b",
+      tools: [{ name: "search", description: "Search something", inputSchema: schema }],
+      stream: true,
+    };
+    await drain(adapter.query(opts) as AsyncGenerator<{ content: string }>).catch(() => {});
+    expect(captured.value).toBeDefined();
+    const body = captured.value as {
+      tools?: readonly {
+        type?: string;
+        function?: {
+          name?: string;
+          description?: string;
+          parameters?: Record<string, unknown>;
+        };
+      }[];
+    };
+    expect(Array.isArray(body.tools)).toBe(true);
+    expect(body.tools?.length).toBe(1);
+    const tool = body.tools?.[0];
+    expect(tool?.type).toBe("function");
+    expect(tool?.function?.name).toBe("search");
+    expect(tool?.function?.description).toBe("Search something");
+    // Schema pass-through: exact structural equality with the caller's
+    // inputSchema. A regression that e.g. strips `required` or mutates
+    // `type: "object"` would fail here.
+    expect(tool?.function?.parameters).toEqual(schema);
+  });
+
+  it("ollama: $ref in tool schema rejected via shared serializer", async () => {
+    // P1-B2 moved Ollama's inline tool serializer behind toOllamaTools,
+    // which inherits the shared $ref rejection. Regression-lock that
+    // guard so a future edit that bypasses the shared serializer fails
+    // loudly in CI, not weeks later on a user's failing request.
+    const adapter = createOllamaAdapter("http://localhost:11434");
+    const refTool: ToolSchema = {
+      name: "lookup",
+      description: "ref",
+      inputSchema: {
+        type: "object",
+        properties: { target: { $ref: "#/$defs/T" } },
+        $defs: { T: { type: "string" } },
+      },
+    };
+    const run = async () => {
+      const gen = adapter.query({
+        prompt: "hi",
+        model: "qwen3-coder:30b",
+        tools: [refTool],
+        stream: true,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of gen) {
+        /* drain */
+      }
+    };
+    await expect(run()).rejects.toThrow(/\$ref/);
   });
 });
