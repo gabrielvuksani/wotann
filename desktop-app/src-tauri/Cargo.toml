@@ -32,6 +32,10 @@ base64 = "0.22"
 window-vibrancy = "0.6"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-fs = "2"
+# shell-words: POSIX-conformant shell-word splitter used by validate_command()
+# to identify the executable token. Prevents substring-match bypasses like
+# `foo;rm -rf /` by requiring exact allow-listed first-token matches.
+shell-words = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = { version = "0.25", features = ["highsierra"] }

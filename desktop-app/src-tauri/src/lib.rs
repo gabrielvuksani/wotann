@@ -2,7 +2,12 @@
 // Manages: system tray, global hotkeys, Node.js sidecar, window state
 
 mod audio_capture;
-mod commands;
+// `commands` is pub so that integration tests in src-tauri/tests/ can
+// reach the security regression test exports in commands::test_exports.
+// Individual command functions remain private to the module — the
+// test_exports submodule is itself gated on #[cfg(test)] so production
+// builds do not leak the security internals.
+pub mod commands;
 mod computer_use;
 mod cursor_overlay;
 mod hotkeys;

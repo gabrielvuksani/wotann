@@ -132,11 +132,68 @@ jobs:
           set -euo pipefail
           npm run tauri -- build --target aarch64-apple-darwin
 
-      # Ad-hoc-sign only the binary INSIDE the .app. The DMG stays
-      # unsigned — Sequoia's Gatekeeper rejects ad-hoc DMGs as damaged.
-      # When a paid Apple Developer ID is in place, replace this block
-      # with proper signing + notarization (see docs/internal/RELEASE_PIPELINE_V2.md).
-      - name: Ad-hoc sign the app binary (not the DMG)
+      # Sign the .app. Two paths:
+      #   1. DEVELOPER_ID path (real cert in secrets) → proper Developer ID
+      #      signing with runtime hardening + notarization via xcrun notarytool.
+      #   2. Adhoc path (no secrets set) → ad-hoc "-" signature, runtime
+      #      hardening enabled so the binary is internally consistent with
+      #      the sandboxed entitlements. Users outside the developer pay
+      #      wall will see Gatekeeper "cannot verify developer" on first
+      #      open — expected for adhoc builds.
+      # Gating on APPLE_SIGNING_IDENTITY being set keeps both paths valid
+      # without requiring secrets to be present for a working release.
+      # All secret values are passed through env: blocks (never inlined)
+      # to avoid command-injection risk.
+      - name: Sign and notarize the app (Developer ID path)
+        if: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP_PATH="desktop-app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/WOTANN.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::Expected $APP_PATH to exist after Tauri build"
+            exit 1
+          fi
+          # Import signing cert into a temporary keychain
+          KEYCHAIN="build.keychain"
+          KEYCHAIN_PWD="$(openssl rand -hex 16)"
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 -d > /tmp/cert.p12
+          security import /tmp/cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed s/\"//g)
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PWD" "$KEYCHAIN"
+          rm -f /tmp/cert.p12
+          # Sign with Developer ID + hardened runtime + entitlements
+          codesign --force --deep --options runtime --timestamp \
+            --entitlements desktop-app/src-tauri/Entitlements.plist \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            "$APP_PATH"
+          codesign --verify --strict --verbose=2 "$APP_PATH"
+          # Notarize via xcrun notarytool (replaces deprecated altool)
+          NOTARIZE_ZIP="/tmp/WOTANN-notarize.zip"
+          /usr/bin/ditto -c -k --keepParent "$APP_PATH" "$NOTARIZE_ZIP"
+          xcrun notarytool submit "$NOTARIZE_ZIP" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          # Staple the notarization ticket so Gatekeeper works offline
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+          rm -f "$NOTARIZE_ZIP"
+          # Clean up keychain
+          security delete-keychain "$KEYCHAIN" || true
+
+      - name: Ad-hoc sign the app binary (fallback when no Developer ID secrets)
+        if: ${{ secrets.APPLE_SIGNING_IDENTITY == '' }}
         run: |
           set -euo pipefail
           APP_PATH="desktop-app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/WOTANN.app"
@@ -145,10 +202,13 @@ jobs:
             ls -la "desktop-app/src-tauri/target/aarch64-apple-darwin/release/bundle/" || true
             exit 1
           fi
-          # Sign the Mach-O executable inside the app bundle with ad-hoc
-          # identity ("-"). This prevents Finder from flagging the app as
-          # "can't verify the developer of WOTANN" on first launch.
-          codesign --force --deep --sign - "$APP_PATH"
+          # Ad-hoc ("-") identity plus hardened runtime flag and explicit
+          # entitlements — matches the shape a notarized build would take,
+          # minus the Developer ID cert. Users will still see Gatekeeper's
+          # "cannot verify developer" on first open (expected for adhoc).
+          codesign --force --deep --options runtime \
+            --entitlements desktop-app/src-tauri/Entitlements.plist \
+            --sign - "$APP_PATH"
           echo "Ad-hoc signature applied to $APP_PATH"
           codesign -dv "$APP_PATH" 2>&1 || true
 

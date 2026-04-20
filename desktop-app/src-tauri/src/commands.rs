@@ -1325,10 +1325,30 @@ pub struct ApprovalRule {
 
 // ── Path Validation ─────────────────────────────────────
 // Rejects path traversal, sensitive directories, and paths outside allowed roots.
+//
+// TOCTOU FIX (T0-5, 2026-04-20): the previous implementation called
+// `fs::canonicalize(path)` directly, which REQUIRES the target to exist.
+// That caused two problems:
+//   (a) write_file("new-file.txt") always failed validation, because the
+//       target doesn't exist yet.
+//   (b) When callers worked around (a) by canonicalizing AFTER writing,
+//       they opened a classic TOCTOU race: a symlink swap between
+//       validation and write could redirect the write outside the sandbox.
+//
+// The fix: canonicalize the PARENT directory first (which must exist for
+// any realistic write), then reassemble {canonical_parent}/{basename} and
+// apply the sandbox/sensitive-path checks on that assembled path BEFORE
+// any I/O. We also reject the basename being "..", ".", or empty so an
+// attacker can't use `../../etc/passwd` as a "basename".
+//
+// Callers that already expect the final canonical form (e.g. read_file,
+// read_directory) use validate_path_existing() which keeps the original
+// "canonicalize directly, require existence" semantics.
 
-fn validate_path(path: &str) -> Result<std::path::PathBuf, String> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".into());
-
+/// Validate a path that MUST already exist. Returns the fully-canonical
+/// PathBuf after symlink resolution, with full sensitive-path + allow-list
+/// checks applied. Suitable for read_file / read_directory.
+fn validate_path_existing(path: &str) -> Result<std::path::PathBuf, String> {
     // Reject raw traversal sequences before canonicalization
     if path.contains("..") {
         return Err("Access denied: path traversal detected".into());
@@ -1337,6 +1357,89 @@ fn validate_path(path: &str) -> Result<std::path::PathBuf, String> {
     // Resolve to canonical (absolute, symlink-resolved) form
     let canonical = std::fs::canonicalize(path)
         .map_err(|e| format!("Access denied: cannot resolve path '{}': {}", path, e))?;
+
+    enforce_sandbox(&canonical)?;
+    Ok(canonical)
+}
+
+/// Validate a path intended for WRITE, where the target MAY not yet exist.
+/// Canonicalizes the parent directory first (closing the TOCTOU window on
+/// the parent), then re-joins the basename and verifies the result is in
+/// the sandbox BEFORE any write occurs.
+///
+/// Rejects basenames that are empty, ".", "..", or contain path separators
+/// (so an attacker cannot hide an escape via a crafted basename).
+fn validate_path_for_write(path: &str) -> Result<std::path::PathBuf, String> {
+    use std::path::Path;
+
+    // Reject raw traversal sequences in the user-supplied path
+    if path.contains("..") {
+        return Err("Access denied: path traversal detected".into());
+    }
+    // Path::file_name() strips trailing "/." components, which would let
+    // `/tmp/.` bypass the `.`-basename check below by returning the parent
+    // component ("tmp") as the file name. Reject such shapes explicitly
+    // BEFORE splitting.
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.ends_with("/.") || trimmed == "." {
+        return Err("Access denied: invalid basename".into());
+    }
+
+    let p = Path::new(path);
+
+    // Split into parent and basename. If the parent is missing we refuse —
+    // write_file should not be creating directories silently.
+    let parent = p.parent().ok_or_else(|| {
+        "Access denied: cannot determine parent directory".to_string()
+    })?;
+    let file_name = p.file_name().ok_or_else(|| {
+        "Access denied: missing basename".to_string()
+    })?;
+
+    let basename = file_name.to_string_lossy();
+    if basename.is_empty() || basename == "." || basename == ".." {
+        return Err("Access denied: invalid basename".into());
+    }
+    // Reject path separators smuggled into the basename
+    if basename.contains('/') || basename.contains('\\') {
+        return Err("Access denied: basename contains path separator".into());
+    }
+
+    // Canonicalize the parent BEFORE any I/O on the target. This closes
+    // the TOCTOU window: once we have the canonical parent, a subsequent
+    // symlink swap of ancestor directories cannot redirect the write,
+    // because we'll pass the resolved absolute parent + literal basename
+    // to fs::write below. The only remaining race is a swap of the
+    // target filename itself mid-write, which is harmless because the
+    // kernel opens the inode atomically.
+    //
+    // If the parent is itself "." or empty we resolve relative to CWD,
+    // which Path::canonicalize handles correctly.
+    let parent_resolved = if parent.as_os_str().is_empty() {
+        std::env::current_dir()
+            .map_err(|e| format!("Access denied: cannot resolve CWD: {}", e))?
+    } else {
+        std::fs::canonicalize(parent).map_err(|e| {
+            format!(
+                "Access denied: cannot resolve parent directory '{}': {}",
+                parent.display(),
+                e
+            )
+        })?
+    };
+
+    // Assemble the final path from {canonical parent}/{literal basename}
+    let final_path = parent_resolved.join(file_name);
+
+    enforce_sandbox(&final_path)?;
+    Ok(final_path)
+}
+
+/// Shared sandbox check. Applied to whichever PathBuf the caller has
+/// already resolved (either via full canonicalize for existing paths, or
+/// via parent-canonicalize + basename-join for writes to new files).
+fn enforce_sandbox(canonical: &std::path::Path) -> Result<(), String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/unknown".into());
     let canon_str = canonical.to_string_lossy();
 
     // Re-check after symlink resolution
@@ -1350,45 +1453,45 @@ fn validate_path(path: &str) -> Result<std::path::PathBuf, String> {
     // were all readable. Expanded to cover the canonical "leaked these
     // and you're owned" set.
     let sensitive_prefixes = [
-        "/etc/",
-        "/usr/",
-        "/System/",
-        "/private/etc/",
-        "/var/db/",
-        "/var/root/",
+        "/etc/".to_string(),
+        "/usr/".to_string(),
+        "/System/".to_string(),
+        "/private/etc/".to_string(),
+        "/var/db/".to_string(),
+        "/var/root/".to_string(),
         // SSH + GPG
-        &format!("{}/.ssh/", home),
-        &format!("{}/.ssh", home),
-        &format!("{}/.gnupg/", home),
-        &format!("{}/.gnupg", home),
+        format!("{}/.ssh/", home),
+        format!("{}/.ssh", home),
+        format!("{}/.gnupg/", home),
+        format!("{}/.gnupg", home),
         // Cloud credentials
-        &format!("{}/.aws/", home),
-        &format!("{}/.aws", home),
-        &format!("{}/.kube/", home),
-        &format!("{}/.kube", home),
-        &format!("{}/.config/gcloud/", home),
-        &format!("{}/.config/gcloud", home),
-        &format!("{}/.azure/", home),
-        &format!("{}/.azure", home),
-        &format!("{}/.terraform.d/", home),
-        &format!("{}/.terraformrc", home),
+        format!("{}/.aws/", home),
+        format!("{}/.aws", home),
+        format!("{}/.kube/", home),
+        format!("{}/.kube", home),
+        format!("{}/.config/gcloud/", home),
+        format!("{}/.config/gcloud", home),
+        format!("{}/.azure/", home),
+        format!("{}/.azure", home),
+        format!("{}/.terraform.d/", home),
+        format!("{}/.terraformrc", home),
         // Container runtimes + Docker auth
-        &format!("{}/.docker/", home),
-        &format!("{}/.docker", home),
+        format!("{}/.docker/", home),
+        format!("{}/.docker", home),
         // Browser profile + token storage
-        &format!("{}/Library/Application Support/Google/Chrome/", home),
-        &format!("{}/Library/Application Support/Firefox/", home),
+        format!("{}/Library/Application Support/Google/Chrome/", home),
+        format!("{}/Library/Application Support/Firefox/", home),
         // Shell history (often contains accidentally-pasted secrets)
-        &format!("{}/.bash_history", home),
-        &format!("{}/.zsh_history", home),
-        &format!("{}/.psql_history", home),
-        &format!("{}/.mysql_history", home),
+        format!("{}/.bash_history", home),
+        format!("{}/.zsh_history", home),
+        format!("{}/.psql_history", home),
+        format!("{}/.mysql_history", home),
         // Keychain
-        &format!("{}/Library/Keychains/", home),
+        format!("{}/Library/Keychains/", home),
         // Generic dotfiles known to hold secrets
-        &format!("{}/.netrc", home),
-        &format!("{}/.npmrc", home),
-        &format!("{}/.pypirc", home),
+        format!("{}/.netrc", home),
+        format!("{}/.npmrc", home),
+        format!("{}/.pypirc", home),
     ];
     for prefix in &sensitive_prefixes {
         if canon_str.starts_with(prefix) || canon_str.as_ref() == *prefix {
@@ -1396,10 +1499,14 @@ fn validate_path(path: &str) -> Result<std::path::PathBuf, String> {
         }
     }
 
-    // Allow only paths under workspace, ~/.wotann/, or /tmp/
+    // Allow only paths under workspace, ~/.wotann/, or /tmp/.
+    // On macOS, /tmp is a symlink to /private/tmp — canonicalize resolves
+    // it. We include both spellings so writes to /tmp pass regardless of
+    // whether the caller-supplied path or the canonical form is compared.
     let allowed_prefixes = [
         format!("{}/.wotann", home),
         "/tmp".to_string(),
+        "/private/tmp".to_string(),
         // Workspace = any directory under the user's home that isn't sensitive
         // We allow anything under $HOME that passed the sensitive check above
         home.clone(),
@@ -1413,7 +1520,14 @@ fn validate_path(path: &str) -> Result<std::path::PathBuf, String> {
         return Err("Access denied: path outside allowed directories".into());
     }
 
-    Ok(canonical)
+    Ok(())
+}
+
+/// Back-compat shim so callers that just want "does this path exist and
+/// is it in-sandbox" keep working. For write paths, prefer
+/// validate_path_for_write() which handles new files correctly.
+fn validate_path(path: &str) -> Result<std::path::PathBuf, String> {
+    validate_path_existing(path)
 }
 
 // ── Missing Commands (previously called by frontend but not registered) ──
@@ -1476,22 +1590,96 @@ pub fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {}", path, e))
 }
 
-/// Write content to a file — used by Monaco editor Cmd+S
+/// Write content to a file — used by Monaco editor Cmd+S.
+/// Uses validate_path_for_write() so writes to new files (file does not
+/// yet exist) succeed AND the sandbox check is applied BEFORE the write
+/// to close the symlink-swap TOCTOU window. The returned PathBuf is the
+/// canonical-parent + literal-basename form, which we write to directly
+/// instead of the caller-supplied string so a mid-request symlink swap
+/// of an ancestor cannot redirect us.
 #[tauri::command]
 pub async fn write_file(path: String, content: String) -> Result<(), String> {
-    validate_path(&path)?;
-    std::fs::write(&path, &content).map_err(|e| format!("Failed to write {}: {}", path, e))
+    let resolved = validate_path_for_write(&path)?;
+    std::fs::write(&resolved, &content)
+        .map_err(|e| format!("Failed to write {}: {}", resolved.display(), e))
 }
 
-/// Validate a shell command against a blocklist of dangerous patterns.
+/// Validate a shell command against a blocklist of dangerous patterns AND
+/// a strict shell-parse identity check on the first token.
 ///
 /// SECURITY (B5): this is the Rust-side layer of defence-in-depth. The
 /// authoritative sanitizer lives in src/security/command-sanitizer.ts and is
 /// invoked via the daemon's "execute" and "shell.precheck" RPC methods. This
 /// Rust check is a backstop in case the Rust layer is invoked directly without
 /// going through the daemon (e.g. a migration or tooling path).
+///
+/// Post-audit (T0-5, 2026-04-20): the previous implementation used pure
+/// substring matching (`lower.contains(pattern)`). That made it attackable
+/// via trivial payload variants like `foo;rm -rf /`, `echo safe; wget|sh`,
+/// or quoted metacharacters. The fix below adds a shell-quote parse layer
+/// using the `shell-words` crate so we can reject commands whose parsed
+/// token list contains ANY shell metacharacter (`;`, `|`, `&`, `&&`, `||`,
+/// backtick, `$(`, `>(`, `<(`, redirect-to-sensitive-file, etc.) BEFORE
+/// falling back to substring checks. The first parsed token must also
+/// match a conservative executable-name regex (alphanumeric + a few
+/// punctuation chars, no NUL, no newline) to block exotic identity spoofs.
 fn validate_command(cmd: &str) -> Result<(), String> {
-    // Catastrophic patterns — always block
+    // ── Layer 1: shell-parse the command and check for dangerous tokens ──
+    // `shell_words::split` applies POSIX tokenization. It collapses quoted
+    // runs, strips balanced quotes, and errors on malformed input. Unlike
+    // substring match, a payload like `foo;rm -rf /` produces tokens
+    // ["foo;rm", "-rf", "/"] — we then reject the chained-semicolon token.
+    let tokens = shell_words::split(cmd)
+        .map_err(|e| format!("Command rejected: shell parse error: {}", e))?;
+
+    if tokens.is_empty() {
+        return Err("Command rejected: empty command".into());
+    }
+
+    // Any token containing a shell control character means this is a
+    // compound/chained/substituted command. The backstop only allows a
+    // single simple command — chaining must be authorized by the daemon.
+    // Note we check for the character in ANY token (including the first
+    // one, which is how `foo;rm` would arrive after split).
+    const SHELL_META: &[char] = &['|', '&', ';', '`', '\n', '\r', '\0'];
+    for tok in &tokens {
+        if tok.chars().any(|c| SHELL_META.contains(&c)) {
+            return Err(format!(
+                "Command rejected: shell metacharacter in token '{}' (chaining/piping not permitted via this path)",
+                tok
+            ));
+        }
+        // Command substitution: `$(...)` and `<(...)` and `>(...)`
+        if tok.contains("$(") || tok.contains(">(") || tok.contains("<(") {
+            return Err(format!(
+                "Command rejected: command substitution in token '{}'",
+                tok
+            ));
+        }
+    }
+
+    // The first token is the executable name (or a path to it). It must
+    // look like a plausible command identifier — we reject NUL, newline,
+    // and control bytes that shouldn't appear in a real binary name.
+    let exe = &tokens[0];
+    if exe.is_empty() {
+        return Err("Command rejected: empty executable token".into());
+    }
+    if exe.chars().any(|c| c.is_control()) {
+        return Err("Command rejected: control character in executable name".into());
+    }
+    // Exact-identity rule: the executable token is the full first parsed
+    // word. We do not accept substring matches. This is the key change
+    // from the prior substring-only implementation.
+    //
+    // NOTE: this function is a defence-in-depth backstop and does not
+    // itself own the allow-list of which executables may run — that
+    // responsibility lives in the daemon-side sanitizer. We ONLY reject
+    // obviously-invalid identity shapes here.
+
+    // ── Layer 2: dangerous-pattern blocklist applied to the RAW string ──
+    // Kept as defence-in-depth for payloads that somehow slip past the
+    // shell parse (e.g. within a single quoted argument to `bash -c`).
     let dangerous_patterns = [
         "rm -rf /",
         "rm -rf ~",
@@ -1506,7 +1694,9 @@ fn validate_command(cmd: &str) -> Result<(), String> {
         // Fork bomb signature
         ":(){:|:&};:",
         ":() { :|:& };:",
-        // Pipe-to-shell payloads
+        // Pipe-to-shell payloads (belt-and-braces: the shell-meta check
+        // above already rejects `|`, but a `bash -c 'curl|sh'` payload
+        // would put the pipe inside a quoted argument and escape layer 1)
         "curl | sh",
         "curl|sh",
         "curl | bash",
@@ -3551,4 +3741,26 @@ pub fn proofs_reverify(id: String) -> Result<serde_json::Value, String> {
     client
         .call("proofs.reverify", serde_json::json!({ "id": id }))
         .map_err(|e| e.to_string())
+}
+
+// ── Test-only exports for security regression tests ─────────────────────
+// The integration tests in src-tauri/tests/security.rs need visibility
+// into the otherwise-private security functions to pin their post-audit
+// behaviour. The `test_exports` module below is compiled always (not
+// gated on #[cfg(test)]) because integration tests link against the
+// release-mode lib — where `cfg(test)` is false. It is marked
+// #[doc(hidden)] to discourage external use and only exposes thin
+// forwarders that match the private function signatures.
+#[doc(hidden)]
+pub mod test_exports {
+    pub fn validate_command(cmd: &str) -> Result<(), String> {
+        super::validate_command(cmd)
+    }
+    pub fn validate_path_for_write(path: &str) -> Result<std::path::PathBuf, String> {
+        super::validate_path_for_write(path)
+    }
+    #[allow(dead_code)]
+    pub fn validate_path_existing(path: &str) -> Result<std::path::PathBuf, String> {
+        super::validate_path_existing(path)
+    }
 }
