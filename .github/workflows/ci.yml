@@ -52,22 +52,19 @@ jobs:
         run: npm run build
 
   test:
-    name: Test ${{ matrix.shard }}/2 (Node ${{ matrix.node-version }} / ubuntu-latest)
-    # Hosted ubuntu-latest runner (2026-04-20): originally moved to
-    # self-hosted because hosted runners were pre-empting shard 1
-    # mid-vitest, but with the codebase-health perf fix dropping that
-    # suite from 13.48s → 198ms, full `npm test` now completes in ~46s
-    # — well under the pre-emption window. Moving back to hosted removes
-    # the self-hosted-runner dependency (jobs queued forever when no
-    # runner was online). nick-fields/retry@v3 wraps vitest so the
-    # occasional flaky hosted-runner hiccup retries once before failing.
+    name: Test ${{ matrix.shard }}/4 (Node ${{ matrix.node-version }} / ubuntu-latest)
+    # 4-shard split (2026-04-20): 2-shard runs were being killed by
+    # "runner received a shutdown signal" ~20-55s in. Shrinking each
+    # shard to ~92 test files reduces per-job wall-clock to ~12-15s,
+    # well below the hosted-runner preemption window. nick-fields/retry
+    # wraps vitest for the rare step-level failure.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         node-version: [22]
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -77,17 +74,13 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
-      - name: Run vitest shard ${{ matrix.shard }}/2
-        # nick-fields/retry@v3 wraps vitest so transient hosted-runner
-        # shutdowns retry once before the job fails. The tests
-        # themselves pass (367 files / 5860 tests, ~46s local); retries
-        # exist purely for infra resilience.
+      - name: Run vitest shard ${{ matrix.shard }}/4
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
           max_attempts: 2
           retry_on: error
-          command: npm test -- --shard ${{ matrix.shard }}/2
+          command: npm test -- --shard ${{ matrix.shard }}/4
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
