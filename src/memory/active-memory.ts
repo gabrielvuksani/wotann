@@ -120,6 +120,79 @@ function extractObservations(
 // ── Memory recall for question messages ─────────────────────
 
 /**
+ * Minimum length for a recall token. One-char tokens produce FTS5
+ * noise and very short stopwords (e.g., "do", "is") explode the
+ * match set with no signal.
+ */
+const MIN_RECALL_TOKEN_LEN = 3;
+
+/**
+ * Stopwords dropped before building the FTS5 query. Pattern-based
+ * classification has already fired, so we're safe to aggressively
+ * strip function words here.
+ */
+const RECALL_STOPWORDS: ReadonlySet<string> = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "that",
+  "this",
+  "what",
+  "which",
+  "where",
+  "when",
+  "who",
+  "why",
+  "how",
+  "did",
+  "does",
+  "was",
+  "are",
+  "you",
+  "your",
+  "have",
+  "has",
+  "had",
+  "can",
+  "should",
+  "would",
+  "could",
+  "about",
+  "from",
+  "into",
+  "onto",
+  "some",
+  "any",
+  "all",
+  "not",
+]);
+
+/**
+ * MemoryStore.search() passes its `query` argument directly to FTS5's
+ * MATCH clause, which has a strict operator syntax. Natural-language
+ * questions like `"What did we decide about OAuth?"` contain operator
+ * characters (`?`, `"`, `.`, `:`, `-`) and throw
+ * `fts5: syntax error near "?"`. Sanitizing the query here keeps the
+ * fix contained to active-memory (out-of-scope files are not touched).
+ *
+ * Strategy: tokenize on non-alphanumeric characters, drop stopwords
+ * and tokens shorter than `MIN_RECALL_TOKEN_LEN`, de-duplicate, and
+ * join with " OR " so FTS5 treats the list as a Boolean union.
+ */
+function toFtsQuery(message: string): string | null {
+  const tokens = message
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((t) => t.length >= MIN_RECALL_TOKEN_LEN && !RECALL_STOPWORDS.has(t));
+  const unique = Array.from(new Set(tokens));
+  if (unique.length === 0) return null;
+  // Cap token count — very long prompts otherwise generate huge MATCH
+  // expressions that hurt perf without improving recall.
+  return unique.slice(0, 12).join(" OR ");
+}
+
+/**
  * For question messages, search memory for relevant prior facts /
  * preferences / decisions and format them as a context prefix the
  * runtime can prepend to the user prompt. Capped at 3 results to
@@ -127,23 +200,35 @@ function extractObservations(
  */
 function recallContext(message: string, memoryStore: MemoryStore | null): string | null {
   if (!memoryStore) return null;
+  const query = toFtsQuery(message);
+  if (!query) return null;
   try {
-    // Use the existing FTS5 search. Returns iterable of {content, score}.
+    // MemoryStore.search() returns `readonly MemorySearchResult[]` where
+    // each row is `{entry: MemoryEntry, score, snippet}` and the content
+    // string lives at `entry.value`. Earlier versions of this recall
+    // filter read `r.content` which silently rejected every row (Master
+    // Plan V8 P0-5 — active recall always returned null). The guard
+    // below is defensive: treat each row as possibly-unshaped, extract
+    // entry.value honestly, and skip anything that doesn't provide a
+    // string value.
     const search = (
       memoryStore as unknown as {
-        search?: (q: string, limit: number) => Array<{ content: string; score?: number }>;
+        search?: (q: string, limit: number) => ReadonlyArray<{ entry?: { value?: unknown } }>;
       }
     ).search;
     if (typeof search !== "function") return null;
-    const results = search.call(memoryStore, message, 3) ?? [];
+    const results = search.call(memoryStore, query, 3) ?? [];
     if (results.length === 0) return null;
-    const formatted = results
-      .filter((r) => r && typeof r.content === "string")
-      .map((r) => `- ${r.content.slice(0, 200)}`)
-      .join("\n");
-    return formatted
-      ? `[Active Memory recall — ${results.length} relevant entries from prior sessions]\n${formatted}\n\n---\n\n`
-      : null;
+    const values: string[] = [];
+    for (const r of results) {
+      const value = r?.entry?.value;
+      if (typeof value === "string" && value.length > 0) {
+        values.push(value);
+      }
+    }
+    if (values.length === 0) return null;
+    const formatted = values.map((v) => `- ${v.slice(0, 200)}`).join("\n");
+    return `[Active Memory recall — ${values.length} relevant entries from prior sessions]\n${formatted}\n\n---\n\n`;
   } catch {
     return null;
   }
