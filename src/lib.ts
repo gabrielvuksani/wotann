@@ -792,16 +792,18 @@ export {
   type ApplyResult as DiffApplyResult,
 } from "./testing/visual-diff-theater.js";
 
-// ── Security (plugin sandbox) ───────────────────────────
+// ── Security (plugin scanner) ───────────────────────────
+// P0-3: renamed from PluginSandbox — the class performs static risk
+// analysis only; real VM isolation is deferred to P1. The misleading
+// execute() method was removed entirely.
 export {
-  PluginSandbox,
-  type SandboxPermissions,
-  type SandboxContext,
-  type SandboxResult,
-  type SandboxLogEntry,
-  type ScanResult as SandboxScanResult,
+  PluginScanner,
+  type ScannerPermissions,
+  type ScannerContext,
+  type ScannerLogEntry,
+  type ScanResult as ScannerScanResult,
   type ScanFinding,
-} from "./security/plugin-sandbox.js";
+} from "./security/plugin-scanner.js";
 
 // ── Telemetry (extended) ────────────────────────────────
 export {

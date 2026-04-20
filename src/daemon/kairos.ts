@@ -77,7 +77,7 @@ import { MCPRegistry, SkillMarketplace } from "../marketplace/registry.js";
 import { DockerSandbox } from "../sandbox/docker-backend.js";
 import { TaskIsolationManager } from "../sandbox/task-isolation.js";
 import { TerminalManager } from "../sandbox/terminal-backends.js";
-import { PluginSandbox } from "../security/plugin-sandbox.js";
+import { PluginScanner } from "../security/plugin-scanner.js";
 import { ReasoningEngine } from "../identity/reasoning-engine.js";
 import { UserModel } from "../identity/user-model.js";
 import { PerceptionEngine } from "../computer-use/perception-engine.js";
@@ -231,7 +231,7 @@ export class KairosDaemon {
   private readonly dockerSandbox = new DockerSandbox();
   private taskIsolation: TaskIsolationManager | null = null;
   private readonly terminalManager = new TerminalManager();
-  private readonly pluginSandbox = new PluginSandbox();
+  private readonly pluginScanner = new PluginScanner();
   private reasoningEngine: ReasoningEngine | null = null;
   private userModel: UserModel | null = null;
   private readonly perceptionEngine = new PerceptionEngine();
@@ -832,8 +832,8 @@ export class KairosDaemon {
   getTerminalManager(): TerminalManager {
     return this.terminalManager;
   }
-  getPluginSandbox(): PluginSandbox {
-    return this.pluginSandbox;
+  getPluginScanner(): PluginScanner {
+    return this.pluginScanner;
   }
   getReasoningEngine(): ReasoningEngine | null {
     return this.reasoningEngine;

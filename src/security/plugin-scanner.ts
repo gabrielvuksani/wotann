@@ -1,13 +1,22 @@
 /**
- * Plugin Sandbox -- execute untrusted plugins in a restricted environment.
- * Prevents malicious plugins from accessing the file system, network, or env vars.
+ * Plugin Scanner — static risk analysis for untrusted plugin code.
  *
- * Creates sandboxed execution contexts with granular permissions.
- * Scans plugin content for risky patterns before execution.
- * Logs all sandbox activity for audit trails.
+ * Scans plugin source for dangerous patterns (child_process, fs, network,
+ * env access, code injection vectors) and classifies risk so callers can
+ * decide whether to load the plugin at all or route it through a real VM
+ * isolation layer (e.g. isolated-vm) at the outer boundary.
+ *
+ * HONESTY NOTE (P0-3): this module does NOT execute code in a sandbox. An
+ * earlier version contained an execute() method that simulated permission
+ * checks without any real VM isolation — the comment at the original call
+ * site literally said "here we simulate". That method was removed in the
+ * P0-3 refactor because a misleading API surface is worse than no API
+ * surface. Real VM sandboxing is a separate task (P1); until that ships,
+ * callers must treat plugin code as untrusted and refuse to load it if
+ * `shouldSandbox()` returns true.
  *
  * SECURITY (B7): Adds a RouteScope concept — a named per-agent-task security
- * context that narrows the plugin-wide sandbox to a specific route (e.g.
+ * context that narrows the plugin-wide scanner to a specific route (e.g.
  * "refactor", "docs-write", "prod-db-read-only"). Routes can be loaded from
  * config or generated dynamically from the agent's task description. The
  * enforceScope helper is a pure checker that callers use before any I/O,
@@ -18,7 +27,7 @@ import { randomUUID } from "node:crypto";
 
 // -- Types -------------------------------------------------------------------
 
-export interface SandboxPermissions {
+export interface ScannerPermissions {
   readonly allowFileRead: boolean;
   readonly allowFileWrite: boolean;
   readonly allowNetwork: boolean;
@@ -29,27 +38,18 @@ export interface SandboxPermissions {
   readonly maxMemoryMb: number;
 }
 
-export interface SandboxContext {
+export interface ScannerContext {
   readonly id: string;
   readonly pluginId: string;
-  readonly permissions: SandboxPermissions;
+  readonly permissions: ScannerPermissions;
   readonly createdAt: number;
-  readonly status: "ready" | "running" | "completed" | "terminated" | "error";
+  readonly status: "ready" | "scanned" | "rejected";
 }
 
-export interface SandboxResult {
-  readonly sandboxId: string;
-  readonly success: boolean;
-  readonly output: string;
-  readonly error: string | null;
-  readonly executionMs: number;
-  readonly terminatedByTimeout: boolean;
-}
-
-export interface SandboxLogEntry {
+export interface ScannerLogEntry {
   readonly timestamp: number;
-  readonly sandboxId: string;
-  readonly event: "created" | "started" | "completed" | "error" | "permission-denied" | "timeout";
+  readonly contextId: string;
+  readonly event: "created" | "scanned" | "rejected" | "error";
   readonly detail: string;
 }
 
@@ -152,7 +152,7 @@ const RISK_PATTERNS: readonly RiskPattern[] = [
   },
 ];
 
-const DEFAULT_PERMISSIONS: SandboxPermissions = {
+const DEFAULT_PERMISSIONS: ScannerPermissions = {
   allowFileRead: false,
   allowFileWrite: false,
   allowNetwork: false,
@@ -165,16 +165,19 @@ const DEFAULT_PERMISSIONS: SandboxPermissions = {
 
 // -- Implementation ----------------------------------------------------------
 
-export class PluginSandbox {
+export class PluginScanner {
   private readonly contexts: Map<string, MutableContext> = new Map();
-  private readonly logs: SandboxLogEntry[] = [];
+  private readonly logs: ScannerLogEntry[] = [];
 
   /**
-   * Create a sandboxed execution context for a plugin.
+   * Register a plugin for scanning with a named permission profile. The
+   * returned context is an opaque handle to scan results + metadata. It
+   * does NOT start any code execution — that requires a real VM layer
+   * which this module intentionally does not provide.
    */
-  createSandbox(pluginId: string, permissions?: Partial<SandboxPermissions>): SandboxContext {
-    const id = `sb_${randomUUID().slice(0, 8)}`;
-    const fullPermissions: SandboxPermissions = { ...DEFAULT_PERMISSIONS, ...permissions };
+  createContext(pluginId: string, permissions?: Partial<ScannerPermissions>): ScannerContext {
+    const id = `ps_${randomUUID().slice(0, 8)}`;
+    const fullPermissions: ScannerPermissions = { ...DEFAULT_PERMISSIONS, ...permissions };
 
     const context: MutableContext = {
       id,
@@ -185,90 +188,22 @@ export class PluginSandbox {
     };
 
     this.contexts.set(id, context);
-    this.log(id, "created", `Sandbox created for plugin ${pluginId}`);
+    this.log(id, "created", `Scanner context created for plugin ${pluginId}`);
 
     return toReadonlyContext(context);
   }
 
   /**
-   * Execute code in a sandbox. Returns the result of the execution.
-   * In production this would use vm2/isolated-vm; here we simulate
-   * the permission checking and execution lifecycle.
-   */
-  execute(sandboxId: string, code: string): SandboxResult {
-    const context = this.contexts.get(sandboxId);
-    if (!context) {
-      return {
-        sandboxId,
-        success: false,
-        output: "",
-        error: "Sandbox not found",
-        executionMs: 0,
-        terminatedByTimeout: false,
-      };
-    }
-
-    context.status = "running";
-    this.log(sandboxId, "started", `Executing ${code.length} chars of code`);
-
-    const startTime = Date.now();
-
-    // Check for permission violations before executing
-    const violations = checkPermissionViolations(code, context.permissions);
-    if (violations.length > 0) {
-      context.status = "error";
-      const violationMsg = violations.join("; ");
-      this.log(sandboxId, "permission-denied", violationMsg);
-
-      return {
-        sandboxId,
-        success: false,
-        output: "",
-        error: `Permission denied: ${violationMsg}`,
-        executionMs: Date.now() - startTime,
-        terminatedByTimeout: false,
-      };
-    }
-
-    // Simulate execution (actual sandboxing would use isolated-vm/vm2)
-    const executionMs = Date.now() - startTime;
-
-    if (executionMs > context.permissions.maxExecutionMs) {
-      context.status = "terminated";
-      this.log(sandboxId, "timeout", `Exceeded ${context.permissions.maxExecutionMs}ms limit`);
-
-      return {
-        sandboxId,
-        success: false,
-        output: "",
-        error: "Execution timed out",
-        executionMs,
-        terminatedByTimeout: true,
-      };
-    }
-
-    context.status = "completed";
-    this.log(sandboxId, "completed", `Executed in ${executionMs}ms`);
-
-    return {
-      sandboxId,
-      success: true,
-      output: `[sandbox:${sandboxId}] Code executed (${code.length} chars)`,
-      error: null,
-      executionMs,
-      terminatedByTimeout: false,
-    };
-  }
-
-  /**
-   * Scan plugin content and determine if it needs sandboxing.
+   * Scan plugin content and determine if it needs sandbox-level isolation.
+   * Convenience wrapper that returns only the boolean decision.
    */
   shouldSandbox(pluginContent: string): boolean {
     return this.scanPlugin(pluginContent).shouldSandbox;
   }
 
   /**
-   * Full scan with detailed findings.
+   * Full scan with detailed findings. Returns risk level + line-anchored
+   * findings so the caller can show a useful rejection message to the user.
    */
   scanPlugin(pluginContent: string): ScanResult {
     const findings: ScanFinding[] = [];
@@ -307,33 +242,55 @@ export class PluginSandbox {
   }
 
   /**
-   * Get execution log for a sandbox.
+   * Record that a scanned plugin was rejected (e.g. because shouldSandbox
+   * returned true and the caller chose not to run it). Emits a log entry
+   * for the audit trail.
    */
-  getExecutionLog(sandboxId: string): readonly SandboxLogEntry[] {
-    return this.logs.filter((l) => l.sandboxId === sandboxId);
+  markRejected(contextId: string, reason: string): void {
+    const ctx = this.contexts.get(contextId);
+    if (!ctx) return;
+    ctx.status = "rejected";
+    this.log(contextId, "rejected", reason);
   }
 
   /**
-   * Get all logs.
+   * Record that a scan completed successfully (plugin passed all checks).
    */
-  getAllLogs(): readonly SandboxLogEntry[] {
+  markScanned(contextId: string, detail: string): void {
+    const ctx = this.contexts.get(contextId);
+    if (!ctx) return;
+    ctx.status = "scanned";
+    this.log(contextId, "scanned", detail);
+  }
+
+  /**
+   * Get log entries for a specific context.
+   */
+  getLog(contextId: string): readonly ScannerLogEntry[] {
+    return this.logs.filter((l) => l.contextId === contextId);
+  }
+
+  /**
+   * Get all logs across every scanned plugin.
+   */
+  getAllLogs(): readonly ScannerLogEntry[] {
     return [...this.logs];
   }
 
   /**
-   * Get a sandbox context by ID.
+   * Retrieve a scanner context by ID. Returns null if not found.
    */
-  getSandbox(sandboxId: string): SandboxContext | null {
-    const ctx = this.contexts.get(sandboxId);
+  getContext(contextId: string): ScannerContext | null {
+    const ctx = this.contexts.get(contextId);
     return ctx ? toReadonlyContext(ctx) : null;
   }
 
   // -- Private ---------------------------------------------------------------
 
-  private log(sandboxId: string, event: SandboxLogEntry["event"], detail: string): void {
+  private log(contextId: string, event: ScannerLogEntry["event"], detail: string): void {
     this.logs.push({
       timestamp: Date.now(),
-      sandboxId,
+      contextId,
       event,
       detail,
     });
@@ -345,12 +302,12 @@ export class PluginSandbox {
 interface MutableContext {
   readonly id: string;
   readonly pluginId: string;
-  readonly permissions: SandboxPermissions;
+  readonly permissions: ScannerPermissions;
   readonly createdAt: number;
-  status: SandboxContext["status"];
+  status: ScannerContext["status"];
 }
 
-function toReadonlyContext(ctx: MutableContext): SandboxContext {
+function toReadonlyContext(ctx: MutableContext): ScannerContext {
   return {
     id: ctx.id,
     pluginId: ctx.pluginId,
@@ -358,28 +315,4 @@ function toReadonlyContext(ctx: MutableContext): SandboxContext {
     createdAt: ctx.createdAt,
     status: ctx.status,
   };
-}
-
-// -- Permission checking -----------------------------------------------------
-
-function checkPermissionViolations(code: string, permissions: SandboxPermissions): readonly string[] {
-  const violations: string[] = [];
-
-  if (!permissions.allowFileRead && /\breadFileSync?\s*\(/.test(code)) {
-    violations.push("File read not permitted");
-  }
-  if (!permissions.allowFileWrite && /\bwriteFileSync?\s*\(/.test(code)) {
-    violations.push("File write not permitted");
-  }
-  if (!permissions.allowNetwork && /\bfetch\s*\(/.test(code)) {
-    violations.push("Network access not permitted");
-  }
-  if (!permissions.allowEnvAccess && /process\.env/.test(code)) {
-    violations.push("Environment variable access not permitted");
-  }
-  if (!permissions.allowChildProcess && /\bexecSync?\s*\(|\bspawnSync?\s*\(/.test(code)) {
-    violations.push("Child process not permitted");
-  }
-
-  return violations;
 }
