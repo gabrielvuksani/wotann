@@ -1050,9 +1050,25 @@ export class AutonomousExecutor {
         // Never silent: `onCrystallize` is always called on success runs so
         // a `crystallize_skipped` event can surface when ineligible.
         try {
+          // Default crystallization context synthesized from executor state
+          // when the caller doesn't supply one. Uses per-cycle action summaries
+          // as a stand-in for tool calls and the filesChanged list as a
+          // coarse diff summary. Callers wanting richer context (real tool-
+          // call trace, full unified diff, custom score) override via
+          // `callbacks.getCrystallizationContext`. This closes the
+          // "crystallizeSuccessHook caller gated" finding from
+          // docs/FINAL_VERIFICATION_AUDIT_2026-04-19.md where the hook path
+          // was dead in prod because no caller supplied the callback.
           const ctx = callbacks?.getCrystallizationContext
             ? await callbacks.getCrystallizationContext()
-            : null;
+            : {
+                toolCalls: cycles.map((c) => `cycle-${c.cycle}:${c.action.slice(0, 60)}`),
+                diffSummary:
+                  filesChanged.length > 0
+                    ? `Files modified: ${filesChanged.slice(0, 20).join(", ")}${filesChanged.length > 20 ? ` (+${filesChanged.length - 20} more)` : ""}`
+                    : "No file modifications recorded",
+                title: task.slice(0, 80),
+              };
           if (ctx) {
             const crystallization = await crystallizeSuccessHook({
               input: {

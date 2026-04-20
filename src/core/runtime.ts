@@ -28,7 +28,7 @@ import { registerBuiltinHooks, clearReadTrackingForSession } from "../hooks/buil
 import { ActiveMemoryEngine } from "../memory/active-memory.js";
 import { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
 import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pipeline.js";
-import { assembleSystemPromptParts } from "../prompt/engine.js";
+import { assembleSystemPromptParts, wrapPromptWithThinkInCode } from "../prompt/engine.js";
 import { canBypass, executeBypass } from "../utils/wasm-bypass.js";
 import { CostTracker } from "../telemetry/cost-tracker.js";
 import { ToolTimingLogger, ToolTimingBaseline } from "../tools/tool-timing.js";
@@ -1733,6 +1733,15 @@ export class WotannRuntime {
     ]
       .filter(Boolean)
       .join("\n\n");
+
+    // Phase 13 Wave-3C — think-in-code wrapping (opt-in via
+    // WOTANN_THINK_IN_CODE=1). Prepends a reasoning directive that
+    // trades ~2-5% more tokens for higher task success on math /
+    // debugging / multi-step planning prompts. Closes the orphan
+    // finding where wrapPromptWithThinkInCode had 0 external callers.
+    if (process.env["WOTANN_THINK_IN_CODE"] === "1") {
+      this.systemPrompt = wrapPromptWithThinkInCode(this.systemPrompt);
+    }
 
     // AITimeMachine: register the initial conversation for time-travel
     this.aiTimeMachine.registerConversation(this.session.id, this.session.messages);
@@ -5215,11 +5224,47 @@ export class WotannRuntime {
   }
 
   /**
-   * Get a spawn configuration for an agent by ID, using the centralized registry.
-   * Returns undefined if the agent ID is not registered.
+   * Get a spawn configuration for an agent by ID, using the centralized
+   * registry. Returns undefined if the agent ID is not registered.
+   *
+   * Sync variant — delegates to `AgentRegistry#spawn` and does NOT
+   * resolve `required_reading` items. Callers that need the file
+   * contents prepended to the agent's system prompt should prefer
+   * `getAgentSpawnConfigWithContext` which awaits `spawnWithContext`
+   * (the requiredReadingHook path).
    */
   getAgentSpawnConfig(agentId: string, task: string) {
     return this.agentRegistryInstance.spawn(agentId, task);
+  }
+
+  /**
+   * Async spawn that resolves the agent's `required_reading` items into
+   * a prompt-block prepended to the system prompt via
+   * `AgentRegistry#spawnWithContext` + `requiredReadingHook`. Uses this
+   * runtime's workingDir as the workspace root — the hook honours the
+   * per-item size caps and the optional total budget.
+   *
+   * Closes the "spawnWithContext has 0 external callers" finding from
+   * docs/FINAL_VERIFICATION_AUDIT_2026-04-19.md; the sync `spawn` path
+   * stays available for callers that don't want the hook overhead.
+   */
+  async getAgentSpawnConfigWithContext(
+    agentId: string,
+    task: string,
+    options?: {
+      readonly defaultMaxCharsPerFile?: number;
+      readonly totalBudgetChars?: number;
+    },
+  ) {
+    return this.agentRegistryInstance.spawnWithContext(agentId, task, {
+      workspaceRoot: this.config.workingDir,
+      ...(options?.defaultMaxCharsPerFile !== undefined
+        ? { defaultMaxCharsPerFile: options.defaultMaxCharsPerFile }
+        : {}),
+      ...(options?.totalBudgetChars !== undefined
+        ? { totalBudgetChars: options.totalBudgetChars }
+        : {}),
+    });
   }
 
   /**
