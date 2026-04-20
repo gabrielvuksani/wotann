@@ -1445,15 +1445,36 @@ engineCmd
 
 engineCmd
   .command("stop")
-  .description("Stop the WOTANN engine")
-  .action(async () => {
+  .description("Stop the WOTANN engine (SIGTERM, then SIGKILL after 5s)")
+  .option("--force", "Skip the SIGTERM wait and SIGKILL immediately", false)
+  .action(async (opts: { force?: boolean }) => {
     const { pidPath, statusPath } = getDaemonPaths();
     const { existsSync, readFileSync, unlinkSync } = await import("node:fs");
     if (existsSync(pidPath)) {
       const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
       try {
-        process.kill(pid, "SIGTERM");
-        await waitForProcessExit(pid, 4_000);
+        // Wave 4F: graceful-by-default shutdown. SIGTERM first, wait
+        // up to 5s for the daemon to flush WAL checkpoints and close
+        // sockets, then escalate to SIGKILL if still alive. `--force`
+        // skips the grace window for abandoned daemons.
+        const initialSignal: NodeJS.Signals = opts.force ? "SIGKILL" : "SIGTERM";
+        process.kill(pid, initialSignal);
+        if (!opts.force) {
+          await waitForProcessExit(pid, 5_000);
+          if (isProcessAlive(pid)) {
+            console.log(
+              chalk.yellow(`Engine (PID ${pid}) didn't exit within 5s — escalating to SIGKILL.`),
+            );
+            try {
+              process.kill(pid, "SIGKILL");
+            } catch {
+              /* already dead */
+            }
+            await waitForProcessExit(pid, 2_000);
+          }
+        } else {
+          await waitForProcessExit(pid, 2_000);
+        }
         try {
           unlinkSync(pidPath);
         } catch {
@@ -1498,16 +1519,32 @@ engineCmd
         console.log(chalk.green(`WOTANN engine running (PID ${pid})`));
         if (existsSync(statusPath)) {
           try {
+            // Wave 4F: richer telemetry emitted every 30s by the
+            // daemon's tick loop (`.wotann/daemon.status.json`).
             const status = JSON.parse(readFileSync(statusPath, "utf-8")) as {
               startedAt?: string;
+              updatedAt?: string;
               heartbeatTasks?: number;
               tickCount?: number;
+              uptime?: number;
+              activeProviders?: number;
+              memoryMb?: number;
+              cronJobsEnabled?: number;
             };
             if (status.startedAt) console.log(chalk.dim(`  Started: ${status.startedAt}`));
+            if (status.updatedAt) console.log(chalk.dim(`  Last heartbeat: ${status.updatedAt}`));
+            if (typeof status.uptime === "number")
+              console.log(chalk.dim(`  Uptime: ${status.uptime}s`));
             if (typeof status.heartbeatTasks === "number")
               console.log(chalk.dim(`  Heartbeat tasks: ${status.heartbeatTasks}`));
             if (typeof status.tickCount === "number")
               console.log(chalk.dim(`  Ticks: ${status.tickCount}`));
+            if (typeof status.activeProviders === "number")
+              console.log(chalk.dim(`  Active providers: ${status.activeProviders}`));
+            if (typeof status.memoryMb === "number")
+              console.log(chalk.dim(`  Memory: ${status.memoryMb} MB`));
+            if (typeof status.cronJobsEnabled === "number")
+              console.log(chalk.dim(`  Cron jobs (enabled): ${status.cronJobsEnabled}`));
           } catch {
             // ignore malformed status
           }
@@ -2064,25 +2101,27 @@ mcpCmd
   .option("--from-cursor", "Import from ~/.cursor/mcp.json")
   .option("--from-windsurf", "Import from ~/.windsurf/mcp.json")
   .option("--from-codex", "Import from ~/.codex/mcp.json")
-  .option("--dry-run", "List what would be imported without modifying the registry")
-  .description("Import MCP servers from other tools (Claude/Cursor/Windsurf/Codex)")
+  .option("--from-vscode", "Import from VSCode settings.json (stable + Insiders, mac/linux/win)")
+  .option("--dry-run", "List what would be imported without modifying ~/.wotann/mcp.json")
+  .description(
+    "Import MCP servers from other tools (Claude/Cursor/Windsurf/Codex/VSCode) into ~/.wotann/mcp.json",
+  )
   .action(
     async (options: {
       fromClaude?: boolean;
       fromCursor?: boolean;
       fromWindsurf?: boolean;
       fromCodex?: boolean;
+      fromVscode?: boolean;
       dryRun?: boolean;
     }) => {
       const { MCPRegistry } = await import("./marketplace/registry.js");
       const registry = new MCPRegistry();
 
-      // Wave 3H: expand the CLI surface to every importer the registry
-      // already knows about. Previously only --from-claude wired through;
-      // --from-cursor / --from-windsurf / --from-codex existed only in
-      // the library API. Dry-run lists the resulting servers without
-      // persisting — the registry only lives in-process so rollback is
-      // implicit when the command exits.
+      // Wave 4E: persist the merged registry to ~/.wotann/mcp.json so
+      // downstream runs (ACP handlers, daemon, TUI) pick up imported
+      // servers. Dry-run skips the write; the in-process registry is
+      // shown to the user but discarded when the CLI exits.
       const sources: { flag: boolean; label: string; fn: () => number }[] = [
         {
           flag: options.fromClaude ?? false,
@@ -2104,12 +2143,17 @@ mcpCmd
           label: "Codex",
           fn: () => registry.importFromTool("codex"),
         },
+        {
+          flag: options.fromVscode ?? false,
+          label: "VSCode",
+          fn: () => registry.importFromTool("vscode"),
+        },
       ];
       const requested = sources.filter((s) => s.flag);
       if (requested.length === 0) {
         console.error(
           chalk.yellow(
-            "No source flag supplied. Use --from-claude / --from-cursor / --from-windsurf / --from-codex.",
+            "No source flag supplied. Use --from-claude / --from-cursor / --from-windsurf / --from-codex / --from-vscode.",
           ),
         );
         process.exit(1);
@@ -2140,15 +2184,78 @@ mcpCmd
         return;
       }
 
+      // Persist to ~/.wotann/mcp.json so other wotann commands see the
+      // imports.
+      const path = registry.persistToDisk();
       console.log(
         chalk.green(
           `Imported ${totalImported} MCP server${totalImported === 1 ? "" : "s"} from ${requested.length} source${
             requested.length === 1 ? "" : "s"
-          }.`,
+          }. Wrote ${path}`,
         ),
       );
     },
   );
+
+mcpCmd
+  .command("export")
+  .description("Export ~/.wotann/mcp.json in ACP-compatible format (stdout unless --out is given)")
+  .option("--out <path>", "Write to a file instead of stdout")
+  .option(
+    "--include-disabled",
+    "Include disabled servers in the export (default: enabled only)",
+    false,
+  )
+  .action(async (options: { out?: string; includeDisabled?: boolean }) => {
+    const { MCPRegistry } = await import("./marketplace/registry.js");
+    const { existsSync, writeFileSync } = await import("node:fs");
+    const { dirname, resolve: resolvePath } = await import("node:path");
+    const { mkdirSync } = await import("node:fs");
+
+    const registry = new MCPRegistry();
+    registry.registerBuiltins();
+    const loaded = registry.loadFromDisk();
+    if (loaded === 0 && !options.includeDisabled) {
+      console.error(
+        chalk.yellow(
+          "No servers found in ~/.wotann/mcp.json. Run `wotann mcp import --from-*` first.",
+        ),
+      );
+    }
+
+    const exported = registry.exportAcp();
+    // Filter disabled if requested default behavior (export already
+    // filters enabled; include-disabled overrides by re-generating from
+    // scratch).
+    const payload = options.includeDisabled
+      ? {
+          version: exported.version,
+          servers: registry.getAllServers().map((s) => ({
+            transport: s.transport,
+            name: s.name,
+            command: s.command,
+            args: s.args,
+            ...(s.env && Object.keys(s.env).length > 0
+              ? {
+                  env: Object.entries(s.env).map(([name, value]) => ({ name, value })),
+                }
+              : {}),
+            enabled: s.enabled,
+          })),
+        }
+      : exported;
+
+    const json = JSON.stringify(payload, null, 2);
+    if (options.out) {
+      const outPath = resolvePath(process.cwd(), options.out);
+      const outDir = dirname(outPath);
+      if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+      writeFileSync(outPath, json);
+      console.log(chalk.green(`Wrote ${payload.servers.length} server(s) to ${outPath}`));
+    } else {
+      process.stdout.write(json + "\n");
+    }
+  });
 
 // ── wotann lsp ───────────────────────────────────────────────
 

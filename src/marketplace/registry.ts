@@ -203,9 +203,15 @@ export class MCPRegistry {
   }
 
   /**
-   * Import from Cursor, Windsurf, or Codex configs.
+   * Import from Cursor, Windsurf, Codex, or VSCode configs.
+   *
+   * VSCode is a special case — MCP servers live under the `mcp` key of
+   * `settings.json` (not a dedicated `mcp.json`). Both stable and
+   * Insiders paths are probed; the first one that exists wins.
    */
-  importFromTool(tool: "cursor" | "windsurf" | "codex"): number {
+  importFromTool(tool: "cursor" | "windsurf" | "codex" | "vscode"): number {
+    if (tool === "vscode") return this.importFromVscode();
+
     const paths: Record<string, string> = {
       cursor: join(homedir(), ".cursor", "mcp.json"),
       windsurf: join(homedir(), ".windsurf", "mcp.json"),
@@ -240,6 +246,183 @@ export class MCPRegistry {
     } catch {
       return 0;
     }
+  }
+
+  /**
+   * Wave 4E: Import MCP servers from VSCode's `settings.json`. VSCode's
+   * MCP support (built-in as of the Nov 2025 release) puts server
+   * definitions under `settings.json -> mcp.servers`. We probe both
+   * stable (`~/.config/Code/User/settings.json` or `~/Library/Application
+   * Support/Code/User/settings.json`) and Insiders paths.
+   *
+   * Honest failure: if no known VSCode settings file exists, returns 0.
+   * Malformed JSON also returns 0 (logged to stderr by callers if needed).
+   */
+  importFromVscode(): number {
+    const candidates = vscodeSettingsCandidates();
+    for (const configPath of candidates) {
+      if (!existsSync(configPath)) continue;
+      try {
+        const raw = readFileSync(configPath, "utf-8");
+        // VSCode settings may include trailing commas / // comments; use a
+        // tolerant parser so the first byte of an unparseable file doesn't
+        // crash the whole import.
+        const stripped = stripJsonComments(raw);
+        const config = JSON.parse(stripped) as Record<string, unknown>;
+        const mcpBlock = (config["mcp"] as Record<string, unknown> | undefined) ?? {};
+        const servers = (mcpBlock["servers"] ?? mcpBlock["mcpServers"]) as
+          | Record<string, unknown>
+          | undefined;
+        if (!servers || typeof servers !== "object") return 0;
+
+        let imported = 0;
+        for (const [name, serverConfig] of Object.entries(servers)) {
+          if (typeof serverConfig === "object" && serverConfig !== null) {
+            const c = serverConfig as Record<string, unknown>;
+            this.register({
+              name: `vscode-${name}`,
+              command: String(c["command"] ?? ""),
+              args: (c["args"] as string[]) ?? [],
+              transport: "stdio",
+              env: c["env"] as Record<string, string> | undefined,
+              enabled: true,
+            });
+            imported++;
+          }
+        }
+        return imported;
+      } catch {
+        return 0;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * Wave 4E: Persist the current in-memory registry to
+   * `~/.wotann/mcp.json` so subsequent runs pick it up. Returns the path
+   * written. Honest: only writes servers that have a non-empty command
+   * (skeleton entries get dropped to avoid producing unusable exports).
+   */
+  persistToDisk(filePath?: string): string {
+    const out = filePath ?? defaultMcpConfigPath();
+    const dir = dirname(out);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+    const payload: Record<string, unknown> = {
+      version: "1.0.0",
+      generatedBy: "wotann",
+      generatedAt: new Date().toISOString(),
+      mcpServers: Object.fromEntries(
+        [...this.servers.values()]
+          .filter((s) => s.command !== "")
+          .map((s) => [
+            s.name,
+            {
+              command: s.command,
+              args: s.args,
+              transport: s.transport,
+              ...(s.env ? { env: s.env } : {}),
+              enabled: s.enabled,
+              ...(s.autoStart !== undefined ? { autoStart: s.autoStart } : {}),
+            },
+          ]),
+      ),
+    };
+
+    writeFileSync(out, JSON.stringify(payload, null, 2));
+    return out;
+  }
+
+  /**
+   * Wave 4E: Load servers from `~/.wotann/mcp.json` (or a custom path).
+   * Complements `persistToDisk`. Returns the number of servers loaded.
+   */
+  loadFromDisk(filePath?: string): number {
+    const src = filePath ?? defaultMcpConfigPath();
+    if (!existsSync(src)) return 0;
+    try {
+      const raw = readFileSync(src, "utf-8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const servers = parsed["mcpServers"] as Record<string, unknown> | undefined;
+      if (!servers || typeof servers !== "object") return 0;
+
+      let loaded = 0;
+      for (const [name, serverConfig] of Object.entries(servers)) {
+        if (typeof serverConfig === "object" && serverConfig !== null) {
+          const c = serverConfig as Record<string, unknown>;
+          const command = String(c["command"] ?? "");
+          if (!command) continue;
+          this.register({
+            name,
+            command,
+            args: (c["args"] as string[]) ?? [],
+            transport:
+              (c["transport"] as "stdio" | "http" | undefined) === "http" ? "http" : "stdio",
+            env: c["env"] as Record<string, string> | undefined,
+            enabled: c["enabled"] === false ? false : true,
+            ...(c["autoStart"] !== undefined ? { autoStart: c["autoStart"] === true } : {}),
+          });
+          loaded++;
+        }
+      }
+      return loaded;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Wave 4E: Export the current registry in an ACP-compatible shape so
+   * other clients (Zed, Cursor, etc.) can import WOTANN's config. The
+   * wire format matches the ACP v1 `McpServerConfig` variants (stdio +
+   * http) so the output can be fed into any ACP-speaking host.
+   */
+  exportAcp(): {
+    readonly version: string;
+    readonly servers: ReadonlyArray<
+      | {
+          readonly transport: "stdio";
+          readonly name: string;
+          readonly command: string;
+          readonly args: readonly string[];
+          readonly env?: readonly { readonly name: string; readonly value: string }[];
+        }
+      | {
+          readonly transport: "http";
+          readonly name: string;
+          readonly command: string;
+          readonly args: readonly string[];
+        }
+    >;
+  } {
+    const servers = [...this.servers.values()]
+      .filter((s) => s.enabled && s.command !== "")
+      .map((s) => {
+        if (s.transport === "http") {
+          return {
+            transport: "http" as const,
+            name: s.name,
+            command: s.command,
+            args: s.args,
+          };
+        }
+        const entry = {
+          transport: "stdio" as const,
+          name: s.name,
+          command: s.command,
+          args: s.args,
+        };
+        if (s.env && Object.keys(s.env).length > 0) {
+          return {
+            ...entry,
+            env: Object.entries(s.env).map(([name, value]) => ({ name, value })),
+          };
+        }
+        return entry;
+      });
+
+    return { version: "1.0.0", servers };
   }
 
   getServerCount(): number {
@@ -751,6 +934,100 @@ function commandExists(command: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Wave 4E: Default path for WOTANN's MCP config file. Lives at
+ * `~/.wotann/mcp.json`. Users or tests can override with
+ * `WOTANN_MCP_CONFIG_PATH` env var.
+ */
+function defaultMcpConfigPath(): string {
+  return process.env["WOTANN_MCP_CONFIG_PATH"] ?? join(homedir(), ".wotann", "mcp.json");
+}
+
+/**
+ * Wave 4E: Candidate VSCode settings paths across platforms. Probes
+ * Stable then Insiders, macOS then Linux then Windows.
+ * `WOTANN_VSCODE_SETTINGS_PATH` overrides all of them for test isolation.
+ */
+function vscodeSettingsCandidates(): readonly string[] {
+  const override = process.env["WOTANN_VSCODE_SETTINGS_PATH"];
+  if (override) return [override];
+
+  const home = homedir();
+  const macCode = join(home, "Library", "Application Support", "Code", "User", "settings.json");
+  const macInsiders = join(
+    home,
+    "Library",
+    "Application Support",
+    "Code - Insiders",
+    "User",
+    "settings.json",
+  );
+  const linuxCode = join(home, ".config", "Code", "User", "settings.json");
+  const linuxInsiders = join(home, ".config", "Code - Insiders", "User", "settings.json");
+  const appdata = process.env["APPDATA"];
+  const winCode = appdata ? join(appdata, "Code", "User", "settings.json") : "";
+  const winInsiders = appdata ? join(appdata, "Code - Insiders", "User", "settings.json") : "";
+
+  return [macCode, macInsiders, linuxCode, linuxInsiders, winCode, winInsiders].filter(
+    (p) => p.length > 0,
+  );
+}
+
+/**
+ * Wave 4E: Strip // line comments and block comments from a JSON-ish
+ * payload so VSCode's JSONC settings can be parsed with `JSON.parse`.
+ * Quoted strings are preserved (including escaped quotes).
+ */
+function stripJsonComments(raw: string): string {
+  let out = "";
+  let i = 0;
+  const n = raw.length;
+  let inString = false;
+  let stringQuote: '"' | "'" | null = null;
+  while (i < n) {
+    const ch = raw[i]!;
+    const next = i + 1 < n ? raw[i + 1] : "";
+
+    if (inString) {
+      out += ch;
+      if (ch === "\\" && i + 1 < n) {
+        out += raw[i + 1];
+        i += 2;
+        continue;
+      }
+      if (ch === stringQuote) {
+        inString = false;
+        stringQuote = null;
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      stringQuote = ch as '"' | "'";
+      out += ch;
+      i++;
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      while (i < n && raw[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < n && !(raw[i] === "*" && raw[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+
+    out += ch;
+    i++;
+  }
+  return out;
 }
 
 /**
