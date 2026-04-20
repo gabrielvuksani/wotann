@@ -1,105 +1,473 @@
 name: Release
 
+# ─────────────────────────────────────────────────────────────────────────────
+# WOTANN Release Pipeline v2 (canonical 8-asset set)
+#
+# Canonical assets produced per release (no more, no less):
+#   wotann-${VER}-macos-arm64.dmg          Tauri GUI — drag to Applications
+#   wotann-${VER}-macos-arm64.dmg.sha256
+#   wotann-${VER}-macos-arm64.tar.gz       CLI SEA binary tarball
+#   wotann-${VER}-macos-arm64.tar.gz.sha256
+#   wotann-${VER}-linux-x64.tar.gz         CLI SEA binary tarball
+#   wotann-${VER}-linux-x64.tar.gz.sha256
+#   wotann-${VER}-windows-x64.exe          CLI SEA single-file
+#   wotann-${VER}-windows-x64.exe.sha256
+#
+# Build graph:
+#   ┌──────────────────────┐  ┌──────────────────────┐
+#   │ macos-gui-dmg        │  │ macos-cli-tarball    │
+#   │ macos-latest / arm64 │  │ macos-latest / arm64 │
+#   └──────────┬───────────┘  └──────────┬───────────┘
+#              ▼                         ▼
+#   ┌──────────────────────┐  ┌──────────────────────┐
+#   │ linux-cli-tarball    │  │ windows-cli-exe      │
+#   │ ubuntu-latest        │  │ windows-latest       │
+#   └──────────┬───────────┘  └──────────┬───────────┘
+#              ▼                         ▼
+#              └──────────┬──────────────┘
+#                         ▼
+#                 ┌─────────────────┐
+#                 │ publish-release │
+#                 │ ubuntu-latest   │
+#                 └─────────────────┘
+#
+# Trigger: push of any tag matching `v*.*.*` (e.g. `git tag v0.4.1 && git push origin v0.4.1`).
+#
+# Environmental assumptions (documented inline where they apply):
+#   - actions/setup-node@v4 on GitHub-hosted runners provides an official
+#     statically-linked Node from nodejs.org at `/usr/local/bin/node` (macos /
+#     linux) or `C:\hostedtoolcache\node\...` (windows). This Node has the SEA
+#     fuse sentinel compiled into the launcher, which Homebrew's Node on
+#     arm64 macs does NOT. See docs/SEA_BUILD_ENVIRONMENTAL_GATE.md for why
+#     this matters.
+#   - Tauri bundler on macos-latest produces its .app + .dmg under
+#     src-tauri/target/aarch64-apple-darwin/release/bundle/{macos,dmg}/.
+#     The .dmg itself is created by `create-dmg` invoked by Tauri's bundler.
+#   - Ad-hoc code-signing (`codesign --sign -`) is applied to the binary
+#     INSIDE the .app only. We never ad-hoc-sign the .dmg; macOS Sequoia
+#     rejects ad-hoc-signed DMGs as "damaged" and refuses to mount them.
+#   - SHA256 checksum format is `<hex-hash>  <filename>\n` to match the
+#     output of `shasum -a 256` / `sha256sum`. The install.sh resolver at
+#     the user's machine uses `awk '{print $1}'` to extract the hash.
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
+      - "v*.*.*-*" # also fire on prerelease tags like v0.4.1-rc1
 
 permissions:
   contents: write
 
+# Cancel duplicate runs if the same tag is pushed twice in a row.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    env:
-      TARGET: ${{ matrix.target }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            target: macos-x64
-          - os: macos-latest
-            target: macos-arm64
-          - os: ubuntu-latest
-            target: linux-x64
-          - os: ubuntu-latest
-            target: linux-arm64
-          - os: windows-latest
-            target: windows-x64
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 1: macos-gui-dmg
+  # Builds the Tauri 2 desktop app and produces a drag-to-Applications DMG.
+  # ───────────────────────────────────────────────────────────────────────
+  macos-gui-dmg:
+    name: Build macOS GUI DMG (Tauri arm64)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      # Official nodejs.org Node via setup-node. Cargo cache comes later.
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop-app/package-lock.json
+
+      # Rust toolchain with aarch64-apple-darwin target. The macos-latest
+      # runner is itself arm64 so this is a native build, not cross-compile.
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      # Cache Cargo registry + target dir. Target dir is the big win —
+      # Tauri's debug deps compile fresh otherwise (~5 min → ~1 min).
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop-app/src-tauri/target
+          key: cargo-macos-arm64-${{ hashFiles('desktop-app/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            cargo-macos-arm64-
+
+      - name: Install npm deps
+        working-directory: desktop-app
+        run: npm ci
+
+      - name: Derive release version from tag
+        id: ver
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION"
+
+      # Tauri's bundler runs `vite build` first (via beforeBuildCommand in
+      # tauri.conf.json) then compiles Rust, then assembles the .app and
+      # wraps it in a .dmg via create-dmg. Output lives at
+      # src-tauri/target/aarch64-apple-darwin/release/bundle/{macos,dmg}/.
+      - name: Tauri build (arm64 DMG)
+        working-directory: desktop-app
+        run: |
+          set -euo pipefail
+          npm run tauri -- build --target aarch64-apple-darwin
+
+      # Ad-hoc-sign only the binary INSIDE the .app. The DMG stays
+      # unsigned — Sequoia's Gatekeeper rejects ad-hoc DMGs as damaged.
+      # When a paid Apple Developer ID is in place, replace this block
+      # with proper signing + notarization (see docs/internal/RELEASE_PIPELINE_V2.md).
+      - name: Ad-hoc sign the app binary (not the DMG)
+        run: |
+          set -euo pipefail
+          APP_PATH="desktop-app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/WOTANN.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::Expected $APP_PATH to exist after Tauri build"
+            ls -la "desktop-app/src-tauri/target/aarch64-apple-darwin/release/bundle/" || true
+            exit 1
+          fi
+          # Sign the Mach-O executable inside the app bundle with ad-hoc
+          # identity ("-"). This prevents Finder from flagging the app as
+          # "can't verify the developer of WOTANN" on first launch.
+          codesign --force --deep --sign - "$APP_PATH"
+          echo "Ad-hoc signature applied to $APP_PATH"
+          codesign -dv "$APP_PATH" 2>&1 || true
+
+      # Tauri names the DMG `WOTANN_<cargo-version>_aarch64.dmg`. Rename to
+      # our canonical format AND regenerate sha256 against the renamed file.
+      - name: Rename DMG and compute sha256
+        id: dmg
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          SRC_DIR="desktop-app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
+          OUT_DIR="dist/release"
+          mkdir -p "$OUT_DIR"
+          # Tauri uses the Cargo.toml version in the filename, which may
+          # differ from the release tag version. Glob-match so we don't
+          # depend on the exact Cargo version.
+          SRC_DMG=$(ls "$SRC_DIR"/*.dmg | head -1)
+          if [ -z "$SRC_DMG" ] || [ ! -f "$SRC_DMG" ]; then
+            echo "::error::No DMG found under $SRC_DIR"
+            ls -la "$SRC_DIR" || true
+            exit 1
+          fi
+          DEST="$OUT_DIR/wotann-${VERSION}-macos-arm64.dmg"
+          cp "$SRC_DMG" "$DEST"
+          ( cd "$OUT_DIR" && shasum -a 256 "wotann-${VERSION}-macos-arm64.dmg" > "wotann-${VERSION}-macos-arm64.dmg.sha256" )
+          echo "dmg=$DEST" >> "$GITHUB_OUTPUT"
+          echo "DMG size: $(wc -c < "$DEST") bytes"
+          ls -la "$OUT_DIR"
+
+      - name: Upload macOS GUI DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-gui-dmg
+          path: |
+            dist/release/wotann-*-macos-arm64.dmg
+            dist/release/wotann-*-macos-arm64.dmg.sha256
+          if-no-files-found: error
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 2: macos-cli-tarball
+  # Produces the CLI SEA binary tarball for macOS arm64.
+  # ───────────────────────────────────────────────────────────────────────
+  macos-cli-tarball:
+    name: Build macOS CLI tarball (SEA arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # setup-node@v4 installs Node from nodejs.org into the runner's
+      # hosted tool cache. That Node IS statically linked AND contains the
+      # SEA fuse sentinel in the launcher — which is exactly what
+      # sea-bundle.sh needs. Homebrew's Node on arm64 would fail the
+      # SEA fuse preflight (BLOCKED-NEEDS-SEA-NODE).
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install deps
+        run: npm ci --ignore-scripts
+
+      # postject must be on PATH for sea-bundle.sh's `npx postject` call.
+      # Installing at the project level (not globally) keeps it cached by
+      # the npm cache and avoids a cold `npx --yes` fetch on each run.
+      - name: Install postject
+        run: npm install --no-save postject
+
+      - name: Derive release version from tag
+        id: ver
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # build-all.sh runs: npm run build → esbuild-cjs → sea-bundle.sh →
+      # tar+sha256 in dist/release/. Exits non-zero on any step failure,
+      # including the SEA fuse preflight in sea-bundle.sh.
+      - name: Build SEA + tarball
+        env:
+          WOTANN_VERSION: ${{ steps.ver.outputs.version }}
+        run: bash scripts/release/build-all.sh "${{ steps.ver.outputs.version }}"
+
+      # Keep ONLY the tarball + sha256. Discard the raw binary artifact
+      # that build-all.sh also leaves in dist/release/ — the canonical
+      # asset set explicitly drops raw SEA binaries.
+      - name: Prune non-canonical artifacts
+        run: |
+          set -euo pipefail
+          cd dist/release
+          # Keep .tar.gz and .tar.gz.sha256 for macos-arm64 only; delete
+          # the loose `wotann-<ver>-macos-arm64` binary and its sha256.
+          find . -maxdepth 1 -type f ! -name '*.tar.gz' ! -name '*.tar.gz.sha256' -delete
+          ls -la
+
+      - name: Upload macOS CLI tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-cli-tarball
+          path: |
+            dist/release/wotann-*-macos-arm64.tar.gz
+            dist/release/wotann-*-macos-arm64.tar.gz.sha256
+          if-no-files-found: error
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 3: linux-cli-tarball
+  # Produces the CLI SEA binary tarball for linux x64.
+  # ───────────────────────────────────────────────────────────────────────
+  linux-cli-tarball:
+    name: Build Linux CLI tarball (SEA x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci --ignore-scripts
-      # postject is required by sea-bundle.sh. Install it once up-front so
-      # the first `npx postject` inside the bundle script is a no-op fetch.
+      - run: npm install --no-save postject
+
+      - name: Derive release version from tag
+        id: ver
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build SEA + tarball
+        env:
+          WOTANN_VERSION: ${{ steps.ver.outputs.version }}
+        run: bash scripts/release/build-all.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Prune non-canonical artifacts
+        run: |
+          set -euo pipefail
+          cd dist/release
+          find . -maxdepth 1 -type f ! -name '*.tar.gz' ! -name '*.tar.gz.sha256' -delete
+          ls -la
+
+      - name: Upload Linux CLI tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-cli-tarball
+          path: |
+            dist/release/wotann-*-linux-x64.tar.gz
+            dist/release/wotann-*-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 4: windows-cli-exe
+  # Produces the CLI SEA .exe for windows x64. No tarball — the raw .exe
+  # is what Windows users expect (and double-clicking a .tar.gz is awful).
+  # ───────────────────────────────────────────────────────────────────────
+  windows-cli-exe:
+    name: Build Windows CLI .exe (SEA x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      # Windows runners ship with Git Bash. Explicitly use bash for the
+      # build-all.sh invocation; postject supports PE binary injection
+      # via the --macho-segment-name flag being skipped on Windows
+      # (sea-bundle.sh already gates that behind `$HOST_OS = macos`).
+      - name: Install deps
+        shell: bash
+        run: npm ci --ignore-scripts
       - name: Install postject
         shell: bash
         run: npm install --no-save postject
-      - name: Build + SEA bundle (via build-all.sh)
-        if: matrix.os != 'windows-latest'
+
+      - name: Derive release version from tag
+        id: ver
         shell: bash
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           VERSION="${REF_NAME#v}"
-          # build-all.sh runs: npm run build -> sea-bundle.sh -> archive+sha256.
-          # Honest failure: non-zero exit propagates and fails the job.
-          bash scripts/release/build-all.sh "$VERSION"
-      - name: Build + SEA bundle (Windows)
-        if: matrix.os == 'windows-latest'
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build SEA .exe
         shell: bash
         env:
-          REF_NAME: ${{ github.ref_name }}
+          WOTANN_VERSION: ${{ steps.ver.outputs.version }}
+        run: bash scripts/release/build-all.sh "${{ steps.ver.outputs.version }}"
+
+      # Windows asset layout: keep the .exe, delete the .tar.gz that
+      # build-all.sh also produces (Windows users expect .exe, not a
+      # POSIX-flavoured archive wrapped around one).
+      - name: Prune to .exe + .sha256 and compute hash
+        shell: bash
         run: |
           set -euo pipefail
-          VERSION="${REF_NAME#v}"
-          # Same build-all.sh path — bash-for-Windows (Git Bash) on the
-          # windows-latest runner. postject handles Windows PE binary format.
-          bash scripts/release/build-all.sh "$VERSION"
-      - name: Upload artifacts
+          VERSION="${{ steps.ver.outputs.version }}"
+          cd dist/release
+          # Remove the tar.gz wrappers — we only want the bare .exe.
+          rm -f ./*.tar.gz ./*.tar.gz.sha256
+          EXE="wotann-${VERSION}-windows-x64.exe"
+          if [ ! -f "$EXE" ]; then
+            echo "::error::Expected $EXE to exist"
+            ls -la
+            exit 1
+          fi
+          # Compute sha256 for the .exe explicitly (build-all.sh only
+          # hashes the tarball, which we just deleted).
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "$EXE" > "${EXE}.sha256"
+          else
+            sha256sum "$EXE" > "${EXE}.sha256"
+          fi
+          ls -la
+
+      - name: Upload Windows .exe artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wotann-${{ matrix.target }}
-          path: dist/release/*
+          name: windows-cli-exe
+          path: |
+            dist/release/wotann-*-windows-x64.exe
+            dist/release/wotann-*-windows-x64.exe.sha256
+          if-no-files-found: error
 
-  publish:
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 5: publish-release
+  # Waits for all four build jobs, collects the 8 canonical assets, does
+  # a final sha256 verification pass, and creates the GitHub Release.
+  # ───────────────────────────────────────────────────────────────────────
+  publish-release:
     name: Publish GitHub Release
-    needs: build
+    needs:
+      - macos-gui-dmg
+      - macos-cli-tarball
+      - linux-cli-tarball
+      - windows-cli-exe
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+
+      - name: Derive release version from tag
+        id: ver
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
         with:
           path: dist/release
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+
+      # Enforce the canonical 8-asset manifest. If any file is missing or
+      # any unexpected file sneaks in, fail the release rather than ship
+      # a messy asset list.
+      - name: Verify canonical 8-asset manifest
+        run: bash scripts/release/verify-release-assets.sh "${{ steps.ver.outputs.version }}" dist/release
+
+      - name: Re-verify all sha256 checksums
+        run: |
+          set -euo pipefail
+          cd dist/release
+          # The sha256 files were produced on their respective runners.
+          # Verify them here on a neutral runner to catch corruption
+          # during artifact upload/download.
+          for sha in *.sha256; do
+            echo "Verifying $sha"
+            sha256sum -c "$sha"
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/release/*
-          draft: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
 
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 6 (optional): npm-publish
+  # Publishes the CJS-bundled package to npm. Only fires on stable (non-rc)
+  # tags so prerelease tags don't clutter the npm registry.
+  # ───────────────────────────────────────────────────────────────────────
   npm-publish:
     name: npm publish
-    needs: build
+    needs:
+      - macos-gui-dmg
+      - macos-cli-tarball
+      - linux-cli-tarball
+      - windows-cli-exe
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           registry-url: "https://registry.npmjs.org/"
       - run: npm ci --ignore-scripts
       - run: npm run build
-      # Run strengthened prepublish-check BEFORE publish. Fails loudly if
-      # any bundle-health gate fails — blocks a broken publish.
-      - run: node scripts/release/prepublish-check.mjs
-      - run: npm publish --access public
+      - name: Pre-publish bundle-health gates
+        run: node scripts/release/prepublish-check.mjs
+      - name: npm publish
+        # TODO: requires secret NPM_TOKEN (Automation token from npmjs.com).
+        # If NPM_TOKEN is unset, this step will fail — that's intentional so
+        # a broken npm publish blocks the release visibly.
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
