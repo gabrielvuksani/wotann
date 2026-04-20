@@ -47,6 +47,12 @@ export {
   type MarkExhaustedOptions,
 } from "./providers/credential-pool.js";
 export {
+  PeerToolAuthSidecar,
+  type PeerCredentialFile,
+  type PeerToolAuthOptions,
+  type SidecarEvent,
+} from "./providers/peer-tool-auth.js";
+export {
   buildFallbackChain,
   resolveNextProvider,
   describeFallbackChain,
