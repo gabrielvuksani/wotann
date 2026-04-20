@@ -86,6 +86,19 @@ import {
   type MemvidExportOptions,
   type MemvidImportResult,
 } from "./memvid-backend.js";
+import {
+  SemanticCache,
+  bigramEmbedding,
+  type CacheStats as SemanticCacheStats,
+  type SemanticCacheOptions,
+} from "./semantic-cache.js";
+import { MemoryBenchmark, type BenchmarkSuite } from "./memory-benchmark.js";
+import {
+  MemoryToolkit,
+  type ToolDefinition,
+  type ToolCallResult,
+  type MemoryToolStoreAdapter,
+} from "./memory-tools.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -2401,6 +2414,159 @@ export class MemoryStore {
     return results;
   }
 
+  // ── Semantic retrieval cache (Phase 2 P1-M7) ───────────────
+
+  /**
+   * Phase 2 P1-M7: expose the semantic-cache backend via MemoryStore
+   * so callers can build a deduped retrieval cache without importing
+   * semantic-cache directly. The cache's lifetime is the store's
+   * lifetime; call `clearRetrievalCache()` to reset or
+   * `getRetrievalCacheStats()` to observe.
+   */
+  private retrievalCache: SemanticCache<readonly MemorySearchResult[]> | null = null;
+
+  private getRetrievalCache(
+    options?: Partial<SemanticCacheOptions>,
+  ): SemanticCache<readonly MemorySearchResult[]> {
+    if (!this.retrievalCache) {
+      this.retrievalCache = new SemanticCache<readonly MemorySearchResult[]>({
+        similarityThreshold: options?.similarityThreshold ?? 0.9,
+        maxEntries: options?.maxEntries ?? 200,
+        ttlMs: options?.ttlMs ?? 10 * 60 * 1000,
+        embed: options?.embed ?? (async (text) => bigramEmbedding(text)),
+      });
+    }
+    return this.retrievalCache;
+  }
+
+  /**
+   * Phase 2 P1-M7: cached wrapper around search() — returns previously
+   * computed results when the query embedding is near-identical to a
+   * prior miss. Miss falls through to live search, result is cached.
+   */
+  async cachedSearch(
+    query: string,
+    limit: number = 10,
+    options?: Partial<SemanticCacheOptions>,
+  ): Promise<readonly MemorySearchResult[]> {
+    const cache = this.getRetrievalCache(options);
+    const hit = await cache.get(query);
+    if (hit !== null) return hit;
+    const live = this.search(query, limit);
+    await cache.set(query, live);
+    return live;
+  }
+
+  /** Phase 2 P1-M7: cache observability — hit/miss/eviction counters. */
+  getRetrievalCacheStats(): SemanticCacheStats | null {
+    return this.retrievalCache?.stats() ?? null;
+  }
+
+  /** Phase 2 P1-M7: clear the retrieval cache. */
+  clearRetrievalCache(): void {
+    this.retrievalCache?.clear();
+  }
+
+  // ── Memory benchmark (Phase 2 P1-M7) ───────────────────────
+
+  /**
+   * Phase 2 P1-M7: run the LongMemEval-style memory benchmark against
+   * this store. Wires the MemoryBenchmark orphan into MemoryStore —
+   * callers just say `store.runMemoryBenchmark()` and receive a
+   * scored BenchmarkSuite. Optional category lets callers run only a
+   * specific slice (e.g. "adversarial", "partitioned").
+   */
+  runMemoryBenchmark(category?: string): BenchmarkSuite {
+    const bench = new MemoryBenchmark();
+    const adapter = {
+      insert: (entry: {
+        id: string;
+        layer: string;
+        blockType: string;
+        key: string;
+        value: string;
+        verified: boolean;
+        freshnessScore: number;
+        confidenceLevel: number;
+        verificationStatus: string;
+        domain?: string;
+        topic?: string;
+      }) => {
+        this.insert({
+          id: entry.id,
+          layer: entry.layer as MemoryLayer,
+          blockType: entry.blockType as MemoryBlockType,
+          key: entry.key,
+          value: entry.value,
+          verified: entry.verified,
+          freshnessScore: entry.freshnessScore,
+          confidenceLevel: entry.confidenceLevel,
+          verificationStatus: entry.verificationStatus as VerificationStatus,
+          ...(entry.domain ? { domain: entry.domain } : {}),
+          ...(entry.topic ? { topic: entry.topic } : {}),
+        });
+      },
+      search: (query: string, limit: number) => {
+        const safe = sanitizeForFts5(query);
+        if (!safe) return [];
+        return this.search(safe, limit).map((r) => ({
+          entry: { key: r.entry.key, value: r.entry.value },
+          score: r.score,
+        }));
+      },
+      searchPartitioned: (
+        query: string,
+        options: { domain?: string; topic?: string; limit?: number },
+      ) => {
+        const safe = sanitizeForFts5(query);
+        if (!safe) return [];
+        return this.searchPartitioned(safe, options).map((r) => ({
+          entry: { key: r.entry.key, value: r.entry.value },
+          score: r.score,
+        }));
+      },
+    };
+    return category ? bench.runCategory(adapter, category) : bench.run(adapter);
+  }
+
+  // ── Agent-callable memory toolkit (Phase 2 P1-M7) ──────────
+
+  /**
+   * Phase 2 P1-M7: return a MemoryToolkit bound to this store.
+   *
+   * MemoryToolkit exposes memory_search / memory_replace / memory_insert
+   * as agent-callable tools following the OpenAI function-calling
+   * schema. Before this wire, the toolkit existed (580 LOC with tests)
+   * but no caller instantiated it — agents couldn't actually invoke
+   * memory operations by name.
+   *
+   * The adapter cast is safe because MemoryStore already implements
+   * every method of MemoryToolStoreAdapter with the exact signatures
+   * used by memory-tools.ts.
+   */
+  createAgentToolkit(): MemoryToolkit {
+    return new MemoryToolkit(this as unknown as MemoryToolStoreAdapter);
+  }
+
+  /**
+   * Phase 2 P1-M7: fetch the tool definitions (name + schema) for
+   * registering memory ops with a provider that supports function
+   * calling. Convenience so callers don't need to construct a
+   * MemoryToolkit just to read definitions.
+   */
+  getMemoryToolDefinitions(): readonly ToolDefinition[] {
+    return this.createAgentToolkit().getToolDefinitions();
+  }
+
+  /**
+   * Phase 2 P1-M7: dispatch a memory tool by name. Returns the result
+   * envelope with success/error + data payload. Agents pass the
+   * tool_name + arguments received from the provider.
+   */
+  dispatchMemoryTool(toolName: string, args: Record<string, unknown>): ToolCallResult {
+    return this.createAgentToolkit().dispatch(toolName, args);
+  }
+
   // ── Memvid portable export/import (Phase 2 P1-M7) ──────────
 
   /**
@@ -3168,4 +3334,20 @@ function blockTypeFromMemvid(category: string): MemoryBlockType {
   return (valid as readonly string[]).includes(category)
     ? (category as MemoryBlockType)
     : "reference";
+}
+
+/**
+ * Minimal FTS5 sanitizer — strips punctuation to tokens and joins with
+ * OR. Returns empty string when no valid tokens survive. Used by the
+ * benchmark adapter so natural-language questions (which contain ?, :,
+ * quotes, etc.) don't crash FTS5.
+ */
+function sanitizeForFts5(query: string): string {
+  const tokens = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((t) => t.length >= 2);
+  const unique = Array.from(new Set(tokens));
+  if (unique.length === 0) return "";
+  return unique.slice(0, 12).join(" OR ");
 }
