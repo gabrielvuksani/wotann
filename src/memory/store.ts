@@ -28,13 +28,32 @@ import { randomUUID } from "node:crypto";
 import { writeFileAtomicSyncBestEffort } from "../utils/atomic-io.js";
 import { deriveIngestTimestamps } from "./dual-timestamp.js";
 import type { MemoryRelationship, MemoryRelationshipKind } from "./relationship-types.js";
-import { clampContextTokens, cleanContext } from "./contextual-embeddings.js";
+import {
+  clampContextTokens,
+  cleanContext,
+  buildContextualChunk,
+  buildBatchedContextualChunks,
+  createLlmContextGenerator,
+  type ContextualChunkGenerator,
+  type LlmQuery as ContextualLlmQuery,
+  type BatchOptions as ContextualBatchOptions,
+} from "./contextual-embeddings.js";
 import {
   fromStoreFields as palaceFromStoreFields,
   toStoreFields as palaceToStoreFields,
   isUnder as palaceIsUnder,
+  parsePath as palaceParsePath,
+  formatPath as palaceFormatPath,
+  listHalls as palaceListHalls,
+  listWings as palaceListWings,
+  listRooms as palaceListRooms,
+  countTree as palaceCountTree,
+  renderTree as palaceRenderTree,
+  filterByQuery as palaceFilterByQuery,
   type MemPalacePath,
   type MemPalaceQuery,
+  type MemPalaceEntry,
+  type LevelCount as PalaceLevelCount,
 } from "./mem-palace.js";
 import {
   hybridFusion as rrfFusion,
@@ -45,6 +64,13 @@ import {
   type SearchableEntry,
   type TemporalFilter,
 } from "./extended-search-types.js";
+import { EntitySchema, type Entity } from "./entity-types.js";
+import { createHeuristicClassifier, resolveLatest, partitionByKind } from "./relationship-types.js";
+import {
+  IncrementalIndexer,
+  computeContentSha,
+  type IndexerOptions,
+} from "./incremental-indexer.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -1037,6 +1063,114 @@ export class MemoryStore {
 
   // ── Layer 4: Knowledge Graph ───────────────────────────────
 
+  /**
+   * Phase 2 P1-M7: typed-entity graph population.
+   *
+   * Validates a structured entity against `entity-types.EntitySchema`
+   * (person / project / file / concept / event / goal / skill / tool)
+   * and inserts it into `knowledge_nodes`. If a node with the same
+   * entity+type already exists, the existing id is returned rather
+   * than duplicated. Remaining fields are serialized into the
+   * properties JSON payload so downstream consumers can reconstruct
+   * the typed entity.
+   *
+   * Exists specifically to fix the "49-byte empty KG" bug: callers
+   * that already hold a validated Entity can push it to the graph
+   * without re-typing the free-form API.
+   */
+  recordEntity(entity: Entity): string {
+    const parsed = EntitySchema.safeParse(entity);
+    if (!parsed.success) {
+      throw new Error(`recordEntity: invalid entity — ${parsed.error.message}`);
+    }
+    const valid = parsed.data;
+    const name = entityNameOf(valid);
+    const existing = this.db
+      .prepare(`SELECT id FROM knowledge_nodes WHERE entity = ? AND entity_type = ? LIMIT 1`)
+      .get(name, valid.type) as { id: string } | undefined;
+    if (existing) return existing.id;
+
+    const properties: Record<string, string> = {};
+    for (const [k, v] of Object.entries(valid)) {
+      if (k === "type" || k === "name") continue;
+      if (v === undefined || v === null) continue;
+      properties[k] = typeof v === "string" ? v : JSON.stringify(v);
+    }
+    return this.addKnowledgeNode(name, valid.type, properties);
+  }
+
+  /**
+   * Phase 2 P1-M7: batch entity population. Parses each entity, skips
+   * invalid rows (returning them in `skipped`), inserts the rest in a
+   * single transaction.
+   */
+  recordEntities(entities: readonly Entity[]): {
+    readonly inserted: readonly { entity: Entity; nodeId: string }[];
+    readonly skipped: readonly { entity: Entity; reason: string }[];
+  } {
+    const inserted: { entity: Entity; nodeId: string }[] = [];
+    const skipped: { entity: Entity; reason: string }[] = [];
+    const tx = this.db.transaction(() => {
+      for (const entity of entities) {
+        try {
+          const nodeId = this.recordEntity(entity);
+          inserted.push({ entity, nodeId });
+        } catch (err) {
+          skipped.push({ entity, reason: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    });
+    tx();
+    return { inserted, skipped };
+  }
+
+  /**
+   * Phase 2 P1-M7: heuristic relationship materialization.
+   *
+   * Given two memory entries, classify the relationship between them
+   * using the heuristic classifier (no LLM call) and, when confident,
+   * insert a knowledge_edges row linking their knowledge_nodes.
+   *
+   * Returns the edge id when inserted, or null when the classifier
+   * emits no relationship (or confidence is below the threshold).
+   */
+  async recordHeuristicRelationship(
+    fromNodeId: string,
+    toNodeId: string,
+    predecessorContent: string,
+    successorContent: string,
+    minConfidence: number = 0.5,
+  ): Promise<string | null> {
+    const classifier = createHeuristicClassifier();
+    const result = await classifier.classify(predecessorContent, successorContent);
+    if (!result) return null;
+    if (result.confidence < minConfidence) return null;
+    return this.addKnowledgeEdge(fromNodeId, toNodeId, result.kind, result.confidence);
+  }
+
+  /**
+   * Phase 2 P1-M7: follow an `updates`-relationship chain from the
+   * given rootId and return the id of the most recent node in that
+   * chain. Delegates to relationship-types.resolveLatest so callers
+   * don't have to import both modules. Used for "what is the CURRENT
+   * version of fact X?" queries.
+   */
+  resolveLatestRelationship(rels: readonly MemoryRelationship[], rootId: string): string {
+    return resolveLatest(rels, rootId);
+  }
+
+  /**
+   * Phase 2 P1-M7: group the relationships attached to a node by kind
+   * (updates / extends / derives / unknown). Delegates to
+   * relationship-types.partitionByKind.
+   */
+  partitionRelationshipsByKind(
+    rels: readonly MemoryRelationship[],
+    nodeId: string,
+  ): Readonly<Record<MemoryRelationshipKind, readonly MemoryRelationship[]>> {
+    return partitionByKind(rels, nodeId);
+  }
+
   addKnowledgeNode(
     entity: string,
     entityType: string,
@@ -1543,6 +1677,157 @@ export class MemoryStore {
       return palaceIsUnder(rowPath, path);
     });
     return filtered.slice(0, limit);
+  }
+
+  // ── MemPalace helpers (Phase 2 P1-M7) ───────────────────────
+
+  /**
+   * Phase 2 P1-M7: list every distinct hall currently represented in
+   * memory_entries, derived from the row's domain/topic fields. A hall
+   * is the top-level palace axis ("auth", "deploy", "memory").
+   */
+  palaceListHalls(): readonly string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT domain, topic FROM memory_entries WHERE archived = 0 AND domain != ''`,
+      )
+      .all() as { domain: string; topic: string | null }[];
+    const entries = this.rowsToPalaceEntries(rows);
+    return palaceListHalls(entries);
+  }
+
+  /** Phase 2 P1-M7: list wings under a hall. */
+  palaceListWings(hall: string): readonly string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT domain, topic FROM memory_entries
+         WHERE archived = 0 AND domain != ''`,
+      )
+      .all() as { domain: string; topic: string | null }[];
+    const entries = this.rowsToPalaceEntries(rows);
+    return palaceListWings(entries, hall);
+  }
+
+  /** Phase 2 P1-M7: list rooms under a specific wing within a hall. */
+  palaceListRooms(hall: string, wing: string): readonly string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT domain, topic FROM memory_entries
+         WHERE archived = 0 AND domain != ''`,
+      )
+      .all() as { domain: string; topic: string | null }[];
+    const entries = this.rowsToPalaceEntries(rows);
+    return palaceListRooms(entries, hall, wing);
+  }
+
+  /**
+   * Phase 2 P1-M7: tree-view of the palace — counts at hall, wing, and
+   * room granularity. Use together with `palaceTreeText()` for a
+   * printable outline.
+   */
+  palaceCountTree(): readonly PalaceLevelCount[] {
+    const rows = this.db
+      .prepare(`SELECT domain, topic FROM memory_entries WHERE archived = 0 AND domain != ''`)
+      .all() as { domain: string; topic: string | null }[];
+    const entries = this.rowsToPalaceEntries(rows);
+    return palaceCountTree(entries);
+  }
+
+  /**
+   * Phase 2 P1-M7: render the palace tree as a printable outline.
+   * Wraps palaceCountTree + palaceRenderTree so TUIs and CLI consumers
+   * can print a quick palace summary without reaching into mem-palace
+   * directly.
+   */
+  palaceTreeText(): string {
+    return palaceRenderTree(this.palaceCountTree());
+  }
+
+  /**
+   * Phase 2 P1-M7: parse a slash-separated palace path and format it
+   * back out. Kept on MemoryStore so the palace API is discoverable
+   * from a single entry point.
+   */
+  palaceParsePath(pathString: string): MemPalacePath {
+    return palaceParsePath(pathString);
+  }
+
+  palaceFormatPath(path: MemPalacePath): string {
+    return palaceFormatPath(path);
+  }
+
+  /**
+   * Convert memory_entries rows to MemPalaceEntry shape. Derives the
+   * palace path from domain/topic fields via the shared
+   * palaceFromStoreFields helper.
+   */
+  private rowsToPalaceEntries(
+    rows: readonly { domain: string; topic: string | null }[],
+  ): readonly MemPalaceEntry<null>[] {
+    return rows.map((r) => ({
+      path: palaceFromStoreFields({ domain: r.domain, topic: r.topic ?? "" }),
+      data: null,
+    }));
+  }
+
+  // ── Contextual embeddings helpers (Phase 2 P1-M7) ───────────
+
+  /**
+   * Phase 2 P1-M7: install a ContextualChunkGenerator on this store.
+   * When set, every subsequent insert() will call the generator and
+   * prepend ~50 tokens of context to the indexed value per Anthropic's
+   * contextual retrieval guidelines.
+   *
+   * Thin wrapper over setContextGenerator that accepts the structured
+   * ContextualChunkGenerator type defined in contextual-embeddings.ts.
+   */
+  private asyncContextGenerator: ContextualChunkGenerator | null = null;
+
+  installContextGenerator(generator: ContextualChunkGenerator | null): void {
+    this.asyncContextGenerator = generator;
+  }
+
+  /** Phase 2 P1-M7: retrieve the installed async ContextualChunkGenerator. */
+  getContextGenerator(): ContextualChunkGenerator | null {
+    return this.asyncContextGenerator;
+  }
+
+  /**
+   * Phase 2 P1-M7: convenience — wrap an LLM query function as a
+   * ContextualChunkGenerator and install it in one call.
+   */
+  enableContextualRetrieval(llm: ContextualLlmQuery): void {
+    this.installContextGenerator(createLlmContextGenerator(llm));
+  }
+
+  /**
+   * Phase 2 P1-M7: build one contextual chunk (chunk + LLM-derived
+   * context). Exposed for callers that want to precompute chunks
+   * offline before inserting into memory.
+   */
+  async buildContextualChunk(
+    chunk: string,
+    document: string,
+    llm: ContextualLlmQuery,
+  ): Promise<string> {
+    const generator = createLlmContextGenerator(llm);
+    const built = await buildContextualChunk(chunk, document, generator);
+    return built.contextualized;
+  }
+
+  /**
+   * Phase 2 P1-M7: batch version — build multiple contextual chunks
+   * with bounded concurrency.
+   */
+  async buildContextualChunksBatch(
+    chunks: readonly string[],
+    document: string,
+    llm: ContextualLlmQuery,
+    options?: ContextualBatchOptions,
+  ): Promise<readonly string[]> {
+    const generator = createLlmContextGenerator(llm);
+    const built = await buildBatchedContextualChunks(chunks, document, generator, options);
+    return built.map((b) => b.contextualized);
   }
 
   /**
@@ -2490,6 +2775,76 @@ export class MemoryStore {
     return Number(info.changes);
   }
 
+  // ── Incremental Indexer (Phase 2 P1-M7) ─────────────────────
+
+  /**
+   * Phase 2 P1-M7: file-indexing helpers wired into MemoryStore.
+   *
+   * The underlying IncrementalIndexer persists a SHA-per-file cache to
+   * `~/.wotann/index-cache.json` so repeat indexing runs only re-read
+   * files whose content actually changed. A lazy singleton keeps the
+   * cache in memory for the store's lifetime.
+   */
+  private incrementalIndexer: IncrementalIndexer | null = null;
+
+  private getIncrementalIndexer(options?: IndexerOptions): IncrementalIndexer {
+    if (!this.incrementalIndexer) {
+      this.incrementalIndexer = new IncrementalIndexer(options ?? {});
+    }
+    return this.incrementalIndexer;
+  }
+
+  /**
+   * Return only the paths that need re-indexing (new or SHA-changed).
+   * First call loads the on-disk cache. Safe to call repeatedly.
+   */
+  async getStaleFiles(
+    paths: readonly string[],
+    options?: IndexerOptions,
+  ): Promise<readonly string[]> {
+    const indexer = this.getIncrementalIndexer(options);
+    await indexer.load();
+    return indexer.getStaleFiles(paths);
+  }
+
+  /**
+   * Record that a file has been indexed. Content-SHA is computed from
+   * the supplied text so callers who already have the content in
+   * memory don't pay an extra disk read.
+   */
+  async markFileIndexed(
+    path: string,
+    content: string,
+    chunksCount: number,
+    options?: IndexerOptions,
+  ): Promise<void> {
+    const indexer = this.getIncrementalIndexer(options);
+    await indexer.load();
+    const sha = computeContentSha(content);
+    indexer.markIndexed(path, sha, chunksCount);
+    await indexer.save();
+  }
+
+  /** Forget a path — used when a file is deleted. Persists immediately. */
+  async forgetFileIndex(path: string, options?: IndexerOptions): Promise<boolean> {
+    const indexer = this.getIncrementalIndexer(options);
+    await indexer.load();
+    const removed = indexer.forget(path);
+    if (removed) await indexer.save();
+    return removed;
+  }
+
+  /** Stats on the in-memory index cache. */
+  async getFileIndexStats(options?: IndexerOptions): Promise<{
+    readonly tracked: number;
+    readonly totalChunks: number;
+    readonly estimatedSavedMs: number;
+  }> {
+    const indexer = this.getIncrementalIndexer(options);
+    await indexer.load();
+    return indexer.stats();
+  }
+
   // ── Typed Relationships (Phase H Task 2) ───────────────────
 
   /** Persist one typed relationship. Idempotent on id. */
@@ -2594,4 +2949,17 @@ export class MemoryStore {
   close(): void {
     this.db.close();
   }
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+
+/**
+ * Return the canonical name field for an entity. Handles per-type
+ * name fields: `person.name`, `project.name`, `file.path`,
+ * `concept.name`, `event.name`, `goal.name`, `skill.name`,
+ * `tool.name`.
+ */
+function entityNameOf(entity: Entity): string {
+  if (entity.type === "file") return entity.path;
+  return entity.name;
 }
