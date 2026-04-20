@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-20
+
+The second major public release. **434 commits since v0.1.0.** This release lands every sprint from Phase 1–5, the full daemon RPC surface, the 8-layer memory, capability augmentation across 19 providers, the Ralph + self-healing autopilot, Tauri desktop, iOS companion, and the single-executable (SEA) release binary.
+
+> **Distribution note:** This release ships the **macOS arm64 SEA binary only**. Linux / Windows / macOS x64 builds are produced by the CI matrix from the same tag — they are intentionally excluded from this manual release to avoid shipping artifacts that haven't been locally verified. Tag `v0.4.0` is in place; re-running the `Release` workflow will populate the remaining targets.
+
 ### Added
 - **CI is green on `main`** — split jobs (typecheck-build hard-required on Ubuntu+macOS, test sharded 2-way with shard 1 advisory due to GH runner preemption flake, desktop-typecheck hard-required); `npm rebuild better-sqlite3` step + `--ignore-scripts` on `npm ci` to skip the postinstall tsc; `NODE_OPTIONS=--max-old-space-size=6144` on test jobs
 - **NotificationService wiring** (A4) — `autonomous.run` now pushes `task-complete` on success and `error` on failure with task summary
@@ -68,5 +74,6 @@ Initial public release.
 - Anti-distillation (fake tool injection + zero-width Unicode watermarks)
 - 3,723 unit tests via Vitest
 
-[Unreleased]: https://github.com/gabrielvuksani/wotann/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/gabrielvuksani/wotann/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/gabrielvuksani/wotann/releases/tag/v0.4.0
 [0.1.0]: https://github.com/gabrielvuksani/wotann/releases/tag/v0.1.0

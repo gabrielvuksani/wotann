@@ -26,7 +26,7 @@ class Wotann < Formula
   on_macos do
     on_arm do
       url "https://github.com/gabrielvuksani/wotann/releases/download/v#{version}/wotann-#{version}-macos-arm64.tar.gz"
-      sha256 "SHA-CALCULATED-AT-RELEASE-TIME-macos-arm64"
+      sha256 "55cb7efdde8492822eb43f1a4dcdaf0183e4f48b0350e41d2469450c08857ad8"
     end
     on_intel do
       url "https://github.com/gabrielvuksani/wotann/releases/download/v#{version}/wotann-#{version}-macos-x64.tar.gz"

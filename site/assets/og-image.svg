@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#d4af37" stop-opacity="0.22"/>
+      <stop offset="55%" stop-color="#0b1020" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d4af37"/>
+      <stop offset="100%" stop-color="#f2cf6b"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="#0b1020"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <g transform="translate(600 180)">
+    <circle cx="0" cy="0" r="62" fill="none" stroke="url(#accent)" stroke-width="3"/>
+    <path d="M-40 -18 L-18 42 L0 -18 L18 42 L40 -18" fill="none" stroke="url(#accent)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <text x="600" y="360" text-anchor="middle"
+        font-family="Iowan Old Style, Palatino, Baskerville, serif"
+        font-size="128" font-weight="700"
+        fill="url(#accent)" letter-spacing="16">
+    WOTANN
+  </text>
+
+  <text x="600" y="440" text-anchor="middle"
+        font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+        font-size="34" font-weight="500" fill="#d7ddec" letter-spacing="1">
+    The All-Father of AI agent harnesses.
+  </text>
+
+  <text x="600" y="500" text-anchor="middle"
+        font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+        font-size="24" font-weight="400" fill="#94a0c0" letter-spacing="1">
+    One install · Every model · Every channel · Full autonomy
+  </text>
+
+  <text x="600" y="575" text-anchor="middle"
+        font-family="SF Mono, Menlo, Monaco, monospace"
+        font-size="20" fill="#d4af37" letter-spacing="3">
+    wotann.com  ·  github.com/gabrielvuksani/wotann  ·  MIT
+  </text>
+</svg>
