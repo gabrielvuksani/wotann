@@ -30,6 +30,7 @@ import type {
   ProviderCapabilities,
 } from "./types.js";
 import { getModelContextConfig } from "../context/limits.js";
+import { toGeminiFunctionDeclarations } from "./tool-serializer.js";
 
 // ── Wire types (subset of the Gemini REST schema we use) ────────────
 
@@ -289,14 +290,16 @@ export function createGeminiNativeAdapter(
     const wantCodeExecution = perQuery?.codeExecution ?? enableCodeExecution;
     const wantUrlContext = perQuery?.urlContext ?? enableUrlContext;
 
+    // P1-B2: route the user-defined tool schemas through the shared
+    // serializer (`toGeminiFunctionDeclarations`) so Gemini's
+    // functionDeclarations inherit the same $ref-reject guard + clean
+    // error messages every other adapter uses. The first-class Gemini
+    // tools (googleSearch / codeExecution / urlContext) still append
+    // locally because they have no user-supplied schema to serialize.
     const tools: Array<Record<string, unknown>> = [];
     if (opts.tools && opts.tools.length > 0) {
       tools.push({
-        functionDeclarations: opts.tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          parameters: t.inputSchema,
-        })),
+        functionDeclarations: toGeminiFunctionDeclarations(opts.tools),
       });
     }
     if (wantWebSearch) tools.push({ googleSearch: {} });

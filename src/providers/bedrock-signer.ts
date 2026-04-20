@@ -34,6 +34,7 @@ import {
   getMessageType,
   type EventStreamMessage,
 } from "./bedrock-eventstream.js";
+import { toBedrockTools, type BedrockToolParam } from "./tool-serializer.js";
 
 interface BedrockCredentials {
   readonly accessKeyId: string;
@@ -139,13 +140,10 @@ interface BedrockMessage {
   readonly content: readonly BedrockContentBlock[];
 }
 
-interface BedrockToolSpec {
-  readonly toolSpec: {
-    readonly name: string;
-    readonly description: string;
-    readonly inputSchema: { readonly json: Record<string, unknown> };
-  };
-}
+// Tool envelope type lives in the shared tool-serializer so every
+// provider's shape is defined in one canonical location. Aliased here
+// to `BedrockToolSpec` for readability at call sites that predate P1-B2.
+type BedrockToolSpec = BedrockToolParam;
 
 interface BedrockRequestBody {
   readonly messages: readonly BedrockMessage[];
@@ -196,14 +194,17 @@ function agentMessagesToBedrock(messages: readonly AgentMessage[]): readonly Bed
   return out;
 }
 
+/**
+ * Thin alias over the shared serializer so call sites read as
+ * "to Bedrock tools" but actually go through the one canonical home
+ * (src/providers/tool-serializer.ts). Routes all adapters through the
+ * same pass-through + $ref-reject pattern introduced in P0-4. Preserves
+ * the exact wire shape Bedrock Converse expects
+ * (`toolSpec.inputSchema.json`) so no regression vs. the pre-P1-B2
+ * inline serializer.
+ */
 function toolSchemasToBedrock(tools: readonly ToolSchema[]): readonly BedrockToolSpec[] {
-  return tools.map((t) => ({
-    toolSpec: {
-      name: t.name,
-      description: t.description,
-      inputSchema: { json: t.inputSchema },
-    },
-  }));
+  return toBedrockTools(tools);
 }
 
 /**

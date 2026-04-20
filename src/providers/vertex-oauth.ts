@@ -27,6 +27,7 @@ import type {
   StopReason,
 } from "./types.js";
 import { openAIToAnthropic } from "./format-translator.js";
+import { toVertexTools } from "./tool-serializer.js";
 
 /**
  * Map Anthropic's raw stop_reason to the normalised StopReason vocabulary.
@@ -224,14 +225,13 @@ export function createVertexAdapter(auth: ProviderAuth): ProviderAdapter {
     }
     anthropicMessages.push({ role: "user", content: opts.prompt });
 
+    // P1-B2: route through the shared serializer so Vertex + native
+    // Anthropic can never drift apart on tool wire shape. Vertex Claude
+    // speaks Anthropic's wire format; `toVertexTools` delegates to
+    // `toAnthropicTools` but the indirection gives us one place to land
+    // any future Vertex-specific quirks.
     const anthropicTools =
-      opts.tools && opts.tools.length > 0
-        ? opts.tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            input_schema: t.inputSchema as Record<string, unknown>,
-          }))
-        : undefined;
+      opts.tools && opts.tools.length > 0 ? toVertexTools(opts.tools) : undefined;
 
     const body = JSON.stringify({
       anthropic_version: "vertex-2023-10-16",

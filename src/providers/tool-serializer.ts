@@ -1,30 +1,36 @@
 /**
  * Unified tool serializer.
  *
- * Per MASTER_PLAN_V8 P0-4 + RESEARCH_HERMES_AGENT_PORT (§4.1, §5):
+ * Per MASTER_PLAN_V8 P0-4 + P1-B2 + RESEARCH_HERMES_AGENT_PORT (§4.1, §5):
  * Hermes Agent's `convert_tools_to_anthropic` is a pass-through that
  * copies the caller's JSON schema verbatim into the provider envelope.
  * The 1-line pattern preserves nested objects, arrays-of-objects,
  * `additionalProperties`, `required` arrays, and `enum` automatically
  * because JSON pass-through is structure-preserving.
  *
- * This module is the single home for that pattern across WOTANN's four
- * provider families that take their tool schemas via the chat-completions
- * / messages-style payload:
+ * This module is the single home for that pattern across WOTANN's
+ * seven provider families that all speak native `tools:` at the
+ * provider-level (NOT JSON-in-prompt hacks). Each adapter's tool
+ * envelope is different, so each family gets a dedicated serializer
+ * that produces EXACTLY the wire shape that adapter POSTs:
  *
  *   - Anthropic Messages API   → { name, description, input_schema }
  *   - OpenAI Chat Completions  → { type: "function", function: {...} }
  *   - Codex Responses API      → flat { type, name, description, parameters }
  *   - GitHub Copilot           → identical to OpenAI (it's a proxy)
+ *   - AWS Bedrock Converse     → { toolSpec: { name, description, inputSchema: { json } } }
+ *   - Google Vertex (Claude)   → same as Anthropic (Vertex fronts Anthropic's wire)
+ *   - Gemini native            → { functionDeclarations: [{ name, description, parameters }] }
+ *   - Ollama /api/chat         → { type: "function", function: {...} } (OpenAI-shape)
  *
- * Bedrock + Vertex + Gemini-native + Ollama are intentionally NOT routed
- * here — each has a wire format different enough that a shared serializer
- * would obscure rather than clarify (Bedrock wraps in `toolSpec.inputSchema.json`,
- * Gemini in `tools[0].functionDeclarations`, Ollama in native /api/chat
- * `tools` with its own quirks). Those adapters keep their bespoke
- * serializers, locked by their own regression tests.
+ * The rationale for centralizing even the bespoke formats: per-adapter
+ * drift is the #1 source of tool-serialization bugs (session-10 audit
+ * found 4 of 5 adapters silently stripping `tools:`). One canonical
+ * home per provider keeps the shape definitions next to each other so
+ * future changes (e.g. a new required top-level field) land in one
+ * review, not six scattered edits.
  *
- * `$ref` handling: every shared-serializer provider rejects `$ref` in tool
+ * `$ref` handling: every native-tools provider rejects `$ref` in tool
  * schemas because none of them dereference it before sending to the model.
  * Without this guard, the request reaches the API and returns an opaque
  * 400 ("invalid_request_error") that's hard to root-cause. We fail loud
@@ -187,5 +193,137 @@ export function toCodexTools(tools: readonly ToolSchema[]): readonly CodexToolPa
  * single place to land without touching OpenAI.
  */
 export function toCopilotTools(tools: readonly ToolSchema[]): readonly CopilotToolParam[] {
+  return toOpenAITools(tools);
+}
+
+// ── Bedrock ─────────────────────────────────────────────────
+
+/**
+ * AWS Bedrock Converse API tool envelope.
+ *
+ * Shape: `{ toolSpec: { name, description, inputSchema: { json: ... } } }`.
+ * Bedrock wraps the schema twice — once in `toolSpec`, then again inside
+ * `inputSchema.json`. The inner `.json` is a discriminator that lets
+ * Bedrock route to the JSON Schema interpreter (vs. future formats).
+ */
+export interface BedrockToolParam {
+  readonly toolSpec: {
+    readonly name: string;
+    readonly description: string;
+    readonly inputSchema: {
+      readonly json: Record<string, unknown>;
+    };
+  };
+}
+
+/**
+ * Convert WOTANN tool specs to the Bedrock Converse envelope. The Bedrock
+ * adapter then wraps the array under `toolConfig.tools` on the request
+ * body. Schema preserved verbatim inside `inputSchema.json`.
+ */
+export function toBedrockTools(tools: readonly ToolSchema[]): readonly BedrockToolParam[] {
+  const out: BedrockToolParam[] = [];
+  for (const t of tools) {
+    assertNoRef(t);
+    out.push({
+      toolSpec: {
+        name: t.name,
+        description: t.description,
+        inputSchema: { json: t.inputSchema },
+      },
+    });
+  }
+  return out;
+}
+
+// ── Vertex (Claude on Vertex AI) ────────────────────────────
+
+/**
+ * Vertex AI tool envelope for Claude models.
+ *
+ * Vertex fronts Anthropic's Messages API wire format with OAuth2 + its
+ * own endpoint, so the tool shape is IDENTICAL to Anthropic's
+ * `{ name, description, input_schema }`. Exported as a distinct type
+ * so Vertex-specific quirks (if any ever appear) land in one place
+ * without touching the native Anthropic path.
+ */
+export type VertexToolParam = AnthropicToolParam;
+
+/**
+ * Convert WOTANN tool specs to the Vertex envelope (Anthropic-shaped).
+ *
+ * Delegates to `toAnthropicTools` — Vertex Claude speaks the same wire
+ * format as native Anthropic. Kept as a distinct export for future-
+ * proofing in case Google ever adds Vertex-specific tool fields (e.g.
+ * `vertex_routing`), so callers don't have to guess which serializer
+ * the path uses.
+ */
+export function toVertexTools(tools: readonly ToolSchema[]): readonly VertexToolParam[] {
+  return toAnthropicTools(tools);
+}
+
+// ── Gemini (native) ─────────────────────────────────────────
+
+/**
+ * Gemini native functionDeclarations envelope — what goes INSIDE the
+ * `tools: [{ functionDeclarations: [...] }]` wrapper on the request.
+ *
+ * Shape: `{ name, description, parameters }`. Gemini uses `parameters`
+ * (like OpenAI) rather than Anthropic's `input_schema`. The full request
+ * body wraps the array as `tools: [{ functionDeclarations }]`; this
+ * serializer returns the inner declarations so the adapter can assemble
+ * the outer wrapper alongside `googleSearch`/`codeExecution`/`urlContext`
+ * first-class tools.
+ */
+export interface GeminiFunctionDeclaration {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: Record<string, unknown>;
+}
+
+/**
+ * Convert WOTANN tool specs to Gemini native functionDeclarations.
+ *
+ * Returns the declarations array. The caller wraps it as
+ * `tools: [{ functionDeclarations: <this-result> }]` and optionally
+ * appends `{ googleSearch: {} }`, `{ codeExecution: {} }`, or
+ * `{ urlContext: {} }` for Gemini's first-class built-in tools.
+ */
+export function toGeminiFunctionDeclarations(
+  tools: readonly ToolSchema[],
+): readonly GeminiFunctionDeclaration[] {
+  const out: GeminiFunctionDeclaration[] = [];
+  for (const t of tools) {
+    assertNoRef(t);
+    out.push({
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema,
+    });
+  }
+  return out;
+}
+
+// ── Ollama ──────────────────────────────────────────────────
+
+/**
+ * Ollama native /api/chat tool envelope.
+ *
+ * Wire format: `{ type: "function", function: { name, description,
+ * parameters } }` — identical to OpenAI Chat Completions. Ollama's
+ * native endpoint deliberately mirrors OpenAI's shape so open-model
+ * tool training datasets transfer over. Exported distinctly so
+ * future Ollama-specific fields (e.g. per-tool thinking budgets) can
+ * land here without touching the OpenAI path.
+ */
+export type OllamaToolParam = OpenAIToolParam;
+
+/**
+ * Convert WOTANN tool specs to the Ollama envelope (OpenAI-shaped).
+ *
+ * Delegates to `toOpenAITools`. Ollama's /api/chat accepts the OpenAI
+ * tool shape verbatim.
+ */
+export function toOllamaTools(tools: readonly ToolSchema[]): readonly OllamaToolParam[] {
   return toOpenAITools(tools);
 }

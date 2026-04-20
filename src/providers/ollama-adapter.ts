@@ -27,6 +27,7 @@ import type {
   StreamChunk,
   ProviderCapabilities,
 } from "./types.js";
+import { toOllamaTools } from "./tool-serializer.js";
 
 interface OllamaModel {
   readonly name: string;
@@ -230,16 +231,16 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
       options: ollamaOpts,
     };
 
-    // Add tool definitions if provided
+    // Add tool definitions if provided.
+    //
+    // P1-B2: routed through the shared tool-serializer
+    // (`toOllamaTools` → `toOpenAITools` since Ollama's /api/chat mirrors
+    // OpenAI's wire). Benefits: (a) one canonical home for every
+    // provider's tool shape, (b) $ref detection + clean error message
+    // shared with every other adapter, (c) no silent drift when OpenAI
+    // tool shape evolves. Preserves the exact wire shape Ollama expects.
     if (options.tools && options.tools.length > 0) {
-      body["tools"] = options.tools.map((t) => ({
-        type: "function",
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.inputSchema,
-        },
-      }));
+      body["tools"] = toOllamaTools(options.tools);
     }
 
     try {
