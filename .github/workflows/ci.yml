@@ -52,16 +52,17 @@ jobs:
         run: npm run build
 
   test:
-    name: Test ${{ matrix.shard }}/2 (Node ${{ matrix.node-version }} / self-hosted)
-    # Self-hosted runner (2026-04-19): GitHub Actions hosted Ubuntu
-    # runners were pre-empting shard 1 mid-vitest (~6-16s in, no test
-    # failure preceding). nick-fields/retry@v3 couldn't recover because
-    # the entire runner process was being killed. Moving to a
-    # self-hosted runner (labels: self-hosted, linux) eliminates the
-    # pre-emption class of failure. Fallback label ensures pending jobs
-    # queue rather than fail when no runner is online.
-    runs-on: [self-hosted, linux]
-    timeout-minutes: 10
+    name: Test ${{ matrix.shard }}/2 (Node ${{ matrix.node-version }} / ubuntu-latest)
+    # Hosted ubuntu-latest runner (2026-04-20): originally moved to
+    # self-hosted because hosted runners were pre-empting shard 1
+    # mid-vitest, but with the codebase-health perf fix dropping that
+    # suite from 13.48s → 198ms, full `npm test` now completes in ~46s
+    # — well under the pre-emption window. Moving back to hosted removes
+    # the self-hosted-runner dependency (jobs queued forever when no
+    # runner was online). nick-fields/retry@v3 wraps vitest so the
+    # occasional flaky hosted-runner hiccup retries once before failing.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
