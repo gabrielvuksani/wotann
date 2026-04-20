@@ -1,12 +1,18 @@
 /**
- * Magika file-type-gate regression tests (session-6 competitor port).
+ * File-type-gate regression tests.
  *
  * The gate's primary value is extension-mismatch detection — a binary
  * uploaded as `.txt` should flag as binary, not get silently fed to a
- * text handler. We can't force-load the Magika model in CI without
- * pulling ~10MB of TFJS weights on every run, so most tests cover the
- * extension-fallback path. One gated test exercises the real model
- * when `WOTANN_RUN_MAGIKA_TESTS=1` is set.
+ * text handler. Tier-0 CVE sweep replaced Google's Magika (TFJS-backed,
+ * 10MB weights, 9 CVEs via protobufjs) with `magic-bytes.js` (pure JS
+ * lookup tree, zero CVEs, no cold-load). Detection is now synchronous
+ * and always available in CI, so tests assert real byte-signature
+ * behaviour instead of having to skip-if-model-missing.
+ *
+ * The env-gated `WOTANN_RUN_MAGIKA_TESTS=1` block is retained as a
+ * named flag for anyone wiring extra magic-byte assertions without
+ * blocking the default CI path. Historical name kept to avoid churning
+ * external test scripts.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -28,23 +34,18 @@ function baseContext(overrides: Partial<MiddlewareContext> = {}): MiddlewareCont
 }
 
 describe("file-type-gate — extension fallback", () => {
-  // First test in the suite triggers Magika model cold-load. When the
-  // optional `magika` dep IS installed, `MagikaNode.create()` currently
-  // takes ~17s even on fast local disks before failing internally with
-  // `binary.find is not a function` (upstream packaging quirk), plus
-  // another ~10s when the full vitest suite is stressing the machine.
-  // Give it 60s — the subsequent 3 tests in this file hit the warm
-  // cache and return in <5ms each.
+  // magic-bytes.js runs synchronously against the first 4KB of the
+  // buffer — no model loading, no warm-cache bookkeeping. The 60s
+  // timeout is kept as a safety margin rather than a real need; every
+  // test here returns in <5ms under the new implementation.
   it(
     "returns a FileTypeResult for a .pdf named file (shape contract)",
     { timeout: 60_000 },
     async () => {
-      // Extension fallback path returns handler:"pdf". If Magika is
-      // available in the test env it may classify these 4 bytes (the
-      // ASCII literal "%PDF") as "text" because the buffer is too short
-      // for real PDF detection — both are honest outcomes. Assert the
-      // result shape rather than a specific handler value (quality bar
-      // #12: env-dependent test assertions break on clean CI).
+      // magic-bytes detects the %PDF magic header even on 4 bytes and
+      // returns handler:"pdf". Extension also agrees. Assert the result
+      // shape (quality bar #12: env-dependent test assertions break on
+      // clean CI); the shape is stable across detector backends.
       const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // "%PDF"
       const result = await detectFileType(bytes, "report.pdf");
       expect(typeof result.handler).toBe("string");
@@ -62,12 +63,13 @@ describe("file-type-gate — extension fallback", () => {
     expect(result.handler).toBe("code");
   });
 
-  it("returns handler='unknown' when neither model nor extension matches", async () => {
+  it("returns handler='unknown' when neither byte-signature nor extension matches", async () => {
     const bytes = new Uint8Array([0x00, 0x01, 0x02]);
     const result = await detectFileType(bytes, "mystery.qqzxy");
-    // Extension fallback: unknown. Model (if loaded) may still classify,
-    // in which case `fromModel` will be true and `handler` may not be
-    // 'unknown'. Both outcomes honest — assert the NO-FABRICATION shape.
+    // Byte-signature fallback: magic-bytes returns nothing for these
+    // 3 random bytes. Extension fallback: unknown. magic-bytes is
+    // deterministic (no model load) so fromModel is always false in
+    // this path. The NO-FABRICATION shape still holds either way.
     if (!result.fromModel) {
       expect(result.handler).toBe("unknown");
       expect(result.confidence).toBe(0);
@@ -86,36 +88,51 @@ describe("file-type-gate — extension fallback", () => {
   });
 });
 
-describe("file-type-gate — real Magika model (env-gated)", () => {
+describe("file-type-gate — byte-signature detection (env-gated)", () => {
+  // Env-gate retained for backwards compat with external scripts that
+  // set WOTANN_RUN_MAGIKA_TESTS=1 to exercise the deep byte-signature
+  // assertions. magic-bytes is synchronous and fast, so these could run
+  // by default, but keeping the gate avoids test-name churn.
   const ENABLE = process.env["WOTANN_RUN_MAGIKA_TESTS"] === "1";
 
   (ENABLE ? it : it.skip)(
     "detects extension mismatch: binary disguised as .txt",
     { timeout: 60_000 },
     async () => {
-      // PE32 executable header ("MZ" + minimal bytes). Magika should
-      // classify as `pebin` regardless of the .txt extension.
+      // PE32 executable header ("MZ" + minimal bytes). magic-bytes
+      // should classify as `exe` regardless of the .txt extension.
       const peBytes = new Uint8Array([
         0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00,
         0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0xb8, 0x00, 0x00, 0x00,
       ]);
       const result = await detectFileType(peBytes, "disguised.txt");
-      if (!result.fromModel) return; // model didn't load — skip silently
+      if (!result.fromModel) return; // detector didn't fire — skip silently
       expect(result.handler).toBe("binary");
       expect(result.extensionMismatch).toBe(true);
     },
   );
 
-  (ENABLE ? it : it.skip)(
-    "classifies Python source by content even with wrong extension",
-    { timeout: 60_000 },
+  // LOST CAPABILITY (Tier-0 CVE sweep trade-off):
+  //
+  // The previous test "classifies Python source by content even with
+  // wrong extension" asserted that magika's LEARNED model could
+  // identify `.xyz`-named Python source as "code" by reading the
+  // bytes. magic-bytes.js is a byte-SIGNATURE detector — it has no
+  // signature for plain-text source because plain-text files have no
+  // magic number. This is a real behaviour regression, knowingly
+  // accepted when we dropped @xenova/transformers + magika for the
+  // CVE sweep.
+  //
+  // Rather than silently weaken the assertion (Quality Bar #9 bans
+  // modifying tests just to make them pass), the test is PERMANENTLY
+  // skipped with a reason. Re-enable when P1-M2 delivers a native
+  // (non-protobufjs) embedding path capable of content-based source
+  // classification.
+  it.skip(
+    "[LOST] classifies Python source by content even with wrong extension",
     async () => {
-      const src = new TextEncoder().encode(
-        "import os\ndef main():\n    print(os.getcwd())\n\nif __name__ == '__main__':\n    main()\n",
-      );
-      const result = await detectFileType(src, "script.xyz");
-      if (!result.fromModel) return;
-      expect(result.handler).toBe("code");
+      // intentionally empty — behaviour no longer provided by the
+      // byte-signature detector. See banner comment above.
     },
   );
 });
@@ -221,8 +238,11 @@ describe("file-type-gate middleware — layer 3.5 wiring", () => {
     }
   });
 
-  it("functional (env-gated): .pdf-as-.txt → handler='pdf' when model loads", async () => {
-    if (process.env["WOTANN_RUN_MAGIKA_TESTS"] !== "1") return;
+  it("functional: .pdf-as-.txt → handler='pdf' via byte-signature", async () => {
+    // Under magic-bytes the %PDF header is always detected (pure JS
+    // lookup, no model load), so the stronger assertion holds
+    // unconditionally. The old env gate `WOTANN_RUN_MAGIKA_TESTS=1`
+    // was retired with magika; the assertion is now default-on.
     const pdfHeader = new TextEncoder().encode(
       "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n",
     );
@@ -233,8 +253,6 @@ describe("file-type-gate middleware — layer 3.5 wiring", () => {
     const pipeline = createDefaultPipeline();
     const out = await pipeline.processBefore(ctx);
     const stamped = out.uploads![0]!;
-    if (!stamped.handler) return; // defensive
-    // With model loaded, handler MUST be pdf per task requirement.
     expect(stamped.handler).toBe("pdf");
     expect(stamped.trustBoundary).toBe("binary");
     expect(stamped.extensionMismatch).toBe(true);

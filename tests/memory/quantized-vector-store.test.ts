@@ -1,15 +1,20 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { QuantizedVectorStore } from "../../src/memory/quantized-vector-store.js";
 
-// Session-4 regression guards for S3-4 phase 2 — @xenova/transformers
-// wiring. The real ONNX path requires ~50MB of model weights from
-// HuggingFace, so these unit tests focus on:
-// - the forceTFIDFFallback contract (always-deterministic)
+// Session-4 regression guards for S3-4 phase 2.
+//
+// Tier-0 CVE sweep removed @xenova/transformers — the ONNX embedding
+// path shipped 9 CVEs through the protobufjs chain. QuantizedVectorStore
+// is now TF-IDF-only under the same public API. This file's test
+// surface focuses on:
+// - the forceTFIDFFallback contract (always-deterministic, now the only
+//   backend)
 // - API parity with TFIDFIndex (addDocument / removeDocument / clear /
 //   size / vocabularySize / similarity)
-// - backend diagnostics
-// The model-loading path is runtime-verified separately (loading a
-// 50MB HuggingFace model inside `npm test` would be flaky + slow).
+// - backend diagnostics (getBackend always "tfidf-fallback" post-sweep)
+// The MiniLM embedding capability that previously lived behind an env
+// flag is now PERMANENTLY SKIPPED (marked [LOST]) — re-enable when
+// P1-M2 delivers a native sqlite-vec + ONNX path without the CVE chain.
 
 describe("QuantizedVectorStore — TF-IDF fallback contract", () => {
   let store: QuantizedVectorStore;
@@ -111,110 +116,36 @@ describe("QuantizedVectorStore — drop-in semantics for legacy consumers", () =
   });
 });
 
-// ─── Real MiniLM path — runtime-verified only when the optional dep
-// is available. Session-4 claimed "runtime-verified: login > auth >
-// cache for 'how do users sign in?'" but every test in the file above
-// uses forceTFIDFFallback:true which short-circuits ready() before
-// the transformers pipeline loads (see quantized-vector-store.ts:182).
-// Phase-1 adversarial audit GAP-2 flagged this as a fictitious claim.
-// This block actually exercises the ONNX path. Skipped when the
-// optional @xenova/transformers package isn't installed so CI still
-// passes on lean installs (matches the module's optional-dep contract).
+// ─── LOST CAPABILITY (Tier-0 CVE sweep trade-off) ───────────────
+//
+// The three tests below previously exercised the real MiniLM ONNX
+// path provided by @xenova/transformers. That package shipped 9 CVEs
+// (4 CRITICAL) via its transitive protobufjs dependency, with no
+// non-breaking upgrade available. The Tier-0 security sweep dropped
+// @xenova/transformers in favour of a CVE-free future P1-M2 native
+// sqlite-vec + ONNX path.
+//
+// Rather than silently weaken the assertions (Quality Bar #9: never
+// modify tests just to make them pass), the three MiniLM tests are
+// marked PERMANENTLY SKIPPED with a [LOST] prefix. Previously they
+// were env-gated behind WOTANN_RUN_ONNX_TESTS=1 and internally
+// skipped via `if (!available) return`, so CI never saw them fail;
+// making the skip explicit surfaces the regression honestly in
+// `npm test` output without breaking any assertion contract.
 
-async function transformersAvailable(): Promise<boolean> {
-  try {
-    await import("@xenova/transformers" as string);
-    return true;
-  } catch {
-    return false;
-  }
-}
+describe("QuantizedVectorStore — MiniLM semantic search (LOST in CVE sweep)", () => {
+  it.skip("[LOST] backend switches from tfidf-fallback to onnx-minilm", async () => {
+    // @xenova/transformers removed in Tier-0 CVE sweep. Re-enable
+    // when P1-M2 ships native sqlite-vec + ONNX without protobufjs.
+  });
 
-describe("QuantizedVectorStore — MiniLM semantic search (requires optional dep)", () => {
-  // Loading MiniLM weights is slow (~10s on cold cache); give vitest
-  // room to fetch the 22MB model on first run. The model is cached
-  // under the hf-cache dir after the first run so subsequent CI runs
-  // are fast, but the initial fetch can take longer than the default
-  // 5s. Budget: 120s to account for the cold-download case.
-  const ENABLE = process.env["WOTANN_RUN_ONNX_TESTS"] === "1";
+  it.skip("[LOST] produces vectors whose self-similarity is near 1", async () => {
+    // @xenova/transformers removed in Tier-0 CVE sweep. Re-enable
+    // when P1-M2 ships native sqlite-vec + ONNX without protobufjs.
+  });
 
-  // Liveness of the embedding path is what this suite primarily pins.
-  // The exact ranking claim from session-4 ("login > auth > cache for
-  // query 'how do users sign in?'") is MiniLM-version-dependent and
-  // fragile to even minor model updates, so we assert the weaker
-  // contracts that guarantee the path ISN'T secretly dead:
-  //   1. When the optional dep is installed, ready() returns true
-  //   2. Adding a doc + awaiting drain flips getBackend to "onnx-minilm"
-  //   3. Self-similarity is near-1 (proves encode→quantize→cosine works)
-  //   4. Cross-doc similarity on related content > cross-doc on unrelated
-  (ENABLE ? it : it.skip)(
-    "actually loads the MiniLM pipeline — backend switches from tfidf-fallback to onnx-minilm",
-    { timeout: 120_000 },
-    async () => {
-      const available = await transformersAvailable();
-      if (!available) return; // optional dep missing
-      const store = new QuantizedVectorStore();
-      const ok = await store.ready();
-      if (!ok) return; // network / sandbox prevented model load; graceful skip
-      store.addDocument("a", "the quick brown fox jumps over the lazy dog");
-      // Drain the fire-and-forget encode queue.
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 100));
-        if (store.getBackend() === "onnx-minilm") break;
-      }
-      expect(store.getBackend()).toBe("onnx-minilm");
-    },
-  );
-
-  (ENABLE ? it : it.skip)(
-    "produces vectors whose self-similarity is near 1 (encode path alive)",
-    { timeout: 120_000 },
-    async () => {
-      const available = await transformersAvailable();
-      if (!available) return;
-      const store = new QuantizedVectorStore();
-      const ok = await store.ready();
-      if (!ok) return;
-      store.addDocument("a", "the quick brown fox jumps over the lazy dog");
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 100));
-        if (store.getBackend() === "onnx-minilm") break;
-      }
-      const sim = store.similarity("a", "a");
-      expect(sim).not.toBeNull();
-      // Self-similarity should be very close to 1. 8-bit quantization
-      // introduces a small amount of noise (~1%) in the worst case.
-      expect(sim!).toBeGreaterThan(0.95);
-    },
-  );
-
-  (ENABLE ? it : it.skip)(
-    "semantic similarity on related content exceeds unrelated content",
-    { timeout: 120_000 },
-    async () => {
-      const available = await transformersAvailable();
-      if (!available) return;
-      const store = new QuantizedVectorStore();
-      const ok = await store.ready();
-      if (!ok) return;
-      // Two obviously-related docs (both about cats) and one unrelated
-      // (database). Semantic embeddings should cluster the two cat docs
-      // closer than either is to the database doc, regardless of MiniLM
-      // minor version.
-      store.addDocument("cat1", "the cat sat on the mat purring softly");
-      store.addDocument("cat2", "a feline napped on a rug and purred");
-      store.addDocument("db", "PostgreSQL connection pool with pgbouncer transaction mode");
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 100));
-        if (store.getBackend() === "onnx-minilm") break;
-      }
-      const catCatSim = store.similarity("cat1", "cat2");
-      const catDbSim = store.similarity("cat1", "db");
-      expect(catCatSim).not.toBeNull();
-      expect(catDbSim).not.toBeNull();
-      // Related content should be meaningfully closer than unrelated
-      // content; any healthy embedding space passes this.
-      expect(catCatSim!).toBeGreaterThan(catDbSim!);
-    },
-  );
+  it.skip("[LOST] semantic similarity on related content exceeds unrelated content", async () => {
+    // @xenova/transformers removed in Tier-0 CVE sweep. Re-enable
+    // when P1-M2 ships native sqlite-vec + ONNX without protobufjs.
+  });
 });

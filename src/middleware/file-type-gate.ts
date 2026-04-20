@@ -1,30 +1,41 @@
 /**
- * File-Type Gate (Magika) — content-aware routing + security pre-filter.
+ * File-Type Gate — content-aware routing + security pre-filter.
  *
  * Session-6 competitor-win port (priority 10 per research agent). Replaces
- * extension-only file routing with Google's Magika (Apache-2.0, 99% accurate
- * across 200+ content types, ~5ms per file via a small bundled TFJS model).
+ * extension-only file routing with byte-signature detection via
+ * `magic-bytes.js` (MIT, zero CVE history, ~35KB pure JS lookup tree
+ * covering ~140 file formats from magic numbers).
+ *
+ * Prior implementation used Google's `magika` (Apache-2.0, TFJS-backed).
+ * We swapped it out because the magika -> @tensorflow/tfjs-node -> protobufjs
+ * chain shipped 9 CVEs (4 CRITICAL, 4 HIGH) with no non-breaking fix. The
+ * magic-bytes.js library is strictly less accurate than a learned model,
+ * but it's zero-runtime (no 10MB weights on cold-load), CVE-free, and
+ * synchronous — so it actually runs on every upload in CI. Magika's cold
+ * load was ~17s, which meant the gate was effectively a no-op in practice.
  *
  * Routing examples the gate enables:
- *   .pdf disguised as .txt    → route to pdf-extractor (not text tool)
- *   binary uploaded as .log   → warn + route to binary-analyzer
- *   TypeScript misnamed .js   → route to TypeScript-aware LSP/skills
- *   executable masquerading as data → route to Exploit tab alert
+ *   .pdf disguised as .txt    -> route to pdf-extractor (not text tool)
+ *   binary uploaded as .log   -> warn + route to binary-analyzer
+ *   executable masquerading as data -> route to Exploit tab alert
  *
- * Security wedge: extension-based routing is trivially bypassable. Magika
- * sees the actual bytes; a renamed `.exe → .txt` still flags as binary and
- * enters the Exploit tab's review queue instead of being silently dumped
- * into a harmless text handler.
+ * Security wedge: extension-based routing is trivially bypassable. Byte
+ * signatures see the actual magic numbers; a renamed `.exe -> .txt` still
+ * flags as binary and enters the Exploit tab's review queue instead of
+ * being silently dumped into a harmless text handler.
  *
  * Integration:
  *   import { detectFileType } from "./middleware/file-type-gate.js";
  *   const result = await detectFileType(bytes, "ambiguous-upload");
  *   switch (result.handler) { case "pdf": ...; case "code": ...; case "binary": ... }
  *
- * Fallback contract: when the optional `magika` dep isn't installed OR the
- * model fails to load, returns a legacy extension-based result so callers
- * always get a routing decision. Never throws.
+ * Honest-fallback contract: if magic-bytes returns no match AND the
+ * filename extension is unknown, the function returns
+ * `{ handler: "unknown", confidence: 0, fromModel: false }` — an HONEST
+ * STUB rather than a silent "text" guess. Never throws.
  */
+
+import { filetypeinfo } from "magic-bytes.js";
 
 export type FileHandler =
   | "pdf"
@@ -43,176 +54,133 @@ export type FileHandler =
 
 export interface FileTypeResult {
   readonly handler: FileHandler;
-  /** Magika's specific label (e.g. "python", "pdf", "pebin") when available. */
+  /** Specific detector label (e.g. "pdf", "png", "exe", filename ext) when available. */
   readonly label: string;
-  /** 0.0–1.0 when from Magika; 1.0 (by-extension) or 0.0 (fallback) otherwise. */
+  /** 0.0-1.0. 0.9 when from magic-bytes, 0.4 when from extension, 0.0 when neither. */
   readonly confidence: number;
-  /** True when the classification came from Magika's model, not extension fallback. */
+  /**
+   * True when the classification came from byte-signature detection, not
+   * extension fallback. Name kept for backward compatibility with callers
+   * and tests — the "model" in the old magika world is the pattern tree
+   * in magic-bytes.
+   */
   readonly fromModel: boolean;
   /** When true, the content disagrees with the filename extension. */
   readonly extensionMismatch: boolean;
 }
 
 /**
- * Minimal structural type for Magika's node bindings — spelled out so the
- * module typechecks without depending on the optional `magika` package at
- * compile time.
+ * Map a magic-bytes typename (e.g. "pdf", "png", "zip", "exe") to one
+ * of the coarse-grained handlers the WOTANN tool router understands.
+ * The mapping is intentionally conservative — unknown typenames fall
+ * through to "unknown" rather than "text" so callers don't silently
+ * feed binaries to a text handler.
+ *
+ * magic-bytes.js typenames catalogue: see
+ * node_modules/magic-bytes.js/dist/model/pattern-tree.js
  */
-type MagikaModule = {
-  readonly MagikaNode: {
-    create(options?: Record<string, unknown>): Promise<{
-      identifyBytes(bytes: Uint8Array): Promise<{
-        prediction: {
-          output: { label: string };
-          score: number;
-        };
-      }>;
-    }>;
-  };
-};
-
-let cachedMagika: Awaited<ReturnType<MagikaModule["MagikaNode"]["create"]>> | null | undefined;
-
-async function loadMagika(): Promise<Awaited<
-  ReturnType<MagikaModule["MagikaNode"]["create"]>
-> | null> {
-  if (cachedMagika !== undefined) return cachedMagika;
-  try {
-    // Dynamic import keeps `magika` an optional dependency — users who
-    // don't install it still get extension-based routing via the fallback.
-    const mod = (await import("magika/node" as string)) as unknown as MagikaModule;
-    const instance = await mod.MagikaNode.create();
-    cachedMagika = instance;
-    return instance;
-  } catch {
-    cachedMagika = null;
-    return null;
-  }
-}
-
-/**
- * Map a Magika content-type label (200+ possible values) to one of the
- * coarse-grained handlers the WOTANN tool router understands. The mapping
- * is intentionally conservative — unknown labels fall through to "unknown"
- * rather than "text" so callers don't silently feed binaries to a text
- * handler.
- */
-function labelToHandler(label: string): FileHandler {
-  const l = label.toLowerCase();
+function typenameToHandler(typename: string): FileHandler {
+  const l = typename.toLowerCase();
   // Documents
   if (l === "pdf") return "pdf";
   if (l === "docx" || l === "doc" || l === "odt" || l === "rtf") return "docx";
-  if (l === "xlsx" || l === "xls" || l === "ods" || l === "csv" || l === "tsv") return "xlsx";
-  // Media
+  if (l === "xlsx" || l === "xls" || l === "ods") return "xlsx";
+  // Media — magic-bytes typenames align with extensions for media
   if (
-    l.startsWith("png") ||
-    l === "jpeg" ||
+    l === "png" ||
     l === "jpg" ||
+    l === "jpeg" ||
     l === "gif" ||
     l === "webp" ||
-    l === "svg" ||
     l === "bmp" ||
     l === "heic" ||
     l === "heif" ||
     l === "tiff" ||
-    l === "ico"
+    l === "tif" ||
+    l === "ico" ||
+    l === "avif" ||
+    l === "psd"
   ) {
     return "image";
   }
-  if (l === "mp4" || l === "mov" || l === "webm" || l === "mkv" || l === "avi") {
+  if (
+    l === "mp4" ||
+    l === "mov" ||
+    l === "webm" ||
+    l === "mkv" ||
+    l === "avi" ||
+    l === "flv" ||
+    l === "m4v" ||
+    l === "3gp"
+  ) {
     return "video";
   }
-  if (l === "mp3" || l === "wav" || l === "ogg" || l === "flac" || l === "m4a") {
+  if (
+    l === "mp3" ||
+    l === "wav" ||
+    l === "ogg" ||
+    l === "flac" ||
+    l === "m4a" ||
+    l === "aac" ||
+    l === "opus" ||
+    l === "mid" ||
+    l === "midi"
+  ) {
     return "audio";
   }
   // Archives
   if (
     l === "zip" ||
     l === "tar" ||
+    l === "gz" ||
     l === "gzip" ||
+    l === "bz2" ||
     l === "bzip2" ||
     l === "xz" ||
     l === "7z" ||
     l === "rar" ||
-    l === "zstd"
+    l === "zst" ||
+    l === "zstd" ||
+    l === "jar" ||
+    l === "apk"
   ) {
     return "archive";
   }
-  // Code
-  if (
-    l === "python" ||
-    l === "typescript" ||
-    l === "javascript" ||
-    l === "rust" ||
-    l === "go" ||
-    l === "java" ||
-    l === "cpp" ||
-    l === "c" ||
-    l === "csharp" ||
-    l === "ruby" ||
-    l === "php" ||
-    l === "swift" ||
-    l === "kotlin" ||
-    l === "scala" ||
-    l === "haskell" ||
-    l === "elixir" ||
-    l === "clojure" ||
-    l === "lua" ||
-    l === "shell" ||
-    l === "sql" ||
-    l === "makefile" ||
-    l === "dockerfile" ||
-    l === "perl" ||
-    l === "dart" ||
-    l === "r" ||
-    l === "julia"
-  ) {
-    return "code";
-  }
-  // Markup / config
-  if (
-    l === "json" ||
-    l === "yaml" ||
-    l === "toml" ||
-    l === "xml" ||
-    l === "html" ||
-    l === "markdown" ||
-    l === "tex" ||
-    l === "rst" ||
-    l === "ini"
-  ) {
+  // Markup / config (magic-bytes detects a subset — mostly xml/html/json)
+  if (l === "json" || l === "xml" || l === "html" || l === "htm") {
     return "markup";
   }
-  // Data
-  if (l === "parquet" || l === "arrow" || l === "sqlite" || l === "jsonl") {
+  // Data / DB
+  if (l === "sqlite" || l === "parquet") {
     return "data";
   }
-  // Binaries — route to Exploit tab for review
+  // Executable binaries -> route to Exploit tab for review
   if (
-    l === "pebin" ||
+    l === "exe" ||
     l === "elf" ||
+    l === "mach-o" ||
     l === "macho" ||
-    l === "dex" ||
-    l === "apk" ||
+    l === "dll" ||
     l === "class" ||
-    l === "jar" ||
+    l === "dex" ||
     l === "wasm" ||
     l === "lnk" ||
     l === "msi" ||
-    l === "smali" ||
-    l === "dylib"
+    l === "dylib" ||
+    l === "so"
   ) {
     return "binary";
   }
-  // Plain text as last resort
-  if (l === "txt" || l === "asciiart" || l === "empty") return "text";
+  // magic-bytes doesn't sniff textual source (no reliable byte signature);
+  // extension fallback handles .ts/.py/.rs etc.
   return "unknown";
 }
 
 /**
- * Coarse-grained fallback from a filename extension when Magika isn't
- * available. Less accurate than the model — specifically, won't catch
- * extension-mismatch (the whole reason Magika exists).
+ * Coarse-grained fallback from a filename extension when byte-signature
+ * detection yields nothing. Less accurate than a learned model, but for
+ * plain-text/source-code extensions with no magic number this is the
+ * ONLY signal available and it's honest about what it is.
  */
 function handlerFromExtension(filename: string): FileHandler {
   const ext = filename.toLowerCase().split(".").pop() ?? "";
@@ -264,6 +232,11 @@ function handlerFromExtension(filename: string): FileHandler {
     swift: "code",
     kt: "code",
     sh: "code",
+    bash: "code",
+    zsh: "code",
+    ps1: "code",
+    bat: "code",
+    cmd: "code",
     sql: "code",
     json: "markup",
     yaml: "markup",
@@ -288,52 +261,81 @@ function handlerFromExtension(filename: string): FileHandler {
 }
 
 /**
- * Primary API — classify bytes via Magika when available, fall back to
- * extension when not. Always returns — never throws.
+ * Run magic-bytes against the supplied bytes. Returns the first matched
+ * typename, or null if nothing matched. Synchronous under the hood —
+ * wrapped here only so the call site can stay `await`-friendly.
+ */
+function detectByBytes(bytes: Uint8Array): string | null {
+  // magic-bytes inspects a bounded prefix — passing the full buffer is
+  // safe but wasteful for very large files. Cap at 4096 bytes which is
+  // enough for every signature in the pattern tree.
+  const slice = bytes.length > 4096 ? bytes.slice(0, 4096) : bytes;
+  try {
+    const matches = filetypeinfo(slice);
+    if (matches.length === 0) return null;
+    const first = matches[0];
+    return first?.typename ?? null;
+  } catch {
+    // magic-bytes is pure lookup and shouldn't throw, but belt-and-suspend
+    // against future library changes.
+    return null;
+  }
+}
+
+/**
+ * Primary API — classify bytes via magic-bytes when possible, fall back
+ * to extension when not. Always returns — never throws. When neither
+ * signal produces a classification, returns an HONEST STUB
+ * `{handler: "unknown", confidence: 0}` so callers never silently
+ * receive a wrong guess.
  */
 export async function detectFileType(
   bytes: Uint8Array,
   filename: string = "",
 ): Promise<FileTypeResult> {
   const extensionHandler = handlerFromExtension(filename);
-  const magika = await loadMagika();
+  const ext = filename.toLowerCase().split(".").pop() ?? "";
 
-  if (!magika) {
+  // Byte-signature detection first — catches the extension-mismatch
+  // attack (.exe disguised as .txt).
+  const typename = bytes.length > 0 ? detectByBytes(bytes) : null;
+  if (typename !== null) {
+    const byteHandler = typenameToHandler(typename);
+    // Only treat byte-signature detection as authoritative when it
+    // mapped to a known handler. magic-bytes can return typenames we
+    // don't cover (e.g. exotic formats) — in that case fall through to
+    // extension so we still return something useful.
+    if (byteHandler !== "unknown") {
+      const mismatch = extensionHandler !== "unknown" && extensionHandler !== byteHandler;
+      return {
+        handler: byteHandler,
+        label: typename,
+        confidence: 0.9,
+        fromModel: true,
+        extensionMismatch: mismatch,
+      };
+    }
+  }
+
+  // Byte-signature failed or unmapped. Use extension fallback when it
+  // has a known answer — otherwise emit the honest {unknown, 0} stub.
+  if (extensionHandler !== "unknown") {
     return {
       handler: extensionHandler,
-      label: filename.toLowerCase().split(".").pop() ?? "",
-      confidence: extensionHandler === "unknown" ? 0 : 0.4,
+      label: ext,
+      confidence: 0.4,
       fromModel: false,
       extensionMismatch: false,
     };
   }
 
-  try {
-    const result = await magika.identifyBytes(bytes);
-    const label = result.prediction.output.label;
-    const score = result.prediction.score;
-    const modelHandler = labelToHandler(label);
-    const mismatch =
-      extensionHandler !== "unknown" &&
-      modelHandler !== "unknown" &&
-      extensionHandler !== modelHandler;
-    return {
-      handler: modelHandler,
-      label,
-      confidence: score,
-      fromModel: true,
-      extensionMismatch: mismatch,
-    };
-  } catch {
-    // Model call failed — fall back to extension rather than crashing.
-    return {
-      handler: extensionHandler,
-      label: filename.toLowerCase().split(".").pop() ?? "",
-      confidence: extensionHandler === "unknown" ? 0 : 0.4,
-      fromModel: false,
-      extensionMismatch: false,
-    };
-  }
+  return {
+    handler: "unknown",
+    label: ext,
+    confidence: 0,
+    fromModel: false,
+    extensionMismatch: false,
+  };
 }
 
 /**
@@ -356,11 +358,11 @@ export async function detectFileTypeFromPath(filePath: string): Promise<FileType
   }
 }
 
-// ── Pipeline integration (Layer 3.5) ─────────────────────────────
+// -- Pipeline integration (Layer 3.5) -----------------------------
 //
 // The file-type gate sits immediately after the uploads layer. Before
 // wiring it we only had extension-based routing which is trivially
-// bypassed (`.exe → .txt`). The gate runs `detectFileType` on every
+// bypassed (`.exe -> .txt`). The gate runs `detectFileType` on every
 // upload's bytes and stamps the classification *plus* a trust boundary
 // so downstream layers (sandbox, skills router, exploit-tab queue) can
 // quarantine dangerous payloads before they touch a text handler.
@@ -385,13 +387,13 @@ export type UploadTrustBoundary =
 export interface FileUpload {
   /** Original filename as supplied by the user (kept for extension fallback + display). */
   readonly filename: string;
-  /** Raw bytes. Required — the gate runs Magika on these. */
+  /** Raw bytes. Required — the gate runs byte-signature detection on these. */
   readonly bytes: Uint8Array;
   /** Detected coarse-grained handler. Stamped by the gate; absent pre-gate. */
   readonly handler?: FileHandler;
-  /** Magika's specific label (e.g. "python", "pdf"). Stamped by the gate. */
+  /** Specific detector label (e.g. "pdf", "png", ext fallback). Stamped by the gate. */
   readonly label?: string;
-  /** 0.0–1.0 detector confidence. Stamped by the gate. */
+  /** 0.0-1.0 detector confidence. Stamped by the gate. */
   readonly confidence?: number;
   /** True if extension disagrees with content. Stamped by the gate. */
   readonly extensionMismatch?: boolean;
@@ -427,37 +429,37 @@ declare module "./types.js" {
 }
 
 /**
- * Specific Magika labels that designate a SCRIPT (shell / ps1 / bat) —
- * these map to the coarse handler "code" by default but they differ
- * from ordinary source files (.ts, .py) in one critical way: they are
+ * Detector labels that designate a SCRIPT (shell / ps1 / bat) — these
+ * map to the coarse handler "code" by default but they differ from
+ * ordinary source files (.ts, .py) in one critical way: they are
  * INTERPRETED by shells that honor every byte. An attacker uploading a
  * .txt that's actually a .sh can get code execution if the pipeline
  * ever passes the bytes to `chmod +x && ./file`. Quarantine them until
  * a human reviews — identical policy to executable binaries.
  */
-const SCRIPT_LABELS: ReadonlySet<string> = new Set([
-  "shell",
+const SCRIPT_EXTENSIONS: ReadonlySet<string> = new Set([
+  "sh",
   "bash",
   "zsh",
-  "powershell",
   "ps1",
-  "batch",
+  "powershell",
   "bat",
   "cmd",
+  "vbs",
   "vbscript",
 ]);
 
 /**
- * Map a FileHandler (and optionally the Magika label) to the trust
+ * Map a FileHandler (and optionally the detector label) to the trust
  * boundary that controls downstream routing.
  *
  * Wave-3E policy (spec priority #3):
- *   - `binary` (pebin/elf/macho/dex/…) → quarantine
- *   - `archive` (zip/tar/rar/7z/xz/…) → quarantine (upgraded from binary)
- *   - `code` with a script label (shell/ps1/bat) → quarantine (new)
- *   - `image/video/audio/data/pdf/docx/xlsx` → binary
- *   - `code` (non-script) / `markup` / `text` → safe
- *   - `unknown` → unknown (conservative)
+ *   - `binary` (pebin/elf/macho/dex/...) -> quarantine
+ *   - `archive` (zip/tar/rar/7z/xz/...) -> quarantine (upgraded from binary)
+ *   - `code` with a script label (shell/ps1/bat) -> quarantine (new)
+ *   - `image/video/audio/data/pdf/docx/xlsx` -> binary
+ *   - `code` (non-script) / `markup` / `text` -> safe
+ *   - `unknown` -> unknown (conservative)
  *
  * Archives move to quarantine because a malicious archive can pack an
  * executable + payload chain; automated extraction in the sandbox stage
@@ -470,7 +472,7 @@ function boundaryForHandler(handler: FileHandler, label: string = ""): UploadTru
     case "archive":
       return "quarantine";
     case "code":
-      return SCRIPT_LABELS.has(label.toLowerCase()) ? "quarantine" : "safe";
+      return SCRIPT_EXTENSIONS.has(label.toLowerCase()) ? "quarantine" : "safe";
     case "image":
     case "video":
     case "audio":
@@ -524,8 +526,8 @@ async function classifyUpload(upload: FileUpload): Promise<{
 
   try {
     const result = await detectFileType(upload.bytes, upload.filename);
-    // Pass the Magika label so shell/ps1/bat get quarantined even though
-    // their coarse handler is "code". Source files (.ts/.py) stay safe.
+    // Pass the label so shell/ps1/bat get quarantined even though their
+    // coarse handler is "code". Source files (.ts/.py) stay safe.
     const boundary = boundaryForHandler(result.handler, result.label);
     const stamped: FileUpload = {
       ...upload,
@@ -548,7 +550,7 @@ async function classifyUpload(upload: FileUpload): Promise<{
     return { stamped };
   } catch (err) {
     // `detectFileType` is designed never to throw, but we belt-and-suspend
-    // in case a Magika upgrade changes that contract. Emit the event and
+    // in case a library upgrade changes that contract. Emit the event and
     // mark the upload as unknown/unknown-boundary instead of passing raw.
     return {
       stamped: {
@@ -575,7 +577,7 @@ async function classifyUpload(upload: FileUpload): Promise<{
 import type { Middleware, MiddlewareContext } from "./types.js";
 
 /**
- * Middleware layer 3.5 — Magika file-type gate.
+ * Middleware layer 3.5 — byte-signature file-type gate.
  *
  * Pipeline position: after `uploadsMiddleware` (which resolves `@file`
  * references to filenames) and before `sandboxMiddleware` (which needs
@@ -594,7 +596,7 @@ export const fileTypeGateMiddleware: Middleware = {
   async before(ctx: MiddlewareContext): Promise<MiddlewareContext> {
     const uploads = ctx.uploads;
     if (!uploads || uploads.length === 0) {
-      // No uploads → nothing to gate. Leave context untouched.
+      // No uploads -> nothing to gate. Leave context untouched.
       return ctx;
     }
 

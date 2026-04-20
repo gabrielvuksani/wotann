@@ -487,13 +487,11 @@ export class WotannRuntime {
   // Session-6 (GAP-11 fix): QuantizedVectorStore was ADDED in session-2
   // and RUNTIME-TEST-SCAFFOLDED in session-4 but the session-4 audit
   // agent missed that runtime.ts never instantiated it — zero consumers.
-  // Session-6 now wires it as an OPT-IN companion index: when
-  // `WOTANN_ENABLE_ONNX_EMBEDDINGS=1` is set + @xenova/transformers is
-  // installed, every addDocument to semanticIndex is mirrored here, and
-  // searchEnhanced() runs RRF-merge between TF-IDF and MiniLM. The
-  // async search path is exposed via a new runtime method rather than
-  // replacing the sync semanticIndex.search (which still has 2 legacy
-  // callsites at runtime.ts:2818, :817 and memory/store.ts:817).
+  // Session-6 wired it as an OPT-IN companion index when
+  // `WOTANN_ENABLE_ONNX_EMBEDDINGS=1`. Tier-0 CVE sweep dropped
+  // @xenova/transformers (protobufjs RCE via onnx-proto), so the
+  // quantized store now runs TF-IDF-only under the same public API.
+  // Future P1-M2: re-enable embeddings via native sqlite-vec + ONNX.
   private quantizedVectorStore: QuantizedVectorStore | null = null;
   private contextIntelligence: ContextWindowIntelligence;
   private editTracker: PerFileEditTracker;
@@ -851,11 +849,13 @@ export class WotannRuntime {
 
     // Initialize semantic search index (TF-IDF default — zero deps, sync).
     this.semanticIndex = new TFIDFIndex();
-    // Session-6 (GAP-11): opt-in MiniLM semantic search via
-    // @xenova/transformers. Runs as a COMPANION index to semanticIndex
-    // when WOTANN_ENABLE_ONNX_EMBEDDINGS=1 is set. Falls back to
-    // TF-IDF silently if the optional dep isn't installed. See
-    // src/memory/quantized-vector-store.ts for the implementation.
+    // Session-6 (GAP-11): opt-in companion vector store. Previously a
+    // MiniLM path via @xenova/transformers, now TF-IDF-only after the
+    // Tier-0 CVE sweep dropped @xenova/transformers (protobufjs RCE
+    // via onnx-proto). The class still exists so callers that gated on
+    // getQuantizedVectorStore() keep compiling; it just always reports
+    // the TF-IDF backend. See src/memory/quantized-vector-store.ts.
+    // Future: P1-M2 calls for native sqlite-vec + ONNX (no transformers).
     if (process.env["WOTANN_ENABLE_ONNX_EMBEDDINGS"] === "1") {
       this.quantizedVectorStore = new QuantizedVectorStore();
     }
