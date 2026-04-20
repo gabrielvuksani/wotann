@@ -457,6 +457,15 @@ main > section { padding: 5rem 0; }
   font-size: 1.3rem;
   margin-bottom: 1rem;
 }
+/* Rune glyphs — Elder Futhark, Noto Sans Runic fallbacks.
+   Size bumped so the runic strokes read clearly on the gold tint. */
+.feature-icon--rune {
+  font-family: "Noto Sans Runic", "Segoe UI Symbol", "Apple Symbols", system-ui, sans-serif;
+  font-size: 1.55rem;
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: 0;
+}
 .feature-card h3 {
   font-size: 1.2rem;
   margin-bottom: 0.5rem;
