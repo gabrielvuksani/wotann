@@ -17,6 +17,7 @@ import {
   CacheHitTracker,
   type CacheStrategy,
 } from "./prompt-cache-warmup.js";
+import { toAnthropicTools } from "./tool-serializer.js";
 
 /**
  * Minimum token length for a system block to be worth caching.
@@ -158,17 +159,14 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
     // so we mark it for Anthropic's prompt caching to avoid re-processing.
     const systemParam = buildSystemBlocks(options.systemPrompt);
 
-    // S1-3: Forward tool definitions into the request body. Anthropic's schema
-    // expects `{ name, description, input_schema }` — our UnifiedQueryOptions
-    // stores them in the same shape under `inputSchema`, so just map the key.
+    // S1-3 + P0-4: Forward tool definitions into the request body via the
+    // shared tool-serializer (Hermes `convert_tools_to_anthropic` pattern).
+    // The serializer renames `inputSchema` → `input_schema` while preserving
+    // nested objects, arrays-of-objects, additionalProperties, required, and
+    // enums verbatim. It also rejects `$ref`-bearing schemas with a clean
+    // error rather than letting them reach the API as opaque 400s.
     const anthropicTools =
-      options.tools && options.tools.length > 0
-        ? options.tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            input_schema: t.inputSchema as Record<string, unknown>,
-          }))
-        : undefined;
+      options.tools && options.tools.length > 0 ? toAnthropicTools(options.tools) : undefined;
 
     try {
       const stream = client.messages.stream({

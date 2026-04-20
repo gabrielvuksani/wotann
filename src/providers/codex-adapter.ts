@@ -23,6 +23,7 @@ import type {
   ProviderCapabilities,
 } from "./types.js";
 import { getModelContextConfig } from "../context/limits.js";
+import { toCodexTools } from "./tool-serializer.js";
 
 // ── Auth Types ──────────────────────────────────────────────
 
@@ -283,19 +284,13 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
       content: [{ type: "input_text", text: options.prompt }],
     });
 
-    // S1-6: Codex Responses API accepts a flat `tools` array. Each tool is a
-    // top-level object with `type: "function"`, `name`, `description`,
-    // `parameters` (different from OpenAI Chat Completions where it's nested
-    // under `function`).
+    // S1-6 + P0-4: Codex Responses API accepts a flat `tools` array. The
+    // shared tool-serializer produces the exact flat shape with the JSON
+    // schema preserved verbatim and `$ref`-bearing schemas rejected up
+    // front. Distinct from OpenAI Chat Completions where `parameters` is
+    // nested under `function:`.
     const codexTools =
-      options.tools && options.tools.length > 0
-        ? options.tools.map((t) => ({
-            type: "function" as const,
-            name: t.name,
-            description: t.description,
-            parameters: t.inputSchema as Record<string, unknown>,
-          }))
-        : undefined;
+      options.tools && options.tools.length > 0 ? toCodexTools(options.tools) : undefined;
 
     const body = JSON.stringify({
       model,

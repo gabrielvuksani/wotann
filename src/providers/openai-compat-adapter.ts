@@ -12,6 +12,7 @@ import type {
 } from "./types.js";
 import { anthropicToOpenAI } from "./format-translator.js";
 import { getModelContextConfig } from "../context/limits.js";
+import { toOpenAITools } from "./tool-serializer.js";
 
 interface OpenAICompatConfig {
   readonly provider: ProviderName;
@@ -138,18 +139,12 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
 
     messages.push({ role: "user", content: options.prompt });
 
-    // S1-4: OpenAI-compatible tool schema — { type: "function", function: {...} }
+    // S1-4 + P0-4: OpenAI-compatible tool schema via the shared tool-serializer
+    // (Hermes `convert_tools_to_anthropic` sibling for OpenAI). Wraps as
+    // `{ type: "function", function: { name, description, parameters } }`
+    // with the JSON schema preserved verbatim. Rejects `$ref`-bearing schemas.
     const openAITools =
-      options.tools && options.tools.length > 0
-        ? options.tools.map((t) => ({
-            type: "function" as const,
-            function: {
-              name: t.name,
-              description: t.description,
-              parameters: t.inputSchema as Record<string, unknown>,
-            },
-          }))
-        : undefined;
+      options.tools && options.tools.length > 0 ? toOpenAITools(options.tools) : undefined;
 
     const body: Record<string, unknown> = {
       model,

@@ -22,6 +22,7 @@ import type {
   ProviderCapabilities,
 } from "./types.js";
 import { anthropicToOpenAI } from "./format-translator.js";
+import { toCopilotTools } from "./tool-serializer.js";
 
 interface CopilotTokenResponse {
   readonly token: string;
@@ -330,19 +331,12 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
     }
     messages.push({ role: "user", content: options.prompt });
 
-    // S1-5: Copilot uses the OpenAI Chat Completions wire format, so tool
-    // schemas look identical to S1-4. Also S1-26: ask for usage on final chunk.
+    // S1-5 + P0-4: Copilot uses the OpenAI Chat Completions wire format, so
+    // it routes through the shared tool-serializer's `toCopilotTools` (an
+    // alias for `toOpenAITools`). Schema preserved verbatim; `$ref` rejected
+    // up front. Also S1-26: ask for usage on final chunk.
     const copilotTools =
-      options.tools && options.tools.length > 0
-        ? options.tools.map((t) => ({
-            type: "function" as const,
-            function: {
-              name: t.name,
-              description: t.description,
-              parameters: t.inputSchema as Record<string, unknown>,
-            },
-          }))
-        : undefined;
+      options.tools && options.tools.length > 0 ? toCopilotTools(options.tools) : undefined;
 
     const body = JSON.stringify({
       model,
