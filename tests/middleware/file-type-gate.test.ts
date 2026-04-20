@@ -28,20 +28,27 @@ function baseContext(overrides: Partial<MiddlewareContext> = {}): MiddlewareCont
 }
 
 describe("file-type-gate — extension fallback", () => {
-  it("returns a FileTypeResult for a .pdf named file (shape contract)", async () => {
-    // Extension fallback path returns handler:"pdf". If Magika is
-    // available in the test env it may classify these 4 bytes (the
-    // ASCII literal "%PDF") as "text" because the buffer is too short
-    // for real PDF detection — both are honest outcomes. Assert the
-    // result shape rather than a specific handler value (quality bar
-    // #12: env-dependent test assertions break on clean CI).
-    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // "%PDF"
-    const result = await detectFileType(bytes, "report.pdf");
-    expect(typeof result.handler).toBe("string");
-    expect(typeof result.label).toBe("string");
-    expect(result.label.length).toBeGreaterThanOrEqual(0);
-    expect(typeof result.fromModel).toBe("boolean");
-  });
+  // First test in the suite triggers Magika model cold-load (~10MB dynamic
+  // import); extend timeout to 30s so it never flakes on slower CI.
+  // Subsequent tests in this file benefit from the warm cache.
+  it(
+    "returns a FileTypeResult for a .pdf named file (shape contract)",
+    { timeout: 30_000 },
+    async () => {
+      // Extension fallback path returns handler:"pdf". If Magika is
+      // available in the test env it may classify these 4 bytes (the
+      // ASCII literal "%PDF") as "text" because the buffer is too short
+      // for real PDF detection — both are honest outcomes. Assert the
+      // result shape rather than a specific handler value (quality bar
+      // #12: env-dependent test assertions break on clean CI).
+      const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // "%PDF"
+      const result = await detectFileType(bytes, "report.pdf");
+      expect(typeof result.handler).toBe("string");
+      expect(typeof result.label).toBe("string");
+      expect(result.label.length).toBeGreaterThanOrEqual(0);
+      expect(typeof result.fromModel).toBe("boolean");
+    },
+  );
 
   it("classifies TypeScript sources as code", async () => {
     const bytes = new TextEncoder().encode(
