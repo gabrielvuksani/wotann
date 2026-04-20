@@ -26,6 +26,7 @@ import {
 import { HookEngine } from "../hooks/engine.js";
 import { registerBuiltinHooks, clearReadTrackingForSession } from "../hooks/built-in.js";
 import { ActiveMemoryEngine } from "../memory/active-memory.js";
+import { Observer } from "../memory/observer.js";
 import { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
 import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pipeline.js";
 import { assembleSystemPromptParts, wrapPromptWithThinkInCode } from "../prompt/engine.js";
@@ -527,6 +528,13 @@ export class WotannRuntime {
   private secretScanner: SecretScanner;
   private proactiveMemory: ProactiveMemoryEngine;
   private activeMemory: ActiveMemoryEngine;
+  /**
+   * Observer — Mastra-style async per-turn fact extractor. Runs
+   * AFTER each turn completes, feeding observations into a
+   * per-session buffer. Drained by the Reflector or at session end.
+   * Never blocks the main query loop.
+   */
+  private observer: Observer;
   private branchManager: ConversationBranchManager;
   private crossSessionLearner: CrossSessionLearner;
   private capabilityEqualizer: CapabilityEqualizer;
@@ -935,6 +943,17 @@ export class WotannRuntime {
     // relevant prior memory for question-shaped messages. Pattern-based
     // for speed (~1ms per call). Wired into runtime.query().
     this.activeMemory = new ActiveMemoryEngine(this.memoryStore);
+
+    // P1-M1: Observer — Mastra-style async fact extractor. Runs at
+    // turn completion, buffers observations per-session, drains to
+    // `working` layer for Reflector promotion. Key invariant: never
+    // blocks the user-facing response path — observer runs only
+    // AFTER streamCompleted=true at the end of query(). Buffer is
+    // per-session (Quality Bar #7 — no module-global state).
+    this.observer = new Observer({
+      store: this.memoryStore,
+      flushThreshold: 8,
+    });
 
     // Conversation branching: fork/merge conversation threads
     this.branchManager = new ConversationBranchManager();
@@ -3927,6 +3946,22 @@ export class WotannRuntime {
         cost: costEntry.cost,
       });
       this.syncMessageIndex();
+
+      // P1-M1: Observer — async fact extraction after the turn
+      // completes. Never throws: Observer returns {ok:false,error} on
+      // extractor failure (Quality Bar #6). The call is synchronous
+      // but extraction is pattern-based and cheap; the block is a
+      // microtask at worst. Writes to the store are batched inside
+      // the observer when its buffer crosses the flush threshold.
+      try {
+        this.observer.observeTurn({
+          sessionId: this.session.id,
+          userMessage: options.prompt.slice(0, 8000),
+          assistantMessage: fullContent.slice(0, 8000),
+        });
+      } catch {
+        /* honest fallback: observer must never block the turn */
+      }
 
       if (truncationWarning) {
         yield {
