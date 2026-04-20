@@ -1588,6 +1588,431 @@ engineCmd
     }
   });
 
+// ── wotann engine restart ───────────────────────────────────
+// Wave 4F: graceful stop + spawn a new daemon worker. Previously users
+// had to chain `wotann engine stop && wotann engine start` manually; on
+// slow shutdowns the second spawn raced the first and bailed because
+// the pid file looked alive. Now we SIGTERM, wait up to 5s, SIGKILL on
+// timeout, remove pid/status, then start. Every step is explicit.
+engineCmd
+  .command("restart")
+  .description("Gracefully stop and restart the WOTANN engine")
+  .option("--force", "Skip the SIGTERM wait and SIGKILL immediately", false)
+  .action(async (opts: { force?: boolean }) => {
+    const { pidPath, statusPath } = getDaemonPaths();
+    const { existsSync, readFileSync, unlinkSync } = await import("node:fs");
+
+    if (existsSync(pidPath)) {
+      const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+      if (isProcessAlive(pid)) {
+        const signal: NodeJS.Signals = opts.force ? "SIGKILL" : "SIGTERM";
+        try {
+          process.kill(pid, signal);
+        } catch {
+          /* ignore */
+        }
+        if (!opts.force) {
+          await waitForProcessExit(pid, 5_000);
+          if (isProcessAlive(pid)) {
+            console.log(chalk.yellow(`SIGTERM timed out; escalating to SIGKILL (PID ${pid}).`));
+            try {
+              process.kill(pid, "SIGKILL");
+            } catch {
+              /* ignore */
+            }
+            await waitForProcessExit(pid, 2_000);
+          }
+        } else {
+          await waitForProcessExit(pid, 2_000);
+        }
+      }
+      try {
+        unlinkSync(pidPath);
+      } catch {
+        /* ignore */
+      }
+      try {
+        unlinkSync(statusPath);
+      } catch {
+        /* ignore */
+      }
+      console.log(chalk.dim(`Engine stopped (PID ${pid}).`));
+    } else {
+      console.log(chalk.dim("No running engine — starting a fresh one."));
+    }
+
+    const entryPath = fileURLToPath(import.meta.url);
+    void spawnDaemonWorker(entryPath, process.cwd());
+    const ready = await waitForDaemonReady(pidPath, 6_000);
+
+    if (!ready) {
+      console.error(chalk.red("WOTANN engine failed to restart."));
+      process.exit(1);
+    }
+
+    console.log(chalk.green(`WOTANN engine restarted (PID ${ready}).`));
+  });
+
+// ── wotann engine tail ──────────────────────────────────────
+// Wave 4F: stream recent heartbeat + event entries from the daemon
+// JSONL log (`.wotann/logs/YYYY-MM-DD.jsonl`). Distinct from
+// `wotann telemetry tail` (which reads `.wotann/events.jsonl`) — this
+// shows the daemon-side cron/tick/heartbeat trail, not the per-session
+// model events.
+engineCmd
+  .command("tail")
+  .description("Stream recent heartbeat + event entries from the engine log")
+  .option("-n <count>", "Number of entries to show initially", "30")
+  .option("--follow", "Continue streaming new entries as they arrive", false)
+  .option(
+    "--type <kinds>",
+    "Comma-separated entry types to keep (tick, cron, heartbeat, start, stop, error)",
+  )
+  .action(async (opts: { n?: string; follow?: boolean; type?: string }) => {
+    const { existsSync, readFileSync, statSync } = await import("node:fs");
+    const logDir = join(process.cwd(), ".wotann", "logs");
+    const today = new Date().toISOString().slice(0, 10);
+    const logFile = join(logDir, `${today}.jsonl`);
+
+    const count = Math.max(1, parseInt(opts.n ?? "30", 10));
+    const typeFilter = opts.type
+      ? new Set(
+          opts.type
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        )
+      : null;
+
+    function renderLine(raw: string): string | null {
+      let entry: { timestamp?: string; type?: string; message?: string } = {};
+      try {
+        entry = JSON.parse(raw) as typeof entry;
+      } catch {
+        return null;
+      }
+      if (typeFilter && entry.type !== undefined && !typeFilter.has(entry.type)) {
+        return null;
+      }
+      const ts = entry.timestamp ?? "-";
+      const type = entry.type ?? "?";
+      const msg = entry.message ?? "";
+      const colour =
+        type === "error"
+          ? chalk.red
+          : type === "cron"
+            ? chalk.cyan
+            : type === "heartbeat"
+              ? chalk.green
+              : type === "start" || type === "stop"
+                ? chalk.yellow
+                : chalk.dim;
+      return `${chalk.dim(ts)} ${colour(type.padEnd(9))} ${msg}`;
+    }
+
+    if (!existsSync(logFile)) {
+      console.log(chalk.dim(`No log file yet: ${logFile}`));
+      return;
+    }
+
+    const content = readFileSync(logFile, "utf-8").trim();
+    const lines = content.split("\n").filter(Boolean);
+    const rendered = lines
+      .map(renderLine)
+      .filter((l): l is string => l !== null)
+      .slice(-count);
+    for (const line of rendered) console.log(line);
+
+    if (!opts.follow) return;
+
+    let offset = Buffer.byteLength(content + "\n", "utf-8");
+    let buffer = "";
+    console.log(chalk.dim("-- following --"));
+    const interval = setInterval(() => {
+      try {
+        if (!existsSync(logFile)) return;
+        const size = statSync(logFile).size;
+        if (size <= offset) return;
+        const fs = require("node:fs") as typeof import("node:fs");
+        const fd = fs.openSync(logFile, "r");
+        try {
+          const buf = Buffer.alloc(size - offset);
+          fs.readSync(fd, buf, 0, buf.length, offset);
+          buffer += buf.toString("utf-8");
+          offset = size;
+        } finally {
+          fs.closeSync(fd);
+        }
+        const parts = buffer.split("\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          if (!part) continue;
+          const line = renderLine(part);
+          if (line) console.log(line);
+        }
+      } catch {
+        /* transient — don't kill the loop */
+      }
+    }, 500);
+
+    const onSignal = (): void => {
+      clearInterval(interval);
+      process.exit(0);
+    };
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
+    await new Promise(() => undefined);
+  });
+
+// ── wotann cron ─────────────────────────────────────────────
+// Wave 4F: CLI surface for the SQLite-backed CronStore. Talks to the
+// daemon via the existing IPC socket — no direct DB access from CLI
+// so authorization and audit trail stay centralised.
+
+const cronCmd = program
+  .command("cron")
+  .description("Manage persistent scheduled cron jobs (SQLite-backed)");
+
+cronCmd
+  .command("add <schedule> <command>")
+  .description('Add a new cron job (e.g. `wotann cron add "*/5 * * * *" "echo hello"`)')
+  .option("--name <label>", "Human-readable label", "")
+  .option("--disabled", "Create the job in a disabled state", false)
+  .action(
+    async (schedule: string, command: string, opts: { name?: string; disabled?: boolean }) => {
+      const { KairosIPCClient } = await import("./daemon/kairos-ipc.js");
+      const ipcClient = new KairosIPCClient();
+      const connected = await ipcClient.connect();
+      if (!connected) {
+        console.error(chalk.red("WOTANN engine not running. Start with: wotann engine start"));
+        process.exit(1);
+      }
+      try {
+        const name = opts.name && opts.name.length > 0 ? opts.name : command.slice(0, 40);
+        const result = (await ipcClient.call("cron.add", {
+          name,
+          schedule,
+          command,
+          enabled: !opts.disabled,
+        })) as { id?: string; nextFireAt?: number | null };
+        if (result.id) {
+          console.log(chalk.green(`Cron job added (id ${result.id})`));
+          console.log(chalk.dim(`  Schedule: ${schedule}`));
+          console.log(chalk.dim(`  Command:  ${command}`));
+          if (result.nextFireAt) {
+            console.log(chalk.dim(`  Next fire: ${new Date(result.nextFireAt).toISOString()}`));
+          }
+        } else {
+          console.error(chalk.red("cron.add returned no id"));
+          process.exit(1);
+        }
+      } catch (err) {
+        console.error(
+          chalk.red(`cron.add failed: ${err instanceof Error ? err.message : String(err)}`),
+        );
+        process.exit(1);
+      } finally {
+        ipcClient.disconnect();
+      }
+    },
+  );
+
+cronCmd
+  .command("list")
+  .description("List all cron jobs (persistent + automation-engine)")
+  .option("--json", "Emit JSON instead of a human-readable table", false)
+  .action(async (opts: { json?: boolean }) => {
+    const { KairosIPCClient } = await import("./daemon/kairos-ipc.js");
+    const ipcClient = new KairosIPCClient();
+    const connected = await ipcClient.connect();
+    if (!connected) {
+      console.error(chalk.red("WOTANN engine not running. Start with: wotann engine start"));
+      process.exit(1);
+    }
+    try {
+      const { jobs = [] } = (await ipcClient.call("cron.list")) as {
+        jobs?: Array<Record<string, unknown>>;
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(jobs, null, 2));
+        return;
+      }
+      if (jobs.length === 0) {
+        console.log(chalk.dim("No cron jobs configured."));
+        return;
+      }
+      console.log(chalk.bold(`Cron jobs (${jobs.length}):`));
+      for (const job of jobs) {
+        const enabled = job["enabled"] === true ? chalk.green("●") : chalk.dim("○");
+        const id = String(job["id"] ?? "?").slice(0, 8);
+        const source = String(job["source"] ?? "?");
+        const schedule = String(job["schedule"] ?? "?");
+        const name = String(job["name"] ?? "?");
+        console.log(
+          `  ${enabled} ${chalk.yellow(id)} ${chalk.cyan(source.padEnd(11))} ${chalk.white(schedule.padEnd(15))} ${name}`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        chalk.red(`cron.list failed: ${err instanceof Error ? err.message : String(err)}`),
+      );
+      process.exit(1);
+    } finally {
+      ipcClient.disconnect();
+    }
+  });
+
+cronCmd
+  .command("remove <id>")
+  .description("Remove a persistent cron job by id")
+  .action(async (id: string) => {
+    const { KairosIPCClient } = await import("./daemon/kairos-ipc.js");
+    const ipcClient = new KairosIPCClient();
+    const connected = await ipcClient.connect();
+    if (!connected) {
+      console.error(chalk.red("WOTANN engine not running. Start with: wotann engine start"));
+      process.exit(1);
+    }
+    try {
+      const result = (await ipcClient.call("cron.remove", { id })) as {
+        ok?: boolean;
+        reason?: string;
+      };
+      if (result.ok) {
+        console.log(chalk.green(`Cron job removed: ${id}`));
+      } else {
+        console.error(chalk.red(`cron.remove failed: ${result.reason ?? "unknown"}`));
+        process.exit(1);
+      }
+    } finally {
+      ipcClient.disconnect();
+    }
+  });
+
+cronCmd
+  .command("enable <id>")
+  .description("Enable a persistent cron job")
+  .action(async (id: string) => {
+    const { KairosIPCClient } = await import("./daemon/kairos-ipc.js");
+    const ipcClient = new KairosIPCClient();
+    const connected = await ipcClient.connect();
+    if (!connected) {
+      console.error(chalk.red("WOTANN engine not running. Start with: wotann engine start"));
+      process.exit(1);
+    }
+    try {
+      await ipcClient.call("cron.setEnabled", { id, enabled: true });
+      console.log(chalk.green(`Cron job enabled: ${id}`));
+    } finally {
+      ipcClient.disconnect();
+    }
+  });
+
+cronCmd
+  .command("disable <id>")
+  .description("Disable a persistent cron job")
+  .action(async (id: string) => {
+    const { KairosIPCClient } = await import("./daemon/kairos-ipc.js");
+    const ipcClient = new KairosIPCClient();
+    const connected = await ipcClient.connect();
+    if (!connected) {
+      console.error(chalk.red("WOTANN engine not running. Start with: wotann engine start"));
+      process.exit(1);
+    }
+    try {
+      await ipcClient.call("cron.setEnabled", { id, enabled: false });
+      console.log(chalk.green(`Cron job disabled: ${id}`));
+    } finally {
+      ipcClient.disconnect();
+    }
+  });
+
+// ── wotann plan ─────────────────────────────────────────────
+// Wave 4F: surface the PlanStore (`.wotann/plans.db`) to the CLI. The
+// database already lived as a first-class dependency via the
+// `plan_create` / `plan_list` runtime tools — but with no direct CLI
+// populate path, users could only reach it through an agent session.
+// Prior audits saw an empty 3-table schema and flagged it as "dead";
+// it's NOT dead — just under-used. These commands let humans add/list/
+// show plans without going through an agent turn.
+const planCmd = program.command("plan").description("Manage saved plans (SQLite-backed)");
+
+planCmd
+  .command("save <title>")
+  .description("Save a plan to .wotann/plans.db")
+  .option("--description <text>", "Plan description", "")
+  .action(async (title: string, opts: { description?: string }) => {
+    const { PlanStore } = await import("./orchestration/plan-store.js");
+    const dbPath = join(process.cwd(), ".wotann", "plans.db");
+    const store = new PlanStore(dbPath);
+    const plan = store.createPlan(title, opts.description ?? "");
+    console.log(chalk.green(`Plan saved: ${plan.id}`));
+    console.log(chalk.dim(`  Title: ${plan.title}`));
+    if (plan.description) console.log(chalk.dim(`  Description: ${plan.description}`));
+    console.log(chalk.dim(`  DB: ${dbPath}`));
+  });
+
+planCmd
+  .command("list")
+  .description("List all saved plans")
+  .option("--json", "Emit JSON instead of a human-readable table", false)
+  .action(async (opts: { json?: boolean }) => {
+    const { PlanStore } = await import("./orchestration/plan-store.js");
+    const dbPath = join(process.cwd(), ".wotann", "plans.db");
+    const store = new PlanStore(dbPath);
+    const summaries = store.listPlans();
+    if (opts.json) {
+      console.log(JSON.stringify(summaries, null, 2));
+      return;
+    }
+    if (summaries.length === 0) {
+      console.log(chalk.dim("No plans saved yet. Create one with `wotann plan save <title>`"));
+      return;
+    }
+    console.log(chalk.bold(`Plans (${summaries.length}):`));
+    for (const s of summaries) {
+      console.log(
+        `  ${chalk.yellow(s.planId.slice(0, 8))} ${chalk.white(s.title)} ` +
+          chalk.dim(
+            `(${s.milestoneCount} milestones, ${s.completedTasks}/${s.taskCount} tasks, status: ${s.status})`,
+          ),
+      );
+    }
+  });
+
+planCmd
+  .command("show <id>")
+  .description("Show a saved plan's full structure")
+  .action(async (id: string) => {
+    const { PlanStore } = await import("./orchestration/plan-store.js");
+    const dbPath = join(process.cwd(), ".wotann", "plans.db");
+    const store = new PlanStore(dbPath);
+    let plan = store.getPlan(id);
+    if (!plan) {
+      const match = store.listPlans().find((p) => p.planId.startsWith(id));
+      if (match) plan = store.getPlan(match.planId);
+    }
+    if (!plan) {
+      console.error(chalk.red(`Plan not found: ${id}`));
+      process.exit(1);
+    }
+    console.log(chalk.bold(`${plan.title}`) + chalk.dim(` (${plan.id})`));
+    console.log(chalk.dim(`  Status: ${plan.status} · Created: ${plan.createdAt}`));
+    if (plan.description) console.log(`  ${plan.description}`);
+    for (const m of plan.milestones) {
+      console.log(`\n  ${chalk.yellow("●")} ${chalk.bold(m.title)} ` + chalk.dim(`[${m.status}]`));
+      for (const t of m.tasks) {
+        const mark =
+          t.status === "completed"
+            ? chalk.green("✓")
+            : t.status === "failed"
+              ? chalk.red("✗")
+              : chalk.dim("◦");
+        console.log(`    ${mark} ${t.title} ` + chalk.dim(`(${t.phase}/${t.lifecycle})`));
+      }
+    }
+  });
+
 // ── wotann channels ─────────────────────────────────────────
 
 const channelsCmd = program.command("channels").description("Multi-channel gateway management");
