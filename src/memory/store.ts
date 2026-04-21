@@ -2229,6 +2229,19 @@ export class MemoryStore {
       readonly now?: number;
       readonly crossEncoder?: CrossEncoder | null;
       readonly onChannelError?: (channelName: string, error: Error) => void;
+      /**
+       * Phase 2 P1-M2 (OMEGA): native sqlite-vec backend for the dense
+       * channel. When supplied together with `embed`, the vector
+       * channel uses sqlite-vec's knn() directly instead of the
+       * per-row cosine fallback. When absent, the channel degrades
+       * to the FTS5 + cosine path (honest fallback).
+       */
+      readonly vectorBackend?: {
+        readonly knn: (
+          q: readonly number[],
+          k: number,
+        ) => readonly { readonly id: string; readonly distance: number }[];
+      };
     } = {},
   ): Promise<{
     readonly hits: readonly (TEMPRHit & { readonly entry: MemoryEntry | null })[];
@@ -2255,9 +2268,33 @@ export class MemoryStore {
           // channel result and can decide what to do.
           return { candidates: [] };
         }
+        // Phase 2 P1-M2 (OMEGA): native sqlite-vec knn path.
+        // When a vectorBackend is provided, route through it rather
+        // than doing per-row cosine. The backend is populated by the
+        // caller (typically MemoryStore.rebuildSqliteVecIndex).
+        if (opts.vectorBackend) {
+          try {
+            const queryVec = await opts.embed(args.query);
+            const hits = opts.vectorBackend.knn(queryVec, pool);
+            if (hits.length === 0) return { candidates: [] };
+            // Rehydrate content from the store. Missing ids (stale
+            // index) are dropped silently — honest fail.
+            const cands: TEMPRCandidate[] = [];
+            for (const h of hits) {
+              const entry = this.getById(h.id);
+              if (entry) {
+                cands.push({ id: entry.id, content: entry.value });
+              }
+            }
+            return { candidates: cands };
+          } catch {
+            // sqlite-vec path failed — fall through to FTS5+cosine
+            // fallback below. Honest degradation.
+          }
+        }
         // Baseline vector retrieval: FTS5 shortlist → cosine rerank
         // against query embedding. This is a COARSE approximation
-        // until quantized-vector-store is threaded through here.
+        // used when sqlite-vec isn't wired.
         const shortlist = this.search(args.query, pool);
         if (shortlist.length === 0) return { candidates: [] };
         const queryVec = await opts.embed!(args.query);
