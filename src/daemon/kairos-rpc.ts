@@ -58,6 +58,14 @@ import {
   ErrorDeviceNotRegisteredForDispatch as WatchErrorDeviceNotRegistered,
   type DispatchTemplate,
 } from "../session/watch-dispatch.js";
+import {
+  CarPlayDispatchRegistry,
+  ErrorUnknownTemplate as CarPlayErrorUnknownTemplate,
+  ErrorRateLimit as CarPlayErrorRateLimit,
+  ErrorDeviceNotRegisteredForDispatch as CarPlayErrorDeviceNotRegistered,
+  ErrorInvalidTranscript as CarPlayErrorInvalidTranscript,
+  type CarPlayTemplate,
+} from "../session/carplay-dispatch.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -181,6 +189,11 @@ function toRpcError(err: unknown): Error {
   if (err instanceof WatchErrorInvalidArgs) return err;
   if (err instanceof WatchErrorRateLimit) return err;
   if (err instanceof WatchErrorDeviceNotRegistered) return err;
+  // F13 — CarPlay dispatch errors. Same class-preservation rationale.
+  if (err instanceof CarPlayErrorUnknownTemplate) return err;
+  if (err instanceof CarPlayErrorRateLimit) return err;
+  if (err instanceof CarPlayErrorDeviceNotRegistered) return err;
+  if (err instanceof CarPlayErrorInvalidTranscript) return err;
   if (err instanceof Error) return err;
   return new Error(String(err));
 }
@@ -710,6 +723,15 @@ export class KairosRPCHandler {
     store: this.computerSessionStore,
   });
 
+  // F13 — CarPlay voice task-dispatch primitive. CarPlay is hands-free-
+  // only by regulation, so the dispatch path is transcript → voice-intent
+  // parser → template match → auto-claimed ComputerSession. Low-confidence
+  // matches return needsConfirmation with topCandidates so the iOS UI can
+  // prompt "Did you mean X or Y?". Per-handler instance per QB #7.
+  private readonly carplayDispatch = new CarPlayDispatchRegistry({
+    store: this.computerSessionStore,
+  });
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -750,6 +772,16 @@ export class KairosRPCHandler {
    */
   getWatchDispatchRegistry(): WatchDispatchRegistry {
     return this.watchDispatch;
+  }
+
+  /**
+   * Test-visibility accessor for the F13 CarPlay dispatch registry. External
+   * callers should route through the `carplay.templates` / `carplay.parseVoice`
+   * / `carplay.dispatch` RPC methods; this exists so tests can seed custom
+   * templates, adjust rate-limit config, or inject a deterministic clock.
+   */
+  getCarPlayDispatchRegistry(): CarPlayDispatchRegistry {
+    return this.carplayDispatch;
   }
 
   /**
@@ -5178,6 +5210,7 @@ export class KairosRPCHandler {
 
     this.registerFleetHandlers();
     this.registerWatchDispatchHandlers();
+    this.registerCarPlayDispatchHandlers();
   }
 
   // ── F15: Multi-agent fleet view RPCs ──────────────────────
@@ -5334,6 +5367,112 @@ export class KairosRPCHandler {
           deviceId,
         });
         return { session: serializeSession(session) };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+  }
+
+  // ── F13: CarPlay voice task-dispatch RPCs ──────────────────
+  //
+  // Per docs/internal/CROSS_SURFACE_SYNERGY_DESIGN.md §Flow 4, CarPlay is
+  // hands-free-only by regulation so dispatch MUST be:
+  //
+  //   voice transcript → intent parse → template match → auto-claim
+  //
+  // F13 exposes three endpoints:
+  //
+  //   - carplay.templates   — list registered templates (with voice pattern
+  //                           metadata stripped for wire-size economy).
+  //   - carplay.parseVoice  — parse a transcript WITHOUT dispatching (for
+  //                           preview flows on the iOS side).
+  //   - carplay.dispatch    — parse + create ComputerSession in one call,
+  //                           with optional forceTemplateId + slots path
+  //                           for confirmation round-trips and an optional
+  //                           freeform fallback for low-confidence speech.
+  //
+  // iOS/CarPlay-side WCSession plumbing is OUT OF SCOPE for F13 — this
+  // is the server-side primitive the mobile team will wire against.
+  private registerCarPlayDispatchHandlers(): void {
+    this.handlers.set("carplay.templates", async (params) => {
+      // Wire contract: templates are returned WITHOUT their regex/keywords
+      // patterns. The iOS UI only needs to know what's available so the
+      // user can ask for it; actual matching happens server-side.
+      const rawTags = (params as Record<string, unknown>)["policyTags"];
+      const tags = Array.isArray(rawTags)
+        ? (rawTags as unknown[]).filter((v): v is string => typeof v === "string")
+        : null;
+      const filter = tags
+        ? (t: CarPlayTemplate): boolean => {
+            const tTags = (t as CarPlayTemplate & { policyTags?: readonly string[] }).policyTags;
+            if (!tTags || tTags.length === 0) return true;
+            return tTags.some((tag) => tags.includes(tag));
+          }
+        : undefined;
+      const list = this.carplayDispatch.list(filter);
+      return {
+        templates: list.map((t) => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          defaults: t.defaults,
+        })),
+      };
+    });
+
+    this.handlers.set("carplay.parseVoice", async (params) => {
+      const transcript = params["transcript"];
+      if (typeof transcript !== "string") {
+        throw new Error("transcript (string) required");
+      }
+      try {
+        const result = this.carplayDispatch.parseVoice({ transcript });
+        return {
+          transcript: result.transcript,
+          normalizedTranscript: result.normalizedTranscript,
+          match: result.match,
+          topCandidates: result.topCandidates,
+          needsConfirmation: result.needsConfirmation,
+        };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("carplay.dispatch", async (params) => {
+      const transcript = params["transcript"];
+      const deviceId = params["deviceId"];
+      const forceTemplateId = params["forceTemplateId"];
+      const slotsIn = params["slots"];
+      const allowFreeformIn = params["allowFreeform"];
+      if (typeof deviceId !== "string" || deviceId.trim() === "") {
+        throw new Error("deviceId (non-empty string) required");
+      }
+      // transcript is only required when forceTemplateId is absent — the
+      // registry enforces this more specifically.
+      const parsedSlots: Record<string, string> =
+        slotsIn && typeof slotsIn === "object" && !Array.isArray(slotsIn)
+          ? Object.fromEntries(
+              Object.entries(slotsIn as Record<string, unknown>).flatMap(([k, v]) =>
+                typeof v === "string" ? [[k, v] as [string, string]] : [],
+              ),
+            )
+          : {};
+      try {
+        const result = this.carplayDispatch.dispatch({
+          transcript: typeof transcript === "string" ? transcript : "",
+          deviceId,
+          forceTemplateId: typeof forceTemplateId === "string" ? forceTemplateId : undefined,
+          slots: parsedSlots,
+          allowFreeform: allowFreeformIn !== false,
+        });
+        return {
+          session: result.session ? serializeSession(result.session) : null,
+          match: result.match,
+          topCandidates: result.topCandidates,
+          needsConfirmation: result.needsConfirmation,
+          usedFreeform: result.usedFreeform,
+        };
       } catch (err) {
         throw toRpcError(err);
       }
