@@ -11,7 +11,8 @@
  * - Enter submits, Shift+Enter inserts a newline, 8-row auto-grow height.
  *
  * Design tokens:
- * - Dark bg #000000, chip bg #1C1C1E with #0A84FF accent border
+ * - Token-backed via `src/design/tokens.generated.ts` — uses the active
+ *   theme's `background`, `surface`, `accent`, `text` color tokens.
  * - SF Pro system font, 15pt body text
  */
 
@@ -57,8 +58,13 @@ export interface ComposerInputProps {
 
 // ── Constants ────────────────────────────────────────────────────────────
 
-const ACCENT = "#0A84FF";
-const CHIP_BG = "#1C1C1E";
+// Token-backed: resolves to the active theme's accent via CSS custom props.
+// `color(...)` returns `var(--wotann-color-accent)` etc., so at runtime
+// these get the theme's live color instead of a hardcoded Apple-blue.
+import { color as tokenColor } from "../../design/tokens.generated";
+
+const ACCENT = tokenColor("accent");
+const CHIP_BG = tokenColor("surface");
 const MAX_ROWS_DEFAULT = 8;
 const ROW_HEIGHT_PX = 22; // 15pt body * ~1.5 line-height
 const MIN_ROWS = 1;
@@ -163,9 +169,12 @@ function ChipPill({ prefix, label }: { readonly prefix: AtPrefix; readonly label
         margin: "0 1px",
         borderRadius: 6,
         background: CHIP_BG,
-        border: `1px solid ${ACCENT}40`,
-        boxShadow: `inset 0 0 0 1px ${ACCENT}14`,
-        color: "#E6E6EB",
+        // ACCENT / CHIP_BG are token-backed CSS vars; visual styling uses
+        // color-mix() so the alpha variants survive the token migration
+        // (color-mix is baseline in Safari 17.5+, Chrome 112+, Firefox 113+).
+        border: `1px solid color-mix(in srgb, ${ACCENT} 25%, transparent)`,
+        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${ACCENT} 8%, transparent)`,
+        color: tokenColor("text"),
         fontSize: 13,
         lineHeight: 1.25,
         fontWeight: 500,
@@ -463,11 +472,11 @@ export function ComposerInput({
         width: "100%",
         padding: 12,
         borderRadius: 14,
-        background: "#000000",
+        background: tokenColor("background"),
         border: "1px solid rgba(255,255,255,0.08)",
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
         font: "15px -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif",
-        color: "#F2F2F7",
+        color: tokenColor("text"),
       }}
     >
       {/* Visual overlay — renders chips as pills underneath the textarea. */}
@@ -535,7 +544,7 @@ export function ComposerInput({
           fontSize: 15,
           lineHeight: `${ROW_HEIGHT_PX}px`,
           color: "transparent",
-          caretColor: "#F2F2F7",
+          caretColor: tokenColor("text"),
           whiteSpace: "pre-wrap",
           wordWrap: "break-word",
         }}

@@ -14,6 +14,7 @@
  */
 
 import { useMemo, useState, type JSX } from "react";
+import { color } from "../../design/tokens.generated";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ export function FocusView({ messages, onExpand, className }: FocusViewProps): JS
         style={{
           padding: "8px 12px",
           fontSize: 12,
-          color: "var(--color-text-muted, #9FB1C8)",
+          color: color("muted"),
         }}
       >
         Focus view collapsed — full conversation restored.
@@ -83,7 +84,7 @@ export function FocusView({ messages, onExpand, className }: FocusViewProps): JS
       {/* 1. Last user prompt */}
       <FocusRow
         label="You asked"
-        accent="var(--color-text-secondary, #9FB1C8)"
+        accent={color("muted")}
         placeholder="No user messages in window"
         content={lastUser}
       />
@@ -91,7 +92,7 @@ export function FocusView({ messages, onExpand, className }: FocusViewProps): JS
       {/* 2. Tool summary */}
       <FocusRow
         label="Tools used"
-        accent="var(--wotann-rune-cyan, #66D9EF)"
+        accent={color("toolMessage")}
         placeholder="No tool calls in window"
         content={toolSummary}
         mono
@@ -100,7 +101,7 @@ export function FocusView({ messages, onExpand, className }: FocusViewProps): JS
       {/* 3. Final assistant response */}
       <FocusRow
         label="WOTANN said"
-        accent="var(--wotann-rune-gold, #FFA843)"
+        accent={color("warning")}
         placeholder="No assistant messages in window"
         content={lastAssistant}
         maxLines={2}
@@ -116,7 +117,7 @@ export function FocusView({ messages, onExpand, className }: FocusViewProps): JS
             fontSize: 11,
             fontWeight: 500,
             letterSpacing: "0.02em",
-            color: "var(--color-text-muted, #9FB1C8)",
+            color: color("muted"),
             background: "transparent",
             border: "1px dashed var(--border-subtle, rgba(138,176,224,0.15))",
             borderRadius: 6,
@@ -224,7 +225,7 @@ function FocusRow({
           lineHeight: 1.5,
           color: isEmpty
             ? "var(--color-text-dim, rgba(138,176,224,0.35))"
-            : "var(--color-text-primary, #E8EEF7)",
+            : color("text"),
           fontStyle: isEmpty ? "italic" : "normal",
           fontFamily: mono
             ? "var(--wotann-font-mono, 'JetBrains Mono', ui-monospace)"

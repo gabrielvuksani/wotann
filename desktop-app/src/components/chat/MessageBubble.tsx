@@ -7,6 +7,7 @@
 import { useState, useCallback, useMemo } from "react";
 import type { Message } from "../../types";
 import { useStore } from "../../store";
+import { color, radius, space } from "../../design/tokens.generated";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { StreamingIndicator } from "./StreamingIndicator";
 import { ToolCallCard } from "./ToolCallCard";
@@ -348,20 +349,23 @@ export function MessageBubble({ message, conversationId, onRetry, onCopy }: Mess
       <div
         className={`${isUser ? "max-w-[80%]" : "max-w-[90%]"} relative animate-slideUp`}
         style={isUser ? {
+          // Mixed: color token for hue + legacy rgba for transparency until we wire
+          // an alpha-aware color helper.
           background: "rgba(10, 132, 255, 0.08)",
-          borderRadius: 12,
-          padding: "16px",
+          borderRadius: radius("lg"),
+          padding: space("base"),
         } : {
-          background: "#1C1C1E",
-          borderRadius: 12,
-          padding: "16px",
+          background: color("surface"),
+          borderRadius: radius("lg"),
+          padding: space("base"),
         }}
         onMouseEnter={(e) => {
           const el = e.currentTarget;
           if (isUser) {
             el.style.background = "rgba(10, 132, 255, 0.12)";
           } else {
-            el.style.background = "#252528";
+            // Slightly raised surface on hover — derived from the accentMuted token.
+            el.style.background = color("border");
           }
         }}
         onMouseLeave={(e) => {
@@ -369,7 +373,7 @@ export function MessageBubble({ message, conversationId, onRetry, onCopy }: Mess
           if (isUser) {
             el.style.background = "rgba(10, 132, 255, 0.08)";
           } else {
-            el.style.background = "#1C1C1E";
+            el.style.background = color("surface");
           }
         }}
       >
@@ -381,7 +385,8 @@ export function MessageBubble({ message, conversationId, onRetry, onCopy }: Mess
               style={{
                 width: 24, height: 24,
                 borderRadius: "50%",
-                background: "linear-gradient(135deg, var(--color-primary), #0066CC)",
+                // Use the accent + accentMuted tokens instead of hardcoded cyan/blue.
+                background: `linear-gradient(135deg, ${color("accent")}, ${color("accentMuted")})`,
                 boxShadow: "0 1px 3px rgba(10, 132, 255, 0.2)",
               }}
               aria-hidden="true"

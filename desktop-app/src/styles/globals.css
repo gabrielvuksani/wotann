@@ -2,6 +2,15 @@
 @source "../**/*.{tsx,ts,jsx,js}";
 @source "../../index.html";
 
+/* Canonical unified design tokens — generated from src/design/tokens.ts.
+ * These expose `--wotann-color-*`, `--wotann-space-*`, `--wotann-radius-*`,
+ * `--wotann-shadow-*`, `--wotann-duration-*`, `--wotann-ease-*` across the
+ * 5 canonical palettes (dark, light, high-contrast, sepia, monochrome).
+ * New components should prefer these over the legacy `--color-*` vars
+ * below.
+ */
+@import "../design/tokens.generated.css";
+
 :root {
   /* WOTANN "Obsidian Precision" — Apple-native dark palette */
   /* Inspired by: Apple HIG Dark Mode, Tesla, Flighty, Apple Wallet */

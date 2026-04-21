@@ -9,6 +9,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "../../store";
+import { color } from "../../design/tokens.generated";
 import {
   ModelPicker,
   PromptRow,
@@ -161,7 +162,7 @@ export function CouncilView() {
             padding: "10px 24px",
             fontSize: 12,
             background: "rgba(255,69,58,0.08)",
-            color: "#ff453a",
+            color: color("error"),
             borderBottom: "1px solid rgba(255,69,58,0.2)",
           }}
         >

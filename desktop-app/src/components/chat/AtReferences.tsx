@@ -10,11 +10,12 @@
  * - Max 10 items per category, max-height 320px
  * - Up/Down to navigate, Enter to insert, Esc to cancel
  * - Shimmer loading state for in-flight queries
- * - Apple blue (#0A84FF) accent on the selected row
+ * - Token-backed accent on the selected row (themes.ts `accent`)
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { commands } from "../../hooks/useTauriCommand";
+import { color } from "../../design/tokens.generated";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -57,7 +58,8 @@ export interface AtReferencesProps {
 // ── Constants ────────────────────────────────────────────────────────────
 
 const MAX_ITEMS = 10;
-const ACCENT = "#0A84FF";
+// Token-backed: maps to the active theme's accent via CSS custom property.
+const ACCENT = color("accent");
 const POPOVER_WIDTH = 360;
 const POPOVER_MAX_HEIGHT = 320;
 
@@ -597,7 +599,7 @@ export function AtReferences({
                       display: "block",
                       fontSize: 14,
                       fontWeight: 500,
-                      color: selected ? "#ffffff" : "rgba(255,255,255,0.92)",
+                      color: selected ? color("text") : "rgba(255,255,255,0.92)",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",

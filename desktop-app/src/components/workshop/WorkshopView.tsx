@@ -5,6 +5,7 @@
 
 import { useState, useCallback } from "react";
 import { useStore } from "../../store";
+import { color } from "../../design/tokens.generated";
 import { spawnAgent } from "../../store/engine";
 import { AgentFleetDashboard } from "../agents/AgentFleetDashboard";
 import { TaskMonitor } from "../autonomous/TaskMonitor";
@@ -126,7 +127,7 @@ export function WorkshopView() {
                 style={{
                   padding: "8px 16px",
                   borderRadius: 10,
-                  background: "#1C1C1E",
+                  background: color("surface"),
                   color: "var(--color-text-secondary)",
                   border: "1px solid var(--border-subtle)",
                   fontSize: "var(--font-size-xs)",

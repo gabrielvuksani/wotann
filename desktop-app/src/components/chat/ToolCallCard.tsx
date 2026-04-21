@@ -4,6 +4,7 @@
  */
 
 import { useState } from "react";
+import { color } from "../../design/tokens.generated";
 
 interface ToolCallCardProps {
   readonly toolName: string;
@@ -17,9 +18,12 @@ export function ToolCallCard({ toolName, toolInput, toolResult, status, duration
   const [expanded, setExpanded] = useState(false);
 
   const icon = status === "running" ? "\u27F3" : status === "complete" ? "\u2713" : "\u2717";
-  const statusColor = status === "running" ? "#0A84FF"
-    : status === "complete" ? "#30D158"
-    : "#FF453A";
+  // Token-backed status color — maps to the active theme's info / success / error.
+  const statusColor = status === "running"
+    ? color("info")
+    : status === "complete"
+      ? color("success")
+      : color("error");
 
   const summary = formatToolSummary(toolName, toolInput);
 

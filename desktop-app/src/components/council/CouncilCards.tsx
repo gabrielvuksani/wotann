@@ -4,6 +4,7 @@
  */
 
 import { MarkdownRenderer } from "../chat/MarkdownRenderer";
+import { color, radius } from "../../design/tokens.generated";
 
 export interface CouncilEntry {
   readonly model: string;
@@ -58,10 +59,10 @@ export function ModelPicker({
                 padding: "6px 12px",
                 fontSize: 12,
                 fontWeight: 500,
-                borderRadius: 999,
-                border: `1px solid ${active ? "#0A84FF" : "rgba(255,255,255,0.08)"}`,
-                background: active ? "rgba(10,132,255,0.15)" : "#1C1C1E",
-                color: active ? "#0A84FF" : "var(--color-text-secondary)",
+                borderRadius: radius("pill"),
+                border: `1px solid ${active ? color("accent") : "rgba(255,255,255,0.08)"}`,
+                background: active ? "rgba(10,132,255,0.15)" : color("surface"),
+                color: active ? color("accent") : "var(--color-text-secondary)",
                 cursor: "pointer",
               }}
               aria-pressed={active}
@@ -102,9 +103,9 @@ export function PromptRow({
           rows={2}
           style={{
             flex: 1,
-            background: "#1C1C1E",
+            background: color("surface"),
             border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 10,
+            borderRadius: radius("md"),
             padding: "10px 12px",
             fontSize: 13,
             color: "var(--color-text-primary)",
@@ -121,12 +122,12 @@ export function PromptRow({
           style={{
             minHeight: 44,
             padding: "0 20px",
-            borderRadius: 10,
+            borderRadius: radius("md"),
             fontSize: 13,
             fontWeight: 600,
             border: "none",
-            background: disabled ? "#2c2c2e" : "#0A84FF",
-            color: disabled ? "var(--color-text-dim)" : "#fff",
+            background: disabled ? color("border") : color("accent"),
+            color: disabled ? "var(--color-text-dim)" : color("text"),
             cursor: disabled ? "not-allowed" : "pointer",
             whiteSpace: "nowrap",
           }}
@@ -145,13 +146,17 @@ export function PromptRow({
 // ── Response card ─────────────────────────────────────
 
 function ResponseCard({ entry }: { readonly entry: CouncilEntry }) {
-  const dotColor = entry.status === "pending" ? "#0A84FF" : entry.status === "error" ? "#ff453a" : "#30d158";
+  const dotColor = entry.status === "pending"
+    ? color("info")
+    : entry.status === "error"
+      ? color("error")
+      : color("success");
   return (
     <div
       style={{
-        background: "#1C1C1E",
+        background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 12,
+        borderRadius: radius("lg"),
         display: "flex",
         flexDirection: "column",
         minHeight: 200,
@@ -180,7 +185,7 @@ function ResponseCard({ entry }: { readonly entry: CouncilEntry }) {
         {entry.status === "pending" ? (
           <p style={{ fontSize: 12, color: "var(--color-text-dim)" }}>Waiting for response...</p>
         ) : entry.status === "error" ? (
-          <p style={{ fontSize: 12, color: "#ff453a" }}>{entry.error ?? "Error"}</p>
+          <p style={{ fontSize: 12, color: color("error") }}>{entry.error ?? "Error"}</p>
         ) : entry.response ? (
           <MarkdownRenderer content={entry.response} />
         ) : (
@@ -217,7 +222,7 @@ export function ConsensusPane({ consensus }: { readonly consensus: string }) {
       style={{
         borderTop: "1px solid rgba(255,255,255,0.08)",
         padding: "14px 24px 20px",
-        background: "#0d0d0f",
+        background: color("background"),
         maxHeight: "42%",
         overflow: "auto",
       }}
@@ -225,7 +230,7 @@ export function ConsensusPane({ consensus }: { readonly consensus: string }) {
     >
       <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M8 1l2 5 5 .5-3.5 3.5.8 5L8 12l-4.3 3 .8-5L1 6.5 6 6l2-5z" stroke="#0A84FF" strokeWidth="1.5" strokeLinejoin="round" />
+          <path d="M8 1l2 5 5 .5-3.5 3.5.8 5L8 12l-4.3 3 .8-5L1 6.5 6 6l2-5z" stroke={color("accent")} strokeWidth="1.5" strokeLinejoin="round" />
         </svg>
         <h3 style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)", margin: 0, letterSpacing: "-0.01em" }}>
           Consensus

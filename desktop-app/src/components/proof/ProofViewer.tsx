@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { color as token } from "../../design/tokens.generated";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -161,7 +162,7 @@ export function ProofViewer({ onClose }: ProofViewerProps) {
   return (
     <div
       className="flex flex-col h-full"
-      style={{ background: "var(--color-bg-primary, #0B0B0F)", color: "rgba(255,255,255,0.9)" }}
+      style={{ background: token("background"), color: "rgba(255,255,255,0.9)" }}
       role="region"
       aria-label="Proof bundles"
     >
@@ -273,7 +274,7 @@ interface BundleHeaderProps {
 }
 
 function BundleHeader({ bundle, isOpen, onToggle, onReverify, reverifying }: BundleHeaderProps) {
-  const color = bundle.summary.success ? "#32D74B" : "#FF453A";
+  const color = bundle.summary.success ? token("success") : token("error");
   return (
     <div
       style={{
@@ -351,7 +352,7 @@ function BundleHeader({ bundle, isOpen, onToggle, onReverify, reverifying }: Bun
           borderRadius: 5,
           background: reverifying ? "rgba(255,255,255,0.03)" : "rgba(10,132,255,0.15)",
           border: "1px solid rgba(10,132,255,0.3)",
-          color: reverifying ? "rgba(255,255,255,0.4)" : "#0A84FF",
+          color: reverifying ? "rgba(255,255,255,0.4)" : token("accent"),
           cursor: reverifying ? "wait" : "pointer",
         }}
       >
@@ -422,7 +423,11 @@ function Chip({ label, value }: { readonly label: string; readonly value: string
 
 function CycleRow({ cycle }: { readonly cycle: ProofCycle }) {
   const allPass = cycle.testsPass && cycle.typecheckPass && cycle.lintPass;
-  const color = allPass ? "#32D74B" : cycle.testsPass || cycle.typecheckPass ? "#FFD60A" : "#FF453A";
+  const color = allPass
+    ? token("success")
+    : cycle.testsPass || cycle.typecheckPass
+      ? token("warning")
+      : token("error");
   return (
     <div
       style={{
@@ -449,7 +454,7 @@ function CycleRow({ cycle }: { readonly cycle: ProofCycle }) {
             padding: "1px 6px",
             borderRadius: 3,
             background: "rgba(10,132,255,0.12)",
-            color: "#0A84FF",
+            color: token("accent"),
             textTransform: "uppercase",
             letterSpacing: 0.2,
           }}
@@ -495,7 +500,7 @@ function VerifyBadge({ label, pass }: { readonly label: string; readonly pass: b
         padding: "1px 5px",
         borderRadius: 3,
         background: pass ? "rgba(50,215,75,0.14)" : "rgba(255,69,58,0.14)",
-        color: pass ? "#32D74B" : "#FF453A",
+        color: pass ? token("success") : token("error"),
         fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
         letterSpacing: 0.2,
       }}

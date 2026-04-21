@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback, useMemo } from "react";
+import { color, radius } from "../../design/tokens.generated";
 
 interface CodeBlockProps {
   readonly code: string;
@@ -160,9 +161,9 @@ export function CodeBlock({ code, language }: CodeBlockProps) {
   );
 
   return (
-    <div className="group relative my-3 overflow-hidden animate-fadeIn" style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)", background: "#1C1C1E" }}>
+    <div className="group relative my-3 overflow-hidden animate-fadeIn" style={{ borderRadius: radius("lg"), border: "1px solid rgba(255,255,255,0.06)", background: color("surface") }}>
       {/* Header with language badge and copy button */}
-      <div className="flex items-center justify-between px-4 py-1.5" style={{ background: "#2C2C2E", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="flex items-center justify-between px-4 py-1.5" style={{ background: color("border"), borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <span style={{ fontSize: 12, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)" }} aria-label={`Language: ${language || "text"}`}>
           {language || "text"}
         </span>

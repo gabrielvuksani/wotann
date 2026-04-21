@@ -10,6 +10,7 @@
 
 import { useRef, useEffect, useCallback, useState, useMemo } from "react";
 import { useStore } from "../../store";
+import { color } from "../../design/tokens.generated";
 import { MessageBubble } from "./MessageBubble";
 import { ComposerInput, type ComposerChipValue } from "./ComposerInput";
 import { FocusView, type FocusMessage } from "./FocusView";
@@ -115,7 +116,7 @@ function WelcomeScreen() {
             width: 40,
             height: 40,
             borderRadius: 10,
-            background: "linear-gradient(135deg, var(--color-primary), #0066CC)",
+            background: `linear-gradient(135deg, ${color("accent")}, ${color("accentMuted")})`,
             boxShadow: "0 2px 12px rgba(10,132,255,0.15), inset 0 1px 0 rgba(255,255,255,0.08)",
             marginBottom: 16,
             animation: "logoBreathe 4s ease-in-out infinite",
@@ -440,7 +441,7 @@ export function ChatView() {
                 style={{
                   fontSize: 11,
                   padding: "4px 10px",
-                  color: "var(--color-text-muted, #9FB1C8)",
+                  color: color("muted"),
                   background: "transparent",
                   border: "1px dashed var(--border-subtle, rgba(138,176,224,0.12))",
                   borderRadius: 6,
