@@ -94,6 +94,16 @@ import {
   type ApprovalEvent,
   type ApprovalRecord,
 } from "../session/approval-queue.js";
+import {
+  FileDelivery,
+  ErrorDeliveryNotFound,
+  ErrorDeliveryExpired,
+  ErrorCreationMissing,
+  ErrorInvalidToken as DeliveryErrorInvalidToken,
+  ErrorInvalidPayload as DeliveryErrorInvalidPayload,
+  type DeliveryEvent,
+  type DeliveryRecord,
+} from "../session/file-delivery.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -230,6 +240,43 @@ function serializeApprovalEvent(e: ApprovalEvent): Record<string, unknown> {
   return out;
 }
 
+// F9 — delivery record / event serializers. Mirror the approval shape so
+// iOS / desktop surfaces parse them with the same plumbing. The
+// `downloadToken` field is flattened from {value, expiresAt} to a pair of
+// siblings because the wire contract is "opaque string + absolute ms"
+// rather than a nested object — matches how iOS ShareLink treats HTTP
+// Authorization: Bearer tokens.
+function serializeDeliveryRecord(r: DeliveryRecord): Record<string, unknown> {
+  return {
+    deliveryId: r.deliveryId,
+    sessionId: r.sessionId,
+    filename: r.filename,
+    displayName: r.displayName,
+    description: r.description,
+    downloadToken: r.downloadToken.value,
+    tokenExpiresAt: r.downloadToken.expiresAt,
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+    state: r.state,
+    acknowledgements: r.acknowledgements.map((a) => ({
+      deviceId: a.deviceId,
+      acknowledgedAt: a.acknowledgedAt,
+    })),
+  };
+}
+
+function serializeDeliveryEvent(e: DeliveryEvent): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    type: e.type,
+    deliveryId: e.deliveryId,
+    sessionId: e.sessionId,
+    timestamp: e.timestamp,
+    record: serializeDeliveryRecord(e.record),
+  };
+  if (e.deviceId !== undefined) out["deviceId"] = e.deviceId;
+  return out;
+}
+
 function toRpcError(err: unknown): Error {
   if (err instanceof SessionNotFoundError) return err;
   if (err instanceof SessionAlreadyClaimedError) return err;
@@ -280,6 +327,13 @@ function toRpcError(err: unknown): Error {
   if (err instanceof ErrorAlreadyDecided) return err;
   if (err instanceof ApprovalErrorExpired) return err;
   if (err instanceof ApprovalErrorInvalidPayload) return err;
+  // F9 — Delivery pipeline errors. Preserve classes so JSON-RPC clients
+  // discriminate on `.code` (DELIVERY_NOT_FOUND / DELIVERY_EXPIRED / ...).
+  if (err instanceof ErrorDeliveryNotFound) return err;
+  if (err instanceof ErrorDeliveryExpired) return err;
+  if (err instanceof ErrorCreationMissing) return err;
+  if (err instanceof DeliveryErrorInvalidToken) return err;
+  if (err instanceof DeliveryErrorInvalidPayload) return err;
   if (err instanceof Error) return err;
   return new Error(String(err));
 }
@@ -847,6 +901,22 @@ export class KairosRPCHandler {
     }
   >();
 
+  // F9 — File-delivery pipeline. Pairs with F5 CreationsStore (finalize
+  // hook) and F7 file.get (actual download). Per-handler instance per
+  // QB #7. Broadcast + finalizeHook are wired in setRuntime; the queue
+  // itself is usable stand-alone in tests. The subscription map follows
+  // the same polling shape as F6 approvals because NDJSON IPC cannot
+  // carry long-lived push streams.
+  private readonly fileDelivery = new FileDelivery();
+  private readonly deliverySubscriptions = new Map<
+    string,
+    {
+      readonly events: DeliveryEvent[];
+      readonly dispose: () => void;
+      lastPolledAt: number;
+    }
+  >();
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -950,6 +1020,17 @@ export class KairosRPCHandler {
   }
 
   /**
+   * Test-visibility accessor for the F9 delivery pipeline. External
+   * callers route through `delivery.notify` / `delivery.pending` /
+   * `delivery.acknowledge` RPCs; this exposes the queue so tests can
+   * seed deliveries directly and assert lifecycle events without
+   * round-tripping through the RPC layer.
+   */
+  getFileDelivery(): FileDelivery {
+    return this.fileDelivery;
+  }
+
+  /**
    * Attach a WotannRuntime instance to route RPC calls to.
    */
   setRuntime(runtime: WotannRuntime): void {
@@ -1011,6 +1092,39 @@ export class KairosRPCHandler {
     } catch {
       // Best-effort — runtime may not expose getWorkingDir in every test.
     }
+
+    // F9 — wire the delivery pipeline into both the dispatch plane (for
+    // cross-surface `delivery-ready` / `delivery-acknowledged` /
+    // `delivery-expired` fan-out) and the creations store (for the
+    // `finalize` hook that lifts a save into a delivery notification).
+    // The existence-check hook lets `delivery.notify` refuse to mint a
+    // token for a file that never got saved — preventing broken download
+    // links on surfaces (QB #6: honest failures).
+    try {
+      const plane = runtime.getDispatchPlane();
+      this.fileDelivery.setBroadcast((ev) => plane.broadcastUnifiedEvent(ev));
+    } catch {
+      // Dispatch plane not available — delivery still works locally.
+    }
+    this.fileDelivery.setCreationExists(({ sessionId, filename }) => {
+      return this.creationsStore.get({ sessionId, filename }) !== null;
+    });
+    this.creationsStore.setFinalizeHook((params) => {
+      const notifyParams: {
+        sessionId: string;
+        filename: string;
+        displayName?: string;
+        description?: string;
+        expiresInSec?: number;
+      } = {
+        sessionId: params.sessionId,
+        filename: params.filename,
+      };
+      if (params.displayName !== undefined) notifyParams.displayName = params.displayName;
+      if (params.description !== undefined) notifyParams.description = params.description;
+      if (params.expiresInSec !== undefined) notifyParams.expiresInSec = params.expiresInSec;
+      return this.fileDelivery.notify(notifyParams);
+    });
   }
 
   /**
@@ -5410,6 +5524,7 @@ export class KairosRPCHandler {
     this.registerCreationsHandlers();
     this.registerFileGetHandlers();
     this.registerApprovalHandlers();
+    this.registerDeliveryHandlers();
   }
 
   // ── F15: Multi-agent fleet view RPCs ──────────────────────
@@ -6005,6 +6120,137 @@ export class KairosRPCHandler {
       } catch (err) {
         throw toRpcError(err);
       }
+    });
+  }
+
+  // ── F9: File-delivery pipeline RPCs ──────────────────────
+  //
+  // Per MASTER_PLAN_V8 §5 P1-F9, when a creation is finalized the daemon
+  // fans out a higher-level delivery notification via F11. Four endpoints:
+  //
+  //   - delivery.notify       — mint a delivery + fan out `delivery-ready`
+  //                             (usually invoked indirectly via the
+  //                             creations-store finalize hook; exposed as
+  //                             a standalone RPC too for tooling + tests)
+  //   - delivery.pending      — list active (non-expired) deliveries,
+  //                             optionally filtered by sessionId
+  //   - delivery.acknowledge  — a surface marks a delivery as seen/
+  //                             downloaded; fans out
+  //                             `delivery-acknowledged`
+  //   - delivery.subscribe    — polling subscription; same shape as
+  //                             approvals.subscribe / fleet.watch
+  //
+  // Errors surface as JSON-RPC errors with typed `.code`:
+  //   DELIVERY_NOT_FOUND / DELIVERY_EXPIRED / DELIVERY_CREATION_MISSING /
+  //   DELIVERY_INVALID_TOKEN / DELIVERY_INVALID_PAYLOAD.
+  private registerDeliveryHandlers(): void {
+    this.handlers.set("delivery.notify", async (params) => {
+      const sessionId = params["sessionId"];
+      const filename = params["filename"];
+      const displayName = params["displayName"];
+      const description = params["description"];
+      const expiresInSec = params["expiresInSec"];
+      if (typeof sessionId !== "string" || sessionId.trim() === "") {
+        throw new Error("sessionId (non-empty string) required");
+      }
+      if (typeof filename !== "string" || filename.trim() === "") {
+        throw new Error("filename (non-empty string) required");
+      }
+      const notifyParams: {
+        sessionId: string;
+        filename: string;
+        displayName?: string;
+        description?: string;
+        expiresInSec?: number;
+      } = { sessionId, filename };
+      if (typeof displayName === "string") notifyParams.displayName = displayName;
+      if (typeof description === "string") notifyParams.description = description;
+      if (typeof expiresInSec === "number" && Number.isFinite(expiresInSec) && expiresInSec > 0) {
+        notifyParams.expiresInSec = expiresInSec;
+      }
+      try {
+        const record = this.fileDelivery.notify(notifyParams);
+        return { delivery: serializeDeliveryRecord(record) };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("delivery.pending", async (params) => {
+      this.fileDelivery.sweepExpired();
+      const sessionId = params["sessionId"];
+      const list =
+        typeof sessionId === "string" && sessionId.length > 0
+          ? this.fileDelivery.pendingForSession(sessionId)
+          : this.fileDelivery.pending();
+      return { pending: list.map(serializeDeliveryRecord) };
+    });
+
+    this.handlers.set("delivery.acknowledge", async (params) => {
+      const deliveryId = params["deliveryId"];
+      const deviceId = params["deviceId"];
+      if (typeof deliveryId !== "string" || deliveryId.trim() === "") {
+        throw new Error("deliveryId (non-empty string) required");
+      }
+      if (typeof deviceId !== "string" || deviceId.trim() === "") {
+        throw new Error("deviceId (non-empty string) required");
+      }
+      try {
+        const record = this.fileDelivery.acknowledge({ deliveryId, deviceId });
+        return { delivery: serializeDeliveryRecord(record) };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("delivery.subscribe", async (params) => {
+      const subscriptionIdIn = params["subscriptionId"];
+      const closeAfter = params["close"] === true;
+      const maxEvents =
+        typeof params["maxEvents"] === "number" && (params["maxEvents"] as number) > 0
+          ? Math.min(params["maxEvents"] as number, 1000)
+          : 256;
+
+      // Poll path — drain buffered events from an existing subscription.
+      if (typeof subscriptionIdIn === "string" && subscriptionIdIn.length > 0) {
+        const sub = this.deliverySubscriptions.get(subscriptionIdIn);
+        if (!sub) {
+          throw new Error(`subscription not found: ${subscriptionIdIn}`);
+        }
+        this.fileDelivery.sweepExpired();
+        const drained = sub.events.splice(0, maxEvents);
+        sub.lastPolledAt = Date.now();
+        if (closeAfter) {
+          sub.dispose();
+          this.deliverySubscriptions.delete(subscriptionIdIn);
+        }
+        return {
+          subscriptionId: subscriptionIdIn,
+          events: drained.map(serializeDeliveryEvent),
+          more: sub.events.length > 0,
+          closed: closeAfter,
+        };
+      }
+
+      // Fresh subscription. Buffer grows as events fire; poll drains.
+      const subId = `dls-${randomUUID()}`;
+      const buffer: DeliveryEvent[] = [];
+      const dispose = this.fileDelivery.subscribe((event) => {
+        buffer.push(event);
+        // Hard cap — protect memory when a subscriber forgets to poll.
+        if (buffer.length > 10_000) buffer.splice(0, buffer.length - 10_000);
+      });
+      this.deliverySubscriptions.set(subId, {
+        events: buffer,
+        dispose,
+        lastPolledAt: Date.now(),
+      });
+      return {
+        subscriptionId: subId,
+        events: [],
+        more: false,
+        closed: false,
+      };
     });
   }
 

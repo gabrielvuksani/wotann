@@ -113,6 +113,28 @@ export interface CreationContent {
  */
 export type BroadcastFn = (event: UnifiedEvent) => void | Promise<void>;
 
+/**
+ * Optional finalize hook — P1-F9 integration. When wired (by the daemon
+ * to `FileDelivery.notify(...)`), `CreationsStore.finalize()` invokes
+ * this hook so the file-delivery pipeline pushes a `delivery-ready`
+ * notification to every registered surface. Silently no-ops if undefined
+ * — `finalize()` remains useful on its own as an "assert bytes on disk"
+ * check even without the F9 layer.
+ *
+ * The hook's return value is whatever the delivery pipeline produces
+ * (opaque to the store — typically a DeliveryRecord). We keep it
+ * `unknown` here so creations.ts doesn't need to import the F9 module
+ * and the two stay decoupled.
+ */
+export type FinalizeHook = (params: {
+  readonly sessionId: string;
+  readonly filename: string;
+  readonly metadata: CreationMetadata;
+  readonly displayName?: string;
+  readonly description?: string;
+  readonly expiresInSec?: number;
+}) => unknown;
+
 // ── Config ─────────────────────────────────────────────────
 
 export interface CreationsStoreConfig {
@@ -152,6 +174,13 @@ export interface CreationsStoreOptions {
   readonly perFileMaxBytes?: number;
   readonly perSessionMaxBytes?: number;
   readonly broadcast?: BroadcastFn;
+  /**
+   * Optional F9 finalize hook. When wired by the daemon, calling
+   * `CreationsStore.finalize(...)` fans out a delivery notification via
+   * this callback. Silent no-op when undefined — `finalize()` still works
+   * as an "assert bytes on disk" check even without F9 wired.
+   */
+  readonly finalizeHook?: FinalizeHook;
   /** Deterministic clock. Default Date.now. */
   readonly now?: () => number;
   /**
@@ -318,6 +347,7 @@ function validateFilename(filename: string): void {
 export class CreationsStore {
   private readonly config: CreationsStoreConfig;
   private broadcast: BroadcastFn | null;
+  private finalizeHook: FinalizeHook | null;
   private readonly clock: () => number;
 
   constructor(options: CreationsStoreOptions = {}) {
@@ -328,6 +358,7 @@ export class CreationsStore {
       perSessionMaxBytes: options.perSessionMaxBytes ?? DEFAULT_PER_SESSION_MAX,
     };
     this.broadcast = options.broadcast ?? null;
+    this.finalizeHook = options.finalizeHook ?? null;
     this.clock = options.now ?? (() => Date.now());
   }
 
@@ -338,6 +369,16 @@ export class CreationsStore {
    */
   setBroadcast(fn: BroadcastFn | null): void {
     this.broadcast = fn;
+  }
+
+  /**
+   * Attach (or replace / detach) the F9 finalize hook. Called by the
+   * daemon once the FileDelivery queue is constructed — same lifecycle
+   * pattern as setBroadcast. Tests bypass this and instead assert that
+   * their own hook fires by passing a spy via options.finalizeHook.
+   */
+  setFinalizeHook(fn: FinalizeHook | null): void {
+    this.finalizeHook = fn;
   }
 
   /** Observe the effective root directory. Tests assert on this. */
@@ -535,6 +576,110 @@ export class CreationsStore {
       },
       content: bytes,
     };
+  }
+
+  /**
+   * F9 integration — mark a creation as ready for delivery. Verifies the
+   * bytes are on disk (ErrorInvalidFilename if not found), captures the
+   * metadata, and hands off to the finalize hook (typically
+   * `FileDelivery.notify(...)`) so downstream surfaces receive a
+   * higher-level `delivery-ready` notification.
+   *
+   * Distinct from `save` which fires a low-level `file-write` event on
+   * EVERY write (including agent scratchpads). `finalize` is the
+   * intentional "this is the output — show it to the user" signal.
+   *
+   * Returns the delivery artifact produced by the hook (opaque — typed as
+   * `unknown` so creations.ts stays decoupled from F9's DeliveryRecord
+   * shape). When no hook is wired, returns null — callers use that to
+   * detect the "F9 not wired" case and fall back to polling `list()`.
+   *
+   * Errors:
+   *   ErrorInvalidSessionId / ErrorInvalidFilename — param validation
+   *   ErrorPathTraversal                           — defence in depth
+   *
+   * Missing file is reported as ErrorInvalidFilename with a "not found"
+   * reason — callers should save() first, then finalize().
+   */
+  finalize(params: {
+    readonly sessionId: string;
+    readonly filename: string;
+    readonly displayName?: string;
+    readonly description?: string;
+    readonly expiresInSec?: number;
+  }): unknown {
+    validateSessionId(params.sessionId);
+    validateFilename(params.filename);
+
+    const absPath = this.resolveFilePath(params.sessionId, params.filename);
+    if (!existsSync(absPath)) {
+      // Honest failure (QB #6): the agent cannot finalize a file that
+      // doesn't exist on disk. Use ErrorInvalidFilename with a "not
+      // found" reason — adding a new error class for every failure mode
+      // bloats the import surface without buying callers much.
+      throw new ErrorInvalidFilename(
+        params.filename,
+        `creation not found under session ${params.sessionId}`,
+      );
+    }
+
+    // Re-read metadata so the finalize payload reflects the current
+    // on-disk state. If `save()` overwrote the file since the agent
+    // queued the finalize call, the delivery notification carries the
+    // updated sha256 + size — which is what the UI needs to surface.
+    let bytes: Buffer;
+    let st;
+    try {
+      bytes = readFileSync(absPath);
+      st = statSync(absPath);
+    } catch {
+      // Race: file vanished between existsSync and readFileSync. Same
+      // honest-failure story as above.
+      throw new ErrorInvalidFilename(
+        params.filename,
+        `creation disappeared during finalize for session ${params.sessionId}`,
+      );
+    }
+    if (!st.isFile()) {
+      throw new ErrorInvalidFilename(
+        params.filename,
+        `creation path is not a regular file under session ${params.sessionId}`,
+      );
+    }
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const metadata: CreationMetadata = {
+      sessionId: params.sessionId,
+      filename: params.filename,
+      size: st.size,
+      sha256,
+      createdAt: Math.floor(st.mtimeMs),
+      path: absPath,
+    };
+
+    if (!this.finalizeHook) return null;
+
+    // Invoke the hook. We pass displayName/description/expiresInSec
+    // through AS-IS when set, omitted when undefined — the hook spreads
+    // them into its own payload so each is optional downstream. Errors
+    // thrown by the hook propagate to the caller: unlike the broadcast
+    // hook (best-effort fan-out), finalize failures are the agent's
+    // responsibility to surface.
+    const hookParams: {
+      sessionId: string;
+      filename: string;
+      metadata: CreationMetadata;
+      displayName?: string;
+      description?: string;
+      expiresInSec?: number;
+    } = {
+      sessionId: params.sessionId,
+      filename: params.filename,
+      metadata,
+    };
+    if (params.displayName !== undefined) hookParams.displayName = params.displayName;
+    if (params.description !== undefined) hookParams.description = params.description;
+    if (params.expiresInSec !== undefined) hookParams.expiresInSec = params.expiresInSec;
+    return this.finalizeHook(hookParams);
   }
 
   /**
