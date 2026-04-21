@@ -66,6 +66,15 @@ import {
   ErrorInvalidTranscript as CarPlayErrorInvalidTranscript,
   type CarPlayTemplate,
 } from "../session/carplay-dispatch.js";
+import {
+  CreationsStore,
+  ErrorFileTooLarge as CreationsErrorFileTooLarge,
+  ErrorQuotaExceeded as CreationsErrorQuotaExceeded,
+  ErrorInvalidFilename as CreationsErrorInvalidFilename,
+  ErrorInvalidSessionId as CreationsErrorInvalidSessionId,
+  ErrorPathTraversal as CreationsErrorPathTraversal,
+  ErrorDiskFull as CreationsErrorDiskFull,
+} from "../session/creations.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -194,6 +203,15 @@ function toRpcError(err: unknown): Error {
   if (err instanceof CarPlayErrorRateLimit) return err;
   if (err instanceof CarPlayErrorDeviceNotRegistered) return err;
   if (err instanceof CarPlayErrorInvalidTranscript) return err;
+  // F5 — Creations store errors. Preserve classes so JSON-RPC clients
+  // discriminate on `.code` and surface localized UI strings without
+  // parsing message bodies.
+  if (err instanceof CreationsErrorFileTooLarge) return err;
+  if (err instanceof CreationsErrorQuotaExceeded) return err;
+  if (err instanceof CreationsErrorInvalidFilename) return err;
+  if (err instanceof CreationsErrorInvalidSessionId) return err;
+  if (err instanceof CreationsErrorPathTraversal) return err;
+  if (err instanceof CreationsErrorDiskFull) return err;
   if (err instanceof Error) return err;
   return new Error(String(err));
 }
@@ -732,6 +750,14 @@ export class KairosRPCHandler {
     store: this.computerSessionStore,
   });
 
+  // F5 — Creations store. When an agent writes a file as part of a
+  // research/creation task, the bytes land under ~/.wotann/creations/
+  // <sessionId>/<filename> with SHA256 integrity, and a UnifiedEvent
+  // fires via F11 so iOS CreationsView / desktop Creations panel can
+  // sync. Per-handler instance per QB #7. The broadcast hook is wired
+  // in setRuntime once the dispatch plane is available.
+  private readonly creationsStore = new CreationsStore();
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -775,6 +801,17 @@ export class KairosRPCHandler {
   }
 
   /**
+   * Test-visibility accessor for the F5 creations store. External callers
+   * should route through the `creations.save` / `creations.list` /
+   * `creations.get` / `creations.delete` RPC methods; this exists so tests
+   * can construct a handler with a tmp rootDir by replacing the field and
+   * seed fixture files before the RPC round-trip.
+   */
+  getCreationsStore(): CreationsStore {
+    return this.creationsStore;
+  }
+
+  /**
    * Test-visibility accessor for the F13 CarPlay dispatch registry. External
    * callers should route through the `carplay.templates` / `carplay.parseVoice`
    * / `carplay.dispatch` RPC methods; this exists so tests can seed custom
@@ -814,6 +851,19 @@ export class KairosRPCHandler {
     } catch {
       // Dispatch plane not available — handoff still works, just without
       // cross-surface fan-out beyond the store's own event stream.
+    }
+
+    // F5 — hook the creations store into the same dispatch plane. Every
+    // save / delete emits a file-write UnifiedEvent so the iOS
+    // CreationsView, desktop Creations panel, and any other registered
+    // surface learns about the new/removed file in realtime. Same
+    // best-effort pattern as F14.
+    try {
+      const plane = runtime.getDispatchPlane();
+      this.creationsStore.setBroadcast((ev) => plane.broadcastUnifiedEvent(ev));
+    } catch {
+      // Dispatch plane not available — creations still works, just
+      // without cross-surface fan-out. Surfaces can still poll `list`.
     }
   }
 
@@ -5211,6 +5261,7 @@ export class KairosRPCHandler {
     this.registerFleetHandlers();
     this.registerWatchDispatchHandlers();
     this.registerCarPlayDispatchHandlers();
+    this.registerCreationsHandlers();
   }
 
   // ── F15: Multi-agent fleet view RPCs ──────────────────────
@@ -5473,6 +5524,129 @@ export class KairosRPCHandler {
           needsConfirmation: result.needsConfirmation,
           usedFreeform: result.usedFreeform,
         };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+  }
+
+  // ── F5: Creations store RPCs ───────────────────────────────
+  //
+  // Per docs/internal/CROSS_SURFACE_SYNERGY_DESIGN.md §P1-S9 and the
+  // Mythical Perfect Workflow (§2.2), agent-created files must land on
+  // a canonical path AND notify every subscribed surface. F5 exposes
+  // four endpoints:
+  //
+  //   - creations.save    — write bytes, return metadata (size + sha256)
+  //   - creations.list    — list metadata for all files in a session
+  //   - creations.get     — fetch a single file's bytes + metadata
+  //   - creations.delete  — remove one file (filename set) or a whole
+  //                         session dir (filename omitted)
+  //
+  // Content is transmitted as base64 on the wire so binary creations
+  // (PDFs, screenshots) survive the JSON-RPC round-trip. The store
+  // emits UnifiedEvents on every save / delete; surfaces wired via F11
+  // pick them up without polling.
+  //
+  // iOS-side CreationsView is OUT OF SCOPE for F5 — this ships the
+  // server-side primitive the mobile team will wire against.
+  private registerCreationsHandlers(): void {
+    this.handlers.set("creations.save", async (params) => {
+      const sessionId = params["sessionId"];
+      const filename = params["filename"];
+      const content = params["content"];
+      const encoding = params["encoding"];
+      if (typeof sessionId !== "string") {
+        throw new Error("sessionId (string) required");
+      }
+      if (typeof filename !== "string") {
+        throw new Error("filename (string) required");
+      }
+      // Accept content as utf8 string (default) or base64-encoded bytes.
+      // JSON-RPC transports treat non-ASCII strings unevenly, so any
+      // caller sending binary bytes MUST pass `encoding: "base64"`.
+      let buffer: Buffer;
+      if (typeof content !== "string") {
+        throw new Error("content (string) required");
+      }
+      if (encoding === "base64") {
+        buffer = Buffer.from(content, "base64");
+      } else if (encoding === undefined || encoding === "utf8" || encoding === "utf-8") {
+        buffer = Buffer.from(content, "utf-8");
+      } else {
+        throw new Error(`unsupported encoding: ${String(encoding)}`);
+      }
+      try {
+        const metadata = this.creationsStore.save({
+          sessionId,
+          filename,
+          content: buffer,
+        });
+        return { metadata };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("creations.list", async (params) => {
+      const sessionId = params["sessionId"];
+      if (typeof sessionId !== "string") {
+        throw new Error("sessionId (string) required");
+      }
+      try {
+        const entries = this.creationsStore.list(sessionId);
+        return { entries };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("creations.get", async (params) => {
+      const sessionId = params["sessionId"];
+      const filename = params["filename"];
+      const encoding = params["encoding"];
+      if (typeof sessionId !== "string") {
+        throw new Error("sessionId (string) required");
+      }
+      if (typeof filename !== "string") {
+        throw new Error("filename (string) required");
+      }
+      try {
+        const result = this.creationsStore.get({ sessionId, filename });
+        if (result === null) return { found: false };
+        // Always base64 on the wire — lossless for binary and safe for
+        // text. Callers that know the content is UTF-8 can decode.
+        const wireEncoding = encoding === "utf8" || encoding === "utf-8" ? "utf-8" : "base64";
+        const content =
+          wireEncoding === "utf-8"
+            ? result.content.toString("utf-8")
+            : result.content.toString("base64");
+        return {
+          found: true,
+          metadata: result.metadata,
+          content,
+          encoding: wireEncoding,
+        };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("creations.delete", async (params) => {
+      const sessionId = params["sessionId"];
+      const filename = params["filename"];
+      if (typeof sessionId !== "string") {
+        throw new Error("sessionId (string) required");
+      }
+      if (filename !== undefined && typeof filename !== "string") {
+        throw new Error("filename must be a string when present");
+      }
+      try {
+        const deleted = this.creationsStore.delete({
+          sessionId,
+          filename: typeof filename === "string" ? filename : undefined,
+        });
+        return { deleted };
       } catch (err) {
         throw toRpcError(err);
       }
