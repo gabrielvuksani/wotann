@@ -6,6 +6,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
+import { SEVERITY } from "../themes.js";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ function percentBar(percent: number, width: number): string {
 function healthColor(percent: number): string {
   if (percent < 50) return "green";
   if (percent < 75) return "yellow";
-  if (percent < 90) return "#ff8c00";
+  if (percent < 90) return SEVERITY.orange;
   return "red";
 }
 
@@ -124,16 +125,22 @@ export function ContextSourcePanel({
     <Box flexDirection="column" borderStyle="single" borderColor={color} paddingX={1}>
       {/* Header */}
       <Box gap={1} marginBottom={1}>
-        <Text bold color={color}>Context Window</Text>
+        <Text bold color={color}>
+          Context Window
+        </Text>
         <Text dimColor>-</Text>
-        <Text color={color} bold>{label}</Text>
+        <Text color={color} bold>
+          {label}
+        </Text>
       </Box>
 
       {/* Total usage bar */}
       <Box flexDirection="column" marginBottom={1}>
         <Box gap={1}>
           <Text color={color}>{percentBar(usagePercent, TOTAL_BAR_WIDTH)}</Text>
-          <Text color={color} bold>{usagePercent}%</Text>
+          <Text color={color} bold>
+            {usagePercent}%
+          </Text>
         </Box>
         <Box gap={1}>
           <Text dimColor>
@@ -146,33 +153,23 @@ export function ContextSourcePanel({
 
       {/* Type breakdown */}
       <Box flexDirection="column" marginBottom={1}>
-        <Text bold dimColor>By Type:</Text>
+        <Text bold dimColor>
+          By Type:
+        </Text>
         {typeAggregates.map((agg) => {
-          const typePercent = totalTokens > 0
-            ? Math.round((agg.totalTokens / totalTokens) * 100)
-            : 0;
-          const barPercent = maxTypeTokens > 0
-            ? Math.round((agg.totalTokens / maxTypeTokens) * 100)
-            : 0;
+          const typePercent =
+            totalTokens > 0 ? Math.round((agg.totalTokens / totalTokens) * 100) : 0;
+          const barPercent =
+            maxTypeTokens > 0 ? Math.round((agg.totalTokens / maxTypeTokens) * 100) : 0;
 
           return (
             <Box key={agg.type} gap={1}>
-              <Text color={TYPE_COLORS[agg.type]}>
-                [{TYPE_ICONS[agg.type]}]
-              </Text>
-              <Text color={TYPE_COLORS[agg.type]}>
-                {agg.type.padEnd(13)}
-              </Text>
-              <Text color={TYPE_COLORS[agg.type]}>
-                {percentBar(barPercent, BAR_WIDTH)}
-              </Text>
-              <Text dimColor>
-                {formatTokenCount(agg.totalTokens).padStart(6)}
-              </Text>
+              <Text color={TYPE_COLORS[agg.type]}>[{TYPE_ICONS[agg.type]}]</Text>
+              <Text color={TYPE_COLORS[agg.type]}>{agg.type.padEnd(13)}</Text>
+              <Text color={TYPE_COLORS[agg.type]}>{percentBar(barPercent, BAR_WIDTH)}</Text>
+              <Text dimColor>{formatTokenCount(agg.totalTokens).padStart(6)}</Text>
               <Text dimColor>({typePercent}%)</Text>
-              {agg.sourceCount > 1 && (
-                <Text dimColor>[{agg.sourceCount} sources]</Text>
-              )}
+              {agg.sourceCount > 1 && <Text dimColor>[{agg.sourceCount} sources]</Text>}
             </Box>
           );
         })}
@@ -180,11 +177,12 @@ export function ContextSourcePanel({
 
       {/* Individual sources */}
       <Box flexDirection="column">
-        <Text bold dimColor>Sources ({sources.length}):</Text>
+        <Text bold dimColor>
+          Sources ({sources.length}):
+        </Text>
         {sources.map((source, idx) => {
-          const sourcePercent = totalTokens > 0
-            ? Math.round((source.tokens / totalTokens) * 100)
-            : 0;
+          const sourcePercent =
+            totalTokens > 0 ? Math.round((source.tokens / totalTokens) * 100) : 0;
 
           return (
             <Box key={`src-${idx}-${source.name}`} gap={1} paddingLeft={1}>

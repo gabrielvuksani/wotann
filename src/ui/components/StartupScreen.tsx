@@ -8,6 +8,7 @@ import { Box, Text } from "ink";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ProviderStatus } from "../../core/types.js";
+import { STARTUP_GRADIENT } from "../themes.js";
 
 const LOGO_LINES = [
   " __        _____  _____  _    _   _ _   _ ",
@@ -17,7 +18,8 @@ const LOGO_LINES = [
   "    \\_/\\_/  \\___/  |_/_/   \\_\\_| \\_|_| \\_|",
 ];
 
-const GRADIENT_COLORS = ["#6366f1", "#8b5cf6", "#a855f7", "#c084fc", "#d8b4fe"];
+/** Palette-backed logo gradient — replaces legacy purple stand-ins. */
+const GRADIENT_COLORS = STARTUP_GRADIENT;
 
 interface StartupScreenProps {
   readonly version: string;
@@ -57,7 +59,8 @@ export function StartupScreen({ version, providers }: StartupScreenProps): React
         {inactiveProviders.length > 0 && (
           <Box gap={1}>
             <Text dimColor>
-              ○ {inactiveProviders.length} provider{inactiveProviders.length > 1 ? "s" : ""} not configured
+              ○ {inactiveProviders.length} provider{inactiveProviders.length > 1 ? "s" : ""} not
+              configured
             </Text>
           </Box>
         )}
@@ -65,18 +68,18 @@ export function StartupScreen({ version, providers }: StartupScreenProps): React
 
       {activeProviders.length === 0 && (
         <Box marginTop={1}>
-          <Text color="yellow">
-            No providers detected. Run `wotann init` to configure.
-          </Text>
+          <Text color="yellow">No providers detected. Run `wotann init` to configure.</Text>
         </Box>
       )}
 
       {!existsSync(join(process.cwd(), ".wotann")) && (
         <Box marginTop={1} flexDirection="column">
-          <Text color="cyan" bold>Welcome to WOTANN!</Text>
+          <Text color="cyan" bold>
+            Welcome to WOTANN!
+          </Text>
           <Text dimColor>First time? Run these to get started:</Text>
-          <Text color="white">  wotann init         Set up workspace + providers</Text>
-          <Text color="white">  wotann init --free  Free-tier setup (Ollama + free APIs)</Text>
+          <Text color="white"> wotann init Set up workspace + providers</Text>
+          <Text color="white"> wotann init --free Free-tier setup (Ollama + free APIs)</Text>
           <Text dimColor>Or type /help for available slash commands.</Text>
         </Box>
       )}

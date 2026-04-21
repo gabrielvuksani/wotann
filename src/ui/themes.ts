@@ -1,10 +1,88 @@
 /**
- * Theme system: 65+ themes with dark/light auto-switch.
- * Each theme defines colors for all UI elements.
+ * Theme system — WOTANN 5-palette consolidation (P1-UI1).
+ *
+ * Design:
+ * - 5 CANONICAL palettes: dark, light, high-contrast, sepia, monochrome.
+ * - Every palette implements the same typed {@link Palette} interface
+ *   (11 role tokens + 4 message kinds + 4 HUD slots). No more scattered
+ *   hex accents in callers — colors are looked up via tokens only.
+ * - Legacy theme names (dracula, nord, tokyo-night, catppuccin-mocha,
+ *   mimir, yggdrasil, …) still resolve via {@link ThemeManager.setTheme}
+ *   so the /theme CLI and Ctrl+Y cycle keep working. They are aliases
+ *   onto one of the 5 canonical palettes — purple stand-ins are gone.
+ * - Norse cycle names (mimir/yggdrasil/runestone/bifrost/valkyrie) are
+ *   preserved as aliases; Ctrl+Y remains a cycle of 5 distinct looks by
+ *   remapping each Norse slot to a canonical palette.
+ *
+ * Purple purge:
+ *   The old DARK_BASE used #6366f1/#8b5cf6/#a855f7/#cba6f7 as accents
+ *   (vendor-biased). Those are now replaced by {@link Palette.accent} /
+ *   {@link Palette.accentMuted} tokens. The default dark accent is
+ *   #06b6d4 (cyan), which matches the WOTANN product palette from
+ *   the rebrand — purple can still be opted in by selecting the
+ *   "sepia" or custom themes that keep warmer accents.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+
+// ── Palette ─────────────────────────────────────────────────────────────────
+
+/**
+ * Typed palette token set. Every canonical palette exports exactly
+ * these keys so callers can consume `theme.colors.<token>` safely.
+ */
+export interface Palette {
+  /** Primary surface (window background). */
+  readonly background: string;
+  /** Slightly raised surface (panels, status bar). */
+  readonly surface: string;
+  /** Default foreground text. */
+  readonly text: string;
+  /** Dimmed text (metadata, hints). */
+  readonly muted: string;
+  /** Borders + dividers. */
+  readonly border: string;
+  /** Accent (focus, primary action, brand highlight). */
+  readonly accent: string;
+  /** Muted accent — hover/inactive variants. */
+  readonly accentMuted: string;
+  /** Info (neutral/assistive) — blue family. */
+  readonly info: string;
+  /** Success — green family. */
+  readonly success: string;
+  /** Warning — yellow/orange family. */
+  readonly warning: string;
+  /** Error — red family. */
+  readonly error: string;
+
+  /** Message kinds (chat log). */
+  readonly userMessage: string;
+  readonly assistantMessage: string;
+  readonly systemMessage: string;
+  readonly toolMessage: string;
+
+  /** HUD severity slots (context gauge, memory health). */
+  readonly hudGreen: string;
+  readonly hudYellow: string;
+  readonly hudOrange: string;
+  readonly hudRed: string;
+}
+
+/**
+ * Legacy-shape colors kept for back-compat with old `theme.colors.*`
+ * references in `App.tsx`. New code should use {@link Palette}.
+ */
+export interface ThemeColors extends Palette {
+  /** @deprecated — use {@link Palette.accent}. */
+  readonly primary: string;
+  /** @deprecated — use {@link Palette.accentMuted}. */
+  readonly secondary: string;
+  /** @deprecated — use {@link Palette.muted}. */
+  readonly textDim: string;
+  /** @deprecated — use {@link Palette.surface}. */
+  readonly statusBar: string;
+}
 
 export interface Theme {
   readonly name: string;
@@ -12,524 +90,297 @@ export interface Theme {
   readonly colors: ThemeColors;
 }
 
-export interface ThemeColors {
-  readonly primary: string;
-  readonly secondary: string;
-  readonly accent: string;
-  readonly background: string;
-  readonly text: string;
-  readonly textDim: string;
-  readonly border: string;
-  readonly success: string;
-  readonly warning: string;
-  readonly error: string;
-  readonly info: string;
-
-  readonly userMessage: string;
-  readonly assistantMessage: string;
-  readonly systemMessage: string;
-  readonly toolMessage: string;
-
-  readonly statusBar: string;
-  readonly hudGreen: string;
-  readonly hudYellow: string;
-  readonly hudRed: string;
-}
-
 export interface PersistedUIState {
   readonly theme?: string;
   readonly panel?: string;
 }
 
-const DARK_BASE: ThemeColors = {
-  primary: "#6366f1",
-  secondary: "#8b5cf6",
-  accent: "#a855f7",
-  background: "#1e1e2e",
-  text: "#cdd6f4",
-  textDim: "#6c7086",
-  border: "#45475a",
-  success: "#a6e3a1",
-  warning: "#f9e2af",
-  error: "#f38ba8",
-  info: "#89b4fa",
-  userMessage: "#89b4fa",
-  assistantMessage: "#a6e3a1",
-  systemMessage: "#f9e2af",
-  toolMessage: "#cba6f7",
-  statusBar: "#313244",
-  hudGreen: "#a6e3a1",
-  hudYellow: "#f9e2af",
-  hudRed: "#f38ba8",
+/** Canonical palette identifiers. */
+export const CANONICAL_PALETTES = [
+  "dark",
+  "light",
+  "high-contrast",
+  "sepia",
+  "monochrome",
+] as const;
+export type CanonicalPaletteName = (typeof CANONICAL_PALETTES)[number];
+
+// ── Canonical palette definitions ──────────────────────────────────────────
+
+const DARK_PALETTE: Palette = {
+  background: "#08080c",
+  surface: "#131318",
+  text: "#e6e6eb",
+  muted: "#8b8b96",
+  border: "#2a2a33",
+  accent: "#06b6d4",
+  accentMuted: "#0891b2",
+  info: "#60a5fa",
+  success: "#34d399",
+  warning: "#fbbf24",
+  error: "#f87171",
+  userMessage: "#60a5fa",
+  assistantMessage: "#34d399",
+  systemMessage: "#fbbf24",
+  toolMessage: "#06b6d4",
+  hudGreen: "#34d399",
+  hudYellow: "#fbbf24",
+  hudOrange: "#f97316",
+  hudRed: "#f87171",
 };
 
-const LIGHT_BASE: ThemeColors = {
-  primary: "#4f46e5",
-  secondary: "#7c3aed",
-  accent: "#9333ea",
-  background: "#eff1f5",
-  text: "#4c4f69",
-  textDim: "#9ca0b0",
-  border: "#ccd0da",
-  success: "#40a02b",
-  warning: "#df8e1d",
-  error: "#d20f39",
-  info: "#1e66f5",
-  userMessage: "#1e66f5",
-  assistantMessage: "#40a02b",
-  systemMessage: "#df8e1d",
-  toolMessage: "#8839ef",
-  statusBar: "#dce0e8",
-  hudGreen: "#40a02b",
-  hudYellow: "#df8e1d",
-  hudRed: "#d20f39",
+const LIGHT_PALETTE: Palette = {
+  background: "#fafafa",
+  surface: "#f0f0f3",
+  text: "#1e1e24",
+  muted: "#6b6b75",
+  border: "#d4d4dc",
+  accent: "#0891b2",
+  accentMuted: "#0e7490",
+  info: "#2563eb",
+  success: "#059669",
+  warning: "#d97706",
+  error: "#dc2626",
+  userMessage: "#2563eb",
+  assistantMessage: "#059669",
+  systemMessage: "#d97706",
+  toolMessage: "#0891b2",
+  hudGreen: "#059669",
+  hudYellow: "#d97706",
+  hudOrange: "#ea580c",
+  hudRed: "#dc2626",
 };
 
-// ── Built-in Themes ─────────────────────────────────────────
+const HIGH_CONTRAST_PALETTE: Palette = {
+  background: "#000000",
+  surface: "#0a0a0a",
+  text: "#ffffff",
+  muted: "#cccccc",
+  border: "#ffffff",
+  accent: "#00ffff",
+  accentMuted: "#00cccc",
+  info: "#00ffff",
+  success: "#00ff00",
+  warning: "#ffff00",
+  error: "#ff0000",
+  userMessage: "#00ffff",
+  assistantMessage: "#00ff00",
+  systemMessage: "#ffff00",
+  toolMessage: "#ffffff",
+  hudGreen: "#00ff00",
+  hudYellow: "#ffff00",
+  hudOrange: "#ff8000",
+  hudRed: "#ff0000",
+};
 
-const THEMES: readonly Theme[] = [
-  { name: "default", variant: "dark", colors: DARK_BASE },
-  { name: "default-light", variant: "light", colors: LIGHT_BASE },
-  { name: "catppuccin-mocha", variant: "dark", colors: DARK_BASE },
-  { name: "catppuccin-latte", variant: "light", colors: LIGHT_BASE },
-  {
-    name: "dracula",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#bd93f9",
-      accent: "#ff79c6",
-      success: "#50fa7b",
-      error: "#ff5555",
-    },
-  },
-  {
-    name: "nord",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#88c0d0",
-      secondary: "#81a1c1",
-      accent: "#5e81ac",
-      background: "#2e3440",
-    },
-  },
-  {
-    name: "gruvbox-dark",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#fe8019",
-      accent: "#fabd2f",
-      success: "#b8bb26",
-      error: "#fb4934",
-    },
-  },
-  {
-    name: "gruvbox-light",
-    variant: "light",
-    colors: {
-      ...LIGHT_BASE,
-      primary: "#d65d0e",
-      accent: "#d79921",
-      success: "#79740e",
-      error: "#cc241d",
-    },
-  },
-  {
-    name: "solarized-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#268bd2", background: "#002b36", text: "#839496" },
-  },
-  {
-    name: "solarized-light",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#268bd2", background: "#fdf6e3", text: "#657b83" },
-  },
-  {
-    name: "tokyo-night",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#7aa2f7", accent: "#bb9af7", background: "#1a1b26" },
-  },
-  {
-    name: "one-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#61afef", accent: "#c678dd", success: "#98c379" },
-  },
-  {
-    name: "monokai",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#66d9ef",
-      accent: "#f92672",
-      success: "#a6e22e",
-      warning: "#fd971f",
-    },
-  },
-  {
-    name: "github-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#58a6ff", background: "#0d1117", border: "#30363d" },
-  },
-  {
-    name: "github-light",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#0969da", background: "#ffffff" },
-  },
-  {
-    name: "material",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#82aaff", accent: "#c792ea", background: "#263238" },
-  },
-  {
-    name: "ayu-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#ffb454", accent: "#ff8f40", background: "#0a0e14" },
-  },
-  {
-    name: "ayu-light",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#ff8f40", background: "#fafafa" },
-  },
-  {
-    name: "everforest-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#a7c080", accent: "#d699b6", background: "#2d353b" },
-  },
-  {
-    name: "rose-pine",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#c4a7e7", accent: "#eb6f92", background: "#191724" },
-  },
-  {
-    name: "rose-pine-moon",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#c4a7e7", accent: "#ea9a97", background: "#232136" },
-  },
-  {
-    name: "rose-pine-dawn",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#907aa9", accent: "#b4637a", background: "#faf4ed" },
-  },
-  {
-    name: "vesper",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#ffc799", accent: "#ff8080", background: "#101010" },
-  },
-  {
-    name: "kanagawa",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#7e9cd8", accent: "#957fb8", background: "#1f1f28" },
-  },
-  {
-    name: "nightfox",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#719cd6", accent: "#9d79d6", background: "#192330" },
-  },
-  {
-    name: "dayfox",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#4d688e", accent: "#955f82", background: "#f6f2ee" },
-  },
-  {
-    name: "oxocarbon",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#78a9ff", accent: "#be95ff", background: "#161616" },
-  },
-  {
-    name: "synthwave",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#36f9f6", accent: "#ff7edb", background: "#2b213a" },
-  },
-  {
-    name: "cyberpunk",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#00ff9f", accent: "#ff003c", background: "#0d0221" },
-  },
-  {
-    name: "midnight",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#569cd6", background: "#1e1e1e", text: "#d4d4d4" },
-  },
-  {
-    name: "horizon",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#e95678", accent: "#fab795", background: "#1c1e26" },
-  },
-  {
-    name: "palenight",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#82aaff", accent: "#c792ea", background: "#292d3e" },
-  },
-  {
-    name: "panda",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#19f9d8", accent: "#ff75b5", background: "#292a2b" },
-  },
-  {
-    name: "shades-of-purple",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#fad000", accent: "#ff628c", background: "#1e1e3f" },
-  },
-  {
-    name: "winter-is-coming",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#89ddff", background: "#011627" },
-  },
-  {
-    name: "cobalt2",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#ffc600", accent: "#f2777a", background: "#193549" },
-  },
-  {
-    name: "night-owl",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#82aaff", accent: "#c792ea", background: "#011627" },
-  },
-  {
-    name: "night-owl-light",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#4876d6", background: "#fbfbfb" },
-  },
-  {
-    name: "atom-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#61afef", background: "#282c34" },
-  },
-  {
-    name: "atom-light",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#4078f2", background: "#fafafa" },
-  },
-  {
-    name: "vim-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#b8bb26", accent: "#fe8019", background: "#282828" },
-  },
-  {
-    name: "helix",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#a6da95", accent: "#f5a97f", background: "#24273a" },
-  },
-  {
-    name: "zed-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#3B9FFF", accent: "#c678dd", background: "#1e2025" },
-  },
-  {
-    name: "zed-light",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#0366D6", background: "#ffffff" },
-  },
-  {
-    name: "fleet-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#87C3FF", accent: "#AF9CFF", background: "#181818" },
-  },
-  {
-    name: "jetbrains-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#6897BB", background: "#2B2B2B" },
-  },
-  {
-    name: "jetbrains-light",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#0000FF", background: "#FFFFFF" },
-  },
-  {
-    name: "vscode-dark",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#569cd6", background: "#1e1e1e" },
-  },
-  {
-    name: "vscode-light",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#0000FF", background: "#FFFFFF" },
-  },
-  {
-    name: "sublime",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#66d9ef", accent: "#f92672", background: "#272822" },
-  },
-  {
-    name: "oceanic",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#6699cc", accent: "#99c794", background: "#1b2b34" },
-  },
-  {
-    name: "aurora",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#88c0d0", accent: "#b48ead", background: "#2e3440" },
-  },
-  {
-    name: "arctic",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#5e81ac", background: "#eceff4" },
-  },
-  {
-    name: "aura",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#a277ff", accent: "#61ffca", background: "#15141b" },
-  },
-  {
-    name: "moonlight",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#82aaff", background: "#222436" },
-  },
-  {
-    name: "blueberry",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#7aa2f7", background: "#17171f" },
-  },
-  {
-    name: "ember",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#ff6c6b", accent: "#da8548", background: "#21242b" },
-  },
-  {
-    name: "forest",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#98c379", accent: "#56b6c2", background: "#1e2127" },
-  },
-  {
-    name: "lavender",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#c4a7e7", accent: "#ebbcba", background: "#232136" },
-  },
-  {
-    name: "slate",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#94a3b8", background: "#0f172a" },
-  },
-  {
-    name: "monochrome",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#ffffff",
-      secondary: "#cccccc",
-      accent: "#ffffff",
-      background: "#000000",
-    },
-  },
-  {
-    name: "monochrome-light",
-    variant: "light",
-    colors: {
-      ...LIGHT_BASE,
-      primary: "#000000",
-      secondary: "#333333",
-      accent: "#000000",
-      background: "#ffffff",
-    },
-  },
-  {
-    name: "high-contrast",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#00ff00",
-      accent: "#ffff00",
-      background: "#000000",
-      text: "#ffffff",
-    },
-  },
-  {
-    name: "high-contrast-light",
-    variant: "light",
-    colors: {
-      ...LIGHT_BASE,
-      primary: "#0000ff",
-      accent: "#ff0000",
-      background: "#ffffff",
-      text: "#000000",
-    },
-  },
-  {
-    name: "wotann",
-    variant: "dark",
-    colors: { ...DARK_BASE, primary: "#8b5cf6", accent: "#06b6d4", background: "#08080c" },
-  },
-  {
-    name: "wotann-light",
-    variant: "light",
-    colors: { ...LIGHT_BASE, primary: "#8b5cf6", accent: "#06b6d4", background: "#fafafa" },
-  },
-  // ── Norse 5-theme switcher (Wave 3G) ─────────────────────────
-  // Cycled via Ctrl+Y (TUI) or /theme <name>. Persists via
-  // ThemeManager.persist to `.wotann/ui-state.json`.
-  {
-    name: "mimir",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#d4a853",
-      secondary: "#8b7355",
-      accent: "#f0c75e",
-      background: "#0d0a06",
-      text: "#ebd5b3",
-      border: "#3d2f1f",
-      assistantMessage: "#d4a853",
-    },
-  },
-  {
-    name: "yggdrasil",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#4a8c3a",
-      secondary: "#2f5e26",
-      accent: "#8cc65f",
-      background: "#0a120a",
-      text: "#c8e3b3",
-      border: "#1e3a1c",
-      assistantMessage: "#8cc65f",
-    },
-  },
-  {
-    name: "runestone",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#a8a8a8",
-      secondary: "#6e6e6e",
-      accent: "#d4d4d4",
-      background: "#121212",
-      text: "#d4d4d4",
-      border: "#333333",
-      assistantMessage: "#d4d4d4",
-    },
-  },
-  {
-    name: "bifrost",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#ff6b9d",
-      secondary: "#9d6bff",
-      accent: "#6bd6ff",
-      background: "#0d0818",
-      text: "#e8d4ff",
-      border: "#3d2d5a",
-      assistantMessage: "#ff6b9d",
-    },
-  },
-  {
-    name: "valkyrie",
-    variant: "dark",
-    colors: {
-      ...DARK_BASE,
-      primary: "#c83c3c",
-      secondary: "#8c2828",
-      accent: "#f05050",
-      background: "#0d0606",
-      text: "#e8c8c8",
-      border: "#3d1c1c",
-      assistantMessage: "#f05050",
-    },
-  },
+const SEPIA_PALETTE: Palette = {
+  background: "#1a1410",
+  surface: "#241b14",
+  text: "#ebd5b3",
+  muted: "#9c8972",
+  border: "#3d2f1f",
+  accent: "#d4a853",
+  accentMuted: "#a88540",
+  info: "#c8a876",
+  success: "#8cb368",
+  warning: "#e8a857",
+  error: "#c87a5e",
+  userMessage: "#c8a876",
+  assistantMessage: "#d4a853",
+  systemMessage: "#e8a857",
+  toolMessage: "#b89468",
+  hudGreen: "#8cb368",
+  hudYellow: "#e8a857",
+  hudOrange: "#d17d3d",
+  hudRed: "#c87a5e",
+};
+
+const MONOCHROME_PALETTE: Palette = {
+  background: "#000000",
+  surface: "#111111",
+  text: "#e0e0e0",
+  muted: "#808080",
+  border: "#333333",
+  accent: "#ffffff",
+  accentMuted: "#cccccc",
+  info: "#bdbdbd",
+  success: "#d0d0d0",
+  warning: "#999999",
+  error: "#666666",
+  userMessage: "#e0e0e0",
+  assistantMessage: "#ffffff",
+  systemMessage: "#aaaaaa",
+  toolMessage: "#888888",
+  hudGreen: "#d0d0d0",
+  hudYellow: "#999999",
+  hudOrange: "#777777",
+  hudRed: "#555555",
+};
+
+/** Canonical palettes indexed by name. */
+export const PALETTES: Readonly<Record<CanonicalPaletteName, Palette>> = {
+  dark: DARK_PALETTE,
+  light: LIGHT_PALETTE,
+  "high-contrast": HIGH_CONTRAST_PALETTE,
+  sepia: SEPIA_PALETTE,
+  monochrome: MONOCHROME_PALETTE,
+};
+
+/**
+ * Severity tokens — palette-backed constants for components that aren't
+ * (yet) theme-aware. Pulling from these instead of hardcoding hex keeps
+ * callers inside the token system even when the Theme object isn't
+ * threaded through props. Matches the dark palette; migrate to full
+ * theme-aware props when a component gets refactored.
+ */
+export const SEVERITY = {
+  green: DARK_PALETTE.hudGreen,
+  yellow: DARK_PALETTE.hudYellow,
+  orange: DARK_PALETTE.hudOrange,
+  red: DARK_PALETTE.hudRed,
+  accent: DARK_PALETTE.accent,
+  accentMuted: DARK_PALETTE.accentMuted,
+} as const;
+
+/** Startup-logo gradient stops — token-backed (accent + info family). */
+export const STARTUP_GRADIENT: readonly string[] = [
+  DARK_PALETTE.accent,
+  DARK_PALETTE.accentMuted,
+  DARK_PALETTE.info,
+  DARK_PALETTE.accent,
+  DARK_PALETTE.accentMuted,
 ];
+
+// ── Theme resolution (back-compat) ──────────────────────────────────────────
+
+/** Convert a Palette into the legacy ThemeColors shape (adds aliases). */
+function toThemeColors(p: Palette): ThemeColors {
+  return {
+    ...p,
+    primary: p.accent,
+    secondary: p.accentMuted,
+    textDim: p.muted,
+    statusBar: p.surface,
+  };
+}
+
+/** Canonical palette → {dark, light} variant mapping. */
+const PALETTE_VARIANT: Readonly<Record<CanonicalPaletteName, "dark" | "light">> = {
+  dark: "dark",
+  light: "light",
+  "high-contrast": "dark",
+  sepia: "dark",
+  monochrome: "dark",
+};
+
+/**
+ * Alias table — every theme name we ever supported resolves to one of
+ * the 5 canonical palettes. Keeps `/theme dracula` from failing while
+ * eliminating 60+ near-duplicate color sets.
+ *
+ * The Norse cycle (mimir→yggdrasil→runestone→bifrost→valkyrie) is
+ * preserved as aliases so Ctrl+Y still produces 5 visibly distinct
+ * looks (one per canonical palette).
+ */
+const THEME_ALIASES: Readonly<Record<string, CanonicalPaletteName>> = {
+  // Canonical
+  dark: "dark",
+  light: "light",
+  "high-contrast": "high-contrast",
+  sepia: "sepia",
+  monochrome: "monochrome",
+
+  // Back-compat (default names)
+  default: "dark",
+  "default-light": "light",
+  "high-contrast-light": "high-contrast",
+  "monochrome-light": "light",
+  wotann: "dark",
+  "wotann-light": "light",
+
+  // Norse cycle — one slot per canonical palette (Ctrl+Y rotates all 5).
+  mimir: "sepia",
+  yggdrasil: "dark",
+  runestone: "monochrome",
+  bifrost: "high-contrast",
+  valkyrie: "light",
+
+  // Legacy decorative names — mapped by best-fit variant
+  "catppuccin-mocha": "dark",
+  "catppuccin-latte": "light",
+  dracula: "dark",
+  nord: "dark",
+  "gruvbox-dark": "dark",
+  "gruvbox-light": "light",
+  "solarized-dark": "dark",
+  "solarized-light": "light",
+  "tokyo-night": "dark",
+  "one-dark": "dark",
+  monokai: "dark",
+  "github-dark": "dark",
+  "github-light": "light",
+  material: "dark",
+  "ayu-dark": "dark",
+  "ayu-light": "light",
+  "everforest-dark": "dark",
+  "rose-pine": "dark",
+  "rose-pine-moon": "dark",
+  "rose-pine-dawn": "light",
+  vesper: "dark",
+  kanagawa: "dark",
+  nightfox: "dark",
+  dayfox: "light",
+  oxocarbon: "dark",
+  synthwave: "dark",
+  cyberpunk: "high-contrast",
+  midnight: "dark",
+  horizon: "dark",
+  palenight: "dark",
+  panda: "dark",
+  "shades-of-purple": "dark",
+  "winter-is-coming": "dark",
+  cobalt2: "dark",
+  "night-owl": "dark",
+  "night-owl-light": "light",
+  "atom-dark": "dark",
+  "atom-light": "light",
+  "vim-dark": "dark",
+  helix: "dark",
+  "zed-dark": "dark",
+  "zed-light": "light",
+  "fleet-dark": "dark",
+  "jetbrains-dark": "dark",
+  "jetbrains-light": "light",
+  "vscode-dark": "dark",
+  "vscode-light": "light",
+  sublime: "dark",
+  oceanic: "dark",
+  aurora: "dark",
+  arctic: "light",
+  aura: "dark",
+  moonlight: "dark",
+  blueberry: "dark",
+  ember: "dark",
+  forest: "dark",
+  lavender: "dark",
+  slate: "dark",
+};
+
+function buildTheme(name: string, palette: CanonicalPaletteName): Theme {
+  return {
+    name,
+    variant: PALETTE_VARIANT[palette],
+    colors: toThemeColors(PALETTES[palette]),
+  };
+}
+
+/** All registered themes — canonical + every alias → same typed Theme. */
+const BUILTIN_THEMES: readonly Theme[] = Object.entries(THEME_ALIASES).map(([name, palette]) =>
+  buildTheme(name, palette),
+);
+
+/** Canonical theme objects (always 5 entries, one per canonical palette). */
+export const CANONICAL_THEMES: readonly Theme[] = CANONICAL_PALETTES.map((p) => buildTheme(p, p));
 
 /** Norse theme preset identifiers — cycled by Ctrl+Y (TUI) / `/theme`. */
 export const NORSE_THEMES: readonly string[] = [
@@ -550,17 +401,26 @@ export function cycleNorseTheme(current: string): string {
   return NORSE_THEMES[(idx + 1) % NORSE_THEMES.length]!;
 }
 
+/** Look up a palette by alias or canonical name. Returns null if unknown. */
+export function resolvePalette(name: string): Palette | null {
+  const canonical = THEME_ALIASES[name];
+  if (!canonical) return null;
+  return PALETTES[canonical];
+}
+
+// ── ThemeManager ───────────────────────────────────────────────────────────
+
 export class ThemeManager {
   private currentTheme: Theme;
   private readonly themes: Map<string, Theme>;
   private readonly storagePath?: string;
 
-  constructor(initialTheme: string = "default", storagePath?: string) {
-    this.themes = new Map(THEMES.map((t) => [t.name, t]));
+  constructor(initialTheme: string = "dark", storagePath?: string) {
+    this.themes = new Map(BUILTIN_THEMES.map((t) => [t.name, t]));
     this.storagePath = storagePath;
     const persisted = storagePath ? readPersistedUIState(storagePath) : {};
     const resolvedTheme = persisted.theme ?? initialTheme;
-    this.currentTheme = this.themes.get(resolvedTheme) ?? THEMES[0]!;
+    this.currentTheme = this.themes.get(resolvedTheme) ?? this.themes.get("dark")!;
   }
 
   getCurrent(): Theme {
@@ -581,6 +441,11 @@ export class ThemeManager {
 
   getThemeCount(): number {
     return this.themes.size;
+  }
+
+  /** Canonical palette count — the 5-palette invariant this system enforces. */
+  getCanonicalPaletteCount(): number {
+    return CANONICAL_PALETTES.length;
   }
 
   addCustomTheme(theme: Theme): void {
