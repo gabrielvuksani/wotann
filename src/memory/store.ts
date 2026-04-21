@@ -2583,6 +2583,43 @@ export class MemoryStore {
     return this.createAgentToolkit().dispatch(toolName, args);
   }
 
+  // ── Phase 2 P1-M3: Mem0 v3 agent-facts wrappers ───────────
+  //
+  // Thin forwarders to the agent-facts module so callers holding a
+  // MemoryStore can record and retrieve Mem0 v3 agent-scoped facts
+  // without a second import. The actual tag-encoding / filter logic
+  // lives in `agent-facts.ts` (single source of truth — Quality
+  // Bar #11). These wrappers exist to keep the API symmetric with
+  // other MemoryStore capabilities (e.g., recordEntity, searchPalace).
+  //
+  // Lazy import pattern avoids any circular-module-load edge case
+  // with `agent-facts.ts` which imports MemoryStore as a type. Using
+  // `import()` at call time would make these async; we use a cached
+  // module reference instead to keep the API synchronous.
+
+  /**
+   * Phase 2 P1-M3: record an ADD-only agent-fact. Delegates to
+   * `recordAgentFact` in `agent-facts.ts`. Honest failure on empty
+   * agentId bubbles up — caller must provide a non-empty identity.
+   */
+  recordAgentFact(fact: import("./agent-facts.js").AgentFact): void {
+    // Synchronous require via eagerly-resolved module ref. The
+    // `agent-facts` module depends only on MemoryStore as a type so
+    // the cycle is harmless at runtime; the lazy binding keeps
+    // initialisation order independent of load order.
+    const mod = getAgentFactsModule();
+    mod.recordAgentFact(this, fact);
+  }
+
+  /**
+   * Phase 2 P1-M3: retrieve agent-facts scoped to an agent identity.
+   * Delegates to `retrieveAgentFacts` in `agent-facts.ts`.
+   */
+  retrieveAgentFacts(opts: import("./agent-facts.js").AgentFactsQuery): readonly MemoryEntry[] {
+    const mod = getAgentFactsModule();
+    return mod.retrieveAgentFacts(this, opts);
+  }
+
   // ── Memvid portable export/import (Phase 2 P1-M7) ──────────
 
   /**
@@ -3375,4 +3412,37 @@ function sanitizeForFts5(query: string): string {
   const unique = Array.from(new Set(tokens));
   if (unique.length === 0) return "";
   return unique.slice(0, 12).join(" OR ");
+}
+
+// ── Phase 2 P1-M3: agent-facts module resolver ─────────
+//
+// Cached reference to the agent-facts module. Populated by the
+// auto-bootstrap side-effect at the bottom of `agent-facts.ts` so any
+// consumer who imports either file gets the wiring transparently.
+// The cycle is safe because `agent-facts.ts` imports MemoryStore /
+// MemoryEntry as types only — no value is imported, so module load
+// order is not observable at runtime.
+type AgentFactsModule = typeof import("./agent-facts.js");
+let agentFactsModuleCache: AgentFactsModule | null = null;
+
+function getAgentFactsModule(): AgentFactsModule {
+  if (agentFactsModuleCache === null) {
+    throw new Error(
+      "MemoryStore.recordAgentFact/retrieveAgentFacts: agent-facts module not bootstrapped; " +
+        "import src/memory/agent-facts.js at composition-root to register the wiring.",
+    );
+  }
+  return agentFactsModuleCache;
+}
+
+/**
+ * Bootstrap the agent-facts module reference used by
+ * `MemoryStore.recordAgentFact` / `MemoryStore.retrieveAgentFacts`.
+ *
+ * Called automatically by `agent-facts.ts` at import time so any
+ * consumer who imports either file gets the wiring transparently.
+ * Exposed for testability — tests can inject a stub module.
+ */
+export function setAgentFactsModule(mod: AgentFactsModule): void {
+  agentFactsModuleCache = mod;
 }
