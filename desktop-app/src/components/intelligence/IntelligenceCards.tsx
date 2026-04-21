@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback } from "react";
 import { HealthGauge } from "./HealthGauge";
 import { PWRStepper } from "./PWRStepper";
 import { rpc, Card, StatusBadge, formatTimeAgo } from "./intelligenceUtils";
+import { color } from "../../design/tokens.generated";
 import type {
   HealthReport,
   FlowInsights,
@@ -191,7 +192,7 @@ export function DecisionLogCard() {
             style={{ background: "var(--surface-1)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-sm)", padding: "4px 8px", fontSize: "var(--font-size-2xs)", color: "var(--color-text-secondary)", outline: "none", resize: "none", fontFamily: "var(--font-sans)" }}
           />
           <div style={{ display: "flex", gap: "var(--space-xs)" }}>
-            <button onClick={handleRecord} className="btn-press" style={{ padding: "4px 10px", fontSize: "var(--font-size-2xs)", background: "var(--accent)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer" }}>
+            <button onClick={handleRecord} className="btn-press" style={{ padding: "4px 10px", fontSize: "var(--font-size-2xs)", background: "var(--accent)", color: color("text"), border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer" }}>
               Save
             </button>
             <button onClick={() => setRecording(false)} className="btn-press" style={{ padding: "4px 10px", fontSize: "var(--font-size-2xs)", background: "transparent", color: "var(--color-text-muted)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}>

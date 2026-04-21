@@ -10,7 +10,10 @@ import { useState, useCallback, useMemo } from "react";
 
 // ── Design Token Map ────────────────────────────────────
 
-/** Maps raw CSS values to their closest design token equivalents. */
+/** Maps raw CSS values to their closest design token equivalents.
+ *  TODO(design-token): hex literals below are REGEX patterns matching raw CSS
+ *  values the user types in the Inspector. They are data, not style values —
+ *  migrating them to color() would break the match semantics. */
 const DESIGN_TOKENS: ReadonlyArray<{
   readonly property: string;
   readonly pattern: RegExp;

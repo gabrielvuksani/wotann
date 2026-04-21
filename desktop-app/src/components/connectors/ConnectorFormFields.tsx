@@ -1,7 +1,7 @@
 /**
  * ConnectorFormFields — primitive field components and per-type field renderers.
  * Extracted from ConnectorConfigForm to keep each file focused.
- * Obsidian Precision: #1C1C1E surfaces, Apple blue focus, 12px radius.
+ * Obsidian Precision: token-backed surfaces, accent focus, 12px radius.
  */
 
 import type { SupportedConnectorType } from "./ConnectorConfigForm";

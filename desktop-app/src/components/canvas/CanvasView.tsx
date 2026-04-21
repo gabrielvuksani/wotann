@@ -14,6 +14,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useStore } from "../../store";
 import { EmptyState } from "../shared/ErrorState";
+import { color } from "../../design/tokens.generated";
 
 interface CanvasSurface {
   readonly id: string;
@@ -30,7 +31,10 @@ interface CanvasSurface {
  * CSP: no network, no storage, scripts only inline.
  */
 function buildSandboxedHtml(surface: CanvasSurface): string {
-  // Read CSS variable values from the host document to inject into the sandboxed iframe
+  // Read CSS variable values from the host document to inject into the sandboxed iframe.
+  // TODO(design-token): iframe is sandboxed; CSS vars don't cross the boundary.
+  // We read from host on build, substitute the resolved string into iframe CSS.
+  // Fallbacks stay literal because the iframe can't resolve var() at runtime.
   const style = getComputedStyle(document.documentElement);
   const cssVar = (name: string, fallback: string): string =>
     style.getPropertyValue(name).trim() || fallback;
@@ -128,6 +132,10 @@ export function CanvasView() {
   }, [activeSurfaceId]);
 
   // Demo surface for testing
+  // TODO(design-token): the demo HTML embeds literal hex for use inside a
+  // sandboxed iframe. The iframe has no access to the host's `--wotann-color-*`
+  // CSS vars (sandbox="allow-scripts" + CSP default-src 'none'), so tokens
+  // can't be injected here. These literals are test-only demo swatches.
   const addDemoSurface = useCallback(() => {
     addSurface({
       id: `demo-${Date.now()}`,
@@ -261,7 +269,7 @@ export function CanvasView() {
             width: "100%",
             height: "100%",
             border: "none",
-            background: "var(--bg-base, #09090b)",
+            background: `var(--bg-base, ${color("background")})`,
           }}
         />
       </div>

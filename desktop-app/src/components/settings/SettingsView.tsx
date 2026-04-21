@@ -209,6 +209,8 @@ export function SettingsView() {
             <SettingRow label="Accent color" description="Primary color used across the interface">
               <div className="flex items-center gap-2">
                 {(["violet", "blue", "emerald", "amber", "rose", "cyan"] as const).map((color) => {
+                  // TODO(design-token): accent picker swatches are user-selectable
+                  // distinct colors — each is the identity of a choice, not a theme token.
                   const colorMap: Record<string, string> = {
                     violet: "#0A84FF",
                     blue: "#3b82f6",
@@ -520,6 +522,7 @@ function DevicesSection() {
         </button>
         {showQr && (
           <div className="mt-4 inline-flex flex-col items-center gap-3">
+            {/* TODO(design-token): QR code bg must be pure white for scanner contrast regardless of theme */}
             <div style={{ padding: 12, background: "#ffffff", borderRadius: "var(--radius-md)" }}>
               <QRCodeSVG value={pairing?.qrData ?? "wotann://pair"} size={180} level="M" />
             </div>

@@ -7,6 +7,7 @@ import { useStore } from "../../store";
 import { getCostDetails, getLifetimeTokenStats } from "../../store/engine";
 import type { DayUsage, ProviderCostBreakdown } from "../../hooks/useTauriCommand";
 import { ArbitrageDashboard } from "./ArbitrageDashboard";
+import { color } from "../../design/tokens.generated";
 
 type CostTab = "overview" | "providers";
 
@@ -140,7 +141,7 @@ export function CostDashboard() {
         </div>
 
         {/* Daily usage chart */}
-        <div style={{ background: "#1C1C1E", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+        <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
           <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: "var(--space-md)" }}>Daily Usage (7 days)</h3>
           {loading ? (
             <div className="flex items-center justify-center" style={{ height: 128, fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>
@@ -176,7 +177,7 @@ export function CostDashboard() {
         </div>
 
         {/* Provider breakdown */}
-        <div style={{ background: "#1C1C1E", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+        <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
           <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: "var(--space-md)" }}>Spending by Provider (This Week)</h3>
           {loading ? (
             <div style={{ fontSize: "var(--font-size-xs)", textAlign: "center", padding: "var(--space-md) 0", color: "var(--color-text-muted)" }}>Loading...</div>
@@ -210,7 +211,7 @@ export function CostDashboard() {
         </div>
 
         {/* Token stats */}
-        <div style={{ background: "#1C1C1E", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+        <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
           <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: "var(--space-md)" }}>Token Summary</h3>
           {loading ? (
             <div style={{ fontSize: "var(--font-size-xs)", textAlign: "center", padding: "var(--space-md) 0", color: "var(--color-text-muted)" }}>Loading...</div>
@@ -236,7 +237,7 @@ export function CostDashboard() {
 
         {/* Lifetime Stats */}
         {lifetimeStats && (
-          <div style={{ background: "#1C1C1E", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+          <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
             <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: "var(--space-md)" }}>Lifetime Stats</h3>
             <div className="grid grid-cols-3" style={{ gap: "var(--space-md)", marginBottom: "var(--space-md)" }}>
               <div>
@@ -297,7 +298,7 @@ export function CostDashboard() {
 
         {/* Budget progress */}
         {cost.budgetRemaining !== null && (
-          <div style={{ background: "#1C1C1E", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+          <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
             <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: 12 }}>Monthly Budget</h3>
             <div className="flex items-center justify-between" style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginBottom: "6px" }}>
               <span>
@@ -344,7 +345,7 @@ function CostCard({
         borderRadius: 12,
         border: "1px solid",
         padding: "14px 16px",
-        background: alert ? "var(--color-warning-muted)" : "#1C1C1E",
+        background: alert ? "var(--color-warning-muted)" : color("surface"),
         borderColor: alert ? "var(--color-warning)" : "var(--border-subtle)",
         transition: "border-color 200ms var(--ease-expo)",
       }}

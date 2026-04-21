@@ -138,7 +138,7 @@ export function SymbolRow({ symbol, depth, filePath }: { readonly symbol: UISymb
             width: 16,
             height: 16,
             borderRadius: 3,
-            background: `${color}20`,
+            background: `color-mix(in srgb, ${color} 12%, transparent)`,
             color,
             fontSize: 10,
             fontWeight: 700,

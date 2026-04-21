@@ -162,7 +162,7 @@ export function Block(props: BlockProps): JSX.Element {
             color: STATUS_DOT[status],
             padding: "2px 6px",
             borderRadius: 4,
-            background: `${STATUS_DOT[status]}15`,
+            background: `color-mix(in srgb, ${STATUS_DOT[status]} 8%, transparent)`,
           }}
         >
           <span

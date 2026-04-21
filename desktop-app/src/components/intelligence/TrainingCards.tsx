@@ -4,6 +4,7 @@
  */
 
 import { Card, StatusBadge, formatTimeAgo } from "./intelligenceUtils";
+import { color } from "../../design/tokens.generated";
 
 // ── Shared types (mirror TrainingReview) ───────────────
 
@@ -43,11 +44,12 @@ export interface SkillForgeTrigger {
 }
 
 export const STATUS_COLOR: Record<TrainingState, string> = {
-  idle: "#8e8e93",
-  queued: "#ff9f0a",
-  training: "#0A84FF",
+  idle: color("muted"),
+  queued: color("warning"),
+  training: color("accent"),
+  // TODO(design-token): no violet/purple token exists for "evaluating" state
   evaluating: "#bf5af2",
-  error: "#ff453a",
+  error: color("error"),
 };
 
 // ── Pending Evolution ─────────────────────────────────
@@ -75,7 +77,7 @@ export function PendingEvolutionCard({
             <div
               key={item.id}
               style={{
-                background: "#000",
+                background: color("background"),
                 borderRadius: 8,
                 padding: 10,
                 border: "1px solid rgba(255,255,255,0.05)",
@@ -87,7 +89,7 @@ export function PendingEvolutionCard({
                     <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)" }}>
                       {item.title}
                     </span>
-                    <StatusBadge text={item.kind} color="#0A84FF" />
+                    <StatusBadge text={item.kind} color={color("accent")} />
                   </div>
                   {item.description && (
                     <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: "2px 0", lineHeight: 1.45 }}>
@@ -110,7 +112,7 @@ export function PendingEvolutionCard({
                       borderRadius: 6,
                       border: "1px solid rgba(48,209,88,0.3)",
                       background: "rgba(48,209,88,0.15)",
-                      color: "#30d158",
+                      color: color("success"),
                       cursor: busy === item.id ? "wait" : "pointer",
                       opacity: busy === item.id ? 0.6 : 1,
                       minWidth: 72,
@@ -128,7 +130,7 @@ export function PendingEvolutionCard({
                       borderRadius: 6,
                       border: "1px solid rgba(255,69,58,0.3)",
                       background: "rgba(255,69,58,0.1)",
-                      color: "#ff453a",
+                      color: color("error"),
                       cursor: busy === item.id ? "wait" : "pointer",
                       opacity: busy === item.id ? 0.6 : 1,
                       minWidth: 72,
@@ -190,7 +192,7 @@ export function TrainingStatusCard({ status }: { readonly status: TrainingStatus
                 style={{
                   width: `${Math.max(0, Math.min(1, status.progress)) * 100}%`,
                   height: "100%",
-                  background: "#0A84FF",
+                  background: color("accent"),
                   transition: "width 400ms ease",
                 }}
               />
@@ -227,7 +229,7 @@ export function PatternHistoryCard({ patterns, loading }: { readonly patterns: r
               className="flex items-center justify-between"
               style={{
                 padding: "6px 8px",
-                background: "#000",
+                background: color("background"),
                 borderRadius: 6,
                 border: "1px solid rgba(255,255,255,0.04)",
               }}
@@ -244,7 +246,7 @@ export function PatternHistoryCard({ patterns, loading }: { readonly patterns: r
                 style={{
                   fontSize: 11,
                   fontFamily: "var(--font-mono)",
-                  color: "#0A84FF",
+                  color: color("accent"),
                   fontWeight: 600,
                   flexShrink: 0,
                   marginLeft: 8,
@@ -287,7 +289,7 @@ export function SkillForgeCard({
               className="flex items-center justify-between"
               style={{
                 padding: "8px 10px",
-                background: "#000",
+                background: color("background"),
                 borderRadius: 6,
                 border: `1px solid ${t.readyToForge ? "rgba(10,132,255,0.3)" : "rgba(255,255,255,0.05)"}`,
               }}
@@ -308,7 +310,7 @@ export function SkillForgeCard({
                   borderRadius: 6,
                   border: `1px solid ${t.readyToForge ? "rgba(10,132,255,0.3)" : "rgba(255,255,255,0.08)"}`,
                   background: t.readyToForge ? "rgba(10,132,255,0.15)" : "transparent",
-                  color: t.readyToForge ? "#0A84FF" : "var(--color-text-dim)",
+                  color: t.readyToForge ? color("accent") : "var(--color-text-dim)",
                   cursor: t.readyToForge && busy !== t.id ? "pointer" : "not-allowed",
                   opacity: busy === t.id ? 0.6 : 1,
                 }}

@@ -1,6 +1,6 @@
 /**
  * ConnectorCard — left-pane card showing connector status and configure action.
- * Obsidian Precision styling: #1C1C1E surfaces, Apple blue accent, 12px radius.
+ * Obsidian Precision styling: token-backed surfaces, accent border, 12px radius.
  */
 
 import type { ConnectorInfo } from "../../hooks/useTauriCommand";

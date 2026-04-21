@@ -5,22 +5,23 @@
 
 import { useMemo } from "react";
 import type { WorkflowNodeType, WorkflowNodeStatus, LayoutNode } from "./dag-layout";
+import { color } from "../../design/tokens.generated";
 
 // ── Node Color Map ──────────────────────────────────────
 
 const NODE_COLORS: Readonly<Record<WorkflowNodeType, string>> = {
-  agent: "#0A84FF",
-  loop: "#3b82f6",
-  approval: "#f59e0b",
-  parallel: "#22c55e",
-  shell: "#6b7280",
+  agent: color("accent"),
+  loop: color("info"),
+  approval: color("warning"),
+  parallel: color("success"),
+  shell: color("muted"),
 };
 
 // ── Status Colors ───────────────────────────────────────
 
 const STATUS_COLORS: Readonly<Record<WorkflowNodeStatus, string>> = {
   pending: "var(--color-text-dim)",
-  running: "#0A84FF",
+  running: color("accent"),
   completed: "var(--green)",
   failed: "var(--red)",
 };

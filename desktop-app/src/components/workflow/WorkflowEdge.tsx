@@ -6,6 +6,7 @@
 
 import { useMemo } from "react";
 import type { LayoutEdge, WorkflowNodeStatus } from "./dag-layout";
+import { color } from "../../design/tokens.generated";
 
 // ── Arrow Marker Definition ─────────────────────────────
 
@@ -33,7 +34,7 @@ export function EdgeArrowDefs() {
         markerHeight="6"
         orient="auto-start-reverse"
       >
-        <path d="M0 0L10 5L0 10z" fill="#0A84FF" />
+        <path d="M0 0L10 5L0 10z" fill={color("accent")} />
       </marker>
     </defs>
   );
@@ -69,7 +70,7 @@ export function WorkflowEdge({ edge, sourceStatus }: WorkflowEdgeProps) {
     <path
       d={pathData}
       fill="none"
-      stroke={isActive ? "#0A84FF" : "var(--color-text-dim)"}
+      stroke={isActive ? color("accent") : "var(--color-text-dim)"}
       strokeWidth={isActive ? 1.5 : 1}
       strokeDasharray={isActive ? "6 4" : "none"}
       markerEnd={isActive ? "url(#workflow-arrow-active)" : "url(#workflow-arrow)"}

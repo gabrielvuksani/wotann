@@ -9,6 +9,7 @@
 import { useState, useCallback } from "react";
 import { useStore } from "../../store";
 import { AudioCapturePanel } from "./AudioCapturePanel";
+import { color } from "../../design/tokens.generated";
 
 type MeetTab = "participants" | "audio";
 
@@ -135,7 +136,7 @@ export function MeetPanel({ onClose }: { readonly onClose: () => void }) {
                 padding: "8px 10px",
                 background: "transparent",
                 border: "none",
-                borderBottom: `2px solid ${active ? "#0A84FF" : "transparent"}`,
+                borderBottom: `2px solid ${active ? color("accent") : "transparent"}`,
                 color: active ? "var(--color-text-primary)" : "var(--color-text-muted)",
                 fontSize: 12,
                 fontWeight: active ? 600 : 500,

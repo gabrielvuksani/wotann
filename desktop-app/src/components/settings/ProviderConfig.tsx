@@ -14,6 +14,11 @@
  * surface that only talks to the daemon through the RPC bridge.
  */
 
+// TODO(design-token): this file uses Tailwind arbitrary-value classes with
+// embedded hex (text-[#0A84FF], bg-[#30D158]/10). Migrating them to
+// color() helpers requires Tailwind theme extensions for the opacity syntax.
+// Until then, the hex values remain as Tailwind-class contents.
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { JSX } from "react";
 import { commands } from "../../hooks/useTauriCommand";

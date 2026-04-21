@@ -6,9 +6,9 @@
  *  - Provenance: current system prompt with per-line source attribution.
  *  - Verification: chronological verification event history.
  *
- * Design: Apple blue (#0A84FF) on true-black (#000), elevated surface
- * (#1C1C1E), SF Pro via inline fontFamily. Each child catches RPC errors
- * and shows an empty state rather than crashing.
+ * Design: token-backed accent + surface/bg from design/tokens.generated,
+ * SF Pro via inline fontFamily. Each child catches RPC errors and shows
+ * an empty state rather than crashing.
  */
 
 import { useState } from "react";
@@ -16,18 +16,19 @@ import { ProofBundleList } from "./ProofBundleList";
 import { ProofBundleDetail } from "./ProofBundleDetail";
 import { ProvenanceViewer } from "./ProvenanceViewer";
 import { VerificationTimeline } from "./VerificationTimeline";
+import { color } from "../../design/tokens.generated";
 
 // ── Shared design tokens ─────────────────────────────────
 
 export const TRUST_COLORS = {
-  accent: "#0A84FF",
-  bg: "#000000",
-  surface: "#1C1C1E",
+  accent: color("accent"),
+  bg: color("background"),
+  surface: color("surface"),
   divider: "rgba(255,255,255,0.08)",
-  success: "#30D158",
-  error: "#FF453A",
-  warning: "#FF9F0A",
-  textPrimary: "#FFFFFF",
+  success: color("success"),
+  error: color("error"),
+  warning: color("warning"),
+  textPrimary: color("text"),
   textDim: "rgba(235,235,245,0.6)",
   textGhost: "rgba(235,235,245,0.3)",
 } as const;

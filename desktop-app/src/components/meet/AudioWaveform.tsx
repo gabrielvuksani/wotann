@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, useRef } from "react";
+import { color } from "../../design/tokens.generated";
 
 /**
  * Keeps a rolling window of RMS amplitude samples from the microphone.
@@ -103,8 +104,8 @@ export function WaveformSVG({ samples, active }: { readonly samples: readonly nu
       aria-label="Audio waveform"
     >
       <line x1={0} x2={width} y1={mid} y2={mid} stroke="rgba(255,255,255,0.08)" strokeWidth={1} />
-      <path d={path} fill="none" stroke={active ? "#0A84FF" : "rgba(255,255,255,0.2)"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-      <path d={mirrorPath} fill="none" stroke={active ? "#0A84FF" : "rgba(255,255,255,0.1)"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={path} fill="none" stroke={active ? color("accent") : "rgba(255,255,255,0.2)"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={mirrorPath} fill="none" stroke={active ? color("accent") : "rgba(255,255,255,0.1)"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

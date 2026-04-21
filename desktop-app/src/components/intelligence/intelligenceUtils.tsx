@@ -3,6 +3,7 @@
  */
 
 import { commands } from "../../hooks/useTauriCommand";
+import { color } from "../../design/tokens.generated";
 
 // ── RPC helper ────────────────────────────────────────
 
@@ -104,7 +105,7 @@ export function Card({
   return (
     <div
       style={{
-        background: "#1C1C1E",
+        background: color("surface"),
         border: "1px solid var(--border-subtle)",
         borderRadius: 12,
         padding: "var(--space-md)",
@@ -140,9 +141,9 @@ export function StatusBadge({ text, color }: { readonly text: string; readonly c
         borderRadius: "var(--radius-sm)",
         fontSize: "var(--font-size-2xs)",
         fontWeight: 500,
-        background: `${color}18`,
+        background: `color-mix(in srgb, ${color} 9%, transparent)`,
         color,
-        border: `1px solid ${color}30`,
+        border: `1px solid color-mix(in srgb, ${color} 19%, transparent)`,
       }}
     >
       {text}

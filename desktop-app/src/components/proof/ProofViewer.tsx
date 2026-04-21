@@ -312,7 +312,7 @@ function BundleHeader({ bundle, isOpen, onToggle, onReverify, reverifying }: Bun
           height: 8,
           borderRadius: 4,
           background: color,
-          boxShadow: `0 0 6px ${color}80`,
+          boxShadow: `0 0 6px color-mix(in srgb, ${color} 50%, transparent)`,
           flexShrink: 0,
         }}
         aria-hidden="true"

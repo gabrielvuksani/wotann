@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { commands } from "../../hooks/useTauriCommand";
 import { useMicSamples, WaveformSVG } from "./AudioWaveform";
+import { color } from "../../design/tokens.generated";
 
 interface RecentMeeting {
   readonly id: string;
@@ -81,7 +82,7 @@ function RecordControl({
   return (
     <div
       style={{
-        background: "#1C1C1E",
+        background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 12,
         padding: 14,
@@ -102,14 +103,14 @@ function RecordControl({
             fontSize: 22,
             fontFamily: "var(--font-mono)",
             fontWeight: 500,
-            color: isRecording ? "#ff453a" : "var(--color-text-dim)",
+            color: isRecording ? color("error") : "var(--color-text-dim)",
             fontVariantNumeric: "tabular-nums",
           }}
         >
           {mm}:{ss}
         </div>
       </div>
-      <div style={{ background: "#000", borderRadius: 8, padding: 8, marginBottom: 10 }}>
+      <div style={{ background: color("background"), borderRadius: 8, padding: 8, marginBottom: 10 }}>
         <WaveformSVG samples={samples} active={isRecording} />
       </div>
       <button
@@ -123,8 +124,8 @@ function RecordControl({
           fontSize: 13,
           fontWeight: 600,
           border: "none",
-          background: !audioAvailable ? "#2c2c2e" : isRecording ? "rgba(255,69,58,0.15)" : "#0A84FF",
-          color: !audioAvailable ? "var(--color-text-dim)" : isRecording ? "#ff453a" : "#fff",
+          background: !audioAvailable ? color("surface") : isRecording ? "rgba(255,69,58,0.15)" : color("accent"),
+          color: !audioAvailable ? "var(--color-text-dim)" : isRecording ? color("error") : color("text"),
           cursor: !audioAvailable ? "not-allowed" : "pointer",
         }}
         aria-label={isRecording ? "Stop recording" : "Start recording"}
@@ -147,7 +148,7 @@ function RecentList({
   return (
     <div
       style={{
-        background: "#1C1C1E",
+        background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 12,
         padding: 14,
@@ -170,8 +171,8 @@ function RecentList({
                   textAlign: "left",
                   padding: "8px 10px",
                   borderRadius: 8,
-                  border: `1px solid ${active ? "#0A84FF" : "rgba(255,255,255,0.05)"}`,
-                  background: active ? "rgba(10,132,255,0.1)" : "#000",
+                  border: `1px solid ${active ? color("accent") : "rgba(255,255,255,0.05)"}`,
+                  background: active ? "rgba(10,132,255,0.1)" : color("background"),
                   color: "var(--color-text-primary)",
                   cursor: "pointer",
                   fontSize: 12,
@@ -205,7 +206,7 @@ function TranscriptView({
   return (
     <div
       style={{
-        background: "#1C1C1E",
+        background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 12,
         padding: 14,
@@ -224,7 +225,7 @@ function TranscriptView({
             borderRadius: 6,
             border: "1px solid rgba(10,132,255,0.3)",
             background: "rgba(10,132,255,0.1)",
-            color: "#0A84FF",
+            color: color("accent"),
             cursor: transcribing ? "wait" : "pointer",
             opacity: transcribing ? 0.6 : 1,
           }}
@@ -355,7 +356,7 @@ export function AudioCapturePanel() {
         onToggle={toggleRecording}
       />
       {error && (
-        <p role="alert" style={{ fontSize: 12, color: "#ff453a", margin: 0 }}>{error}</p>
+        <p role="alert" style={{ fontSize: 12, color: color("error"), margin: 0 }}>{error}</p>
       )}
       <RecentList items={recent} selectedId={selectedId} onSelect={setSelectedId} />
       {selected && (

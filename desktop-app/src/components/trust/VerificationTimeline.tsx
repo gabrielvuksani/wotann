@@ -178,9 +178,9 @@ function Icon({ status, color }: { readonly status: EventStatus; readonly color:
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: `${color}18`,
+        background: `color-mix(in srgb, ${color} 9%, transparent)`,
         color,
-        border: `1px solid ${color}40`,
+        border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
       }}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">

@@ -10,6 +10,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent, ChangeEvent as ReactChangeEvent, JSX as ReactJSX } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { color } from "../../design/tokens.generated";
 
 export interface ImportedComponentSummary {
   readonly name: string;
@@ -179,7 +180,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
             style={{
               margin: "4px 0 0 0",
               fontSize: "var(--font-size-xs, 12px)",
-              color: "var(--color-text-muted, #888)",
+              color: `var(--color-text-muted, ${color("muted")})`,
             }}
           >
             Import a .zip bundle from Anthropic Labs (2026-04-17 format) into Workshop.
@@ -193,7 +194,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
               padding: "6px 12px",
               fontSize: "var(--font-size-xs, 12px)",
               borderRadius: "var(--radius-sm, 6px)",
-              border: "1px solid var(--border-subtle, #2a2a2a)",
+              border: `1px solid var(--border-subtle, ${color("border")})`,
               background: "transparent",
               cursor: "pointer",
             }}
@@ -222,7 +223,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
             }
           }}
           style={{
-            border: `2px dashed ${isDragOver ? "var(--color-primary, #0A84FF)" : "var(--border-subtle, #2a2a2a)"}`,
+            border: `2px dashed ${isDragOver ? `var(--color-primary, ${color("accent")})` : `var(--border-subtle, ${color("border")})`}`,
             borderRadius: "var(--radius-lg, 12px)",
             padding: "48px 24px",
             textAlign: "center",
@@ -243,7 +244,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
           <div
             style={{
               fontSize: "var(--font-size-xs, 12px)",
-              color: "var(--color-text-muted, #888)",
+              color: `var(--color-text-muted, ${color("muted")})`,
             }}
           >
             or click to browse
@@ -265,9 +266,9 @@ export function DesignHandoffImporter(): ReactJSX.Element {
           style={{
             padding: 12,
             borderRadius: "var(--radius-sm, 6px)",
-            border: "1px solid var(--color-danger, #e74c3c)",
+            border: `1px solid var(--color-danger, ${color("error")})`,
             background: "rgba(231,76,60,0.08)",
-            color: "var(--color-danger, #e74c3c)",
+            color: `var(--color-danger, ${color("error")})`,
             fontSize: "var(--font-size-xs, 12px)",
           }}
         >
@@ -281,11 +282,11 @@ export function DesignHandoffImporter(): ReactJSX.Element {
             style={{
               padding: 16,
               borderRadius: "var(--radius-md, 8px)",
-              border: "1px solid var(--border-subtle, #2a2a2a)",
+              border: `1px solid var(--border-subtle, ${color("border")})`,
               background: "var(--surface-1, transparent)",
             }}
           >
-            <div style={{ fontSize: "var(--font-size-xs, 12px)", color: "var(--color-text-muted, #888)" }}>
+            <div style={{ fontSize: "var(--font-size-xs, 12px)", color: `var(--color-text-muted, ${color("muted")})` }}>
               {selectedSummary.status === "pending"
                 ? "Import pending — backend not yet wired"
                 : "Import complete"}
@@ -295,7 +296,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
               <span
                 style={{
                   fontSize: "var(--font-size-xs, 12px)",
-                  color: "var(--color-text-muted, #888)",
+                  color: `var(--color-text-muted, ${color("muted")})`,
                   fontWeight: 400,
                 }}
               >
@@ -307,7 +308,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
                 style={{
                   marginTop: 8,
                   fontSize: "var(--font-size-xs, 12px)",
-                  color: "var(--color-warning, #f39c12)",
+                  color: `var(--color-warning, ${color("warning")})`,
                 }}
               >
                 {selectedSummary.message}
@@ -323,7 +324,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
               }}
             >
               <div>
-                <dt style={{ fontSize: "var(--font-size-2xs, 10px)", color: "var(--color-text-muted, #888)" }}>
+                <dt style={{ fontSize: "var(--font-size-2xs, 10px)", color: `var(--color-text-muted, ${color("muted")})` }}>
                   Tokens
                 </dt>
                 <dd style={{ margin: 0, fontSize: "var(--font-size-md, 16px)", fontWeight: 600 }}>
@@ -331,7 +332,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
                 </dd>
               </div>
               <div>
-                <dt style={{ fontSize: "var(--font-size-2xs, 10px)", color: "var(--color-text-muted, #888)" }}>
+                <dt style={{ fontSize: "var(--font-size-2xs, 10px)", color: `var(--color-text-muted, ${color("muted")})` }}>
                   Components
                 </dt>
                 <dd style={{ margin: 0, fontSize: "var(--font-size-md, 16px)", fontWeight: 600 }}>
@@ -339,7 +340,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
                 </dd>
               </div>
               <div>
-                <dt style={{ fontSize: "var(--font-size-2xs, 10px)", color: "var(--color-text-muted, #888)" }}>
+                <dt style={{ fontSize: "var(--font-size-2xs, 10px)", color: `var(--color-text-muted, ${color("muted")})` }}>
                   Location
                 </dt>
                 <dd
@@ -386,7 +387,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
                       style={{
                         padding: 12,
                         textAlign: "left",
-                        border: `1px solid ${isSelected ? "var(--color-primary, #0A84FF)" : "var(--border-subtle, #2a2a2a)"}`,
+                        border: `1px solid ${isSelected ? `var(--color-primary, ${color("accent")})` : `var(--border-subtle, ${color("border")})`}`,
                         borderRadius: "var(--radius-md, 8px)",
                         background: isSelected
                           ? "var(--accent-muted, rgba(10,132,255,0.08))"
@@ -400,7 +401,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
                       <div
                         style={{
                           fontSize: "var(--font-size-2xs, 10px)",
-                          color: "var(--color-text-muted, #888)",
+                          color: `var(--color-text-muted, ${color("muted")})`,
                           marginTop: 4,
                         }}
                       >
@@ -432,7 +433,7 @@ export function DesignHandoffImporter(): ReactJSX.Element {
                 style={{
                   width: "100%",
                   height: 320,
-                  border: "1px solid var(--border-subtle, #2a2a2a)",
+                  border: `1px solid var(--border-subtle, ${color("border")})`,
                   borderRadius: "var(--radius-md, 8px)",
                   background: "white",
                 }}

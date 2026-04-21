@@ -24,6 +24,7 @@ import {
   type TrainingState,
   type SkillForgeTrigger,
 } from "./TrainingCards";
+import { color } from "../../design/tokens.generated";
 
 // ── Normalizers — the daemon may return shapes in slightly different keys ──
 
@@ -198,7 +199,7 @@ export function TrainingReview() {
           style={{
             padding: "8px 24px",
             background: "rgba(255,69,58,0.08)",
-            color: "#ff453a",
+            color: color("error"),
             fontSize: 12,
             borderBottom: "1px solid rgba(255,69,58,0.2)",
           }}

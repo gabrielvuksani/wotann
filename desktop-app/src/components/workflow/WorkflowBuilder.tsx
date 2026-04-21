@@ -16,6 +16,7 @@ import { WorkflowNode } from "./WorkflowNode";
 import { WorkflowEdge, EdgeArrowDefs } from "./WorkflowEdge";
 import { PropertyPanel } from "./PropertyPanel";
 import { commands } from "../../hooks/useTauriCommand";
+import { color } from "../../design/tokens.generated";
 
 // ── RPC Helper ──────────────────────────────────────────
 
@@ -57,11 +58,11 @@ interface PaletteEntry {
 }
 
 const PALETTE: readonly PaletteEntry[] = [
-  { type: "agent", label: "Agent", color: "#0A84FF" },
-  { type: "loop", label: "Loop", color: "#3b82f6" },
-  { type: "approval", label: "Approval", color: "#f59e0b" },
-  { type: "parallel", label: "Parallel", color: "#22c55e" },
-  { type: "shell", label: "Shell", color: "#6b7280" },
+  { type: "agent", label: "Agent", color: color("accent") },
+  { type: "loop", label: "Loop", color: color("info") },
+  { type: "approval", label: "Approval", color: color("warning") },
+  { type: "parallel", label: "Parallel", color: color("success") },
+  { type: "shell", label: "Shell", color: color("muted") },
 ];
 
 // ── Props ───────────────────────────────────────────────

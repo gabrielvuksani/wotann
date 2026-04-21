@@ -7,6 +7,7 @@ import { useStore } from "../../store";
 import type { ArenaResponse } from "../../types";
 import { MarkdownRenderer } from "../chat/MarkdownRenderer";
 import { runArena } from "../../store/engine";
+import { color } from "../../design/tokens.generated";
 
 interface ArenaVote {
   readonly prompt: string;
@@ -195,7 +196,7 @@ export function ArenaView() {
                   height: 48,
                   borderRadius: 12,
                   border: "1px solid var(--border-subtle)",
-                  background: "#1C1C1E",
+                  background: color("surface"),
                   marginBottom: "var(--space-sm)",
                 }}
               >
@@ -226,7 +227,7 @@ export function ArenaView() {
                   style={{
                     padding: "12px var(--space-md)",
                     borderBottom: "1px solid var(--border-subtle)",
-                    background: "#1C1C1E",
+                    background: color("surface"),
                   }}
                 >
                   <div className="flex items-center gap-2">

@@ -18,6 +18,7 @@ import {
   type ProofBundleSummary,
 } from "./TrustView";
 import { SealedScroll, type ProofSeal, type SealState } from "../wotann/SealedScroll";
+import { color } from "../../design/tokens.generated";
 
 const MONO =
   "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
@@ -119,7 +120,7 @@ export function ProofBundleDetail({
           style={{
             minHeight: 36, padding: "8px 14px", borderRadius: 10,
             background: rerunning ? "rgba(10,132,255,0.4)" : C.accent,
-            color: "#fff", border: "none",
+            color: color("text"), border: "none",
             cursor: rerunning ? "progress" : "pointer",
             fontFamily: "inherit", fontSize: 12, fontWeight: 600, letterSpacing: "0.2px",
           }}
@@ -200,7 +201,7 @@ const titleStyle: React.CSSProperties = {
 
 const statusStyle: React.CSSProperties = {
   fontSize: 11, color: C.textDim, padding: "6px 10px",
-  background: "rgba(10,132,255,0.08)", border: `1px solid ${C.accent}30`, borderRadius: 8,
+  background: "rgba(10,132,255,0.08)", border: `1px solid color-mix(in srgb, ${C.accent} 19%, transparent)`, borderRadius: 8,
 };
 
 function Evidence({
@@ -214,8 +215,8 @@ function Evidence({
       style={{
         padding: 10,
         borderRadius: 10,
-        background: "#0C0C0E",
-        border: `1px solid ${color}30`,
+        background: C.bg,
+        border: `1px solid color-mix(in srgb, ${color} 19%, transparent)`,
         display: "flex",
         flexDirection: "column",
         gap: 4,
