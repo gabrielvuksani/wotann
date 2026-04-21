@@ -39,8 +39,9 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import type { StreamChunk } from "../../providers/types.js";
 import type { WotannQueryOptions } from "../../core/types.js";
 import type { CompletionCriterion, VerificationEvidence } from "../../autopilot/types.js";
@@ -102,6 +103,14 @@ export interface TerminalBenchReport {
   readonly trajectoryPath: string;
   /** Parity target for this benchmark (Claude Mythos 82% on TB 2.0). */
   readonly parityTargetPassAt1: number;
+  /**
+   * Populated when real-mode was requested (WOTANN_TB_REAL=1) but the
+   * harness was not installed / dispatch failed, and the run therefore
+   * degraded to simple-mode. Absent on successful real-mode runs and
+   * on simple-mode runs that never attempted real-mode. This makes the
+   * "real requested but simple delivered" case visible instead of silent.
+   */
+  readonly realModeIssue?: string;
 }
 
 /** Runtime shape the runner depends on — a structural subset of WotannRuntime. */
@@ -360,7 +369,8 @@ export async function runTerminalBench(
   // is the wire-up gate; actual real dispatch is attempted further below
   // and degrades honestly to simple if the tb CLI or corpus is missing.
   const wantReal = process.env["WOTANN_TB_REAL"] === "1";
-  const mode: "real" | "simple" = wantReal ? "real" : "simple";
+  let mode: "real" | "simple" = wantReal ? "real" : "simple";
+  let realModeIssue: string | undefined;
 
   const loadOpts: { limit?: number; seed?: number; requireCorpus?: boolean } = {};
   if (opts.limit !== undefined) loadOpts.limit = opts.limit;
@@ -377,6 +387,78 @@ export async function runTerminalBench(
     totalTasks: tasks.length,
     mode,
   });
+
+  // Real-mode preflight: probe tb CLI + agent script. Falls back to
+  // simple-mode with an honest `realModeIssue` if any precondition is
+  // missing. We deliberately do NOT actually execute `tb run` here in
+  // this commit — the subprocess dispatch wiring lives in the small
+  // `dispatchTbRun` helper below, which is currently guarded behind
+  // `WOTANN_TB_DISPATCH=1` to keep the default simple-mode surface
+  // byte-identical until the end-to-end pipeline is exercised by hand
+  // once. This is honest plumbing: mode flips to "real" only when the
+  // full chain works; otherwise realModeIssue carries the reason.
+  if (wantReal) {
+    const probe = probeRealModePreconditions(workingDir);
+    if (!probe.ready) {
+      mode = "simple";
+      realModeIssue = probe.reason;
+      trajectory.write({
+        type: "real-mode-fallback",
+        runId,
+        reason: realModeIssue,
+      });
+    } else if (process.env["WOTANN_TB_DISPATCH"] === "1") {
+      // Opt-in actual subprocess dispatch. Hidden behind a second env so
+      // a typo in CI doesn't trigger a live 6-hour tb run.
+      const dispatched = await dispatchTbRun({
+        runId,
+        workingDir,
+        ...(opts.model !== undefined ? { model: opts.model } : {}),
+        trajectory,
+      });
+      if (dispatched !== null) {
+        const finishedAt = Date.now();
+        const completedTasks = dispatched.results.filter((r) => r.completed).length;
+        const durations = dispatched.results.map((r) => r.durationMs).sort((a, b) => a - b);
+        const medianDurationMs = durations.length
+          ? (durations[Math.floor(durations.length / 2)] ?? 0)
+          : 0;
+        const averageScore =
+          dispatched.results.length > 0
+            ? dispatched.results.reduce((s, r) => s + r.score, 0) / dispatched.results.length
+            : 0;
+        const passAt1 =
+          dispatched.results.length > 0 ? completedTasks / dispatched.results.length : 0;
+        trajectory.write({
+          type: "run-end",
+          runId,
+          finishedAt,
+          totalTasks: dispatched.results.length,
+          completedTasks,
+          passAt1,
+          parityTargetPassAt1: TERMINAL_BENCH_PARITY_PASS_AT_1,
+          mode: "real",
+        });
+        return {
+          runId,
+          startedAt,
+          finishedAt,
+          totalTasks: dispatched.results.length,
+          completedTasks,
+          passAt1,
+          medianDurationMs,
+          averageScore,
+          results: dispatched.results,
+          mode: "real",
+          trajectoryPath: trajectory.path,
+          parityTargetPassAt1: TERMINAL_BENCH_PARITY_PASS_AT_1,
+        };
+      }
+      // Dispatch attempted but returned null — degrade to simple-mode.
+      mode = "simple";
+      realModeIssue = "tb run subprocess failed or produced no parseable results";
+    }
+  }
 
   const results: TerminalBenchTaskResult[] = [];
   for (const task of tasks) {
@@ -457,6 +539,7 @@ export async function runTerminalBench(
     passAt1,
     parityTargetPassAt1: TERMINAL_BENCH_PARITY_PASS_AT_1,
     mode,
+    ...(realModeIssue !== undefined ? { realModeIssue } : {}),
   });
 
   return {
@@ -472,7 +555,211 @@ export async function runTerminalBench(
     mode,
     trajectoryPath: trajectory.path,
     parityTargetPassAt1: TERMINAL_BENCH_PARITY_PASS_AT_1,
+    ...(realModeIssue !== undefined ? { realModeIssue } : {}),
   };
+}
+
+// ── Real-mode dispatch (P0-8 plumbing) ────────────────
+
+/**
+ * Probe whether the upstream TerminalBench CLI is available on PATH.
+ * Exported so CLI code / tests can check readiness without spinning up
+ * a full run. Never throws — returns a data-tagged struct.
+ */
+export function isTbCliAvailable(): { available: boolean; reason?: string } {
+  try {
+    execFileSync("tb", ["--version"], { stdio: "pipe", timeout: 5000 });
+    return { available: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return {
+      available: false,
+      reason:
+        `tb CLI not installed or not on PATH (${msg.slice(0, 120)}). ` +
+        `Run: bash scripts/install-terminal-bench.sh`,
+    };
+  }
+}
+
+/**
+ * Resolve the on-disk path to `python-scripts/tb_agent.py`. Works
+ * whether the runner is executed from src/ (dev) or dist/ (built).
+ * Exported so tests can assert the path is stable + exists.
+ */
+export function resolveTbAgentScript(): string {
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  // From src/intelligence/benchmark-runners we walk up 3 levels to the
+  // repo root, then into python-scripts/. Same relative distance from
+  // dist/intelligence/benchmark-runners once compiled.
+  return resolve(here, "..", "..", "..", "python-scripts", "tb_agent.py");
+}
+
+/**
+ * Preflight a real-mode run: checks tb CLI + agent script + corpus
+ * directory. All three are required. Returns a {ready, reason} tag.
+ */
+export function probeRealModePreconditions(workingDir: string): {
+  ready: boolean;
+  reason?: string;
+} {
+  const cli = isTbCliAvailable();
+  if (!cli.available) {
+    return { ready: false, reason: cli.reason ?? "tb CLI missing" };
+  }
+  const agent = resolveTbAgentScript();
+  if (!existsSync(agent)) {
+    return { ready: false, reason: `tb_agent.py missing at ${agent}` };
+  }
+  const corpusDir = join(workingDir, ".wotann", "benchmarks", "terminal-bench");
+  if (!existsSync(corpusDir)) {
+    return {
+      ready: false,
+      reason:
+        `corpus directory missing at ${corpusDir}. ` +
+        `Run: node scripts/download-terminal-bench-corpus.mjs --yes`,
+    };
+  }
+  return { ready: true };
+}
+
+/**
+ * Parse `tb run` stdout. Scans for the last line that looks like a
+ * JSON object with a `results` array, then maps each entry into the
+ * runner's internal result shape. Exported so
+ * `scripts/terminal-bench-extract.mjs` can share the contract via a
+ * sibling implementation (kept in sync by the test suite).
+ */
+export interface TbExtractResult {
+  readonly results: readonly TerminalBenchTaskResult[];
+  readonly rawJson: string;
+}
+
+export function parseTbStdout(stdout: string): TbExtractResult | null {
+  const lines = stdout.split("\n").map((l) => l.trim());
+  let jsonBlob: string | null = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line === undefined) continue;
+    if (line.startsWith("{") && line.includes('"results"')) {
+      jsonBlob = line;
+      break;
+    }
+  }
+  if (jsonBlob === null) return null;
+
+  try {
+    const obj = JSON.parse(jsonBlob) as {
+      results?: Array<{
+        task_id?: string;
+        prompt?: string;
+        completed?: boolean;
+        score?: number;
+        duration_ms?: number;
+        transcript?: string[];
+        error?: string;
+      }>;
+    };
+    const rawResults = Array.isArray(obj.results) ? obj.results : [];
+    const mapped: TerminalBenchTaskResult[] = rawResults.map((r) => {
+      const task: TerminalBenchTask = {
+        id: typeof r.task_id === "string" ? r.task_id : "unknown",
+        prompt: typeof r.prompt === "string" ? r.prompt : "",
+      };
+      const base: TerminalBenchTaskResult = {
+        task,
+        completed: r.completed === true,
+        score: typeof r.score === "number" ? r.score : 0,
+        evidence: [] as readonly VerificationEvidence[],
+        transcript: Array.isArray(r.transcript)
+          ? r.transcript.filter((s): s is string => typeof s === "string")
+          : [],
+        durationMs: typeof r.duration_ms === "number" ? r.duration_ms : 0,
+      };
+      return typeof r.error === "string" ? { ...base, error: r.error } : base;
+    });
+    return { results: mapped, rawJson: jsonBlob };
+  } catch {
+    return null;
+  }
+}
+
+interface DispatchTbRunArgs {
+  readonly runId: string;
+  readonly workingDir: string;
+  readonly model?: string;
+  readonly trajectory: { write(entry: unknown): void; readonly path: string };
+}
+
+/**
+ * Subprocess dispatch to `tb run`. Gated behind WOTANN_TB_DISPATCH=1
+ * (checked by the caller) so a typo in WOTANN_TB_REAL alone never
+ * triggers a live 6-hour tb run. This is the plumbing wire-up — calling
+ * code must opt in a SECOND time to actually spawn the subprocess.
+ *
+ * Returns a {results} struct on success, or null if dispatch / parse
+ * failed. On null the caller degrades to simple-mode and populates
+ * `realModeIssue` from the trajectory diagnostic.
+ *
+ * Implementation note: we use `execFileSync` so this function blocks
+ * the runner for the duration of `tb run` (which can be hours). The
+ * per-task progress is visible via the trajectory JSONL either way.
+ */
+async function dispatchTbRun(args: DispatchTbRunArgs): Promise<TbExtractResult | null> {
+  const agentScript = resolveTbAgentScript();
+  const outDir = join(args.workingDir, ".wotann", "bench-runs", args.runId);
+  const model = args.model ?? "opus-4.7";
+  const tbArgs = ["run", "--agent", agentScript, "--model", model, "--output-dir", outDir];
+
+  args.trajectory.write({
+    type: "real-mode-dispatch",
+    runId: args.runId,
+    tbArgs,
+  });
+
+  let stdout: string;
+  try {
+    const buf = execFileSync("tb", tbArgs, {
+      stdio: "pipe",
+      timeout: 6 * 60 * 60 * 1000, // 6h cap
+      env: {
+        ...process.env,
+        WOTANN_TB_RUN_ID: args.runId,
+      },
+    });
+    stdout = buf.toString("utf-8");
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    args.trajectory.write({
+      type: "real-mode-spawn-failed",
+      runId: args.runId,
+      reason: reason.slice(0, 500),
+    });
+    return null;
+  }
+
+  const parsed = parseTbStdout(stdout);
+  if (parsed === null) {
+    args.trajectory.write({
+      type: "real-mode-parse-failed",
+      runId: args.runId,
+      reason: "no parseable JSON results in tb stdout",
+    });
+    return null;
+  }
+
+  for (const r of parsed.results) {
+    args.trajectory.write({
+      type: "task-result",
+      task_id: r.task.id,
+      passed: r.completed,
+      durationMs: r.durationMs,
+      cost: 0,
+      score: r.score,
+      trajectory: r.transcript.slice(-20),
+    });
+  }
+
+  return parsed;
 }
 
 // ── Smoke Corpus ──────────────────────────────────────
