@@ -60,6 +60,7 @@ import { IntelligenceAmplifier } from "../intelligence/amplifier.js";
 import { ReasoningSandwich } from "../middleware/reasoning-sandwich.js";
 import { TraceAnalyzer } from "../intelligence/trace-analyzer.js";
 import { gatherLocalContext, formatContextForPrompt } from "../middleware/local-context.js";
+import { SessionBootstrapCache, formatSnapshotForPrompt } from "./bootstrap-snapshot.js";
 import {
   buildSecurityResearchPrompt,
   getDefaultGuardrailsConfig,
@@ -445,6 +446,14 @@ export interface RuntimeConfig {
    * user's home directory in transcripts.
    */
   readonly virtualPathsEnabled?: boolean;
+  /**
+   * P1-B1 Droid/Meta-Harness parity: capture an environment bootstrap
+   * snapshot (git HEAD/branch/dirty, tree, filtered env, services, log
+   * tail, lockfile shas) at session start and prepend it to the system
+   * prompt. Disable for benchmark runs where ~50ms of capture overhead
+   * matters. Defaults to ENABLED.
+   */
+  readonly skipBootstrapSnapshot?: boolean;
 }
 
 export interface RuntimeStatus {
@@ -515,6 +524,13 @@ export class WotannRuntime {
   private config: RuntimeConfig;
   private systemPrompt: string = "";
   private localContextPrompt: string = "";
+  /**
+   * P1-B1 per-session bootstrap cache. One instance per runtime; the
+   * snapshot is captured lazily on the first session-start and frozen
+   * for the session lifetime. See src/core/bootstrap-snapshot.ts.
+   */
+  private readonly bootstrapCache: SessionBootstrapCache = new SessionBootstrapCache();
+  private bootstrapPrompt: string = "";
   private recentErrors: string[] = [];
   private isFirstTurn = true;
 
@@ -1690,6 +1706,23 @@ export class WotannRuntime {
     const localContext = gatherLocalContext(this.config.workingDir);
     this.localContextPrompt = formatContextForPrompt(localContext);
 
+    // P1-B1 Droid/Meta-Harness parity: capture environment bootstrap
+    // snapshot (git HEAD/branch/dirty, tree, filtered env, services,
+    // log tail, lockfile shas). Cached for the session lifetime. Opt
+    // out with `skipBootstrapSnapshot: true` for benchmark runs.
+    try {
+      const snapshot = await this.bootstrapCache.getOrCapture({
+        workspaceRoot: this.config.workingDir,
+        bypass: this.config.skipBootstrapSnapshot === true,
+      });
+      this.bootstrapPrompt = formatSnapshotForPrompt(snapshot);
+    } catch {
+      // Never crash agent init if bootstrap capture itself throws
+      // (honest failure: leave the prompt section empty, log nothing
+      // so we don't leak filesystem shape to the console).
+      this.bootstrapPrompt = "";
+    }
+
     // Score and filter context files using tiered loading (L0/L1/L2)
     // This reduces token usage by up to 91% vs loading all files at L2
     const contextFiles = this.buildFileInfoFromTree(localContext.directoryTree);
@@ -1764,6 +1797,7 @@ export class WotannRuntime {
       stablePrefixSegments.stablePrefix,
       basePrompt.dynamicSuffix,
       modeInstructions,
+      this.bootstrapPrompt,
       this.localContextPrompt,
       userModelContext ? `[User Profile]\n${userModelContext}` : "",
       crossDevicePrompt ? `[Cross-Device Context]\n${crossDevicePrompt}` : "",
@@ -4108,6 +4142,7 @@ export class WotannRuntime {
       stablePrefixSegments.stablePrefix,
       basePrompt.dynamicSuffix,
       modeInstructions,
+      this.bootstrapPrompt,
       this.localContextPrompt,
     ]
       .filter(Boolean)
