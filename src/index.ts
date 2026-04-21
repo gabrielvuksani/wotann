@@ -6110,6 +6110,17 @@ intentByoaCmd
     }
   });
 
+// ── wotann exploit — C5 MythosScaffold 4-step scaffold (P1-C5 wire) ──
+//
+// MythosScaffold (src/exploit/mythos-scaffold.ts) shipped as library
+// with 36 tests but zero callers. This wire makes it invocable via
+// `wotann exploit run <task-spec>` + `wotann exploit templates`.
+// Handler + Commander registration live in cli/commands/exploit.ts.
+{
+  const { registerExploitCommands } = await import("./cli/commands/exploit.js");
+  registerExploitCommands(program);
+}
+
 // ── Parse ───────────────────────────────────────────────────
 
 // Deep-link fast path — if the first positional arg is a `wotann://` URL,
