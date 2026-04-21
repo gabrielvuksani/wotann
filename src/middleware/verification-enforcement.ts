@@ -12,15 +12,17 @@
  * 3. No TODO/FIXME/stubs in modified files
  * 4. Git diff shows expected changes
  *
- * DIFFERENCE FROM EXISTING FILES:
- * - forced-verification.ts: runs AFTER each Write/Edit (incremental, per-tool)
- * - pre-completion-checklist.ts: checks BEFORE claiming done (final gate class)
- * - THIS FILE: orchestrates both into a unified middleware layer that
- *   blocks the completion response itself with actionable feedback.
+ * POSITION IN THE 4-LAYER FLOW (see docs/internal/VERIFICATION_LAYERS.md):
+ * - layers.ts: `forcedVerificationMiddleware` runs AFTER each Write/Edit
+ *   at pipeline order 15 (per-file incremental tsc).
+ * - pre-completion-checklist.ts: Layer-1 shell-check class. Deterministic
+ *   tests/tsc/no-stubs/git-diff gate before the completion claim.
+ * - THIS FILE: the pipeline adapter that wires Layer-1 into the main
+ *   middleware pipeline at order 21. It tracks tool results into the
+ *   checklist state and blocks completion claims with actionable feedback.
  *
- * This is the middleware pipeline integration point. It delegates to
- * PreCompletionChecklistMiddleware for the actual checks, and to
- * ForcedVerificationMiddleware for per-file incremental verification.
+ * Layers 2-4 (LLM pre-completion review, cascade, CoVe) are composed
+ * separately by the runtime; see `VERIFICATION_LAYERS.md` for the full map.
  */
 
 import type { Middleware, MiddlewareContext, AgentResult } from "./types.js";
@@ -39,8 +41,19 @@ import {
  * Code file extensions that require verification.
  */
 const CODE_EXTENSIONS: ReadonlySet<string> = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs",
-  ".java", ".cs", ".rb", ".php", ".swift", ".kt",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".py",
+  ".go",
+  ".rs",
+  ".java",
+  ".cs",
+  ".rb",
+  ".php",
+  ".swift",
+  ".kt",
 ]);
 
 // -- Types -------------------------------------------------------------
@@ -81,10 +94,7 @@ export class VerificationEnforcementMiddleware {
    */
   trackToolResult(result: AgentResult): void {
     // Track file modifications from Write/Edit
-    if (
-      (result.toolName === "Write" || result.toolName === "Edit") &&
-      result.filePath
-    ) {
+    if ((result.toolName === "Write" || result.toolName === "Edit") && result.filePath) {
       this.checklist.recordFileModification(result.filePath, result.content);
     }
 

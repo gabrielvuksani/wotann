@@ -16,10 +16,14 @@
  * 3. No TODO/FIXME/stub markers remain in modified files
  * 4. Git diff shows expected changes (files were actually modified)
  *
- * DIFFERENCE FROM forced-verification.ts:
- * - forced-verification runs AFTER each Write/Edit (incremental)
- * - pre-completion-checklist runs BEFORE claiming done (final gate)
- * - This one blocks the completion response itself
+ * POSITION IN THE 4-LAYER FLOW (see docs/internal/VERIFICATION_LAYERS.md):
+ * - Layer 1 (THIS FILE): shell checks run BEFORE claiming done
+ * - Layer 2: pre-completion-verifier.ts runs LLM 4-persona review
+ * - Layer 3: verification-cascade.ts runs structured stages (tsc/test/build)
+ * - Layer 4: chain-of-verification.ts runs CoVe reason-about-reasoning
+ *
+ * This layer blocks the completion response itself with a deterministic
+ * shell-based checklist (tests/tsc/no-stubs/git-diff).
  */
 
 import type { Middleware, MiddlewareContext, AgentResult } from "./types.js";
@@ -69,14 +73,20 @@ export interface ChecklistResult {
  */
 function checkTypecheck(sessionState: PreCompletionSessionState): ChecklistItem {
   if (!sessionState.hasModifiedFiles) {
-    return { name: "typecheck", passed: true, message: "No code files modified", severity: "error" };
+    return {
+      name: "typecheck",
+      passed: true,
+      message: "No code files modified",
+      severity: "error",
+    };
   }
 
   if (!sessionState.typecheckRan) {
     return {
       name: "typecheck",
       passed: false,
-      message: "Typecheck has NOT been run after code changes. Run `npx tsc --noEmit` before claiming done.",
+      message:
+        "Typecheck has NOT been run after code changes. Run `npx tsc --noEmit` before claiming done.",
       severity: "error",
     };
   }
@@ -105,7 +115,8 @@ function checkTests(sessionState: PreCompletionSessionState): ChecklistItem {
     return {
       name: "tests",
       passed: false,
-      message: "Tests have NOT been run after code changes. Run relevant tests before claiming done.",
+      message:
+        "Tests have NOT been run after code changes. Run relevant tests before claiming done.",
       severity: "error",
     };
   }
@@ -136,7 +147,12 @@ function checkNoStubs(sessionState: PreCompletionSessionState): ChecklistItem {
     };
   }
 
-  return { name: "no-stubs", passed: true, message: "No TODO/FIXME/stub markers found", severity: "error" };
+  return {
+    name: "no-stubs",
+    passed: true,
+    message: "No TODO/FIXME/stub markers found",
+    severity: "error",
+  };
 }
 
 /**
@@ -188,7 +204,15 @@ export { containsStubMarkers, STUB_PATTERNS } from "../utils/stub-detection.js";
  * Code file extensions that trigger verification tracking.
  */
 const CODE_EXTENSIONS: readonly string[] = [
-  ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".cs",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".py",
+  ".go",
+  ".rs",
+  ".java",
+  ".cs",
 ];
 
 function isCodeFile(filePath: string): boolean {

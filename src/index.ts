@@ -5995,6 +5995,121 @@ program
     },
   );
 
+// ── wotann intent ───────────────────────────────────────────
+// P1-C4: Augment-Intent-style living specs + BYOA (Bring Your Own
+// Anthropic). `intent spec *` manages the workspace SPEC.md; `intent
+// byoa *` surfaces + validates the user's personal Anthropic API key
+// with masked output. The handler lives in cli/commands/intent.ts;
+// this shell only translates commander args into handler options.
+const intentCmd = program.command("intent").description("Living project spec + BYOA (P1-C4)");
+
+const intentSpecCmd = intentCmd.command("spec").description("Living project spec operations");
+
+intentSpecCmd
+  .command("init")
+  .description("Create SPEC.md scaffold in the current workspace")
+  .option("--workspace <dir>", "Workspace root (default: cwd)")
+  .action(async (opts: { workspace?: string }) => {
+    const { runIntentCommand } = await import("./cli/commands/intent.js");
+    const result = await runIntentCommand({
+      action: "spec-init",
+      workspaceRoot: opts.workspace ?? process.cwd(),
+    });
+    for (const line of result.lines) process.stdout.write(`${line}\n`);
+    if (!result.success) {
+      process.stderr.write(chalk.red(`✗ ${result.error ?? "failed"}\n`));
+      process.exit(1);
+    }
+  });
+
+intentSpecCmd
+  .command("show")
+  .description("Print the current project SPEC.md")
+  .option("--workspace <dir>", "Workspace root (default: cwd)")
+  .action(async (opts: { workspace?: string }) => {
+    const { runIntentCommand } = await import("./cli/commands/intent.js");
+    const result = await runIntentCommand({
+      action: "spec-show",
+      workspaceRoot: opts.workspace ?? process.cwd(),
+    });
+    for (const line of result.lines) process.stdout.write(`${line}\n`);
+    if (!result.success) {
+      process.stderr.write(chalk.red(`✗ ${result.error ?? "failed"}\n`));
+      process.exit(1);
+    }
+  });
+
+const intentDecisionCmd = intentCmd
+  .command("decision")
+  .description("Append decisions to the spec's decisions log");
+
+intentDecisionCmd
+  .command("add <decision>")
+  .description("Append a decision with rationale to SPEC.md")
+  .requiredOption("--rationale <why>", "Why this decision was made")
+  .option("--workspace <dir>", "Workspace root (default: cwd)")
+  .option("--timestamp <iso>", "Override timestamp (default: now)")
+  .action(
+    async (
+      decision: string,
+      opts: { rationale: string; workspace?: string; timestamp?: string },
+    ) => {
+      const { runIntentCommand } = await import("./cli/commands/intent.js");
+      const cmdOpts: Parameters<typeof runIntentCommand>[0] = {
+        action: "decision-add",
+        workspaceRoot: opts.workspace ?? process.cwd(),
+        decision,
+        rationale: opts.rationale,
+      };
+      if (opts.timestamp !== undefined) {
+        (cmdOpts as { decisionTimestamp?: string }).decisionTimestamp = opts.timestamp;
+      }
+      const result = await runIntentCommand(cmdOpts);
+      for (const line of result.lines) process.stdout.write(`${line}\n`);
+      if (!result.success) {
+        process.stderr.write(chalk.red(`✗ ${result.error ?? "failed"}\n`));
+        process.exit(1);
+      }
+    },
+  );
+
+const intentByoaCmd = intentCmd
+  .command("byoa")
+  .description("BYOA (Bring Your Own Anthropic) key operations");
+
+intentByoaCmd
+  .command("status")
+  .description("Detect BYOA key and print masked form")
+  .action(async () => {
+    const { runIntentCommand } = await import("./cli/commands/intent.js");
+    const result = await runIntentCommand({
+      action: "byoa-status",
+      workspaceRoot: process.cwd(),
+    });
+    for (const line of result.lines) process.stdout.write(`${line}\n`);
+    if (!result.success) {
+      process.stderr.write(chalk.red(`✗ ${result.error ?? "failed"}\n`));
+      process.exit(1);
+    }
+  });
+
+intentByoaCmd
+  .command("test")
+  .description("Validate BYOA key against Anthropic /v1/models")
+  .action(async () => {
+    const { runIntentCommand } = await import("./cli/commands/intent.js");
+    const result = await runIntentCommand({
+      action: "byoa-test",
+      workspaceRoot: process.cwd(),
+    });
+    for (const line of result.lines) process.stdout.write(`${line}\n`);
+    if (!result.success) {
+      // error lines already contain masked key only — safe to surface
+      process.stderr.write(chalk.red(`✗ ${result.error ?? "failed"}\n`));
+      process.exit(1);
+    }
+  });
+
 // ── Parse ───────────────────────────────────────────────────
 
 // Deep-link fast path — if the first positional arg is a `wotann://` URL,

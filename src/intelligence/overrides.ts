@@ -7,7 +7,9 @@
 import type { AgentMessage } from "../core/types.js";
 
 // ── Override 1: Forced Verification Loop ────────────────────
-// (Implemented in middleware/layers.ts as ForcedVerificationMiddleware)
+// (Implemented in middleware/layers.ts as `forcedVerificationMiddleware`
+//  at order 15. See docs/internal/VERIFICATION_LAYERS.md for the full
+//  4-layer verification flow.)
 
 // ── Override 2: Step 0 Deletion ─────────────────────────────
 
@@ -25,7 +27,8 @@ export function shouldRunStep0(fileLineCount: number, isRefactor: boolean): Step
   return {
     shouldClean: true,
     deadCodeLines: 0,
-    suggestion: `File has ${fileLineCount} lines and this is a structural refactor. ` +
+    suggestion:
+      `File has ${fileLineCount} lines and this is a structural refactor. ` +
       `Run dead-code elimination before modifying. ` +
       `Remove unused imports, unreachable code, and commented-out blocks first.`,
   };
@@ -62,7 +65,8 @@ export function shouldSwarm(independentFileCount: number): SwarmDecision {
     shouldSwarm: true,
     batchCount,
     batchSize,
-    reason: `${independentFileCount} independent files detected. ` +
+    reason:
+      `${independentFileCount} independent files detected. ` +
       `Decomposing into ${batchCount} batches of ~${batchSize} files. ` +
       `Each sub-agent gets ~167K fresh context.`,
   };
@@ -128,7 +132,8 @@ export function detectTruncation(
       isTruncated: true,
       expectedMinLines: minExpected,
       actualLines,
-      suggestion: `Result from ${toolName} seems suspiciously small (${actualLines} lines). ` +
+      suggestion:
+        `Result from ${toolName} seems suspiciously small (${actualLines} lines). ` +
         `Consider re-running with a narrower or broader scope.`,
     };
   }
@@ -194,27 +199,31 @@ export function buildOverrideDirective(
 
   const swarm = shouldSwarm(fileMatches.length);
   if (swarm.shouldSwarm && swarm.reason) {
-    systemPromptFragments.push([
-      "OVERRIDE 4 — Mandatory Sub-Agent Swarming:",
-      swarm.reason,
-      "Decompose the work into independent batches before implementation.",
-    ].join("\n"));
+    systemPromptFragments.push(
+      [
+        "OVERRIDE 4 — Mandatory Sub-Agent Swarming:",
+        swarm.reason,
+        "Decompose the work into independent batches before implementation.",
+      ].join("\n"),
+    );
     notices.push(`Sub-agent swarming required for ${fileMatches.length} files.`);
   }
 
   let chunking: ChunkResult | undefined;
   if (
     mentionedLines > 500 ||
-    /\b(read|inspect|review|open)\b/.test(lower) &&
-    /\b(full|entire|whole|large|500|1000)\b/.test(lower)
+    (/\b(read|inspect|review|open)\b/.test(lower) &&
+      /\b(full|entire|whole|large|500|1000)\b/.test(lower))
   ) {
     chunking = shouldChunkFile(Math.max(mentionedLines, 501));
     if (chunking.shouldChunk) {
-      systemPromptFragments.push([
-        "OVERRIDE 5 — File Read Chunking:",
-        `If you must inspect large files, read them in ${chunking.chunkSize}-line segments.`,
-        `Expected chunks: ${chunking.chunkCount}.`,
-      ].join("\n"));
+      systemPromptFragments.push(
+        [
+          "OVERRIDE 5 — File Read Chunking:",
+          `If you must inspect large files, read them in ${chunking.chunkSize}-line segments.`,
+          `Expected chunks: ${chunking.chunkCount}.`,
+        ].join("\n"),
+      );
     }
   }
 
@@ -222,11 +231,13 @@ export function buildOverrideDirective(
   let renamePatterns: readonly RenameSearchPattern[] | undefined;
   if (rename) {
     renamePatterns = generateRenameSearchPatterns(rename.from);
-    systemPromptFragments.push([
-      "OVERRIDE 7 — AST-Level Rename Search:",
-      `Before renaming ${rename.from} to ${rename.to}, search all impact surfaces using these patterns:`,
-      ...renamePatterns.map((pattern) => `- ${pattern.name}: ${pattern.pattern.source}`),
-    ].join("\n"));
+    systemPromptFragments.push(
+      [
+        "OVERRIDE 7 — AST-Level Rename Search:",
+        `Before renaming ${rename.from} to ${rename.to}, search all impact surfaces using these patterns:`,
+        ...renamePatterns.map((pattern) => `- ${pattern.name}: ${pattern.pattern.source}`),
+      ].join("\n"),
+    );
     notices.push(`Rename guard prepared for ${rename.from} → ${rename.to}.`);
   }
 
@@ -269,10 +280,13 @@ function extractMentionedLineCount(prompt: string, context: readonly AgentMessag
   return longestMessage;
 }
 
-function extractFileReferences(prompt: string, context: readonly AgentMessage[]): readonly string[] {
+function extractFileReferences(
+  prompt: string,
+  context: readonly AgentMessage[],
+): readonly string[] {
   const pattern = /\b[\w./-]+\.[a-zA-Z0-9]+\b/g;
   const candidates = [
-    ...prompt.match(pattern) ?? [],
+    ...(prompt.match(pattern) ?? []),
     ...context.flatMap((message) => message.content.match(pattern) ?? []),
   ];
 
@@ -280,7 +294,9 @@ function extractFileReferences(prompt: string, context: readonly AgentMessage[])
 }
 
 function extractRenameIntent(prompt: string): { from: string; to: string } | null {
-  const match = prompt.match(/\brename\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:to|->)\s+([A-Za-z_][A-Za-z0-9_]*)\b/i);
+  const match = prompt.match(
+    /\brename\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:to|->)\s+([A-Za-z_][A-Za-z0-9_]*)\b/i,
+  );
   if (!match?.[1] || !match[2]) {
     return null;
   }
