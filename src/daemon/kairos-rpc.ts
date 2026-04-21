@@ -49,6 +49,7 @@ import {
   ErrorHandoffNotFound,
 } from "../session/computer-session-store.js";
 import { SessionHandoffManager } from "../session/session-handoff.js";
+import { FleetView, type FleetSnapshot } from "../session/fleet-view.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -669,6 +670,21 @@ export class KairosRPCHandler {
     store: this.computerSessionStore,
   });
 
+  // F15 — multi-agent fleet view. Observes the store's event bus and
+  // exposes debounced snapshots via fleet.list / fleet.summary /
+  // fleet.watch. One-per-handler per QB #7 (per-session state lives on
+  // this instance, not in module globals). The default 100ms debounce
+  // batches bursts of events (ten cursor emits in a tick -> one snapshot).
+  private readonly fleetView = new FleetView({ store: this.computerSessionStore });
+  private readonly fleetSubscriptions = new Map<
+    string,
+    {
+      snapshots: FleetSnapshot[];
+      readonly dispose: () => void;
+      lastPolledAt: number;
+    }
+  >();
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -699,6 +715,16 @@ export class KairosRPCHandler {
    */
   getComputerSessionHandoff(): SessionHandoffManager {
     return this.computerSessionHandoff;
+  }
+
+  /**
+   * Test-visibility accessor for the F15 fleet view. External callers
+   * should route through `fleet.list`, `fleet.summary`, and `fleet.watch`
+   * RPCs; this is exposed for tests that need to assert subscriber
+   * lifecycle and debounce behavior with a synthetic scheduler.
+   */
+  getFleetView(): FleetView {
+    return this.fleetView;
   }
 
   /**
@@ -5113,6 +5139,92 @@ export class KairosRPCHandler {
           : undefined;
       const list = this.computerSessionStore.list(status ? { status } : undefined);
       return list.map(serializeSession);
+    });
+
+    this.registerFleetHandlers();
+  }
+
+  // ── F15: Multi-agent fleet view RPCs ──────────────────────
+  //
+  // Per docs/internal/CROSS_SURFACE_SYNERGY_DESIGN.md §Flow 8, every
+  // surface (iOS WorkView, Desktop AgentFleetDashboard, Watch Triage,
+  // CarPlay Status, TUI HUD) wants a single-glance view of every running
+  // agent session. F15 exposes the FleetView instance as three RPCs:
+  //
+  //   - fleet.list    — full FleetSnapshot with per-session rows
+  //   - fleet.summary — counts-only FleetSummary (cheap, for watch/carplay)
+  //   - fleet.watch   — polling subscription returning snapshots emitted
+  //                     since the subscriber's last poll. Mirrors the
+  //                     computer.session.stream shape so iOS/CLI clients
+  //                     can reuse their existing subscription plumbing.
+  //
+  // Errors are folded into the result envelope for the polling path
+  // (unknown subscription id -> Error from RPC layer), mirroring
+  // computer.session.stream's contract.
+  private registerFleetHandlers(): void {
+    this.handlers.set("fleet.list", async () => {
+      return this.fleetView.snapshot();
+    });
+
+    this.handlers.set("fleet.summary", async () => {
+      return this.fleetView.summary();
+    });
+
+    // Polling subscription: NDJSON IPC can't carry long-lived push
+    // streams, so callers open a subscription (subscribe=true), then
+    // poll with subscriptionId. Each poll drains snapshots emitted
+    // since the previous poll; close=true tears down the subscription.
+    this.handlers.set("fleet.watch", async (params) => {
+      const subscriptionIdIn = params["subscriptionId"];
+      const closeAfter = params["close"] === true;
+      const subscribe = params["subscribe"] === true;
+
+      if (typeof subscriptionIdIn === "string") {
+        const sub = this.fleetSubscriptions.get(subscriptionIdIn);
+        if (!sub) {
+          throw new Error(`fleet subscription not found: ${subscriptionIdIn}`);
+        }
+        const snapshots = sub.snapshots;
+        sub.snapshots = []; // drain — each snapshot delivered exactly once
+        sub.lastPolledAt = Date.now();
+        if (closeAfter) {
+          sub.dispose();
+          this.fleetSubscriptions.delete(subscriptionIdIn);
+        }
+        return {
+          subscriptionId: subscriptionIdIn,
+          snapshots,
+          closed: closeAfter,
+        };
+      }
+
+      if (!subscribe) {
+        throw new Error("fleet.watch requires subscribe=true or a subscriptionId");
+      }
+
+      // Start a new subscription. The live hook appends incoming
+      // snapshots into the subscriber's buffer; cap the buffer so a
+      // slow poller cannot cause unbounded memory growth.
+      const subId = `fs-${randomUUID()}`;
+      const buffer: FleetSnapshot[] = [];
+      const dispose = this.fleetView.subscribe((snap) => {
+        buffer.push(snap);
+        if (buffer.length > 256) buffer.splice(0, buffer.length - 256);
+      });
+      this.fleetSubscriptions.set(subId, {
+        snapshots: buffer,
+        dispose,
+        lastPolledAt: Date.now(),
+      });
+      // Seed with the current snapshot so callers don't need a
+      // separate fleet.list to prime the UI — matches the behavior
+      // of computer.session.stream's history replay.
+      const seed = this.fleetView.snapshot();
+      return {
+        subscriptionId: subId,
+        snapshots: [seed],
+        closed: false,
+      };
     });
   }
 
