@@ -25,6 +25,15 @@ import type { ChannelAdapter, ChannelMessage, ChannelType, DeviceNode } from "./
 import type { DispatchRoutePolicy } from "./dispatch.js";
 import { RoutePolicyEngine, createDefaultPolicy } from "./route-policies.js";
 import type { ComputerSessionStore, SessionEvent } from "../session/computer-session-store.js";
+import {
+  SurfaceRegistry,
+  type BroadcastOptions,
+  type SurfaceListener,
+  type SurfaceRegistration,
+  type SurfaceType,
+  type UnifiedEvent,
+  type UnifiedEventType,
+} from "./fan-out.js";
 
 // ── Task Inbox Types ─────────────────────────────────────
 
@@ -190,6 +199,14 @@ export class UnifiedDispatchPlane {
   private computerSessionDispose: (() => void) | null = null;
   private readonly computerSessionListeners = new Set<(event: SessionEvent) => void>();
 
+  // Surface registry (Phase 3 P1-F11). Generalises F1's session-event bridge
+  // to arbitrary UnifiedEvent types (mention, approval, message, etc). Each
+  // registered surface (phone, desktop, watch, TUI) receives events that pass
+  // its filter. Listener errors emit "error" UnifiedEvents — they do NOT
+  // poison the bus (QB #6). Per-coordinator isolation (QB #7): this is a
+  // per-instance field, never a module global.
+  private readonly surfaceRegistry = new SurfaceRegistry();
+
   constructor(config?: Partial<UnifiedDispatchConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
 
@@ -268,6 +285,74 @@ export class UnifiedDispatchPlane {
     return () => {
       this.computerSessionListeners.delete(listener);
     };
+  }
+
+  // ── Multi-Surface Fan-Out (Phase 3 P1-F11) ──────────────
+  //
+  // These methods extend F1's session-event plumbing to arbitrary UnifiedEvents
+  // across ALL surfaces (desktop, iOS, watch, TUI, CarPlay). Example: a Slack
+  // @mention can be fanned out as a UnifiedEvent{type:"mention"} so the desktop
+  // Live Activity, iPhone push, and watch haptic all fire simultaneously.
+  //
+  // Delegates to SurfaceRegistry; exposed on the plane so callers have a
+  // single injection point (the plane is already threaded through KairosRPC
+  // and daemon startup).
+
+  /**
+   * Register a surface listener. Returns a disposer. If a surface with the
+   * same id is already registered, its listener is replaced (no duplicates).
+   *
+   * @param surfaceId  unique id for this surface instance (e.g., "phone-abc")
+   * @param surfaceType one of desktop|ios|watch|tui|carplay|web
+   * @param listener invoked with every matching UnifiedEvent
+   * @param filter optional — if present, listener only sees events whose type is in filter
+   */
+  registerSurface(
+    surfaceId: string,
+    surfaceType: SurfaceType,
+    listener: SurfaceListener,
+    filter?: ReadonlySet<UnifiedEventType>,
+  ): () => void {
+    const registration: SurfaceRegistration = filter
+      ? { surfaceId, surfaceType, filter }
+      : { surfaceId, surfaceType };
+    return this.surfaceRegistry.registerSurface(registration, listener);
+  }
+
+  /**
+   * Broadcast a UnifiedEvent to every registered surface whose filter matches.
+   * excludeSurface skips a specific id (e.g., don't echo back to originator).
+   *
+   * Throws InvalidEventTypeError synchronously if event.type is unknown —
+   * this is a caller bug, surfaced loudly not silently swallowed.
+   */
+  async broadcastUnifiedEvent(event: UnifiedEvent, opts: BroadcastOptions = {}): Promise<void> {
+    await this.surfaceRegistry.broadcast(event, opts);
+  }
+
+  unregisterSurface(surfaceId: string): boolean {
+    return this.surfaceRegistry.unregisterSurface(surfaceId);
+  }
+
+  getRegisteredSurfaces(): readonly SurfaceRegistration[] {
+    return this.surfaceRegistry.getSurfaces();
+  }
+
+  /**
+   * Subscribe to error events emitted when a surface listener throws. Returns
+   * a disposer. Error events carry the original event type plus the failing
+   * surface's id and surfaceType.
+   */
+  onSurfaceError(listener: (ev: UnifiedEvent) => void): () => void {
+    return this.surfaceRegistry.onError(listener);
+  }
+
+  /**
+   * Access the underlying registry for advanced use cases. Prefer the plane
+   * methods above; this escape hatch is for testing and edge integration.
+   */
+  getSurfaceRegistry(): SurfaceRegistry {
+    return this.surfaceRegistry;
   }
 
   // ── Connection Management ────────────────────────────────
