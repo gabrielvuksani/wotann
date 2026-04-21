@@ -228,6 +228,15 @@ import { WallClockBudget } from "../intelligence/wall-clock-budget.js";
 import { PreCompletionVerifier } from "../intelligence/pre-completion-verifier.js";
 import type { LlmQuery as PreCompletionLlmQuery } from "../intelligence/pre-completion-verifier.js";
 import { ProgressiveBudget } from "../intelligence/progressive-budget.js";
+// B7 goal-drift (OpenHands port, P1-B7). Lazily constructed on first
+// getGoalDriftDetector() call when the gate is enabled. Zero overhead
+// when off. NullTodoProvider is the default provider — real FS-backed
+// wiring is up to callers (see src/orchestration/todo-provider.ts).
+import {
+  GoalDriftDetector,
+  type LlmQuery as GoalDriftLlmQuery,
+} from "../orchestration/goal-drift.js";
+import { NullTodoProvider, type TodoProvider } from "../orchestration/todo-provider.js";
 import {
   detectTruncatedThinking,
   buildContinuationPrompt,
@@ -482,6 +491,25 @@ export interface RuntimeConfig {
    * safe, but we gate for symmetry with the other primitives.
    */
   readonly enableProgressiveBudget?: boolean;
+  /**
+   * P1-B7 GoalDriftDetector opt-in (OpenHands port, part 3).
+   * Construction itself is cheap but the detector is only useful
+   * when callers wire it into a per-cycle checkpoint (see
+   * AutonomousExecutor.execute's `goalDrift` callback) AND provide
+   * a real `todoProvider`. Defaults to
+   * `process.env.WOTANN_GOAL_DRIFT === "1"` so the getter stays
+   * honest about its state — a caller that forgets to flip the
+   * flag gets `null` (feature off) instead of a detector with
+   * NullTodoProvider that always says "no drift".
+   */
+  readonly enableGoalDrift?: boolean;
+  /**
+   * P1-B7: optional provider the runtime hands back from
+   * `getTodoProvider()` when a caller wants a session-level default.
+   * When unset `getTodoProvider()` returns `NullTodoProvider` so
+   * default sessions pay zero FS cost.
+   */
+  readonly todoProvider?: TodoProvider;
 }
 
 export interface RuntimeStatus {
@@ -697,6 +725,13 @@ export class WotannRuntime {
   // disabled (which is the default). Zero-overhead when gated off.
   private preCompletionVerifier: PreCompletionVerifier | null = null;
   private progressiveBudget: ProgressiveBudget | null = null;
+  /**
+   * B7 goal-drift (OpenHands port, P1-B7). Lazily constructed on
+   * first getGoalDriftDetector() call when the gate is enabled.
+   * Null when the config flag + env var are both disabled —
+   * zero-overhead, zero-allocation when off.
+   */
+  private goalDriftDetector: GoalDriftDetector | null = null;
 
   // Session-5: TokenPersistence deleted. CostTracker is now the single
   // authoritative source of token + cost data across sessions — it already
@@ -4616,6 +4651,69 @@ export class WotannRuntime {
       this.progressiveBudget = new ProgressiveBudget();
     }
     return this.progressiveBudget;
+  }
+
+  /**
+   * P1-B7 goal-drift (OpenHands port, part 3).
+   *
+   * Returns a lazily-constructed GoalDriftDetector when the gate is
+   * enabled, or null when it's off. Gate chain:
+   *   - `config.enableGoalDrift === true` → enabled
+   *   - `process.env.WOTANN_GOAL_DRIFT === "1"` → enabled (when config
+   *      flag is undefined)
+   *   - otherwise → disabled, return null
+   *
+   * The detector is provider-agnostic: it takes a TodoState and a
+   * list of AgentActions and scores relevance. Callers wiring it into
+   * the autonomous loop supply their own `TodoProvider` via the
+   * `AutonomousExecutor.execute` `goalDrift` callback. The runtime
+   * does NOT couple the detector to a provider here — a single
+   * runtime may serve many tasks, each with its own provider.
+   *
+   * QB #14 real wiring: the getter returns a singleton per-runtime,
+   * not a module-global, so two runtimes never share drift state.
+   * QB #6 honest failure: returns `null` (not a no-op detector) when
+   * the feature is off so callers can detect the gate state.
+   */
+  getGoalDriftDetector(): GoalDriftDetector | null {
+    const enabled =
+      this.config.enableGoalDrift === true ||
+      (this.config.enableGoalDrift === undefined &&
+        process.env["WOTANN_GOAL_DRIFT"] === "1");
+    if (!enabled) return null;
+    if (!this.goalDriftDetector) {
+      // Bind an optional LlmQuery to runtime.query for semantic
+      // relevance checks when heuristic scoring is ambiguous. The
+      // detector only calls this when its own ambiguity band fires,
+      // so the recursion risk we have with PreCompletionVerifier
+      // doesn't apply here — drift checks never land back inside
+      // another drift check.
+      const llm: GoalDriftLlmQuery = async (prompt: string) => {
+        let accumulated = "";
+        for await (const chunk of this.query({
+          prompt,
+          maxTokens: 256,
+          temperature: 0,
+        })) {
+          if (chunk.type === "text") accumulated += chunk.content;
+        }
+        return accumulated;
+      };
+      this.goalDriftDetector = new GoalDriftDetector({ llm });
+    }
+    return this.goalDriftDetector;
+  }
+
+  /**
+   * P1-B7 goal-drift: resolve the TodoProvider for drift-detector
+   * use. Defaults to NullTodoProvider (empty-todo stub) when no
+   * session-level provider has been configured. Callers that need
+   * a real FS-backed feed should either supply one on
+   * `RuntimeConfig.todoProvider` or build one at the call site via
+   * `createFsTodoProvider`.
+   */
+  getTodoProvider(): TodoProvider {
+    return this.config.todoProvider ?? NullTodoProvider;
   }
 
   /**
