@@ -377,6 +377,7 @@ import type { SearchHit } from "../memory/extended-search-types.js";
 import {
   scheduleViaHook as scheduleSessionIngestion,
   type SessionIngestStoreLike,
+  type KnowledgeGraphPopulator,
 } from "../memory/session-ingestion.js";
 import { detectSupersession, parseAssertionAsFact } from "../memory/knowledge-update-dynamics.js";
 import {
@@ -533,6 +534,21 @@ export interface RuntimeConfig {
    * default sessions pay zero FS cost.
    */
   readonly todoProvider?: TodoProvider;
+  /**
+   * Tier-A release hygiene (rc.2): flip the KG auto-populate gate for
+   * session-ingestion. When true, the SessionEnd hook passes
+   * `{ autoPopulateKG: true, populator: memoryStore }` to
+   * `ingestSession`, which then derives entities + heuristic
+   * relationships from observations and inserts them via
+   * `MemoryStore.recordEntity` / `recordHeuristicRelationship`. When
+   * false (default) the ingest pipeline returns zero KG counts and
+   * the flow is a no-op. Defaults to
+   * `process.env.WOTANN_AUTO_POPULATE_KG === "1"` so the existing
+   * free-tier behavior is unchanged — the flag is opt-in until the
+   * classifier's false-positive rate is characterized against the
+   * full MemoryStore corpus.
+   */
+  readonly autoPopulateKG?: boolean;
 }
 
 export interface RuntimeStatus {
@@ -1497,10 +1513,19 @@ export class WotannRuntime {
     if (this.memoryStore) {
       try {
         const store = this.memoryStore as unknown as SessionIngestStoreLike;
+        const autoPopulateKG =
+          config.autoPopulateKG ?? process.env["WOTANN_AUTO_POPULATE_KG"] === "1";
+        const ingestOptions = autoPopulateKG
+          ? {
+              autoPopulateKG: true as const,
+              populator: this.memoryStore as unknown as KnowledgeGraphPopulator,
+            }
+          : undefined;
         this.runSessionIngestion = scheduleSessionIngestion(
           this.hookEngine,
           store,
           () => undefined, // No per-session SessionContext wired yet; resolver no-ops.
+          ingestOptions,
         );
       } catch (err) {
         console.warn(
