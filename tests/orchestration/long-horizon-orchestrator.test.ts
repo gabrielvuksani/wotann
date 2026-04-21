@@ -359,3 +359,50 @@ describe("parsePhases", () => {
     expect(phases[0]?.exit.minScore).toBe(0.8);
   });
 });
+
+// ── rc.2 follow-up: PhasedExecutor-backed phase validation (P2 partial) ──
+
+describe("LongHorizonOrchestrator.getPhaseNames (PhasedExecutor validation)", () => {
+  it("returns phase ids in declared order", () => {
+    const phases: readonly Phase[] = [
+      makePhase({ id: "outline", name: "Outline" }),
+      makePhase({ id: "draft", name: "Draft" }),
+      makePhase({ id: "polish", name: "Polish" }),
+    ];
+    expect(LongHorizonOrchestrator.getPhaseNames(phases)).toEqual(["outline", "draft", "polish"]);
+  });
+
+  it("throws when two phases share the same id (duplicate detection)", () => {
+    const phases: readonly Phase[] = [
+      makePhase({ id: "outline", name: "Outline" }),
+      makePhase({ id: "outline", name: "Outline v2" }),
+    ];
+    expect(() => LongHorizonOrchestrator.getPhaseNames(phases)).toThrow(/duplicate phase/i);
+  });
+
+  it("throws when the phases array is empty", () => {
+    expect(() => LongHorizonOrchestrator.getPhaseNames([])).toThrow(/at least one phase/i);
+  });
+
+  it("run() surfaces duplicate-phase error before any worker call", async () => {
+    const orch = new LongHorizonOrchestrator({ enableReview: false });
+    let workerInvoked = false;
+    const worker: WorkerExecutor = async () => {
+      workerInvoked = true;
+      return { artifact: "x", tokensUsed: 1, costUsd: 0 };
+    };
+    const phases: readonly Phase[] = [
+      makePhase({ id: "p", name: "P" }),
+      makePhase({ id: "p", name: "P again" }),
+    ];
+    await expect(
+      orch.run({
+        taskDescription: "duplicate-phase test",
+        phases,
+        worker,
+        scorer: makeScalingScorer(),
+      }),
+    ).rejects.toThrow(/duplicate phase/i);
+    expect(workerInvoked).toBe(false);
+  });
+});

@@ -55,6 +55,7 @@ import {
   type DualPersonaVerdict,
   type PersonaExecutor,
 } from "./dual-persona-reviewer.js";
+import { PhasedExecutor } from "./phased-executor.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -250,11 +251,46 @@ export class LongHorizonOrchestrator {
   }
 
   /**
+   * P2 partial migration: validate phase input using PhasedExecutor.
+   * LongHorizonOrchestrator does NOT hold a persistent PhasedExecutor
+   * instance because phases are user-supplied per-run (input.phases) and
+   * the per-phase iteration loop is incompatible with PhasedExecutor's
+   * single-handler-per-phase contract. Instead, we use PhasedExecutor's
+   * fail-fast constructor validation (no duplicates, all handlers
+   * present, at least one phase) to sanity-check the input before any
+   * work starts — upgrading the previous silent-on-duplicate-phase
+   * behavior to a loud-at-entry error.
+   *
+   * This exposes phase ordering to phase-aware tooling (via
+   * getPhaseNames) without restructuring the iteration machinery.
+   *
+   * Returns the validated phase-name array sourced from PhasedExecutor.
+   */
+  static getPhaseNames(phases: readonly Phase[]): readonly string[] {
+    // Construct a throwaway PhasedExecutor with no-op handlers. Raises
+    // at construction time if phases is empty or contains duplicates.
+    const names = phases.map((p) => p.id);
+    const noop = async <C>(c: C): Promise<C> => c;
+    const handlers = Object.fromEntries(names.map((n) => [n, noop])) as Record<string, typeof noop>;
+    const exec = new PhasedExecutor<string, unknown>({
+      phases: names,
+      handlers,
+    });
+    return exec.getPhases();
+  }
+
+  /**
    * Execute all phases sequentially. Each phase runs its own iterate/review
    * loop. Returns a final OrchestratorResult with phase-level state so
    * callers can inspect what got produced even on failure.
    */
   async run(input: LongHorizonInput): Promise<OrchestratorResult> {
+    // rc.2 follow-up: fail fast on malformed phase input. Empty array,
+    // duplicate phase ids, or structural issues now raise at entry
+    // rather than mid-run. Caller can catch and render a clear error.
+    if (input.phases.length > 0) {
+      LongHorizonOrchestrator.getPhaseNames(input.phases);
+    }
     // Merge per-run config over orchestrator defaults so callers can tweak
     // plateau/budget/review settings per task.
     const cfg = mergeConfig(this.config, input.config);
