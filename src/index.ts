@@ -401,6 +401,36 @@ program
     console.log(renderBoard(board));
   });
 
+// ── wotann worktree (Cursor 3 /worktree port — P1-C6) ────────
+
+program
+  .command("worktree <action> [taskId]")
+  .description("Isolated git worktrees (actions: create | list | abandon | accept)")
+  .option("--base <ref>", "Base ref for `create` (defaults to HEAD)")
+  .option("--message <msg>", "Commit message for `accept`")
+  .action(
+    async (
+      action: string,
+      taskId: string | undefined,
+      options: { base?: string; message?: string },
+    ) => {
+      const { runWorktreeCommand, parseWorktreeArgs } = await import("./cli/commands/worktree.js");
+      try {
+        const parsed = parseWorktreeArgs(action, taskId, options);
+        const result = await runWorktreeCommand(parsed);
+        for (const line of result.lines) {
+          console.log(line.startsWith("error:") ? chalk.red(line) : line);
+        }
+        if (!result.success) {
+          process.exit(1);
+        }
+      } catch (err) {
+        console.log(chalk.red(`error: ${err instanceof Error ? err.message : String(err)}`));
+        process.exit(1);
+      }
+    },
+  );
+
 // ── wotann cli-registry (C32) ────────────────────────────────
 
 program
@@ -2362,12 +2392,7 @@ memoryCmd
   .option("--category <cat>", "Filter to a single block_type / category")
   .option("--tags <csv>", "Comma-separated tags to filter by")
   .action(
-    async (options: {
-      out?: string;
-      minConfidence?: number;
-      category?: string;
-      tags?: string;
-    }) => {
+    async (options: { out?: string; minConfidence?: number; category?: string; tags?: string }) => {
       const { MemoryStore } = await import("./memory/store.js");
       const { writeFileSync } = await import("node:fs");
       const dbPath = join(process.cwd(), ".wotann", "memory.db");
@@ -2377,17 +2402,11 @@ memoryCmd
         const memvidFile = store.exportToMemvid({
           ...(options.minConfidence !== undefined ? { minConfidence: options.minConfidence } : {}),
           ...(options.category ? { filterCategory: options.category } : {}),
-          ...(options.tags
-            ? { filterTags: options.tags.split(",").map((t) => t.trim()) }
-            : {}),
+          ...(options.tags ? { filterTags: options.tags.split(",").map((t) => t.trim()) } : {}),
           outputPath: outPath,
         });
         writeFileSync(outPath, JSON.stringify(memvidFile, null, 2));
-        console.log(
-          chalk.green(
-            `Exported ${memvidFile.header.entryCount} entries to ${outPath}`,
-          ),
-        );
+        console.log(chalk.green(`Exported ${memvidFile.header.entryCount} entries to ${outPath}`));
       } finally {
         store.close();
       }
