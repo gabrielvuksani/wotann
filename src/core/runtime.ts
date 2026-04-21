@@ -225,7 +225,12 @@ import { WallClockBudget } from "../intelligence/wall-clock-budget.js";
 // caller can retrieve a session-scoped instance via accessors. Both are
 // gated behind config flags (default OFF) and constructed lazily on first
 // access — zero overhead when disabled.
-import { PreCompletionVerifier } from "../intelligence/pre-completion-verifier.js";
+import {
+  PreCompletionVerifier,
+  formatVerificationReport,
+  type VerificationReport,
+  type VerificationInput,
+} from "../intelligence/pre-completion-verifier.js";
 import type { LlmQuery as PreCompletionLlmQuery } from "../intelligence/pre-completion-verifier.js";
 import { ProgressiveBudget } from "../intelligence/progressive-budget.js";
 // B7 goal-drift (OpenHands port, P1-B7). Lazily constructed on first
@@ -492,6 +497,24 @@ export interface RuntimeConfig {
    */
   readonly enableProgressiveBudget?: boolean;
   /**
+   * M4 TEMPR opt-in: route active-memory recall through the 4-channel
+   * TEMPR search (vector + BM25 + entity + temporal) instead of the
+   * default FTS5 `store.search()`. TEMPR costs more per call but yields
+   * stronger retrieval on factual/entity-heavy prompts. Defaults to
+   * `process.env.WOTANN_USE_TEMPR === "1"` so the existing FTS path
+   * stays the free-tier default.
+   */
+  readonly useTempr?: boolean;
+  /**
+   * M6 Retrieval-mode opt-in: when set to a registered mode name
+   * (e.g. "time-decay", "fuzzy-match"), active-memory recall dispatches
+   * through `store.searchWithMode(mode, query)` instead of the default
+   * FTS search. `useTempr` takes precedence when both are set. Defaults
+   * to `process.env.WOTANN_RECALL_MODE` when unset; omit the env var
+   * to keep the default FTS path.
+   */
+  readonly recallMode?: string;
+  /**
    * P1-B7 GoalDriftDetector opt-in (OpenHands port, part 3).
    * Construction itself is cheap but the detector is only useful
    * when callers wire it into a per-cycle checkpoint (see
@@ -732,6 +755,16 @@ export class WotannRuntime {
    * zero-overhead, zero-allocation when off.
    */
   private goalDriftDetector: GoalDriftDetector | null = null;
+  /**
+   * B4 recursion guard. The PreCompletionVerifier's LlmQuery is bound
+   * to `this.query()`, so if the post-turn verify-invoker calls
+   * verifier.verify() unguarded, each of the 4 perspective calls would
+   * recursively trigger another verify cycle → infinite loop. This
+   * flag is set inside finalizePreCompletionVerify and cleared in the
+   * finally; nested query() calls observe it as "verify already in
+   * progress, skip". Not module-global: per-runtime-instance.
+   */
+  private insidePreCompletionVerify: boolean = false;
 
   // Session-5: TokenPersistence deleted. CostTracker is now the single
   // authoritative source of token + cost data across sessions — it already
@@ -2052,8 +2085,18 @@ export class WotannRuntime {
     // memory store, and for question-shaped messages recalls relevant
     // prior memory and prepends it as a context block. Stays
     // pattern-based for speed (~1ms per call).
+    //
+    // M4 + M6 wire: when the runtime is configured for TEMPR
+    // (`config.useTempr`) or a named retrieval mode (`config.recallMode`),
+    // route through the async variant which dispatches to the opt-in
+    // backend. When both are off, the cheap synchronous path is used —
+    // zero-overhead for free-tier default.
     try {
-      const activeResult = this.activeMemory.preprocess(options.prompt, this.session.id);
+      const recallOpts = this.resolveRecallOptions();
+      const activeResult =
+        recallOpts.useTempr || recallOpts.recallMode
+          ? await this.activeMemory.preprocessAsync(options.prompt, this.session.id, recallOpts)
+          : this.activeMemory.preprocess(options.prompt, this.session.id);
       if (activeResult.contextPrefix) {
         options = {
           ...options,
@@ -4110,6 +4153,30 @@ export class WotannRuntime {
         }
       }
 
+      // B4 + B12 (rc.2 follow-up): post-turn 4-persona self-review
+      // with optional progressive-budget retry. Only fires when the
+      // corresponding config flag / env var is set, so free-tier runs
+      // pay ZERO cost. Guarded against self-recursion via
+      // `insidePreCompletionVerify` because the verifier itself uses
+      // this.query() for each perspective — without the guard, each
+      // of the 4 perspectives would spawn another 4 perspectives.
+      // Failures are honestly surfaced as yielded error chunks (not
+      // thrown) so a verifier error doesn't derail the turn.
+      if (!this.insidePreCompletionVerify) {
+        const verifyReport = await this.finalizePreCompletionVerify({
+          task: options.prompt,
+          result: fullContent,
+        });
+        if (verifyReport && verifyReport.status === "fail") {
+          yield {
+            type: "error",
+            content: formatVerificationReport(verifyReport),
+            provider: responseProvider,
+            model: responseModel,
+          };
+        }
+      }
+
       if (truncationWarning) {
         yield {
           type: "error",
@@ -4678,8 +4745,7 @@ export class WotannRuntime {
   getGoalDriftDetector(): GoalDriftDetector | null {
     const enabled =
       this.config.enableGoalDrift === true ||
-      (this.config.enableGoalDrift === undefined &&
-        process.env["WOTANN_GOAL_DRIFT"] === "1");
+      (this.config.enableGoalDrift === undefined && process.env["WOTANN_GOAL_DRIFT"] === "1");
     if (!enabled) return null;
     if (!this.goalDriftDetector) {
       // Bind an optional LlmQuery to runtime.query for semantic
@@ -4714,6 +4780,108 @@ export class WotannRuntime {
    */
   getTodoProvider(): TodoProvider {
     return this.config.todoProvider ?? NullTodoProvider;
+  }
+
+  /**
+   * M4 + M6 wire: resolve the recall options used by active-memory
+   * pre-processing. Config overrides env vars; unset on both paths
+   * means default FTS5. TEMPR takes precedence over recallMode when
+   * both are set (gate symmetry — TEMPR is a heavier hybrid so its
+   * intent signal is stronger than a single retrieval mode).
+   */
+  private resolveRecallOptions(): { useTempr: boolean; recallMode: string | undefined } {
+    const useTempr =
+      this.config.useTempr === true ||
+      (this.config.useTempr === undefined && process.env["WOTANN_USE_TEMPR"] === "1");
+    // Mode resolution: explicit config beats env var.
+    const modeFromEnv = process.env["WOTANN_RECALL_MODE"];
+    const recallMode =
+      this.config.recallMode !== undefined
+        ? this.config.recallMode
+        : modeFromEnv && modeFromEnv.length > 0
+          ? modeFromEnv
+          : undefined;
+    // TEMPR precedence: if TEMPR is on, mask off recallMode so the
+    // active-memory engine doesn't try both on the same call.
+    return { useTempr, recallMode: useTempr ? undefined : recallMode };
+  }
+
+  /**
+   * B4 + B12 post-turn wire. Runs the 4-persona review after the turn
+   * finalizes the assistant message, with optional progressive-budget
+   * retry when B12 is also enabled.
+   *
+   * Returns:
+   *   - `null` when B4 is disabled (fast-path: no verifier allocated).
+   *   - A `VerificationReport` otherwise. The caller inspects `.status`
+   *     to decide whether to surface a blocking error.
+   *
+   * Recursion safety: this method sets `insidePreCompletionVerify` so
+   * nested `this.query()` calls inside perspective prompts observe the
+   * guard and skip re-verifying. The flag is cleared in the `finally`
+   * block even on exception.
+   */
+  private async finalizePreCompletionVerify(
+    input: VerificationInput,
+  ): Promise<VerificationReport | null> {
+    const verifier = this.getPreCompletionVerifier();
+    if (!verifier) return null;
+
+    // Set the guard BEFORE any verifier call so nested query() turns
+    // (from the 4-perspective LlmQuery) see it and bail out.
+    this.insidePreCompletionVerify = true;
+    try {
+      const budget = this.getProgressiveBudget();
+      if (!budget) {
+        // B4-only path: single-pass review, no retry.
+        return await verifier.verify(input);
+      }
+
+      // B4 + B12 path: wrap in progressive-budget retry loop. We
+      // convert the verifier into a PassVerifier<VerificationInput,
+      // VerificationReport> shape where concerns === allConcerns when
+      // status !== "pass". Pass 0 at LOW budget; escalate on concerns.
+      const sessionId = `verify:${this.session.id}:${Date.now()}`;
+      // reset in case a prior run left counters — per-call isolation.
+      budget.reset(sessionId);
+      const wrapped = budget.wrap<VerificationInput, VerificationReport>(
+        async (inp) => {
+          const rep = await verifier.verify(inp);
+          return {
+            result: rep,
+            concerns: rep.status === "pass" ? [] : [...rep.allConcerns],
+          };
+        },
+        { sessionId },
+      );
+      try {
+        const outcome = await wrapped(input);
+        return outcome.result;
+      } catch (err) {
+        // BudgetExhaustedConcernsRemain carries the final report.
+        const lastResult = (err as { lastResult?: VerificationReport } | null)?.lastResult;
+        if (lastResult && typeof lastResult === "object" && "status" in lastResult) {
+          return lastResult;
+        }
+        // Unknown error shape — honest failure: surface as a
+        // synthetic error-status report rather than fabricating a
+        // pass.
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          status: "error",
+          perspectives: [],
+          implementer: makeErrorPerspective("implementer", msg),
+          reviewer: makeErrorPerspective("reviewer", msg),
+          tester: makeErrorPerspective("tester", msg),
+          user: makeErrorPerspective("user", msg),
+          bypassed: false,
+          totalDurationMs: 0,
+          allConcerns: [msg],
+        } as VerificationReport;
+      }
+    } finally {
+      this.insidePreCompletionVerify = false;
+    }
   }
 
   /**
@@ -6667,3 +6835,30 @@ export async function createRuntime(
 // entirely (it had zero live consumers and had fallen further behind
 // the real runtime — missing anti-distillation, flow tracker, active
 // memory, user model, and instinct system wiring).
+
+/**
+ * Synthetic error-status perspective used when the progressive-budget
+ * wrapper bubbles up an unexpected error shape. Keeps finalizePreCompletion
+ * honest: we never return "pass" when something went wrong, only an
+ * explicit "error" report with the failure message captured.
+ */
+function makeErrorPerspective(
+  perspective: "implementer" | "reviewer" | "tester" | "user",
+  error: string,
+): {
+  perspective: "implementer" | "reviewer" | "tester" | "user";
+  status: "error";
+  concerns: readonly string[];
+  raw: string;
+  error: string;
+  durationMs: number;
+} {
+  return {
+    perspective,
+    status: "error",
+    concerns: [],
+    raw: "",
+    error,
+    durationMs: 0,
+  };
+}
