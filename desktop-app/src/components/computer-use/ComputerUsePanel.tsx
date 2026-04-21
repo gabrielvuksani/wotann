@@ -14,12 +14,13 @@ import { ScreenPreview } from "./ScreenPreview";
 import { MouseControl } from "./MouseControl";
 import { KeyboardControl } from "./KeyboardControl";
 import { AppApprovals } from "./AppApprovals";
+import { color } from "../../design/tokens.generated";
 
 export function ComputerUsePanel() {
   return (
     <div
       className="flex-1 flex flex-col h-full overflow-hidden"
-      style={{ background: "var(--color-bg-primary, #000)" }}
+      style={{ background: `var(--color-bg-primary, ${color("background")})` }}
       role="region"
       aria-label="Computer Use control panel"
     >
@@ -36,8 +37,8 @@ export function ComputerUsePanel() {
       >
         <div className="flex items-center gap-2">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="1.5" y="2.5" width="13" height="9" rx="1.5" stroke="#0A84FF" strokeWidth="1.5" />
-            <path d="M5 14h6M8 11.5v2.5" stroke="#0A84FF" strokeWidth="1.5" strokeLinecap="round" />
+            <rect x="1.5" y="2.5" width="13" height="9" rx="1.5" stroke={color("accent")} strokeWidth="1.5" />
+            <path d="M5 14h6M8 11.5v2.5" stroke={color("accent")} strokeWidth="1.5" strokeLinecap="round" />
           </svg>
           <h2
             style={{

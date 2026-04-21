@@ -5,6 +5,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { color } from "../../design/tokens.generated";
 
 interface Screenshot {
   readonly data: string;        // base64 PNG
@@ -63,7 +64,7 @@ export function ScreenPreview() {
   return (
     <div
       style={{
-        background: "#1C1C1E",
+        background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 12,
         padding: 16,
@@ -104,8 +105,8 @@ export function ScreenPreview() {
               fontWeight: 500,
               borderRadius: 8,
               border: "1px solid rgba(255,255,255,0.08)",
-              background: "#0A84FF",
-              color: "#fff",
+              background: color("accent"),
+              color: color("text"),
               cursor: loading ? "wait" : "pointer",
               opacity: loading ? 0.6 : 1,
             }}
@@ -118,7 +119,7 @@ export function ScreenPreview() {
 
       <div
         style={{
-          background: "#000",
+          background: color("background"),
           border: "1px solid rgba(255,255,255,0.05)",
           borderRadius: 8,
           overflow: "hidden",
@@ -129,7 +130,7 @@ export function ScreenPreview() {
         }}
       >
         {error ? (
-          <p style={{ color: "var(--color-error, #ff453a)", fontSize: 13, padding: 12 }}>{error}</p>
+          <p style={{ color: `var(--color-error, ${color("error")})`, fontSize: 13, padding: 12 }}>{error}</p>
         ) : dataUrl ? (
           /* eslint-disable-next-line jsx-a11y/alt-text */
           <img

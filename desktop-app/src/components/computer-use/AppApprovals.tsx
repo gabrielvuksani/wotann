@@ -14,6 +14,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { color } from "../../design/tokens.generated";
 
 interface ApprovedApp {
   readonly name: string;
@@ -119,7 +120,7 @@ export function AppApprovals() {
   return (
     <div
       style={{
-        background: "#1C1C1E",
+        background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 12,
         padding: 16,
@@ -142,7 +143,7 @@ export function AppApprovals() {
           placeholder="App name (e.g. Safari)"
           style={{
             flex: 1,
-            background: "#000",
+            background: color("background"),
             border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: 8,
             padding: "8px 12px",
@@ -163,8 +164,8 @@ export function AppApprovals() {
             fontSize: 13,
             fontWeight: 500,
             border: "none",
-            background: "#0A84FF",
-            color: "#fff",
+            background: color("accent"),
+            color: color("text"),
             cursor: busy || !newName.trim() ? "not-allowed" : "pointer",
             opacity: busy || !newName.trim() ? 0.6 : 1,
           }}
@@ -175,7 +176,7 @@ export function AppApprovals() {
       </div>
 
       {error && (
-        <p role="alert" style={{ fontSize: 12, color: "var(--color-error, #ff453a)", margin: 0 }}>{error}</p>
+        <p role="alert" style={{ fontSize: 12, color: `var(--color-error, ${color("error")})`, margin: 0 }}>{error}</p>
       )}
 
       {/* Approved list */}
@@ -191,7 +192,7 @@ export function AppApprovals() {
               className="flex items-center justify-between"
               style={{
                 padding: "8px 12px",
-                background: "#000",
+                background: color("background"),
                 border: "1px solid rgba(255,255,255,0.05)",
                 borderRadius: 8,
               }}
@@ -203,6 +204,7 @@ export function AppApprovals() {
                     width: 6,
                     height: 6,
                     borderRadius: "50%",
+                    // TODO(design-token): map to semantic token — SF system green/grey differ from wotann success/muted
                     background: app.approved ? "#30d158" : "#8e8e93",
                     flexShrink: 0,
                   }}
@@ -218,7 +220,7 @@ export function AppApprovals() {
                       padding: "1px 5px",
                       borderRadius: 4,
                       background: "rgba(255,69,58,0.15)",
-                      color: "#ff453a",
+                      color: color("error"),
                       letterSpacing: "0.02em",
                     }}
                   >

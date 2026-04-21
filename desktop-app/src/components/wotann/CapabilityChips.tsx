@@ -15,6 +15,7 @@
  */
 
 import type { JSX } from "react";
+import { color } from "../../design/tokens.generated";
 
 export interface CapabilityChipsProps {
   /** Provider that produced this message. */
@@ -80,7 +81,7 @@ export function CapabilityChips(props: CapabilityChipsProps): JSX.Element {
     className,
   } = props;
 
-  const providerColor = localOrFree ? "var(--wotann-rune-moss, #4CC38A)" : "var(--wotann-rune-gold, #FFA843)";
+  const providerColor = localOrFree ? color("success") : color("warning");
   const providerLabel = `${model}${contextWindow ? ` ◈ ${formatContextWindow(contextWindow)}` : ""}`;
 
   const chipBase: React.CSSProperties = {
@@ -147,8 +148,8 @@ export function CapabilityChips(props: CapabilityChipsProps): JSX.Element {
           style={{
             ...chipBase,
             color: localOrFree
-              ? "var(--wotann-rune-moss, #4CC38A)"
-              : "var(--wotann-rune-gold, #FFA843)",
+              ? color("success")
+              : color("warning"),
             background: localOrFree
               ? "rgba(76, 195, 138, 0.08)"
               : "rgba(255, 168, 67, 0.08)",
@@ -169,7 +170,7 @@ export function CapabilityChips(props: CapabilityChipsProps): JSX.Element {
           disabled={!onShadowGitScrub}
           style={{
             ...chipBase,
-            color: "var(--color-text-muted, #9FB1C8)",
+            color: color("muted"),
             background: "rgba(138, 176, 224, 0.06)",
             border: "1px solid rgba(138, 176, 224, 0.12)",
             cursor: onShadowGitScrub ? "pointer" : "default",
@@ -207,7 +208,7 @@ function AugmentationChip({
         borderRadius: 4,
         lineHeight: "18px",
         whiteSpace: "nowrap",
-        color: "var(--wotann-rune-cyan, #66D9EF)",
+        color: color("toolMessage"),
         background: "rgba(102, 217, 239, 0.08)",
         border: "1px dashed rgba(102, 217, 239, 0.25)",
       }}

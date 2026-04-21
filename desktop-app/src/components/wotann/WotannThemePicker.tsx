@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useState, type JSX } from "react";
+import { color } from "../../design/tokens.generated";
 
 export type WotannThemeId =
   | "mimir"
@@ -31,6 +32,10 @@ interface ThemeMeta {
   readonly accent: string;
 }
 
+// TODO(design-token): theme swatch/accent hex values ARE the theme identity
+// (each Norse theme defines its own distinct palette). These literally
+// cannot map to shared color.* tokens — they're swatch previews, not
+// semantic colors.
 const THEMES: readonly ThemeMeta[] = [
   {
     id: "none",
@@ -141,10 +146,12 @@ export function WotannThemePicker(): JSX.Element {
               padding: "12px",
               borderRadius: "var(--wotann-radius-md, 12px)",
               border: selected
-                ? "2px solid var(--wotann-accent, #8C7DF7)"
+                ? `2px solid ${color("accent")}`
                 : "1px solid rgba(255,255,255,0.1)",
               background: `linear-gradient(135deg, ${theme.swatch} 0%, ${theme.swatch} 70%, ${theme.accent}22 100%)`,
               cursor: "pointer",
+              // TODO(design-token): swatch-local contrast text — yggdrasil is a light theme,
+              // others are dark; these literals intentionally mismatch the active theme tokens.
               color: theme.id === "yggdrasil" ? "#111" : "#fff",
               fontFamily: "var(--wotann-font-ui, system-ui)",
               textAlign: "left",

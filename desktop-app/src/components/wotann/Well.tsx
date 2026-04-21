@@ -18,6 +18,7 @@
  */
 
 import { useMemo, useState, type JSX } from "react";
+import { color } from "../../design/tokens.generated";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -167,7 +168,7 @@ export function Well({
           justifyContent: "space-between",
           alignItems: "center",
           fontSize: 9,
-          color: "var(--color-text-muted, #9FB1C8)",
+          color: color("muted"),
           letterSpacing: "0.02em",
         }}
       >
@@ -356,7 +357,7 @@ function RestoreConfirm({
         left: "50%",
         transform: "translateX(-50%)",
         padding: "10px 14px",
-        background: "var(--color-bg-raised, #0C1118)",
+        background: color("background"),
         border: "1px solid var(--border-subtle, rgba(138,176,224,0.15))",
         borderRadius: 10,
         boxShadow: "0 12px 32px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,168,67,0.06)",
@@ -364,7 +365,7 @@ function RestoreConfirm({
         alignItems: "center",
         gap: 10,
         fontSize: 12,
-        color: "var(--color-text-primary, #E8EEF7)",
+        color: color("text"),
         whiteSpace: "nowrap",
         zIndex: 100,
       }}
@@ -374,7 +375,7 @@ function RestoreConfirm({
         <span
           style={{
             fontFamily: "var(--wotann-font-mono, 'JetBrains Mono', ui-monospace)",
-            color: "var(--wotann-rune-gold, #FFA843)",
+            color: color("warning"),
           }}
         >
           {sha.slice(0, 7)}
@@ -388,7 +389,7 @@ function RestoreConfirm({
           style={{
             padding: "4px 10px",
             fontSize: 11,
-            color: "var(--color-text-secondary, #9FB1C8)",
+            color: color("muted"),
             background: "transparent",
             border: "1px solid var(--border-subtle, rgba(138,176,224,0.15))",
             borderRadius: 6,
@@ -406,8 +407,8 @@ function RestoreConfirm({
             padding: "4px 10px",
             fontSize: 11,
             fontWeight: 600,
-            color: "#0C1118",
-            background: "var(--wotann-rune-gold, #FFA843)",
+            color: color("background"),
+            background: color("warning"),
             border: "none",
             borderRadius: 6,
             cursor: "pointer",
@@ -423,7 +424,7 @@ function RestoreConfirm({
         style={{
           padding: "4px 8px",
           fontSize: 11,
-          color: "var(--color-text-muted, #9FB1C8)",
+          color: color("muted"),
           background: "transparent",
           border: "1px solid transparent",
           borderRadius: 6,

@@ -13,6 +13,7 @@
  */
 
 import { useId, type JSX } from "react";
+import { color as tokenColor } from "../../design/tokens.generated";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -48,10 +49,10 @@ const SEAL_ICON: Record<string, string> = {
 
 const STATE_COLOR: Record<SealState, string> = {
   pending: "var(--color-text-dim, rgba(138,176,224,0.35))",
-  running: "var(--wotann-rune-cyan, #66D9EF)",
-  passed: "var(--wotann-rune-gold, #FFA843)",
-  failed: "var(--wotann-rune-blood, #E5484D)",
-  skipped: "var(--color-text-muted, #9FB1C8)",
+  running: tokenColor("toolMessage"),
+  passed: tokenColor("warning"),
+  failed: tokenColor("error"),
+  skipped: tokenColor("muted"),
 };
 
 const STATE_BG: Record<SealState, string> = {
@@ -73,10 +74,10 @@ export function SealedScroll({
   const allDone = seals.every((s) => s.state !== "pending" && s.state !== "running");
   const anyFailed = seals.some((s) => s.state === "failed");
   const overallColor = anyFailed
-    ? "var(--wotann-rune-blood, #E5484D)"
+    ? tokenColor("error")
     : allDone
-    ? "var(--wotann-rune-gold, #FFA843)"
-    : "var(--wotann-rune-cyan, #66D9EF)";
+    ? tokenColor("warning")
+    : tokenColor("toolMessage");
 
   return (
     <div
@@ -116,7 +117,7 @@ export function SealedScroll({
               justifyContent: "center",
               fontSize: 12,
               fontFamily: "var(--wotann-font-rune, 'Noto Sans Runic', system-ui)",
-              color: "#0C1118",
+              color: tokenColor("background"),
               fontWeight: 700,
             }}
           >
@@ -133,7 +134,7 @@ export function SealedScroll({
             style={{
               fontSize: 10,
               fontFamily: "var(--wotann-font-mono, 'JetBrains Mono', ui-monospace)",
-              color: "var(--color-text-muted, #9FB1C8)",
+              color: tokenColor("muted"),
               padding: "2px 6px",
               background: "rgba(138,176,224,0.06)",
               borderRadius: 4,
@@ -223,7 +224,7 @@ function SealChip({ seal }: { seal: ProofSeal }): JSX.Element {
           borderRadius: 12,
           border: seal.state === "passed" ? "none" : `1px ${seal.state === "failed" ? "dashed" : "solid"} ${color}`,
           background: seal.state === "passed" ? color : "transparent",
-          color: seal.state === "passed" ? "#0C1118" : color,
+          color: seal.state === "passed" ? tokenColor("background") : color,
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
@@ -247,7 +248,7 @@ function SealChip({ seal }: { seal: ProofSeal }): JSX.Element {
           <span
             style={{
               fontSize: 10,
-              color: "var(--color-text-muted, #9FB1C8)",
+              color: tokenColor("muted"),
               lineHeight: 1.3,
               fontFamily: seal.kind === "typecheck" || seal.kind === "tests"
                 ? "var(--wotann-font-mono, 'JetBrains Mono', ui-monospace)"

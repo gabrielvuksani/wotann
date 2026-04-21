@@ -5,6 +5,7 @@
 
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { color } from "../../design/tokens.generated";
 
 interface InputResult {
   readonly success: boolean;
@@ -78,7 +79,7 @@ export function KeyboardControl() {
   }, [key, mods]);
 
   const inputStyle: React.CSSProperties = {
-    background: "#000",
+    background: color("background"),
     border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: 8,
     padding: "8px 12px",
@@ -91,7 +92,7 @@ export function KeyboardControl() {
   return (
     <div
       style={{
-        background: "#1C1C1E",
+        background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 12,
         padding: 16,
@@ -128,8 +129,8 @@ export function KeyboardControl() {
               fontSize: 13,
               fontWeight: 500,
               border: "1px solid rgba(255,255,255,0.08)",
-              background: "#0A84FF",
-              color: "#fff",
+              background: color("accent"),
+              color: color("text"),
               cursor: busy || !text ? "not-allowed" : "pointer",
               opacity: busy || !text ? 0.6 : 1,
               whiteSpace: "nowrap",
@@ -158,9 +159,9 @@ export function KeyboardControl() {
                   fontSize: 12,
                   fontWeight: 500,
                   fontFamily: "var(--font-mono)",
-                  border: `1px solid ${active ? "#0A84FF" : "rgba(255,255,255,0.08)"}`,
-                  background: active ? "rgba(10,132,255,0.15)" : "#000",
-                  color: active ? "#0A84FF" : "var(--color-text-secondary)",
+                  border: `1px solid ${active ? color("accent") : "rgba(255,255,255,0.08)"}`,
+                  background: active ? "rgba(10,132,255,0.15)" : color("background"),
+                  color: active ? color("accent") : "var(--color-text-secondary)",
                   cursor: "pointer",
                 }}
                 aria-pressed={active}
@@ -192,8 +193,8 @@ export function KeyboardControl() {
               fontSize: 13,
               fontWeight: 500,
               border: "1px solid rgba(255,255,255,0.08)",
-              background: "#0A84FF",
-              color: "#fff",
+              background: color("accent"),
+              color: color("text"),
               cursor: busy || !key ? "not-allowed" : "pointer",
               opacity: busy || !key ? 0.6 : 1,
               whiteSpace: "nowrap",
@@ -210,7 +211,10 @@ export function KeyboardControl() {
           role="status"
           style={{
             fontSize: 12,
-            color: status.ok ? "var(--color-success, #30d158)" : "var(--color-error, #ff453a)",
+            // TODO(design-token): --color-success/--color-error fallbacks use Apple SF palette; wotann tokens are close but distinct
+            color: status.ok
+              ? `var(--color-success, ${color("success")})`
+              : `var(--color-error, ${color("error")})`,
             margin: 0,
           }}
         >

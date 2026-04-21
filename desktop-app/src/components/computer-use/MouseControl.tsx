@@ -5,6 +5,7 @@
 
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { color } from "../../design/tokens.generated";
 
 type MouseAction = "click" | "double_click" | "right_click" | "move";
 
@@ -48,7 +49,7 @@ export function MouseControl() {
   }, [x, y, action]);
 
   const inputStyle: React.CSSProperties = {
-    background: "#000",
+    background: color("background"),
     border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: 8,
     padding: "8px 12px",
@@ -62,7 +63,7 @@ export function MouseControl() {
   return (
     <div
       style={{
-        background: "#1C1C1E",
+        background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 12,
         padding: 16,
@@ -125,8 +126,8 @@ export function MouseControl() {
           fontSize: 15,
           fontWeight: 500,
           border: "none",
-          background: "#0A84FF",
-          color: "#fff",
+          background: color("accent"),
+          color: color("text"),
           cursor: busy ? "wait" : "pointer",
           opacity: busy ? 0.6 : 1,
         }}
@@ -140,7 +141,10 @@ export function MouseControl() {
           role="status"
           style={{
             fontSize: 12,
-            color: status.ok ? "var(--color-success, #30d158)" : "var(--color-error, #ff453a)",
+            // TODO(design-token): --color-success/--color-error fallbacks use Apple SF palette; wotann tokens are close but distinct
+            color: status.ok
+              ? `var(--color-success, ${color("success")})`
+              : `var(--color-error, ${color("error")})`,
             margin: 0,
           }}
         >

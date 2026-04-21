@@ -18,6 +18,7 @@
  */
 
 import { useState, type JSX, type ReactNode } from "react";
+import { color } from "../../design/tokens.generated";
 
 export type BlockStatus = "running" | "success" | "error" | "cancelled";
 
@@ -44,10 +45,10 @@ export interface BlockProps {
 }
 
 const STATUS_DOT: Record<BlockStatus, string> = {
-  running: "var(--wotann-rune-cyan, #66D9EF)",
-  success: "var(--wotann-rune-moss, #4CC38A)",
-  error: "var(--wotann-rune-blood, #E5484D)",
-  cancelled: "var(--color-text-muted, #9FB1C8)",
+  running: color("toolMessage"),
+  success: color("success"),
+  error: color("error"),
+  cancelled: color("muted"),
 };
 
 const STATUS_LABEL: Record<BlockStatus, string> = {
@@ -95,7 +96,7 @@ export function Block(props: BlockProps): JSX.Element {
         borderRadius: 8,
         border: `1px solid ${
           selected
-            ? "var(--color-primary, #0A84FF)"
+            ? color("accent")
             : "var(--border-subtle, rgba(138,176,224,0.08))"
         }`,
         background: selected
@@ -137,7 +138,7 @@ export function Block(props: BlockProps): JSX.Element {
             fontFamily: "var(--wotann-font-mono, 'JetBrains Mono', ui-monospace)",
             fontSize: 13,
             fontWeight: 500,
-            color: "var(--color-text-primary, #E8EEF7)",
+            color: color("text"),
             flex: 1,
             minWidth: 0,
             overflow: "hidden",
@@ -181,7 +182,7 @@ export function Block(props: BlockProps): JSX.Element {
           <span
             style={{
               fontSize: 11,
-              color: "var(--color-text-muted, #9FB1C8)",
+              color: color("muted"),
               fontFamily: "var(--wotann-font-mono, 'JetBrains Mono', ui-monospace)",
               fontVariantNumeric: "tabular-nums",
             }}
@@ -238,7 +239,7 @@ export function Block(props: BlockProps): JSX.Element {
               : "var(--wotann-font-mono, 'JetBrains Mono', ui-monospace)",
             fontSize: 12,
             lineHeight: 1.55,
-            color: "var(--color-text-secondary, #9FB1C8)",
+            color: color("muted"),
             maxHeight: 320,
             overflowY: "auto",
             whiteSpace: children ? undefined : "pre-wrap",
@@ -276,7 +277,7 @@ function BlockActionButton(props: {
         height: 24,
         padding: 0,
         fontSize: 13,
-        color: "var(--color-text-muted, #9FB1C8)",
+        color: color("muted"),
         background: "transparent",
         border: "1px solid transparent",
         borderRadius: 4,
@@ -288,11 +289,11 @@ function BlockActionButton(props: {
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = "rgba(138,176,224,0.1)";
-        e.currentTarget.style.color = "var(--color-text-primary, #E8EEF7)";
+        e.currentTarget.style.color = color("text");
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = "transparent";
-        e.currentTarget.style.color = "var(--color-text-muted, #9FB1C8)";
+        e.currentTarget.style.color = color("muted");
       }}
     >
       {props.children}

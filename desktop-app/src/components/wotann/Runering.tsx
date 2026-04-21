@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useState, useRef, useId, type JSX } from "react";
+import { color as tokenColor } from "../../design/tokens.generated";
 
 /** Rune kinds mapped to Elder Futhark glyphs + semantic names. */
 export type RuneKind = "decision" | "pattern" | "discovery" | "blocker" | "case" | "feedback" | "reference" | "project";
@@ -31,14 +32,14 @@ const RUNE_GLYPH: Record<RuneKind, string> = {
 };
 
 const RUNE_COLOR: Record<RuneKind, string> = {
-  decision: "var(--wotann-rune-gold, #FFA843)",
-  pattern: "var(--wotann-rune-cyan, #66D9EF)",
-  discovery: "var(--wotann-rune-gold, #FFA843)",
-  blocker: "var(--wotann-rune-blood, #E5484D)",
-  case: "var(--wotann-rune-moss, #4CC38A)",
-  feedback: "var(--wotann-rune-gold, #FFA843)",
-  reference: "var(--wotann-rune-cyan, #66D9EF)",
-  project: "var(--wotann-rune-gold, #FFA843)",
+  decision: tokenColor("warning"),
+  pattern: tokenColor("toolMessage"),
+  discovery: tokenColor("warning"),
+  blocker: tokenColor("error"),
+  case: tokenColor("success"),
+  feedback: tokenColor("warning"),
+  reference: tokenColor("toolMessage"),
+  project: tokenColor("warning"),
 };
 
 interface RuneEvent {
@@ -179,7 +180,7 @@ function SingleRune({ event, stackIndex }: { event: RuneEvent; stackIndex: numbe
         <span
           style={{
             fontSize: 12,
-            color: "var(--color-text-secondary, #9FB1C8)",
+            color: tokenColor("muted"),
             fontWeight: 500,
             whiteSpace: "nowrap",
             maxWidth: 220,
