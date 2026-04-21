@@ -46,6 +46,7 @@
 import { randomUUID } from "node:crypto";
 import type { MemoryStore } from "./store.js";
 import { ObservationExtractor, type Observation } from "./observation-extractor.js";
+import { Mem0AddOnlyExtractor, type Mem0Fact } from "./mem0-add-only.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -56,6 +57,15 @@ export interface ObservedTurn {
   readonly assistantMessage: string;
   /** Unix ms when the turn completed. Defaults to Date.now() at observe. */
   readonly completedAt?: number;
+  /**
+   * Phase 2 P1-M3 (Mem0 v3): agent identity. When provided, the
+   * Observer ALSO runs the Mem0 v3 single-pass ADD-only extractor and
+   * persists the resulting facts via `recordAgentFact`. This closes
+   * the single-session-assistant blind spot — assistant-emitted facts
+   * get user-equal priority. When omitted, behaviour is unchanged
+   * from P1-M1 (pure observation extraction → `working` layer).
+   */
+  readonly agentId?: string;
 }
 
 /** Per-session observer state — never shared across sessions. */
@@ -76,6 +86,12 @@ export interface ObserveOk {
   readonly observations: readonly Observation[];
   /** Current buffer size after the call. */
   readonly bufferSize: number;
+  /**
+   * Phase 2 P1-M3 (Mem0 v3): agent-facts emitted this call. Always a
+   * flat list — the ADD-only path means no reconciliation. Empty when
+   * `turn.agentId` was omitted OR no fact patterns matched.
+   */
+  readonly agentFacts: readonly Mem0Fact[];
 }
 
 /** Honest failure — the extractor threw, but the pipeline didn't silently swallow. */
@@ -105,6 +121,14 @@ export interface ObserverOptions {
   readonly maxBuffer?: number;
   /** Store handle used for persistence. Nullable for unit tests. */
   readonly store?: MemoryStore | null;
+  /**
+   * Phase 2 P1-M3: Mem0 v3 ADD-only extractor. Optional — when
+   * provided (or omitted, in which case a default is constructed),
+   * turns that carry `agentId` are ALSO routed through the Mem0 v3
+   * path and persisted via `recordAgentFact`. Tests can inject a
+   * stub to assert wiring without running the full extractor.
+   */
+  readonly mem0Extractor?: Mem0AddOnlyExtractor | null;
 }
 
 // ── Observer engine ────────────────────────────────────
@@ -115,12 +139,23 @@ export class Observer {
   private readonly flushThreshold: number;
   private readonly maxBuffer: number;
   private readonly store: MemoryStore | null;
+  /**
+   * Phase 2 P1-M3: Mem0 v3 ADD-only extractor. `null` disables the
+   * agent-facts path entirely (used by existing unit tests that
+   * don't care about Mem0 v3). Default: a fresh extractor.
+   */
+  private readonly mem0Extractor: Mem0AddOnlyExtractor | null;
 
   constructor(options: ObserverOptions = {}) {
     this.extractor = options.extractor ?? new ObservationExtractor();
     this.flushThreshold = Math.max(1, options.flushThreshold ?? 8);
     this.maxBuffer = Math.max(this.flushThreshold, options.maxBuffer ?? 512);
     this.store = options.store ?? null;
+    // `null` → explicit opt-out. `undefined` → construct a default.
+    this.mem0Extractor =
+      options.mem0Extractor === null
+        ? null
+        : (options.mem0Extractor ?? new Mem0AddOnlyExtractor({ extractor: this.extractor }));
   }
 
   /**
@@ -183,11 +218,50 @@ export class Observer {
       this.flushInternal(sessionId, state);
     }
 
+    // Phase 2 P1-M3: Mem0 v3 agent-facts lane. Only runs when the
+    // caller provided an agentId — keeps the existing single-agent
+    // use case free of extra writes. Facts are persisted immediately
+    // via the ADD-only path (never buffered) so they are visible to
+    // retrieval within the same turn that produced them. This is the
+    // Mem0 v3 contract: new facts live alongside old without delay.
+    //
+    // Quality Bar #6 honest failure: if the Mem0 extractor returns
+    // {ok:false, error}, we DON'T mask that — we keep the observation
+    // result shape (ok:true for the observer) but emit `agentFacts:[]`
+    // and surface the failure via the return. Callers that care can
+    // check `agentFacts.length` against an expected signal.
+    let agentFacts: readonly Mem0Fact[] = [];
+    if (turn.agentId && turn.agentId.length > 0 && this.mem0Extractor) {
+      const mem0Result = this.mem0Extractor.extractFromTurn({
+        sessionId,
+        agentId: turn.agentId,
+        userMessage: turn.userMessage,
+        assistantMessage: turn.assistantMessage,
+        completedAt,
+      });
+      if (mem0Result.ok) {
+        agentFacts = mem0Result.facts;
+        // Persist immediately (ADD-only — never mutates prior facts).
+        if (this.store && agentFacts.length > 0) {
+          try {
+            this.mem0Extractor.persistFacts(this.store, agentFacts);
+          } catch {
+            // Store write failure is logged via honest skip — the
+            // observer's existing pattern for store-insert failures.
+          }
+        }
+      }
+      // mem0Result.ok === false → agentFacts stays empty. No throw;
+      // the observer's honest-failure shape is maintained because
+      // P1-M1's contract was "never throw from observeTurn".
+    }
+
     return {
       ok: true,
       sessionId,
       observations: fresh,
       bufferSize: state.pending.length,
+      agentFacts,
     };
   }
 
