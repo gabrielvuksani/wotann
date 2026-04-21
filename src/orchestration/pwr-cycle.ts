@@ -2,9 +2,17 @@
  * Plan-Work-Review 6-phase cycle with bidirectional mode transitions.
  * Phases: DISCUSS → PLAN → IMPLEMENT → REVIEW → UAT → SHIP
  * Transitions are intent-driven — the harness reads the user message and moves fluidly.
+ *
+ * P2 migration: the canonical phase ordering now lives in a PhasedExecutor
+ * instance (see phased-executor.ts). PhasedExecutor.run() is NEVER invoked
+ * from PWREngine — PWR's transitions are intent-driven and bidirectional,
+ * incompatible with PhasedExecutor's contiguous-forward semantics. What's
+ * gained: single-source-of-truth for the phase list, plus a `getPhases()`
+ * accessor aligned with every other phased orchestrator.
  */
 
 import type { PermissionMode } from "../core/types.js";
+import { PhasedExecutor } from "./phased-executor.js";
 
 export type PWRPhase = "discuss" | "plan" | "implement" | "review" | "uat" | "fix" | "ship";
 
@@ -19,7 +27,15 @@ export interface PWRState {
   readonly checkpoints: ReadonlyMap<PWRPhase, string>;
 }
 
-const PHASE_ORDER: readonly PWRPhase[] = ["discuss", "plan", "implement", "review", "uat", "fix", "ship"];
+const PHASE_ORDER: readonly PWRPhase[] = [
+  "discuss",
+  "plan",
+  "implement",
+  "review",
+  "uat",
+  "fix",
+  "ship",
+];
 
 const PHASE_PERMISSIONS: Record<PWRPhase, PermissionMode> = {
   discuss: "default",
@@ -97,12 +113,33 @@ export function autoDetectNextPhase(ctx: ProjectContext): PWRPhase {
 export class PWREngine {
   private state: PWRState;
 
+  /**
+   * PhasedExecutor view over the PWR phase list. Not used to drive
+   * transitions (PWR is bidirectional; PhasedExecutor is contiguous-
+   * forward only). Purely a canonical phase-list source — phase-aware
+   * tooling / UI can iterate `getPhases()` to render cycle progress in
+   * the correct order. Handlers are no-ops.
+   */
+  private readonly phasedExecutor: PhasedExecutor<PWRPhase, { readonly phase: PWRPhase }>;
+
   constructor(initialPhase: PWRPhase = "discuss") {
     this.state = {
       currentPhase: initialPhase,
       phaseHistory: [],
       checkpoints: new Map(),
     };
+    this.phasedExecutor = new PhasedExecutor({
+      phases: PHASE_ORDER,
+      handlers: {
+        discuss: async (ctx) => ctx,
+        plan: async (ctx) => ctx,
+        implement: async (ctx) => ctx,
+        review: async (ctx) => ctx,
+        uat: async (ctx) => ctx,
+        fix: async (ctx) => ctx,
+        ship: async (ctx) => ctx,
+      },
+    });
   }
 
   getState(): PWRState {
@@ -113,7 +150,20 @@ export class PWREngine {
     return this.state.currentPhase;
   }
 
-  processMessage(message: string): { transitioned: boolean; newPhase: PWRPhase; direction: string } {
+  /**
+   * Return the canonical phase ordering, sourced from PhasedExecutor.
+   * Aligned with other P2-migrated orchestrators (Coordinator,
+   * AutonomousExecutor, SpecToShipPipeline).
+   */
+  getPhases(): readonly PWRPhase[] {
+    return this.phasedExecutor.getPhases();
+  }
+
+  processMessage(message: string): {
+    transitioned: boolean;
+    newPhase: PWRPhase;
+    direction: string;
+  } {
     const intent = detectTransitionKeywords(message);
 
     if (!intent.suggestedPhase || intent.suggestedPhase === this.state.currentPhase) {

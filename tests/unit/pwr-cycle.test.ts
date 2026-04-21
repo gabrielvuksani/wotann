@@ -143,4 +143,25 @@ describe("PWR Cycle", () => {
       expect(result.newPhase).toBe("implement");
     });
   });
+
+  describe("PWREngine.getPhases (P2 PhasedExecutor view)", () => {
+    it("exposes the canonical 7-phase ordering", () => {
+      const engine = new PWREngine();
+      expect(engine.getPhases()).toEqual([
+        "discuss",
+        "plan",
+        "implement",
+        "review",
+        "uat",
+        "fix",
+        "ship",
+      ]);
+    });
+
+    it("phase list is independent of current phase", () => {
+      const atDiscuss = new PWREngine("discuss");
+      const atShip = new PWREngine("ship");
+      expect(atDiscuss.getPhases()).toEqual(atShip.getPhases());
+    });
+  });
 });
