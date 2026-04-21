@@ -30,9 +30,19 @@ import type { BackgroundTaskConfig } from "../agents/background-agent.js";
 import type { BenchmarkType } from "../intelligence/benchmark-harness.js";
 import type { Workflow } from "../orchestration/workflow-dag.js";
 import type { WotannMode } from "../core/mode-cycling.js";
-import { createECDH, hkdfSync } from "node:crypto";
+import { createECDH, hkdfSync, randomUUID } from "node:crypto";
 import { sanitizeCommand } from "../security/command-sanitizer.js";
 import { VoicePipeline } from "../voice/voice-pipeline.js";
+import {
+  ComputerSessionStore,
+  type Session as ComputerSessionRecord,
+  type SessionEvent as ComputerSessionEvent,
+  type SessionStatus as ComputerSessionStatus,
+  SessionNotFoundError,
+  SessionAlreadyClaimedError,
+  SessionUnauthorizedError,
+  SessionIllegalTransitionError,
+} from "../session/computer-session-store.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -103,6 +113,42 @@ function simpleLineDiff(oldContent: string, newContent: string, path: string): s
     if (!oldSet.has(line)) lines.push(`+ ${line}`);
   }
   return lines.join("\n");
+}
+
+// ── Computer Session serialization helpers (Phase 3 P1-F1) ─
+
+function serializeSession(s: ComputerSessionRecord): Record<string, unknown> {
+  return {
+    id: s.id,
+    creatorDeviceId: s.creatorDeviceId,
+    claimedByDeviceId: s.claimedByDeviceId,
+    taskSpec: s.taskSpec,
+    status: s.status,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    eventCount: s.events.length,
+    pendingApprovalId: s.pendingApprovalId,
+    result: s.result,
+  };
+}
+
+function serializeEvent(e: ComputerSessionEvent): Record<string, unknown> {
+  return {
+    sessionId: e.sessionId,
+    seq: e.seq,
+    timestamp: e.timestamp,
+    type: e.type,
+    payload: e.payload,
+  };
+}
+
+function toRpcError(err: unknown): Error {
+  if (err instanceof SessionNotFoundError) return err;
+  if (err instanceof SessionAlreadyClaimedError) return err;
+  if (err instanceof SessionUnauthorizedError) return err;
+  if (err instanceof SessionIllegalTransitionError) return err;
+  if (err instanceof Error) return err;
+  return new Error(String(err));
 }
 
 // ── Types ────────────────────────────────────────────────
@@ -580,6 +626,20 @@ export class KairosRPCHandler {
   private readonly frameBuffer: ContinuityFrame[] = [];
   private notificationPrefsPath = join(homedir(), ".wotann", "notifications.json");
 
+  // Computer-session keystone store (Phase 3 P1-F1). Per-session state lives here,
+  // NOT in module globals (QB #7). Polling subscribers hold a rolling buffer keyed
+  // by subscription id; the store owns the canonical event log.
+  private readonly computerSessionStore = new ComputerSessionStore();
+  private readonly computerSessionSubscriptions = new Map<
+    string,
+    {
+      readonly sessionId: string | "*";
+      readonly events: ComputerSessionEvent[];
+      readonly dispose: () => void;
+      lastPolledAt: number;
+    }
+  >();
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -591,6 +651,15 @@ export class KairosRPCHandler {
    */
   setDaemon(daemon: KairosDaemon): void {
     this.daemon = daemon;
+  }
+
+  /**
+   * Test-visibility accessor for the ComputerSessionStore. External callers
+   * (UnifiedDispatchPlane bridges, tests) should read session state through
+   * this method rather than poking at private fields.
+   */
+  getComputerSessionStore(): ComputerSessionStore {
+    return this.computerSessionStore;
   }
 
   /**
@@ -3804,6 +3873,12 @@ export class KairosRPCHandler {
         nodeStates: run.nodeStates,
       };
     });
+
+    // Keystone cross-surface session RPCs (Phase 3 P1-F1). Registered in the
+    // built-in set because the session store owns its own lifecycle and does
+    // not depend on WotannRuntime — any surface can create/claim/stream sessions
+    // from the moment the daemon boots.
+    this.registerComputerSessionHandlers();
   }
 
   // ── Self-Improvement RPC Methods ────────────────────
@@ -4563,6 +4638,270 @@ export class KairosRPCHandler {
           message: `Skill merge failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
+    });
+  }
+
+  // ── Computer Session RPC family (Phase 3 P1-F1 keystone) ─────
+  //
+  // The 7 methods below wire the cross-surface workflow defined in
+  // docs/internal/CROSS_SURFACE_SYNERGY_DESIGN.md. Phone creates; desktop
+  // claims; phone/any-surface subscribes to stream. Per the design, this is
+  // the keystone — F2-F9 all build on top of the session lifecycle + event
+  // bus established here.
+  private registerComputerSessionHandlers(): void {
+    this.handlers.set("computer.session.create", async (params) => {
+      const creatorDeviceId = params["creatorDeviceId"] ?? params["deviceId"];
+      const taskSpecParam = params["taskSpec"] ?? params["spec"];
+      if (typeof creatorDeviceId !== "string") {
+        throw new Error("creatorDeviceId (string) required");
+      }
+      if (!taskSpecParam || typeof taskSpecParam !== "object") {
+        throw new Error("taskSpec (object) required");
+      }
+      const spec = taskSpecParam as Record<string, unknown>;
+      const task = spec["task"];
+      if (typeof task !== "string" || task.trim() === "") {
+        throw new Error("taskSpec.task (non-empty string) required");
+      }
+      const mode = spec["mode"];
+      const maxSteps = spec["maxSteps"];
+      const creationPath = spec["creationPath"];
+      const modelId = spec["modelId"];
+      const session = this.computerSessionStore.create({
+        creatorDeviceId,
+        taskSpec: {
+          task,
+          mode:
+            mode === "research" ||
+            mode === "autopilot" ||
+            mode === "focused" ||
+            mode === "watch-only"
+              ? mode
+              : undefined,
+          maxSteps: typeof maxSteps === "number" ? maxSteps : undefined,
+          creationPath: typeof creationPath === "string" ? creationPath : undefined,
+          modelId: typeof modelId === "string" ? modelId : undefined,
+        },
+      });
+      return serializeSession(session);
+    });
+
+    this.handlers.set("computer.session.claim", async (params) => {
+      const sessionId = params["sessionId"];
+      const deviceId = params["deviceId"];
+      if (typeof sessionId !== "string") throw new Error("sessionId required");
+      if (typeof deviceId !== "string") throw new Error("deviceId required");
+      try {
+        const session = this.computerSessionStore.claim(sessionId, deviceId);
+        return serializeSession(session);
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("computer.session.step", async (params) => {
+      const sessionId = params["sessionId"];
+      const deviceId = params["deviceId"];
+      const step = params["step"];
+      if (typeof sessionId !== "string") throw new Error("sessionId required");
+      if (typeof deviceId !== "string") throw new Error("deviceId required");
+      if (!step || typeof step !== "object") throw new Error("step (object) required");
+      try {
+        const session = this.computerSessionStore.step({
+          sessionId,
+          deviceId,
+          step: step as Readonly<Record<string, unknown>>,
+        });
+        return serializeSession(session);
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("computer.session.requestApproval", async (params) => {
+      const sessionId = params["sessionId"];
+      const deviceId = params["deviceId"];
+      const summary = params["summary"];
+      const riskLevel = params["riskLevel"] ?? "medium";
+      if (typeof sessionId !== "string") throw new Error("sessionId required");
+      if (typeof deviceId !== "string") throw new Error("deviceId required");
+      if (typeof summary !== "string") throw new Error("summary required");
+      if (riskLevel !== "low" && riskLevel !== "medium" && riskLevel !== "high") {
+        throw new Error("riskLevel must be low|medium|high");
+      }
+      try {
+        const { session, approval } = this.computerSessionStore.requestApproval({
+          sessionId,
+          deviceId,
+          summary,
+          riskLevel,
+        });
+        return { session: serializeSession(session), approval };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("computer.session.approve", async (params) => {
+      const sessionId = params["sessionId"];
+      const deviceId = params["deviceId"];
+      const decision = params["decision"];
+      if (typeof sessionId !== "string") throw new Error("sessionId required");
+      if (typeof deviceId !== "string") throw new Error("deviceId required");
+      if (decision !== "allow" && decision !== "deny") {
+        throw new Error("decision must be allow|deny");
+      }
+      try {
+        const session = this.computerSessionStore.approve({
+          sessionId,
+          deviceId,
+          decision,
+        });
+        return serializeSession(session);
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("computer.session.close", async (params) => {
+      const sessionId = params["sessionId"];
+      const deviceId = params["deviceId"];
+      const outcome = params["outcome"] ?? "done";
+      const result = params["result"];
+      const error = params["error"];
+      if (typeof sessionId !== "string") throw new Error("sessionId required");
+      if (typeof deviceId !== "string") throw new Error("deviceId required");
+      if (outcome !== "done" && outcome !== "failed") {
+        throw new Error("outcome must be done|failed");
+      }
+      try {
+        const session = this.computerSessionStore.close({
+          sessionId,
+          deviceId,
+          outcome,
+          result:
+            result && typeof result === "object"
+              ? (result as Readonly<Record<string, unknown>>)
+              : undefined,
+          error: typeof error === "string" ? error : undefined,
+        });
+        return serializeSession(session);
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    // Polling-style stream: NDJSON IPC can't carry subscriptions, so `stream`
+    // returns history-then-tail via an opaque subscription id. Caller repeats
+    // with `since` to page new events. `close` releases the buffer.
+    this.handlers.set("computer.session.stream", async (params) => {
+      const sessionId = params["sessionId"];
+      const subscribeAll = params["subscribeAll"] === true;
+      const sinceSeq = params["since"];
+      const subscriptionIdIn = params["subscriptionId"];
+      const closeAfter = params["close"] === true;
+      const maxEvents =
+        typeof params["maxEvents"] === "number" && params["maxEvents"]! > 0
+          ? (params["maxEvents"] as number)
+          : 256;
+
+      // Continuation: page from an existing subscription. Returns the full
+      // accumulated buffer — history replayed at subscribe + every event
+      // emitted since. Callers pass `since` to filter to newer events only,
+      // otherwise the full timeline is returned (subscriber-friendly default).
+      if (typeof subscriptionIdIn === "string") {
+        const sub = this.computerSessionSubscriptions.get(subscriptionIdIn);
+        if (!sub) {
+          throw new Error(`subscription not found: ${subscriptionIdIn}`);
+        }
+        const filter =
+          typeof sinceSeq === "number" && sub.sessionId !== "*"
+            ? (e: ComputerSessionEvent) => e.seq >= sinceSeq
+            : (): boolean => true;
+        const events = sub.events.filter(filter).slice(0, maxEvents);
+        sub.lastPolledAt = Date.now();
+        if (closeAfter) {
+          sub.dispose();
+          this.computerSessionSubscriptions.delete(subscriptionIdIn);
+        }
+        return {
+          subscriptionId: subscriptionIdIn,
+          events: events.map(serializeEvent),
+          more: sub.events.filter(filter).length > events.length,
+          closed: closeAfter,
+        };
+      }
+
+      // Start a new subscription. Replay history up to this point, then buffer new.
+      if (subscribeAll) {
+        const subId = `ss-${randomUUID()}`;
+        const buffer: ComputerSessionEvent[] = [];
+        const dispose = this.computerSessionStore.subscribeAll((event) => {
+          buffer.push(event);
+          if (buffer.length > 10000) buffer.splice(0, buffer.length - 10000);
+        });
+        this.computerSessionSubscriptions.set(subId, {
+          sessionId: "*",
+          events: buffer,
+          dispose,
+          lastPolledAt: Date.now(),
+        });
+        return {
+          subscriptionId: subId,
+          events: [],
+          more: false,
+          closed: false,
+        };
+      }
+
+      if (typeof sessionId !== "string") {
+        throw new Error("sessionId (string) or subscribeAll=true required");
+      }
+      let buffer: ComputerSessionEvent[];
+      let dispose: () => void;
+      try {
+        buffer = [];
+        dispose = this.computerSessionStore.subscribe(sessionId, (event) => {
+          buffer.push(event);
+          if (buffer.length > 10000) buffer.splice(0, buffer.length - 10000);
+        });
+      } catch (err) {
+        throw toRpcError(err);
+      }
+      const subId = `ss-${randomUUID()}`;
+      this.computerSessionSubscriptions.set(subId, {
+        sessionId,
+        events: buffer,
+        dispose,
+        lastPolledAt: Date.now(),
+      });
+      // History is already captured synchronously in the buffer by subscribe().
+      const replay = buffer.slice(0, maxEvents);
+      return {
+        subscriptionId: subId,
+        events: replay.map(serializeEvent),
+        more: buffer.length > replay.length,
+        closed: false,
+      };
+    });
+
+    this.handlers.set("computer.session.list", async (params) => {
+      const statusFilter = params["status"];
+      const validStatuses: readonly ComputerSessionStatus[] = [
+        "pending",
+        "claimed",
+        "running",
+        "awaiting_approval",
+        "done",
+        "failed",
+      ];
+      const status =
+        typeof statusFilter === "string" &&
+        (validStatuses as readonly string[]).includes(statusFilter)
+          ? (statusFilter as ComputerSessionStatus)
+          : undefined;
+      const list = this.computerSessionStore.list(status ? { status } : undefined);
+      return list.map(serializeSession);
     });
   }
 
