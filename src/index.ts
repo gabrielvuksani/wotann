@@ -5674,6 +5674,94 @@ program
     process.exit(0);
   });
 
+// ── wotann design ───────────────────────────────────────────
+// P1-C8: Claude Design codebase→design-system extractor. Scans a
+// workspace for CSS/TSX/JSX color+spacing+typography tokens and
+// emits an auditable DesignSystem as Markdown or JSON. Pairs with
+// `wotann import-design` (which consumes Claude Design handoff
+// bundles) and the W3C token parser in src/design/design-tokens-parser.ts.
+const designCmd = program
+  .command("design")
+  .description("Design-system utilities (extract, inspect)");
+
+designCmd
+  .command("extract")
+  .description("Extract a design system (palettes, spacing, typography) from a codebase")
+  .option("--root <dir>", "Workspace root (default: current working directory)")
+  .option("--format <format>", "Output format: md | json (default: md)", "md")
+  .option("--output <file>", "Write output to a file instead of stdout")
+  .option(
+    "--exclude <pattern>",
+    "Exclude glob (repeatable). Defaults include node_modules, dist, .git",
+    (val, acc: string[]) => [...(acc ?? []), val],
+    [] as string[],
+  )
+  .option(
+    "--include <pattern>",
+    "Include glob (repeatable). If set, overrides default extension filter",
+    (val, acc: string[]) => [...(acc ?? []), val],
+    [] as string[],
+  )
+  .option("--threshold <n>", "Palette clustering RGB-distance threshold (default: 12)", (val) =>
+    Number(val),
+  )
+  .option("--dry-run", "Compute the system but do not write to --output", false)
+  .action(
+    async (opts: {
+      root?: string;
+      format?: string;
+      output?: string;
+      exclude?: string[];
+      include?: string[];
+      threshold?: number;
+      dryRun?: boolean;
+    }) => {
+      const { runDesignExtractCommand } = await import("./cli/commands/design-extract.js");
+      const format = opts.format === "json" ? "json" : "md";
+      const cmdOpts: Parameters<typeof runDesignExtractCommand>[0] = {
+        format,
+        dryRun: opts.dryRun === true,
+      };
+      if (opts.root !== undefined) {
+        (cmdOpts as { root?: string }).root = opts.root;
+      }
+      if (opts.output !== undefined) {
+        (cmdOpts as { output?: string }).output = opts.output;
+      }
+      if (opts.exclude && opts.exclude.length > 0) {
+        (cmdOpts as { exclude?: readonly string[] }).exclude = opts.exclude;
+      }
+      if (opts.include && opts.include.length > 0) {
+        (cmdOpts as { include?: readonly string[] }).include = opts.include;
+      }
+      if (opts.threshold !== undefined && !Number.isNaN(opts.threshold)) {
+        (cmdOpts as { paletteDistanceThreshold?: number }).paletteDistanceThreshold =
+          opts.threshold;
+      }
+
+      const result = await runDesignExtractCommand(cmdOpts);
+      if (!result.success) {
+        process.stderr.write(chalk.red(`design extract failed: ${result.error ?? "unknown"}\n`));
+        process.exit(2);
+      }
+
+      if (result.wrotePath !== null) {
+        process.stderr.write(chalk.green(`✓ Wrote ${result.wrotePath}\n`));
+        if (result.system) {
+          process.stderr.write(
+            chalk.dim(
+              `  palettes=${result.system.palettes.length} spacing=${result.system.spacing.length} ` +
+                `fontFamilies=${result.system.typography.fontFamilies.length} files=${result.system.filesScanned}\n`,
+            ),
+          );
+        }
+      } else {
+        process.stdout.write(result.output);
+        if (!result.output.endsWith("\n")) process.stdout.write("\n");
+      }
+    },
+  );
+
 // ── wotann shell snapshot ───────────────────────────────────
 // Phase 13 Wave 3B: Codex parity — save + restore a PTY-less shell
 // session's state (cwd + env + history) to ~/.wotann/shell-snapshots/.
