@@ -27,8 +27,15 @@
  */
 
 import type { AutoCaptureEntry } from "./store.js";
-import { ObservationExtractor, type Observation } from "./observation-extractor.js";
+import {
+  ObservationExtractor,
+  deriveEntitiesFromObservations,
+  deriveRelationshipHintsFromObservations,
+  type Observation,
+  type DerivedEntityCandidate,
+} from "./observation-extractor.js";
 import type { MemoryRelationship } from "./relationship-types.js";
+import type { Entity } from "./entity-types.js";
 import {
   type SessionContext,
   type ContextualResolver,
@@ -58,6 +65,25 @@ export interface SessionIngestStageFailures {
   readonly classificationErrors: number;
 }
 
+/**
+ * P1-M7 upstream — KG auto-population outcome. Populated only when
+ * `IngestOptions.autoPopulateKG === true` AND the caller supplied a
+ * store that exposes `recordEntity` + `recordHeuristicRelationship`.
+ * When the gate is OFF (default), every count here is zero.
+ */
+export interface KnowledgeGraphPopulationReport {
+  /** Entity candidates derived from observations (before DB insert). */
+  readonly derivedEntities: number;
+  /** knowledge_nodes rows inserted (or reused — recordEntity is idempotent). */
+  readonly recordedEntities: number;
+  /** Entity candidates that failed EntitySchema validation. */
+  readonly rejectedEntities: number;
+  /** Relationship hint pairs considered. */
+  readonly relationshipHints: number;
+  /** knowledge_edges rows actually inserted (classifier confident). */
+  readonly recordedRelationships: number;
+}
+
 export interface SessionIngestResult {
   readonly sessionId: string;
   readonly endedAt: number;
@@ -74,6 +100,12 @@ export interface SessionIngestResult {
   readonly resolutions: readonly ResolutionEvent[];
   /** Stage-wise failure counters — honest, not silently swallowed. */
   readonly failures: SessionIngestStageFailures;
+  /**
+   * P1-M7 upstream — KG auto-population report. When
+   * `IngestOptions.autoPopulateKG` is false (default) this is still
+   * present with all zero counters, so callers always see the contract.
+   */
+  readonly kgPopulation: KnowledgeGraphPopulationReport;
 }
 
 // ── Dedup helpers ──────────────────────────────────────
@@ -91,6 +123,26 @@ function dedupByAssertion(observations: readonly Observation[]): readonly Observ
 
 // ── Core ingest pipeline ───────────────────────────────
 
+/**
+ * Minimal KG-population API the ingest pipeline calls through when
+ * `autoPopulateKG === true`. Matches MemoryStore.recordEntity +
+ * MemoryStore.recordHeuristicRelationship so MemoryStore can be passed
+ * directly. Kept as an explicit subset so tests can pass a lightweight
+ * double.
+ */
+export interface KnowledgeGraphPopulator {
+  /** Insert or reuse a knowledge_nodes row. Returns the node id. */
+  recordEntity(entity: Entity): string;
+  /** Classify + insert a knowledge_edges row. Returns edge id or null. */
+  recordHeuristicRelationship(
+    fromNodeId: string,
+    toNodeId: string,
+    predecessorContent: string,
+    successorContent: string,
+    minConfidence?: number,
+  ): Promise<string | null>;
+}
+
 export interface IngestOptions {
   /** Extractor to reuse (wires classifier). Default: new instance. */
   readonly extractor?: ObservationExtractor;
@@ -98,6 +150,26 @@ export interface IngestOptions {
   readonly resolver?: ContextualResolver;
   /** Reference time used for derived createdAt fields. */
   readonly now?: number;
+  /**
+   * P1-M7 upstream — opt-in gate that wires observation-extractor into
+   * MemoryStore.recordEntity + MemoryStore.recordHeuristicRelationship.
+   * Default is FALSE so existing callers get zero behavior change; flip
+   * to TRUE to auto-populate the knowledge graph from agent workflows.
+   *
+   * When true, `populator` MUST be supplied; otherwise the flag is a
+   * no-op (the pipeline reports zero counts rather than crashing).
+   */
+  readonly autoPopulateKG?: boolean;
+  /**
+   * The KG populator — typically a MemoryStore instance. Ignored unless
+   * `autoPopulateKG === true`.
+   */
+  readonly populator?: KnowledgeGraphPopulator;
+  /**
+   * Minimum classifier confidence to emit a knowledge_edges row. Same
+   * default as MemoryStore.recordHeuristicRelationship (0.5).
+   */
+  readonly kgMinRelationshipConfidence?: number;
 }
 
 /**
@@ -181,6 +253,13 @@ export async function ingestSession(
   // Stage 4: dedup.
   const deduped = dedupByAssertion(observations);
 
+  // Stage 5 (P1-M7 upstream): KG auto-population — OFF by default.
+  // When enabled, derives typed Entity candidates + relationship hints
+  // from the DEDUPED observations and pushes them through the
+  // populator (MemoryStore). Behind the gate so legacy callers see
+  // zero behavior change.
+  const kgPopulation = await populateKnowledgeGraph(deduped, options);
+
   return {
     sessionId: input.sessionId,
     endedAt,
@@ -193,7 +272,110 @@ export async function ingestSession(
       extractionEmpty,
       classificationErrors,
     },
+    kgPopulation,
   };
+}
+
+/**
+ * Run the derived-entity + derived-relationship pipeline against the
+ * populator. Returns zero counters when the gate is off or when no
+ * populator was provided — never throws, honest-failure semantics.
+ */
+async function populateKnowledgeGraph(
+  observations: readonly Observation[],
+  options: IngestOptions | undefined,
+): Promise<KnowledgeGraphPopulationReport> {
+  const empty: KnowledgeGraphPopulationReport = {
+    derivedEntities: 0,
+    recordedEntities: 0,
+    rejectedEntities: 0,
+    relationshipHints: 0,
+    recordedRelationships: 0,
+  };
+  if (!options?.autoPopulateKG) return empty;
+  if (!options.populator) return empty;
+  if (observations.length === 0) return empty;
+
+  const minConfidence = options.kgMinRelationshipConfidence ?? 0.5;
+  const derivedEntities = deriveEntitiesFromObservations(observations);
+  const relationshipHints = deriveRelationshipHintsFromObservations(observations);
+
+  // Map observation-id → the first derived entity's KG node id so the
+  // hint → relationship pass can connect predecessor to successor
+  // entities via the same node they were recorded as.
+  const obsToNodeId = new Map<string, string>();
+  let recordedEntities = 0;
+  let rejectedEntities = 0;
+
+  for (const candidate of derivedEntities) {
+    const nodeId = tryRecordEntity(options.populator, candidate);
+    if (nodeId === null) {
+      rejectedEntities++;
+      continue;
+    }
+    recordedEntities++;
+    // Only remember the FIRST entity per observation — that's the
+    // canonical anchor for relationship building.
+    if (!obsToNodeId.has(candidate.observationId)) {
+      obsToNodeId.set(candidate.observationId, nodeId);
+    }
+  }
+
+  let recordedRelationships = 0;
+  if (relationshipHints.length > 0) {
+    // Pair hints are derived from sorted observations (earlier → later).
+    // We have per-observation node ids above. Reconstruct the pair by
+    // walking the same sorted order.
+    const sortedObs = [...observations].sort((a, b) => a.extractedAt - b.extractedAt);
+    for (let i = 1; i < sortedObs.length; i++) {
+      const predecessor = sortedObs[i - 1]!;
+      const successor = sortedObs[i]!;
+      if (predecessor.domain && successor.domain && predecessor.domain !== successor.domain) {
+        continue;
+      }
+      const fromNodeId = obsToNodeId.get(predecessor.id);
+      const toNodeId = obsToNodeId.get(successor.id);
+      if (!fromNodeId || !toNodeId) continue;
+      if (fromNodeId === toNodeId) continue; // self-edges are noise.
+      try {
+        const edgeId = await options.populator.recordHeuristicRelationship(
+          fromNodeId,
+          toNodeId,
+          predecessor.assertion,
+          successor.assertion,
+          minConfidence,
+        );
+        if (edgeId) recordedRelationships++;
+      } catch {
+        // Honest-failure: classifier errors don't crash the pipeline.
+        // The counter simply stays at whatever it is.
+      }
+    }
+  }
+
+  return {
+    derivedEntities: derivedEntities.length,
+    recordedEntities,
+    rejectedEntities,
+    relationshipHints: relationshipHints.length,
+    recordedRelationships,
+  };
+}
+
+/**
+ * Try to record a single entity candidate. Returns the node id, or
+ * null when recordEntity throws (typically EntitySchema validation
+ * failure on malformed derived entities).
+ */
+function tryRecordEntity(
+  populator: KnowledgeGraphPopulator,
+  candidate: DerivedEntityCandidate,
+): string | null {
+  try {
+    return populator.recordEntity(candidate.entity);
+  } catch {
+    return null;
+  }
 }
 
 // ── Hook-API scheduling (no runtime.ts edits) ──────────

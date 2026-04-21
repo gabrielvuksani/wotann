@@ -413,6 +413,193 @@ export class ObservationExtractor {
 }
 
 // ---------------------------------------------------------------------------
+// KG auto-population — P1-M7 upstream (derives Entity + Relationship
+// records from observations so MemoryStore.recordEntity +
+// recordHeuristicRelationship actually get CALLED on real workflows).
+//
+// Before this helper existed, P1-M7 exposed recordEntity/recordHeuristic-
+// Relationship but the extractor never emitted entity/relationship
+// records, so `knowledge_nodes` stayed empty forever. These pure
+// functions bridge that gap without adding an LLM call in the hot path.
+// ---------------------------------------------------------------------------
+
+/**
+ * A single derived-relationship hint linking two entity names. Separate
+ * from MemoryRelationship (which links Observation ids) because the KG
+ * is addressed by entity+type, not observation id.
+ */
+export interface DerivedRelationshipHint {
+  readonly subject: string;
+  readonly subjectType: Entity["type"];
+  readonly predicateContent: string;
+  readonly objectContent: string;
+}
+
+/**
+ * Structured entity candidate with the observation that produced it,
+ * so callers can trace a KG node back to its source assertion.
+ */
+export interface DerivedEntityCandidate {
+  readonly entity: Entity;
+  readonly observationId: string;
+  readonly observationType: ObservationType;
+}
+
+const FILE_PATH_REGEX =
+  /(?:src|lib|app|tests?|docs?|scripts?)\/[\w./-]+\.(?:ts|tsx|js|jsx|py|rs|go|md|json|yaml|yml|toml)/gi;
+const PROJECT_NAME_REGEX =
+  /\b(?:WOTANN|Nexus|Postgres|PostgreSQL|MySQL|Redis|Memcached|Kubernetes|Docker|Node\.?js|Vitest|Jest|Next\.?js)\b/gi;
+
+/**
+ * Derive typed Entity candidates from a batch of observations.
+ *
+ * Mapping rules:
+ *   - preference  → Tool entity (derived from the toolName embedded
+ *                   in the assertion)
+ *   - decision    → Concept entity (a named decision in the assertion
+ *                   text) + any project/framework names mentioned
+ *   - milestone   → Event entity + optional File entity for paths
+ *   - problem     → Event entity + optional File entity for paths
+ *   - discovery   → Concept entity
+ *
+ * All derived entities respect the EntitySchema (validated downstream
+ * by MemoryStore.recordEntity).
+ *
+ * This function is PURE — no side effects, no DB calls. Callers route
+ * the derived entities into MemoryStore.recordEntities().
+ */
+export function deriveEntitiesFromObservations(
+  observations: readonly Observation[],
+): readonly DerivedEntityCandidate[] {
+  const out: DerivedEntityCandidate[] = [];
+
+  for (const obs of observations) {
+    if (obs.type === "preference") {
+      // Assertion shape: `Preference detected: tool "<toolName>" used N times ...`
+      const toolMatch = obs.assertion.match(/tool "([^"]+)"/);
+      if (toolMatch?.[1]) {
+        out.push({
+          entity: { type: "tool", name: toolMatch[1] },
+          observationId: obs.id,
+          observationType: obs.type,
+        });
+      }
+      continue;
+    }
+
+    if (obs.type === "decision") {
+      // Concept entity naming the decision topic (domain or first N chars).
+      const name = obs.topic?.split("|")[0] ?? obs.domain ?? obs.assertion.slice(0, 80);
+      out.push({
+        entity: {
+          type: "concept",
+          name: name.length > 0 ? name : obs.assertion.slice(0, 80),
+          ...(obs.domain ? { domain: obs.domain } : {}),
+        },
+        observationId: obs.id,
+        observationType: obs.type,
+      });
+      // Plus project/framework names mentioned in the assertion.
+      const projects = extractProjectMentions(obs.assertion);
+      for (const name of projects) {
+        out.push({
+          entity: { type: "project", name },
+          observationId: obs.id,
+          observationType: obs.type,
+        });
+      }
+      continue;
+    }
+
+    if (obs.type === "milestone" || obs.type === "problem") {
+      // Event entity naming the milestone/problem.
+      const topicName = obs.topic?.split("|")[0] ?? obs.domain ?? `${obs.type}-event`;
+      out.push({
+        entity: {
+          type: "event",
+          name: topicName.length > 0 ? topicName : `${obs.type}-event`,
+          whenMs: obs.extractedAt,
+        },
+        observationId: obs.id,
+        observationType: obs.type,
+      });
+      // Plus any file paths mentioned.
+      const paths = extractFilePathsFromAssertion(obs.assertion);
+      for (const path of paths) {
+        out.push({
+          entity: { type: "file", path },
+          observationId: obs.id,
+          observationType: obs.type,
+        });
+      }
+      continue;
+    }
+
+    if (obs.type === "discovery") {
+      const name = obs.topic?.split("|")[0] ?? obs.domain ?? "discovery";
+      out.push({
+        entity: {
+          type: "concept",
+          name: name.length > 0 ? name : "discovery",
+          ...(obs.domain ? { domain: obs.domain } : {}),
+        },
+        observationId: obs.id,
+        observationType: obs.type,
+      });
+    }
+  }
+
+  return out;
+}
+
+function extractFilePathsFromAssertion(assertion: string): readonly string[] {
+  const matches = assertion.match(FILE_PATH_REGEX);
+  if (!matches) return [];
+  // Dedup — the same path may appear multiple times in one assertion.
+  return Array.from(new Set(matches));
+}
+
+function extractProjectMentions(assertion: string): readonly string[] {
+  const matches = assertion.match(PROJECT_NAME_REGEX);
+  if (!matches) return [];
+  // Normalize casing to the canonical form for dedup.
+  return Array.from(new Set(matches.map((m) => m)));
+}
+
+/**
+ * Derive relationship hints between observations of the same domain.
+ * The result is meant to be fed into MemoryStore.recordHeuristic-
+ * Relationship — it links earlier observation text → later observation
+ * text so the heuristic classifier can decide updates/extends/derives.
+ *
+ * Pure — no DB, no LLM. The classifier itself runs in the caller.
+ */
+export function deriveRelationshipHintsFromObservations(
+  observations: readonly Observation[],
+): readonly DerivedRelationshipHint[] {
+  if (observations.length < 2) return [];
+  const sorted = [...observations].sort((a, b) => a.extractedAt - b.extractedAt);
+  const hints: DerivedRelationshipHint[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const successor = sorted[i]!;
+    const predecessor = sorted[i - 1]!;
+    // Same-domain pairs only (matches classifyRelationships policy).
+    if (predecessor.domain && successor.domain && predecessor.domain !== successor.domain) {
+      continue;
+    }
+    const subjectName =
+      predecessor.topic?.split("|")[0] ?? predecessor.domain ?? predecessor.assertion.slice(0, 40);
+    hints.push({
+      subject: subjectName.length > 0 ? subjectName : predecessor.assertion.slice(0, 40),
+      subjectType: "concept",
+      predicateContent: predecessor.assertion,
+      objectContent: successor.assertion,
+    });
+  }
+  return hints;
+}
+
+// ---------------------------------------------------------------------------
 // ObservationStore — in-memory with deduplication
 // ---------------------------------------------------------------------------
 
