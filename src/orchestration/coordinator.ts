@@ -1,6 +1,11 @@
 /**
  * Coordinator Mode: Research → Spec → Implement → Verify.
  * Max 3 subagents, git worktree isolation per worker.
+ *
+ * P2 migration: the canonical phase ordering now lives in a PhasedExecutor
+ * instance (see phased-executor.ts). All of Coordinator's existing public
+ * API is preserved verbatim; `getPhases()` is added as the canonical
+ * single-source-of-truth for the phase list.
  */
 
 import { existsSync, mkdirSync } from "node:fs";
@@ -14,6 +19,7 @@ import {
   type CoordinatedOutcome,
   type Synthesizer,
 } from "./parallel-coordinator.js";
+import { PhasedExecutor } from "./phased-executor.js";
 
 export interface CoordinatorTask {
   readonly id: string;
@@ -42,11 +48,28 @@ export interface CoordinatorWorktree {
   readonly path: string;
 }
 
+/** Canonical phase ordering for Coordinator — keep in sync with CoordinatorTask.phase. */
+const COORDINATOR_PHASES = ["research", "spec", "implement", "verify"] as const;
+type CoordinatorPhase = (typeof COORDINATOR_PHASES)[number];
+
 export class Coordinator {
   private readonly tasks: Map<string, CoordinatorTask> = new Map();
   private readonly worktrees: Map<string, CoordinatorWorktree> = new Map();
   private readonly config: CoordinatorConfig;
   private activeWorkers: number = 0;
+
+  /**
+   * The canonical phase walker (P2 migration). Coordinator doesn't use
+   * `run()` directly — it uses the executor as the single source of truth
+   * for phase ordering and transition validation, while preserving its
+   * graph-based execution strategy. Per-session: constructed once per
+   * Coordinator instance; `buildExecutionGraph()` and `executeWithGraph()`
+   * consult this for the authoritative phase list.
+   */
+  private readonly phasedExecutor: PhasedExecutor<
+    CoordinatorPhase,
+    { readonly tasksVisited: readonly string[] }
+  >;
 
   constructor(config: Partial<CoordinatorConfig> = {}) {
     this.config = {
@@ -56,6 +79,33 @@ export class Coordinator {
       strategy: config.strategy ?? "graph",
       ...(config.worktreeRoot !== undefined ? { worktreeRoot: config.worktreeRoot } : {}),
     };
+
+    // PhasedExecutor as the single-source-of-truth for phase ordering +
+    // transition validation. Handlers are no-ops here: Coordinator's
+    // actual work is DAG-based (executeWithGraph), not phase-handler-based.
+    // What we gain is: one authoritative phase list, free transition
+    // validation for future phase-aware tooling (phase-gate, plateau
+    // detector, long-horizon), and honest error types when something
+    // tries to transition illegally.
+    this.phasedExecutor = new PhasedExecutor({
+      phases: COORDINATOR_PHASES,
+      handlers: {
+        research: async (ctx) => ctx,
+        spec: async (ctx) => ctx,
+        implement: async (ctx) => ctx,
+        verify: async (ctx) => ctx,
+      },
+    });
+  }
+
+  /**
+   * Return the canonical phase ordering, sourced from PhasedExecutor.
+   * External consumers (UI, telemetry, progress reporters) can iterate
+   * this to render progress in the correct order. Part of the P2
+   * unification: every phased orchestrator exposes `getPhases()`.
+   */
+  getPhases(): readonly CoordinatorPhase[] {
+    return this.phasedExecutor.getPhases();
   }
 
   addTask(task: CoordinatorTask): void {
@@ -190,10 +240,13 @@ export class Coordinator {
   /**
    * Build an execution graph from pending tasks.
    * Tasks in the same phase can run in parallel (fanout); phases run sequentially (chain).
+   *
+   * P2 migration: phase order sourced from the PhasedExecutor instance, so
+   * there's exactly one authoritative list in the codebase.
    */
   buildExecutionGraph(): ExecutionGraph {
     const tasks = [...this.tasks.values()];
-    const phaseOrder = ["research", "spec", "implement", "verify"] as const;
+    const phaseOrder = this.phasedExecutor.getPhases();
     const builder = new GraphBuilder();
 
     for (const phase of phaseOrder) {
