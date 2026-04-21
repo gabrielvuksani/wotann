@@ -170,6 +170,8 @@ describe("bedrock-signer: adapter stream parser using event-stream framing", () 
 
     const adapter = createBedrockAdapter({
       provider: "bedrock",
+      method: "aws-iam",
+      billing: "api-key",
       token: "t",
       models: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
     });
@@ -202,6 +204,8 @@ describe("bedrock-signer: adapter stream parser using event-stream framing", () 
 
     const adapter = createBedrockAdapter({
       provider: "bedrock",
+      method: "aws-iam",
+      billing: "api-key",
       token: "t",
       models: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
     });
@@ -250,6 +254,8 @@ describe("bedrock-signer: adapter stream parser using event-stream framing", () 
 
     const adapter = createBedrockAdapter({
       provider: "bedrock",
+      method: "aws-iam",
+      billing: "api-key",
       token: "t",
       models: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
     });
@@ -296,6 +302,8 @@ describe("bedrock-signer: adapter stream parser using event-stream framing", () 
 
     const adapter = createBedrockAdapter({
       provider: "bedrock",
+      method: "aws-iam",
+      billing: "api-key",
       token: "t",
       models: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
     });
@@ -322,6 +330,8 @@ describe("bedrock-signer: adapter stream parser using event-stream framing", () 
 
     const adapter = createBedrockAdapter({
       provider: "bedrock",
+      method: "aws-iam",
+      billing: "api-key",
       token: "t",
       models: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
     });

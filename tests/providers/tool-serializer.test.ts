@@ -233,7 +233,7 @@ describe("toCodexTools — fidelity", () => {
     expect(tool.description).toBe("Create a new user with nested address");
     expect(tool.parameters).toEqual(NESTED_OBJECT_TOOL.inputSchema);
     // Codex Responses API is flat — there is NO `function:` wrapper.
-    expect((tool as Record<string, unknown>)["function"]).toBeUndefined();
+    expect((tool as unknown as Record<string, unknown>)["function"]).toBeUndefined();
   });
 
   it("nested object + array-of-objects + required survive", () => {

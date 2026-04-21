@@ -52,7 +52,7 @@ function mockFetch(capture: CapturedRequest[]): void {
   }) as unknown as typeof fetch;
 }
 
-function normalizeHeaders(h: HeadersInit | undefined): Record<string, string> {
+function normalizeHeaders(h: RequestInit["headers"] | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!h) return out;
   if (h instanceof Headers) {

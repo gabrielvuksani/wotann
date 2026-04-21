@@ -347,6 +347,8 @@ describe("wire-level tools serialization — Bedrock Converse", () => {
     // not re-serialized into a different shape.
     const adapter = createBedrockAdapter({
       provider: "bedrock",
+      method: "aws-iam",
+      billing: "api-key",
       token: "t",
       models: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
     });
@@ -407,6 +409,8 @@ describe("wire-level tools serialization — Bedrock Converse", () => {
     // an opaque 400. This test asserts the rejection happens locally.
     const adapter = createBedrockAdapter({
       provider: "bedrock",
+      method: "aws-iam",
+      billing: "api-key",
       token: "t",
       models: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
     });
@@ -513,6 +517,8 @@ describe("wire-level tools serialization — Vertex AI", () => {
     // { name, description, input_schema } trio — verified here.
     const adapter = createVertexAdapter({
       provider: "vertex",
+      method: "gcp-sa",
+      billing: "api-key",
       token: "unused",
       models: ["claude-3-5-sonnet@20241022"],
     });

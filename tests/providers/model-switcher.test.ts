@@ -15,6 +15,7 @@ function makeSession(overrides: Partial<SessionState> = {}): SessionState {
     totalCost: 0.05,
     toolCalls: 3,
     messages: [],
+    incognito: false,
     ...overrides,
   };
 }

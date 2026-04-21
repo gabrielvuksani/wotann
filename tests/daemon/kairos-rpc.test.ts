@@ -30,6 +30,8 @@ function makeMockRuntime(overrides?: Partial<RuntimeStatus>): WotannRuntime {
     traceEntries: 10,
     semanticIndexSize: 50,
     skillCount: 3,
+    contextPercent: 0,
+    messageCount: 0,
     ...overrides,
   };
 

@@ -108,7 +108,7 @@ describe("RpcSubscriptionManager", () => {
       for (let i = 0; i < 10; i++) mgr.emit({ seq: i, payload: `e${i}` });
       const first = mgr.poll(subscriptionId, { maxEvents: 4 });
       expect(first.events).toHaveLength(4);
-      expect(first.events[0].seq).toBe(0);
+      expect(first.events[0]?.seq).toBe(0);
       const second = mgr.poll(subscriptionId);
       expect(second.events).toHaveLength(6);
     });

@@ -137,6 +137,8 @@ describe("vertex-oauth: tool-use SSE lifecycle", () => {
 
     const adapter = createVertexAdapter({
       provider: "vertex",
+      method: "gcp-sa",
+      billing: "api-key",
       token: "unused",
       models: ["claude-3-5-sonnet@20241022"],
     });
@@ -196,6 +198,8 @@ describe("vertex-oauth: tool-use SSE lifecycle", () => {
 
     const adapter = createVertexAdapter({
       provider: "vertex",
+      method: "gcp-sa",
+      billing: "api-key",
       token: "unused",
       models: ["claude-3-5-sonnet@20241022"],
     });
@@ -232,6 +236,8 @@ describe("vertex-oauth: tool-use SSE lifecycle", () => {
 
     const adapter = createVertexAdapter({
       provider: "vertex",
+      method: "gcp-sa",
+      billing: "api-key",
       token: "unused",
       models: ["claude-3-5-sonnet@20241022"],
     });
@@ -289,6 +295,8 @@ describe("vertex-oauth: tool-use SSE lifecycle", () => {
 
     const adapter = createVertexAdapter({
       provider: "vertex",
+      method: "gcp-sa",
+      billing: "api-key",
       token: "unused",
       models: ["claude-3-5-sonnet@20241022"],
     });
@@ -319,6 +327,8 @@ describe("vertex-oauth: tool-use SSE lifecycle", () => {
 
     const adapter = createVertexAdapter({
       provider: "vertex",
+      method: "gcp-sa",
+      billing: "api-key",
       token: "unused",
       models: ["claude-3-5-sonnet@20241022"],
     });
