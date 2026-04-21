@@ -2770,6 +2770,96 @@ export class KairosRPCHandler {
       };
     });
 
+    // ── P1-C2: Hermes-style Cron Scheduler (at-most-once) ──
+    //
+    // Distinct from the `cron.*` family above (which wraps the
+    // legacy Wave-4F CronStore). `schedule.*` exposes the handler-
+    // based scheduler with at-most-once semantics, missed-fire
+    // policies, and the inflight gate. See `src/scheduler/`.
+
+    /** List every registered schedule with derived next_fire_at + inflight. */
+    this.handlers.set("schedule.list", async () => {
+      if (!this.daemon) return { schedules: [] };
+      const scheduler = this.daemon.getCronScheduler();
+      if (!scheduler) return { schedules: [] };
+      return { schedules: scheduler.list() };
+    });
+
+    /**
+     * Create or update a schedule. Requires a cronExpr; taskId is
+     * caller-supplied (for re-registration) or assigned by the
+     * store. Returns the persisted record.
+     *
+     * Note: this RPC DOES NOT attach a handler. Handlers are
+     * registered in-process by the owning module (e.g. memory flush
+     * module registers itself at daemon boot). `schedule.create` is
+     * primarily for caller-visible CRUD; handler-less schedules fire
+     * a `skip` event with reason="no_handler" at tick time.
+     */
+    this.handlers.set("schedule.create", async (params) => {
+      if (!this.daemon) throw new Error("Daemon not initialized");
+      const scheduler = this.daemon.getCronScheduler();
+      if (!scheduler) {
+        return { ok: false, reason: "scheduler_unavailable" };
+      }
+      const cronExpr = typeof params["cronExpr"] === "string" ? params["cronExpr"] : null;
+      if (!cronExpr) throw new Error("schedule.create requires {cronExpr}");
+
+      const taskId = typeof params["taskId"] === "string" ? params["taskId"] : undefined;
+      const missedPolicyRaw = params["missedPolicy"];
+      const missedPolicy =
+        missedPolicyRaw === "skip" ||
+        missedPolicyRaw === "catch-up-once" ||
+        missedPolicyRaw === "catch-up-all"
+          ? missedPolicyRaw
+          : undefined;
+      const enabled = typeof params["enabled"] === "boolean" ? params["enabled"] : undefined;
+      const optionsRaw = params["options"];
+      const options =
+        optionsRaw !== null && typeof optionsRaw === "object" && !Array.isArray(optionsRaw)
+          ? (optionsRaw as Record<string, unknown>)
+          : undefined;
+
+      // Register with a no-op handler if caller didn't wire one — a
+      // CLI-created schedule with no runtime handler yet still needs
+      // a registry row so the caller can observe it in `schedule.list`.
+      const record = scheduler.register(cronExpr, () => {}, {
+        ...(taskId !== undefined ? { taskId } : {}),
+        ...(missedPolicy !== undefined ? { missedPolicy } : {}),
+        ...(enabled !== undefined ? { enabled } : {}),
+        ...(options !== undefined ? { options } : {}),
+      });
+      return { ok: true, schedule: record };
+    });
+
+    /** Remove a schedule by taskId. Handler completes if inflight. */
+    this.handlers.set("schedule.delete", async (params) => {
+      if (!this.daemon) throw new Error("Daemon not initialized");
+      const scheduler = this.daemon.getCronScheduler();
+      if (!scheduler) return { ok: false, reason: "scheduler_unavailable" };
+
+      const taskId = typeof params["taskId"] === "string" ? params["taskId"] : null;
+      if (!taskId) throw new Error("schedule.delete requires {taskId}");
+      const removed = scheduler.unregister(taskId);
+      return { ok: removed, taskId };
+    });
+
+    /**
+     * Fire a schedule now, bypassing the cron expression. Respects
+     * the inflight gate — a schedule already running returns ok=false
+     * with reason="inflight" in the emitted event stream.
+     */
+    this.handlers.set("schedule.fire", async (params) => {
+      if (!this.daemon) throw new Error("Daemon not initialized");
+      const scheduler = this.daemon.getCronScheduler();
+      if (!scheduler) return { ok: false, reason: "scheduler_unavailable" };
+
+      const taskId = typeof params["taskId"] === "string" ? params["taskId"] : null;
+      if (!taskId) throw new Error("schedule.fire requires {taskId}");
+      const fired = await scheduler.fireNow(taskId);
+      return { ok: fired, taskId };
+    });
+
     // ── Automation Engine (via daemon's AutomationEngine) ──
 
     // automations.list — list all configured automations

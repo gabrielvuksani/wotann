@@ -62,6 +62,8 @@ import { ContextPressureMonitor } from "./context-pressure.js";
 import { TerminalMonitor } from "./terminal-monitor.js";
 import { FileDependencyGraph } from "./file-dep-graph.js";
 import { CronStore, type CronJobRecord } from "./cron-store.js";
+import { CronScheduler } from "../scheduler/cron-scheduler.js";
+import { ScheduleStore } from "../scheduler/schedule-store.js";
 import { discoverModels } from "../providers/dynamic-discovery.js";
 import {
   optimizeSkillPrompt,
@@ -261,6 +263,14 @@ export class KairosDaemon {
   // semantics (see `tests/unit/kairos.test.ts`) leave it null so the
   // existing `state.cronJobs` array remains the source of truth.
   private cronStore: CronStore | null = null;
+
+  // P1-C2 Hermes cron port: sibling scheduler with at-most-once
+  // semantics. Distinct from cronStore — cronStore is at-least-once
+  // exec-based (legacy Wave-4F), scheduler is at-most-once
+  // handler-based (Hermes §4.4). Exposes `schedule.*` RPC family.
+  // Null until start() opens `.wotann/schedule.db`.
+  private scheduleStore: ScheduleStore | null = null;
+  private cronScheduler: CronScheduler | null = null;
 
   // Wave 4F: heartbeat telemetry tick counter. At the 15s daemon
   // interval, every 2nd tick (~30s) writes PID + uptime + tickCount +
@@ -609,6 +619,55 @@ export class KairosDaemon {
         this.cronStore = null;
       }
 
+      // ── P1-C2: Hermes-style Cron Scheduler (at-most-once) ──
+      // Distinct from the Wave-4F CronStore above. This one owns the
+      // `schedule.*` RPC family and uses handler callbacks (not
+      // child_process). Persists to `.wotann/schedule.db` so
+      // registrations survive restart; handlers are re-registered at
+      // boot by their owning modules.
+      try {
+        this.scheduleStore = new ScheduleStore(join(wotannDir, "schedule.db"));
+        this.cronScheduler = new CronScheduler(this.scheduleStore);
+
+        // Wire scheduler events into the daemon audit log so
+        // fire/skip/success/failure appear alongside cron rows.
+        this.cronScheduler.on(
+          "event",
+          (evt: import("../scheduler/cron-scheduler.js").SchedulerEvent) => {
+            this.appendLog({
+              type: "cron",
+              message: `Schedule ${evt.type}: ${evt.taskId}${evt.reason ? ` (${evt.reason})` : ""}${evt.error ? ` — ${evt.error}` : ""}`,
+              data: {
+                taskId: evt.taskId,
+                eventType: evt.type,
+                ...(evt.reason !== undefined ? { reason: evt.reason } : {}),
+                ...(evt.error !== undefined ? { error: evt.error } : {}),
+                ...(evt.durationMs !== undefined ? { durationMs: evt.durationMs } : {}),
+              },
+            });
+          },
+        );
+
+        this.cronScheduler.start();
+
+        if (this.scheduleStore.count() > 0) {
+          this.appendLog({
+            type: "start",
+            message: `Schedule registry loaded: ${this.scheduleStore.count()} schedules (${this.scheduleStore.countEnabled()} enabled)`,
+          });
+        }
+      } catch (err) {
+        // Scheduler init failure mustn't kill the daemon. Legacy
+        // CronStore stays intact for any caller that doesn't need
+        // at-most-once semantics.
+        this.appendLog({
+          type: "error",
+          message: `CronScheduler init failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        this.scheduleStore = null;
+        this.cronScheduler = null;
+      }
+
       // Phase A10: Load event triggers from config
       const triggersPath = join(wotannDir, "triggers.yaml");
       void this.eventTriggerSystem.loadConfig(triggersPath).then((count) => {
@@ -727,6 +786,15 @@ export class KairosDaemon {
     if (this.cronStore) {
       this.cronStore.close();
       this.cronStore = null;
+    }
+    // P1-C2: stop scheduler ticker and close its SQLite connection.
+    if (this.cronScheduler) {
+      this.cronScheduler.stop();
+      this.cronScheduler = null;
+    }
+    if (this.scheduleStore) {
+      this.scheduleStore.close();
+      this.scheduleStore = null;
     }
     this.rpcHandler = null;
 
@@ -1953,6 +2021,16 @@ export class KairosDaemon {
   /** Wave 4F: expose the store for RPC/CLI callers. Null if not started. */
   getCronStore(): CronStore | null {
     return this.cronStore;
+  }
+
+  /**
+   * P1-C2: expose the Hermes-style cron scheduler. Null until
+   * daemon.start() opens the schedule.db connection. Callers
+   * (kairos-rpc, tests, runtime modules) use this to register
+   * at-most-once handler-backed schedules.
+   */
+  getCronScheduler(): CronScheduler | null {
+    return this.cronScheduler;
   }
 
   /**
