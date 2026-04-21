@@ -493,7 +493,6 @@ export function WotannApp({
     return () => {
       for (const cmd of builtins) registry.unregister(cmd.id);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Command Palette Handlers ────────────────────────────

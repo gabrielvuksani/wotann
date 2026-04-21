@@ -484,7 +484,7 @@ function parseRelevanceResponse(raw: string, count: number): readonly Relevance[
   const out: Relevance[] = new Array(count).fill("medium" as Relevance);
   const lines = raw.split("\n");
   for (const line of lines) {
-    const match = line.match(/^\s*(\d+)\s*[:\-]\s*(high|medium|low)\b/i);
+    const match = line.match(/^\s*(\d+)\s*[-:]\s*(high|medium|low)\b/i);
     if (!match) continue;
     const idxStr = match[1];
     const levelStr = match[2];
