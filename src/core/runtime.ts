@@ -221,6 +221,13 @@ import { UserModelManager } from "../intelligence/user-model.js";
 // query path (getter-only, confirmed dead in the audit).
 import { VerificationCascade } from "../intelligence/verification-cascade.js";
 import { WallClockBudget } from "../intelligence/wall-clock-budget.js";
+// rc.2 follow-up: injectable primitives B4/B12 — wired into runtime so any
+// caller can retrieve a session-scoped instance via accessors. Both are
+// gated behind config flags (default OFF) and constructed lazily on first
+// access — zero overhead when disabled.
+import { PreCompletionVerifier } from "../intelligence/pre-completion-verifier.js";
+import type { LlmQuery as PreCompletionLlmQuery } from "../intelligence/pre-completion-verifier.js";
+import { ProgressiveBudget } from "../intelligence/progressive-budget.js";
 import {
   detectTruncatedThinking,
   buildContinuationPrompt,
@@ -455,6 +462,26 @@ export interface RuntimeConfig {
    * matters. Defaults to ENABLED.
    */
   readonly skipBootstrapSnapshot?: boolean;
+  /**
+   * rc.2 follow-up: allocate a PreCompletionVerifier instance (B4 —
+   * ForgeCode 4-perspective self-review) so callers can run the
+   * 4-persona parallel review before declaring a task complete. The
+   * verifier is constructed lazily on first `getPreCompletionVerifier()`
+   * call with an LlmQuery bound to this runtime's query() method.
+   * Defaults to `process.env.WOTANN_PRE_COMPLETION_VERIFY === "1"` so it
+   * stays opt-in — 4 parallel LLM calls are expensive on free-tier.
+   */
+  readonly enablePreCompletionVerify?: boolean;
+  /**
+   * rc.2 follow-up: allocate a ProgressiveBudget instance (B12 —
+   * ForgeCode progressive-budget) so callers can wrap verify-loops
+   * with a LOW → MEDIUM → MAX escalation ladder. The scheduler is
+   * constructed lazily on first `getProgressiveBudget()` call with the
+   * default 3-tier config. Defaults to `process.env.WOTANN_PROGRESSIVE_BUDGET
+   * === "1"`. Allocation is cheap; leaving enabled everywhere would be
+   * safe, but we gate for symmetry with the other primitives.
+   */
+  readonly enableProgressiveBudget?: boolean;
 }
 
 export interface RuntimeStatus {
@@ -664,6 +691,12 @@ export class WotannRuntime {
   private verificationCascade: VerificationCascade;
   private wallClockBudget: WallClockBudget;
   private agentRegistryInstance: AgentRegistry;
+
+  // rc.2 follow-up: injectable primitives B4 + B12 — lazily constructed
+  // on first accessor call. Null when the corresponding config flag is
+  // disabled (which is the default). Zero-overhead when gated off.
+  private preCompletionVerifier: PreCompletionVerifier | null = null;
+  private progressiveBudget: ProgressiveBudget | null = null;
 
   // Session-5: TokenPersistence deleted. CostTracker is now the single
   // authoritative source of token + cost data across sessions — it already
@@ -4525,6 +4558,64 @@ export class WotannRuntime {
    */
   getAutoVerifier(): AutoVerifier {
     return this.autoVerifier;
+  }
+
+  /**
+   * rc.2 follow-up: get (or lazily construct) the PreCompletionVerifier
+   * instance (B4 — ForgeCode 4-persona review). Returns null when
+   * `enablePreCompletionVerify` is disabled (default). Callers should
+   * treat null as "feature off" rather than an error.
+   *
+   * Each call returns the SAME instance so runCount statistics
+   * accumulate within one session. Construction binds the verifier's
+   * LlmQuery to `runtime.query()` so reviews execute on whichever
+   * provider is currently active.
+   */
+  getPreCompletionVerifier(): PreCompletionVerifier | null {
+    const enabled =
+      this.config.enablePreCompletionVerify === true ||
+      (this.config.enablePreCompletionVerify === undefined &&
+        process.env["WOTANN_PRE_COMPLETION_VERIFY"] === "1");
+    if (!enabled) return null;
+    if (!this.preCompletionVerifier) {
+      // Bind LlmQuery to runtime.query — streams text chunks and joins
+      // them into a single response string the verifier can parse.
+      const llmQuery: PreCompletionLlmQuery = async (prompt, options) => {
+        let accumulated = "";
+        for await (const chunk of this.query({
+          prompt,
+          maxTokens: options?.maxTokens ?? 1024,
+          temperature: options?.temperature ?? 0,
+        })) {
+          if (chunk.type === "text") accumulated += chunk.content;
+        }
+        return accumulated;
+      };
+      this.preCompletionVerifier = new PreCompletionVerifier({ llmQuery });
+    }
+    return this.preCompletionVerifier;
+  }
+
+  /**
+   * rc.2 follow-up: get (or lazily construct) the ProgressiveBudget
+   * instance (B12 — escalating LOW→MEDIUM→MAX budget for verify-loops).
+   * Returns null when `enableProgressiveBudget` is disabled (default).
+   * Callers should treat null as "feature off" rather than an error.
+   *
+   * The returned scheduler is safe to share across sessions — per-
+   * session isolation is handled via the `sessionId` parameter on
+   * `nextPass()` / `wrap()` / `reset()`.
+   */
+  getProgressiveBudget(): ProgressiveBudget | null {
+    const enabled =
+      this.config.enableProgressiveBudget === true ||
+      (this.config.enableProgressiveBudget === undefined &&
+        process.env["WOTANN_PROGRESSIVE_BUDGET"] === "1");
+    if (!enabled) return null;
+    if (!this.progressiveBudget) {
+      this.progressiveBudget = new ProgressiveBudget();
+    }
+    return this.progressiveBudget;
   }
 
   /**

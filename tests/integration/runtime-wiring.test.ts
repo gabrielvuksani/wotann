@@ -140,4 +140,92 @@ describe("Integration: Runtime Wiring", () => {
     expect(status).toHaveProperty("traceEntries");
     expect(status).toHaveProperty("semanticIndexSize");
   });
+
+  // ── rc.2 follow-up: B4 + B12 primitive wires ──────────────────
+
+  describe("PreCompletionVerifier (B4) + ProgressiveBudget (B12) wires", () => {
+    it("getPreCompletionVerifier() returns null when flag is off (default)", () => {
+      vi.stubEnv("WOTANN_PRE_COMPLETION_VERIFY", "");
+      const runtime = createTestRuntime();
+      expect(runtime.getPreCompletionVerifier()).toBeNull();
+    });
+
+    it("getPreCompletionVerifier() returns instance when config flag is true", () => {
+      vi.stubEnv("WOTANN_SKIP_CLI_CHECK", "1");
+      vi.stubEnv("CODEX_AUTH_JSON_PATH", "/nonexistent");
+      const runtime = new WotannRuntime({
+        workingDir: process.cwd(),
+        enableMemory: false,
+        hookProfile: "standard",
+        enablePreCompletionVerify: true,
+      });
+      const verifier = runtime.getPreCompletionVerifier();
+      expect(verifier).not.toBeNull();
+      expect(verifier?.isBypassed()).toBe(false);
+      expect(verifier?.getRunCount()).toBe(0);
+    });
+
+    it("getPreCompletionVerifier() returns instance when env var is set", () => {
+      vi.stubEnv("WOTANN_SKIP_CLI_CHECK", "1");
+      vi.stubEnv("CODEX_AUTH_JSON_PATH", "/nonexistent");
+      vi.stubEnv("WOTANN_PRE_COMPLETION_VERIFY", "1");
+      const runtime = new WotannRuntime({
+        workingDir: process.cwd(),
+        enableMemory: false,
+        hookProfile: "standard",
+      });
+      expect(runtime.getPreCompletionVerifier()).not.toBeNull();
+    });
+
+    it("getPreCompletionVerifier() returns stable instance across calls", () => {
+      vi.stubEnv("WOTANN_SKIP_CLI_CHECK", "1");
+      vi.stubEnv("CODEX_AUTH_JSON_PATH", "/nonexistent");
+      const runtime = new WotannRuntime({
+        workingDir: process.cwd(),
+        enableMemory: false,
+        hookProfile: "standard",
+        enablePreCompletionVerify: true,
+      });
+      const first = runtime.getPreCompletionVerifier();
+      const second = runtime.getPreCompletionVerifier();
+      expect(first).toBe(second);
+    });
+
+    it("getProgressiveBudget() returns null when flag is off (default)", () => {
+      vi.stubEnv("WOTANN_PROGRESSIVE_BUDGET", "");
+      const runtime = createTestRuntime();
+      expect(runtime.getProgressiveBudget()).toBeNull();
+    });
+
+    it("getProgressiveBudget() returns instance when config flag is true", () => {
+      vi.stubEnv("WOTANN_SKIP_CLI_CHECK", "1");
+      vi.stubEnv("CODEX_AUTH_JSON_PATH", "/nonexistent");
+      const runtime = new WotannRuntime({
+        workingDir: process.cwd(),
+        enableMemory: false,
+        hookProfile: "standard",
+        enableProgressiveBudget: true,
+      });
+      const budget = runtime.getProgressiveBudget();
+      expect(budget).not.toBeNull();
+      // Default config: 3 tiers, maxPasses 3.
+      expect(budget?.getConfig().maxPasses).toBe(3);
+      // Fresh — no sessions consumed any passes yet.
+      expect(budget?.activeSessionCount()).toBe(0);
+    });
+
+    it("getProgressiveBudget() returns stable instance across calls", () => {
+      vi.stubEnv("WOTANN_SKIP_CLI_CHECK", "1");
+      vi.stubEnv("CODEX_AUTH_JSON_PATH", "/nonexistent");
+      const runtime = new WotannRuntime({
+        workingDir: process.cwd(),
+        enableMemory: false,
+        hookProfile: "standard",
+        enableProgressiveBudget: true,
+      });
+      const first = runtime.getProgressiveBudget();
+      const second = runtime.getProgressiveBudget();
+      expect(first).toBe(second);
+    });
+  });
 });
