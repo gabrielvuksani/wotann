@@ -19,6 +19,8 @@ import { ContextHUD } from "./components/ContextHUD.js";
 import { DiffViewer } from "./components/DiffViewer.js";
 import { AgentStatusPanel, type SubagentStatus } from "./components/AgentStatusPanel.js";
 import { HistoryPicker } from "./components/HistoryPicker.js";
+import { CommandPalette } from "./components/CommandPalette.js";
+import { CommandRegistry, type Command } from "./command-registry.js";
 import { MessageActions, type MessageAction } from "./components/MessageActions.js";
 import { ContextSourcePanel, type ContextSource } from "./components/ContextSourcePanel.js";
 import { TerminalBlocksView } from "./components/TerminalBlocksView.js";
@@ -145,6 +147,8 @@ export function WotannApp({
   const voiceControllerRef = useRef(new TUIVoiceController());
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [showHistoryPicker, setShowHistoryPicker] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const commandRegistryRef = useRef<CommandRegistry>(new CommandRegistry());
   const [showContextPanel, setShowContextPanel] = useState(false);
   // Terminal Blocks overlay (Warp-style OSC 133 blocks — Phase D).
   // Session-13: Osc133Parser + BlockBuffer are now live. The parser
@@ -349,16 +353,15 @@ export function WotannApp({
           setShowContextPanel(false);
           setShowMessageActions(false);
           setShowTerminalBlocks(false);
+          setShowCommandPalette(false);
           break;
         case "voice-capture":
           void handleVoiceCapture();
           break;
         // ── Wave 3G additions ─────────────────────────────
         case "command-palette":
-          // Ctrl+P: quick jump — fills the prompt with "/" so the
-          // PromptInput's slash-command autocomplete becomes the
-          // palette surface (Ink TUI equivalent of Cmd+K).
-          setPromptValue("/");
+          // Ctrl+P: toggle the overlay palette (P1-UI3).
+          setShowCommandPalette((prev) => !prev);
           break;
         case "clear-conversation":
           // Ctrl+K: clear the conversation (mirrors /clear).
@@ -410,6 +413,100 @@ export function WotannApp({
   const handleHistoryCancel = useCallback(() => {
     setShowHistoryPicker(false);
   }, []);
+
+  // ── Command Palette: register built-in commands ─────────
+  // One-shot registration. Commands close over `setPromptValue` & friends
+  // so they react to the live App state at execution time.
+  useEffect(() => {
+    const registry = commandRegistryRef.current;
+    const builtins: Command[] = [
+      {
+        id: "palette.clear-conversation",
+        label: "Clear Conversation",
+        description: "Reset chat history (same as Ctrl+K)",
+        keywords: ["clear", "reset", "new", "fresh"],
+        handler: () => {
+          setMessages([]);
+          setShowStartup(true);
+          setTurnCount(0);
+          setPromptValue("");
+        },
+      },
+      {
+        id: "palette.switch-model",
+        label: "Switch Model",
+        description: "Cycle to the next configured provider/model",
+        keywords: ["model", "provider", "cycle"],
+        handler: () => {
+          const nextModel = cycleModel(currentModel, providers);
+          if (nextModel !== currentModel) {
+            setCurrentModel(nextModel);
+            appendSystemMessage(`Model switched to ${nextModel}.`);
+          }
+        },
+      },
+      {
+        id: "palette.cycle-theme",
+        label: "Cycle Norse Theme",
+        description:
+          "Switch to the next theme (Valhalla, Niflheim, Muspelheim, Alfheim, Svartalfheim)",
+        keywords: ["theme", "color", "palette", "norse"],
+        handler: () => {
+          const next = cycleNorseTheme(themeName);
+          if (themeManagerRef.current.setTheme(next)) {
+            setThemeName(themeManagerRef.current.getCurrent().name);
+            appendSystemMessage(`Theme switched to: ${next}`);
+          }
+        },
+      },
+      {
+        id: "palette.show-history",
+        label: "Search Prompt History",
+        description: "Open the history picker (Ctrl+R)",
+        keywords: ["history", "search", "prompt"],
+        handler: () => {
+          if (history.length > 0) setShowHistoryPicker(true);
+        },
+      },
+      {
+        id: "palette.toggle-context-inspector",
+        label: "Toggle Context Inspector",
+        description: "Show context source panel (Ctrl+I)",
+        keywords: ["context", "inspect", "sources"],
+        handler: () => {
+          setShowContextPanel((prev) => !prev);
+        },
+      },
+      {
+        id: "palette.exit",
+        label: "Exit",
+        description: "Close the TUI",
+        keywords: ["quit", "exit", "close"],
+        handler: () => {
+          if (runtime) runtime.close();
+          exit();
+        },
+      },
+    ];
+
+    for (const cmd of builtins) registry.register(cmd);
+    return () => {
+      for (const cmd of builtins) registry.unregister(cmd.id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Command Palette Handlers ────────────────────────────
+  const handleCommandPaletteClose = useCallback(() => {
+    setShowCommandPalette(false);
+  }, []);
+
+  const handleCommandPaletteError = useCallback(
+    (message: string) => {
+      appendSystemMessage(message);
+    },
+    [appendSystemMessage],
+  );
 
   // ── Message Actions Handler ─────────────────────────────
   const handleMessageAction = useCallback(
@@ -3012,6 +3109,14 @@ export function WotannApp({
           history={history}
           onSelect={handleHistorySelect}
           onCancel={handleHistoryCancel}
+        />
+      )}
+
+      {showCommandPalette && (
+        <CommandPalette
+          registry={commandRegistryRef.current}
+          onClose={handleCommandPaletteClose}
+          onError={handleCommandPaletteError}
         />
       )}
 
