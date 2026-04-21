@@ -43,6 +43,7 @@ import {
 import { AutoInstallMiddleware, createAutoInstallMiddleware } from "./auto-install.js";
 import { StaleDetectionMiddleware, createStaleDetectionMiddleware } from "./stale-detection.js";
 import { DoomLoopMiddleware, createDoomLoopMiddleware } from "./doom-loop.js";
+import { LoopDetector, createLoopDetectionMiddleware } from "./loop-detection.js";
 import {
   OutputTruncationMiddleware,
   createOutputTruncationMiddleware,
@@ -82,6 +83,7 @@ const defaultVerificationInstance = new VerificationEnforcementMiddleware(defaul
 const defaultAutoInstallInstance = new AutoInstallMiddleware();
 const defaultStaleDetectionInstance = new StaleDetectionMiddleware();
 const defaultDoomLoopInstance = new DoomLoopMiddleware();
+const defaultLoopDetectorInstance = new LoopDetector();
 const defaultOutputTruncationInstance = new OutputTruncationMiddleware();
 const defaultToolPairValidatorInstance = new ToolPairValidatorMiddleware();
 // Lane 2 deer-flow ports (6 new middleware — closes Lane 2 parity gap).
@@ -127,6 +129,7 @@ const PIPELINE: readonly Middleware[] = [
   createAutoInstallMiddleware(defaultAutoInstallInstance), // 22. Auto-install missing deps
   createStaleDetectionMiddleware(defaultStaleDetectionInstance), // 23. Stale-read detection
   createDoomLoopMiddleware(defaultDoomLoopInstance), // 24. Doom loop detection
+  createLoopDetectionMiddleware(defaultLoopDetectorInstance), // 24.5. Loop detection (Crush port, per-session)
   selfReflectionMiddleware, // 25. Self-reflection (post-response validation)
 ];
 
@@ -210,6 +213,7 @@ export function createPipelineWithInstances(
   readonly autoInstall: AutoInstallMiddleware;
   readonly staleDetection: StaleDetectionMiddleware;
   readonly doomLoop: DoomLoopMiddleware;
+  readonly loopDetector: LoopDetector;
   readonly outputTruncation: OutputTruncationMiddleware;
   readonly toolPairValidator: ToolPairValidatorMiddleware;
   readonly guardrailProvider: GuardrailProviderMiddleware;
@@ -225,6 +229,7 @@ export function createPipelineWithInstances(
   const autoInstall = new AutoInstallMiddleware();
   const staleDetection = new StaleDetectionMiddleware();
   const doomLoop = new DoomLoopMiddleware();
+  const loopDetector = new LoopDetector();
   const outputTruncation = new OutputTruncationMiddleware();
   const toolPairValidator = new ToolPairValidatorMiddleware();
   const guardrailProvider = new GuardrailProviderMiddleware(new AllowlistProvider({}));
@@ -266,6 +271,7 @@ export function createPipelineWithInstances(
     createAutoInstallMiddleware(autoInstall),
     createStaleDetectionMiddleware(staleDetection),
     createDoomLoopMiddleware(doomLoop),
+    createLoopDetectionMiddleware(loopDetector),
     selfReflectionMiddleware,
   ];
   return {
@@ -278,6 +284,7 @@ export function createPipelineWithInstances(
     autoInstall,
     staleDetection,
     doomLoop,
+    loopDetector,
     outputTruncation,
     toolPairValidator,
     guardrailProvider,
@@ -343,6 +350,13 @@ export function getDefaultStaleDetection(): StaleDetectionMiddleware {
  */
 export function getDefaultDoomLoop(): DoomLoopMiddleware {
   return defaultDoomLoopInstance;
+}
+
+/**
+ * Get the default shared LoopDetector instance (Crush port, per-session).
+ */
+export function getDefaultLoopDetector(): LoopDetector {
+  return defaultLoopDetectorInstance;
 }
 
 /**

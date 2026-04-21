@@ -15,11 +15,12 @@ describe("Middleware Pipeline", () => {
       // SubagentLimit and LSP. Phase C added FileTypeGate at 3.5.
       // Lane 2 added 6 more middleware (DanglingToolCall, SandboxAudit,
       // GuardrailProvider, LLMErrorHandling, DeferredToolFilter, Title).
-      // Total: 32 layers.
+      // P1-B6 added LoopDetection at 24.5 (Crush port, per-session).
+      // Total: 33 layers.
       const pipeline = createDefaultPipeline();
       const names = pipeline.getLayerNames();
 
-      expect(names).toHaveLength(32);
+      expect(names).toHaveLength(33);
       expect(names[0]).toBe("ToolPairValidator");
       expect(names[1]).toBe("IntentGate");
       expect(names[2]).toBe("ThreadData");
@@ -40,6 +41,7 @@ describe("Middleware Pipeline", () => {
       expect(names).toContain("AutoInstall");
       expect(names).toContain("StaleDetection");
       expect(names).toContain("DoomLoop");
+      expect(names).toContain("LoopDetection");
       // SelfReflection must remain the final (post-response) layer.
       expect(names[names.length - 1]).toBe("SelfReflection");
     });
