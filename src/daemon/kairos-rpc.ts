@@ -104,6 +104,12 @@ import {
   type DeliveryEvent,
   type DeliveryRecord,
 } from "../session/file-delivery.js";
+import {
+  CursorStream,
+  ErrorInvalidCoordinates as CursorErrorInvalidCoordinates,
+  ErrorSessionNotFound as CursorErrorSessionNotFound,
+  type CursorAction,
+} from "../session/cursor-stream.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -334,6 +340,11 @@ function toRpcError(err: unknown): Error {
   if (err instanceof ErrorCreationMissing) return err;
   if (err instanceof DeliveryErrorInvalidToken) return err;
   if (err instanceof DeliveryErrorInvalidPayload) return err;
+  // F2 — Cursor stream errors. Preserve classes so JSON-RPC clients
+  // (desktop-control agent + iOS CursorOverlayView) discriminate on
+  // `.code` (CURSOR_INVALID_COORDINATES / CURSOR_SESSION_NOT_FOUND).
+  if (err instanceof CursorErrorInvalidCoordinates) return err;
+  if (err instanceof CursorErrorSessionNotFound) return err;
   if (err instanceof Error) return err;
   return new Error(String(err));
 }
@@ -917,6 +928,15 @@ export class KairosRPCHandler {
     }
   >();
 
+  // F2 — Cursor stream primitive. Sits on top of the F1 session store
+  // and micro-batches `move` events at 30fps; `click`/`scroll` pass
+  // through immediately. Per-handler instance per QB #7 (throttle state
+  // is per-session, not per-process). Broadcast is wired in setRuntime
+  // once the dispatch plane is available; the stream emits into the
+  // session event log regardless, so tests without a plane still get
+  // deterministic coverage.
+  private readonly cursorStream = new CursorStream({ store: this.computerSessionStore });
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -1031,6 +1051,17 @@ export class KairosRPCHandler {
   }
 
   /**
+   * Test-visibility accessor for the F2 cursor stream. External callers
+   * route through `cursor.emit` / `cursor.subscribe` RPCs; this exposes
+   * the stream so tests can swap in a deterministic scheduler, seed
+   * samples directly, and assert coalescing behavior without waiting
+   * on real timers.
+   */
+  getCursorStream(): CursorStream {
+    return this.cursorStream;
+  }
+
+  /**
    * Attach a WotannRuntime instance to route RPC calls to.
    */
   setRuntime(runtime: WotannRuntime): void {
@@ -1105,6 +1136,19 @@ export class KairosRPCHandler {
       this.fileDelivery.setBroadcast((ev) => plane.broadcastUnifiedEvent(ev));
     } catch {
       // Dispatch plane not available — delivery still works locally.
+    }
+    // F2 — hook the cursor stream into the dispatch plane. Every emitted
+    // cursor sample (post-coalesce) fans out a UnifiedEvent{type:"cursor"}
+    // so iOS CursorOverlayView + desktop agents-window HUD render in
+    // lock-step. Best-effort identical to F5/F6/F9 — tests without a
+    // plane still exercise the session-log path via `cursor.subscribe`
+    // and verify coalescing against the event buffer directly.
+    try {
+      const plane = runtime.getDispatchPlane();
+      this.cursorStream.setBroadcast((ev) => plane.broadcastUnifiedEvent(ev));
+    } catch {
+      // Dispatch plane not available — cursor emits still land on the
+      // F1 event log; only cross-surface fan-out is skipped.
     }
     this.fileDelivery.setCreationExists(({ sessionId, filename }) => {
       return this.creationsStore.get({ sessionId, filename }) !== null;
@@ -5525,6 +5569,162 @@ export class KairosRPCHandler {
     this.registerFileGetHandlers();
     this.registerApprovalHandlers();
     this.registerDeliveryHandlers();
+    this.registerCursorHandlers();
+  }
+
+  // ── F2: Cursor stream RPCs (real-time coordinate events) ──
+  //
+  // Per MASTER_PLAN_V8 §5 P1-F2 (1 day), F2 adds dedicated primitives for
+  // desktop-control agents that physically move a mouse. The event type
+  // `cursor` is already part of the F1 `SessionEvent` union; F2 adds a
+  // stateless enrichment layer (CursorStream) for coalescing + fan-out.
+  //
+  //   - cursor.emit       — daemon-side producer API. Desktop-control
+  //                         agents call this with each movement; moves
+  //                         are coalesced to 30fps before hitting the
+  //                         session log. Click/scroll pass through.
+  //   - cursor.subscribe  — filter on computer.session.stream that only
+  //                         returns cursor events. Phones use this to
+  //                         render CursorOverlayView without subscribing
+  //                         to step/frame/file_write events.
+  //
+  // Errors surface as JSON-RPC errors with typed `.code`:
+  //   CURSOR_INVALID_COORDINATES / CURSOR_SESSION_NOT_FOUND.
+  private registerCursorHandlers(): void {
+    this.handlers.set("cursor.emit", async (params) => {
+      const sessionId = params["sessionId"];
+      const deviceId = params["deviceId"];
+      const action = params["action"];
+      const x = params["x"];
+      const y = params["y"];
+
+      if (typeof sessionId !== "string" || sessionId.trim() === "") {
+        throw new Error("sessionId (non-empty string) required");
+      }
+      if (typeof deviceId !== "string" || deviceId.trim() === "") {
+        throw new Error("deviceId (non-empty string) required");
+      }
+      if (action !== "move" && action !== "click" && action !== "scroll") {
+        throw new Error("action must be one of move|click|scroll");
+      }
+      if (typeof x !== "number") {
+        throw new Error("x (number) required");
+      }
+      if (typeof y !== "number") {
+        throw new Error("y (number) required");
+      }
+
+      const sample: {
+        sessionId: string;
+        deviceId: string;
+        x: number;
+        y: number;
+        action: CursorAction;
+        screenId?: string | null;
+        button?: string;
+        deltaX?: number;
+        deltaY?: number;
+      } = {
+        sessionId,
+        deviceId,
+        x,
+        y,
+        action,
+      };
+      const screenId = params["screenId"];
+      if (typeof screenId === "string") sample.screenId = screenId;
+      else if (screenId === null) sample.screenId = null;
+      const button = params["button"];
+      if (typeof button === "string") sample.button = button;
+      const deltaX = params["deltaX"];
+      if (typeof deltaX === "number") sample.deltaX = deltaX;
+      const deltaY = params["deltaY"];
+      if (typeof deltaY === "number") sample.deltaY = deltaY;
+
+      try {
+        const outcome = this.cursorStream.record(sample);
+        return { outcome };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("cursor.subscribe", async (params) => {
+      const sessionId = params["sessionId"];
+      const subscriptionIdIn = params["subscriptionId"];
+      const closeAfter = params["close"] === true;
+      const maxEvents =
+        typeof params["maxEvents"] === "number" && (params["maxEvents"] as number) > 0
+          ? Math.min(params["maxEvents"] as number, 10_000)
+          : 256;
+
+      // Poll path — drain buffered cursor events from an existing subscription.
+      if (typeof subscriptionIdIn === "string" && subscriptionIdIn.length > 0) {
+        const sub = this.computerSessionSubscriptions.get(subscriptionIdIn);
+        if (!sub) {
+          throw new Error(`subscription not found: ${subscriptionIdIn}`);
+        }
+        // Cursor subscriptions filter the shared buffer in-place. We
+        // do NOT splice — other pollers may share the id (they shouldn't,
+        // but be defensive) — and we keep `seq`-based filtering for
+        // efficient continuation. Drain up to maxEvents.
+        const sinceSeq = params["since"];
+        const events = sub.events
+          .filter((e) => e.type === "cursor")
+          .filter((e) =>
+            typeof sinceSeq === "number" && sub.sessionId !== "*" ? e.seq >= sinceSeq : true,
+          )
+          .slice(0, maxEvents);
+        sub.lastPolledAt = Date.now();
+        if (closeAfter) {
+          sub.dispose();
+          this.computerSessionSubscriptions.delete(subscriptionIdIn);
+        }
+        return {
+          subscriptionId: subscriptionIdIn,
+          events: events.map(serializeEvent),
+          more: sub.events.filter((e) => e.type === "cursor").length > events.length,
+          closed: closeAfter,
+        };
+      }
+
+      // Fresh subscription — seed from the session's buffered events.
+      // Reuses the session-stream buffer pipeline so history replay for
+      // the session's cursor events works exactly like computer.session.stream,
+      // just with a type filter applied.
+      if (typeof sessionId !== "string" || sessionId.trim() === "") {
+        throw new Error("sessionId (non-empty string) required");
+      }
+
+      const buffer: ComputerSessionEvent[] = [];
+      let dispose: () => void;
+      try {
+        dispose = this.computerSessionStore.subscribe(sessionId, (event) => {
+          if (event.type !== "cursor") return;
+          buffer.push(event);
+          if (buffer.length > 10_000) buffer.splice(0, buffer.length - 10_000);
+        });
+      } catch (err) {
+        throw toRpcError(err);
+      }
+      const subId = `cs-cursor-${randomUUID()}`;
+      this.computerSessionSubscriptions.set(subId, {
+        sessionId,
+        events: buffer,
+        dispose,
+        lastPolledAt: Date.now(),
+      });
+      // History is already captured synchronously via the subscribe hook
+      // above — any cursor events replayed by the store land in `buffer`
+      // before we return.
+      const replay = buffer.slice(0, maxEvents);
+      return {
+        subscriptionId: subId,
+        events: replay.map(serializeEvent),
+        more: buffer.length > replay.length,
+        closed: false,
+      };
+    });
   }
 
   // ── F15: Multi-agent fleet view RPCs ──────────────────────

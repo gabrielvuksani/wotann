@@ -809,6 +809,53 @@ export class ComputerSessionStore {
 
   // ── Event subscription ────────────────────────────────
 
+  // ── F2 — Cursor emit (real-time coordinate stream) ────────
+  //
+  // The F2 CursorStream sits ABOVE the store and owns coalescing/throttling
+  // policy. Once its pipeline has decided a sample should land on the
+  // canonical event log, it calls `emitCursorEvent` to push a `cursor`
+  // SessionEvent through the normal emitter. Keeping the emit path here
+  // (instead of from the stream) preserves the invariant that every
+  // SessionEvent flows through the same audit/ordering machinery — a
+  // subscriber that never heard of CursorStream still sees cursor events
+  // with correct seq numbers and proper fan-out via subscribeAll.
+  //
+  // The session MUST exist and MUST NOT be terminal. A terminal session
+  // no longer accepts new events — surfaces that render a finished
+  // session should have torn down their overlay by the time a stray
+  // cursor sample arrives. Per QB #6 the caller gets a typed error
+  // instead of a silent drop.
+
+  /**
+   * Emit a `cursor` SessionEvent onto a session's event log.
+   *
+   * Throws:
+   *   - SessionNotFoundError   if sessionId is unknown
+   *   - SessionIllegalTransitionError
+   *                             if the session is in a terminal status
+   *                             (done|failed) — no more events allowed
+   *
+   * Note: unlike `step()` this does NOT require a claiming device. Cursor
+   * events are a *view* of the desktop-control agent's physical state —
+   * per the F2 design any device that can observe cursor motion (the
+   * desktop running the agent) can publish samples. The session's state
+   * machine is unaffected (status unchanged); only the event log grows.
+   */
+  emitCursorEvent(params: {
+    readonly sessionId: string;
+    readonly payload: Readonly<Record<string, unknown>>;
+  }): SessionEvent {
+    const current = this.requireSession(params.sessionId);
+    if (isTerminal(current.status)) {
+      throw new SessionIllegalTransitionError(params.sessionId, current.status, current.status);
+    }
+    const event = this.appendEvent(current, "cursor", params.payload);
+    const next = this.applyUpdates(current, { events: [...current.events, event] });
+    this.sessions.set(params.sessionId, next);
+    this.emitEvent(event);
+    return event;
+  }
+
   /**
    * Subscribe to events for a session. Replays history (events that have already
    * been emitted up to the point of subscription) then tails live events.
