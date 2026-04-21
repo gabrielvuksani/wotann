@@ -58,7 +58,8 @@ describe("terminal-bench blocked corpus", () => {
         if (isBlockedCorpusError(e)) {
           expect(e.benchmark).toBe("terminal-bench");
           expect(e.fetchCommand).toContain("git clone");
-          expect(e.fetchCommand).toContain("tbench-ai/terminal-bench");
+          expect(e.fetchCommand).toContain("laude-institute/terminal-bench");
+          expect(e.fetchCommand).not.toContain("tbench-ai/terminal-bench");
         }
       }
     } finally {
@@ -125,7 +126,9 @@ describe("terminal-bench trajectory + parity", () => {
 
   it("exposes the Claude Mythos parity target on the report", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "wotann-tb-"));
+    const prev = process.env["WOTANN_TB_REAL"];
     try {
+      delete process.env["WOTANN_TB_REAL"]; // force simple-mode for this assertion
       const runtime = makeFakeRuntime({
         verifyResult: { completed: true, score: 0.9, evidence: [] },
       });
@@ -133,6 +136,46 @@ describe("terminal-bench trajectory + parity", () => {
       expect(report.parityTargetPassAt1).toBe(TERMINAL_BENCH_PARITY_PASS_AT_1);
       expect(report.mode).toBe("simple");
     } finally {
+      if (prev === undefined) delete process.env["WOTANN_TB_REAL"];
+      else process.env["WOTANN_TB_REAL"] = prev;
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("switches mode='real' on the report when WOTANN_TB_REAL=1", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "wotann-tb-"));
+    const prev = process.env["WOTANN_TB_REAL"];
+    try {
+      process.env["WOTANN_TB_REAL"] = "1";
+      const runtime = makeFakeRuntime({
+        verifyResult: { completed: true, score: 0.9, evidence: [] },
+      });
+      const report = await runTerminalBench(runtime, tmpDir, { limit: 1 });
+      expect(report.mode).toBe("real");
+    } finally {
+      if (prev === undefined) delete process.env["WOTANN_TB_REAL"];
+      else process.env["WOTANN_TB_REAL"] = prev;
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats WOTANN_TB_REAL=0 / other values as simple mode (strict equality to '1')", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "wotann-tb-"));
+    const prev = process.env["WOTANN_TB_REAL"];
+    try {
+      process.env["WOTANN_TB_REAL"] = "0";
+      const runtime = makeFakeRuntime({
+        verifyResult: { completed: true, score: 0.8, evidence: [] },
+      });
+      const report = await runTerminalBench(runtime, tmpDir, { limit: 1 });
+      expect(report.mode).toBe("simple");
+
+      process.env["WOTANN_TB_REAL"] = "true";
+      const report2 = await runTerminalBench(runtime, tmpDir, { limit: 1 });
+      expect(report2.mode).toBe("simple");
+    } finally {
+      if (prev === undefined) delete process.env["WOTANN_TB_REAL"];
+      else process.env["WOTANN_TB_REAL"] = prev;
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });

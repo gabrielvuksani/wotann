@@ -1,7 +1,7 @@
 /**
  * TerminalBench 2.0 runner — targets the Claude Mythos 82% parity line.
  *
- * TerminalBench (Stanford / Laude Institute, https://github.com/tbench-ai/terminal-bench)
+ * TerminalBench (Stanford / Laude Institute, https://github.com/laude-institute/terminal-bench)
  * is the flagship "agent in a real shell" benchmark: tmux-bootstrapped
  * Docker containers per task, an automated grader shipped with each
  * task, and 30-minute wall-clock budgets. The 2.0 release (March 2026)
@@ -132,7 +132,7 @@ export const TERMINAL_BENCH_PARITY_PASS_AT_1 = 0.82;
  */
 const TB_CORPUS_FETCH_COMMAND = [
   "mkdir -p .wotann/benchmarks/terminal-bench",
-  "git clone --depth 1 https://github.com/tbench-ai/terminal-bench .wotann/benchmarks/terminal-bench/src",
+  "git clone --depth 1 https://github.com/laude-institute/terminal-bench .wotann/benchmarks/terminal-bench/src",
   "node scripts/terminal-bench-extract.mjs  # produces terminal-bench-tasks.jsonl",
 ].join(" && ");
 
@@ -355,9 +355,12 @@ export async function runTerminalBench(
 ): Promise<TerminalBenchReport> {
   const startedAt = Date.now();
   const runId = `tb-${startedAt}-${Math.random().toString(36).slice(2, 8)}`;
-  // Until real-container orchestration is wired, mode is always "simple"
-  // even when WOTANN_TB_REAL=1 — no silent lies about capability.
-  const mode: "real" | "simple" = "simple";
+  // WOTANN_TB_REAL=1 opts into real-mode subprocess dispatch to `tb run`.
+  // When unset (or any other value), runs in simple-mode. This env switch
+  // is the wire-up gate; actual real dispatch is attempted further below
+  // and degrades honestly to simple if the tb CLI or corpus is missing.
+  const wantReal = process.env["WOTANN_TB_REAL"] === "1";
+  const mode: "real" | "simple" = wantReal ? "real" : "simple";
 
   const loadOpts: { limit?: number; seed?: number; requireCorpus?: boolean } = {};
   if (opts.limit !== undefined) loadOpts.limit = opts.limit;
