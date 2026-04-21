@@ -6121,6 +6121,19 @@ intentByoaCmd
   registerExploitCommands(program);
 }
 
+// ── wotann grep — B9 ParallelGrep semantic-search wire (P1-B9 wire) ─
+//
+// ParallelGrep (src/tools/parallel-grep.ts + grep-subagent.ts, 716 LOC,
+// 28 tests) shipped as library with zero runtime callers. This wire
+// makes it invocable via `wotann grep <query> [paths...]` with
+// --parallel, --top-k, --json, and --relevance-filter. Engine field
+// surfaces ripgrep vs node-fallback honestly (QB #6); relevance-filter
+// without a provider falls back to heuristic ranking with a warning.
+{
+  const { registerGrepCommand } = await import("./cli/commands/grep.js");
+  registerGrepCommand(program);
+}
+
 // ── Parse ───────────────────────────────────────────────────
 
 // Deep-link fast path — if the first positional arg is a `wotann://` URL,
