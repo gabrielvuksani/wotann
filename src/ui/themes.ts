@@ -1,7 +1,17 @@
 /**
  * Theme system — WOTANN 5-palette consolidation (P1-UI1).
  *
- * Design:
+ * ── Role in the unified token graph (P2 design-token unification) ──────────
+ * This file is the palette source-of-truth for the TUI surface. The 5
+ * canonical palettes below are re-exported from `src/design/tokens.ts`
+ * (the cross-surface unified token graph), which adds typography /
+ * spacing / radius / shadow / motion tokens on top and feeds the
+ * per-surface emitters (desktop CSS, iOS Swift, W3C JSON).
+ *
+ * Edits made here automatically flow through `tokens.ts` to every
+ * surface via `node scripts/generate-tokens.mjs`.
+ *
+ * ── Design: ────────────────────────────────────────────────────────────────
  * - 5 CANONICAL palettes: dark, light, high-contrast, sepia, monochrome.
  * - Every palette implements the same typed {@link Palette} interface
  *   (11 role tokens + 4 message kinds + 4 HUD slots). No more scattered
