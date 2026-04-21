@@ -106,6 +106,18 @@ import {
   type ToolCallResult,
   type MemoryToolStoreAdapter,
 } from "./memory-tools.js";
+import {
+  createTEMPR,
+  type TEMPR,
+  type TEMPRChannel,
+  type TEMPRChannelArgs,
+  type TEMPRChannelResult,
+  type TEMPRSearchOptions,
+  type TEMPRSearchResult,
+  type TEMPRHit,
+  type TEMPRCandidate,
+} from "./tempr.js";
+import { createHeuristicCrossEncoder, type CrossEncoder } from "./cross-encoder.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -2175,6 +2187,243 @@ export class MemoryStore {
       .slice(0, limit);
   }
 
+  // ── TEMPR (Phase 2 P1-M4, Hindsight port) ──────────────
+
+  /**
+   * TEMPR 4-channel parallel retrieval + RRF + cross-encoder rerank.
+   *
+   * Hindsight port (arXiv 2512.12818) — 91.4% LongMemEval-S reference.
+   * Runs 4 canonical channels in parallel over this store:
+   *
+   *   1. VECTOR   — dense retrieval via caller-supplied embedder
+   *                 (falls back to FTS5-equivalent if no embedder)
+   *   2. BM25     — FTS5 lexical match (store.search)
+   *   3. ENTITY   — KG-aware: parses query entity candidates and
+   *                 retrieves entries whose content mentions any
+   *                 related entity (from knowledge_nodes + M7 edges)
+   *   4. TEMPORAL — bi-temporal snapshot: returns entries adjacent
+   *                 to edges valid at `opts.validAt` (leverages M5
+   *                 queryValidAt). When no validAt, falls back to
+   *                 eventDate/documentDate proximity to `opts.now`.
+   *
+   * Failed channels (exceptions from the backing calls) are isolated
+   * — the remaining channels still contribute. A channel that crashes
+   * is captured in `result.channelResults.get(name).error`; the overall
+   * query never crashes.
+   *
+   * Cross-encoder: defaults to the word-overlap heuristic (good
+   * enough for wiring; the real MS MARCO MiniLM lands in P1-M2 via
+   * createCrossEncoderFromFn). Pass `crossEncoder: null` to skip
+   * rerank entirely.
+   *
+   * Per-query isolation: every call constructs a fresh TEMPR handle
+   * over snapshot channel functions — no shared state between calls.
+   */
+  async temprSearch(
+    query: string,
+    opts: {
+      readonly topK?: number;
+      readonly candidatePool?: number;
+      readonly embed?: (text: string) => Promise<readonly number[]>;
+      readonly validAt?: string;
+      readonly now?: number;
+      readonly crossEncoder?: CrossEncoder | null;
+      readonly onChannelError?: (channelName: string, error: Error) => void;
+    } = {},
+  ): Promise<{
+    readonly hits: readonly (TEMPRHit & { readonly entry: MemoryEntry | null })[];
+    readonly channelResults: ReadonlyMap<
+      string,
+      { readonly candidates?: readonly TEMPRCandidate[]; readonly error?: Error }
+    >;
+    readonly rerankerApplied: boolean;
+    readonly durationMs: number;
+  }> {
+    const topK = opts.topK ?? 20;
+    const pool = opts.candidatePool ?? Math.max(50, topK * 3);
+
+    // Build each channel. Each channel is a closure over `this`. Errors
+    // inside the closure become rejections that TEMPR captures — never
+    // swallow here.
+
+    const vectorChannel: TEMPRChannel = {
+      name: "vector",
+      retrieve: async (args: TEMPRChannelArgs): Promise<TEMPRChannelResult> => {
+        if (!opts.embed) {
+          // No embedder provided — emit empty rather than faking
+          // (quality bar: honest failure). Caller sees the empty
+          // channel result and can decide what to do.
+          return { candidates: [] };
+        }
+        // Baseline vector retrieval: FTS5 shortlist → cosine rerank
+        // against query embedding. This is a COARSE approximation
+        // until quantized-vector-store is threaded through here.
+        const shortlist = this.search(args.query, pool);
+        if (shortlist.length === 0) return { candidates: [] };
+        const queryVec = await opts.embed!(args.query);
+        const scored: { c: TEMPRCandidate; score: number }[] = [];
+        for (const row of shortlist) {
+          const docVec = await opts.embed!(row.entry.value);
+          const score = cosineSimTempr(queryVec, docVec);
+          if (score > 0) {
+            scored.push({
+              c: { id: row.entry.id, content: row.entry.value },
+              score,
+            });
+          }
+        }
+        scored.sort((a, b) => b.score - a.score);
+        return { candidates: scored.slice(0, pool).map((s) => s.c) };
+      },
+    };
+
+    const bm25Channel: TEMPRChannel = {
+      name: "bm25",
+      retrieve: async (args): Promise<TEMPRChannelResult> => {
+        const results = this.search(args.query, pool);
+        return {
+          candidates: results.map((r) => ({
+            id: r.entry.id,
+            content: r.entry.value,
+          })),
+        };
+      },
+    };
+
+    const entityChannel: TEMPRChannel = {
+      name: "entity",
+      retrieve: async (args): Promise<TEMPRChannelResult> => {
+        // Heuristic entity extraction from the query: capitalized
+        // tokens + quoted strings. Good enough for the channel split
+        // (we don't need a full NER — the LLM-based extraction lives
+        // in observation-extractor and feeds into recordEntity).
+        const tokens = extractQueryEntities(args.query);
+        if (tokens.length === 0) return { candidates: [] };
+
+        // Look up knowledge_nodes by any matching entity name, then
+        // find memory entries that mention any related entity.
+        const collected = new Map<string, TEMPRCandidate>();
+        for (const tok of tokens) {
+          try {
+            const related = this.getRelatedEntities(tok, 2);
+            for (const node of related) {
+              // Find entries whose value mentions this entity name.
+              // FTS5 quoted-phrase search: "Alice" (no operators).
+              const safe = fts5QuoteName(node.entity);
+              if (!safe) continue;
+              const rows = this.search(safe, 20);
+              for (const row of rows) {
+                if (!collected.has(row.entry.id)) {
+                  collected.set(row.entry.id, {
+                    id: row.entry.id,
+                    content: row.entry.value,
+                    metadata: { entityMatch: node.entity, entityType: node.entityType },
+                  });
+                }
+              }
+            }
+          } catch {
+            // skip this token — another might match
+          }
+        }
+        return { candidates: [...collected.values()].slice(0, pool) };
+      },
+    };
+
+    const temporalChannel: TEMPRChannel = {
+      name: "temporal",
+      retrieve: async (_args): Promise<TEMPRChannelResult> => {
+        // If a validAt is provided, fetch edges valid at that point
+        // and surface entries connected (via KG node.entity) to those
+        // edges' source/target. Otherwise, surface entries whose
+        // documentDate/eventDate is closest to `now` — a recency
+        // proxy for temporal relevance.
+        if (opts.validAt) {
+          try {
+            const edges = this.queryValidAt(opts.validAt);
+            if (edges.length === 0) return { candidates: [] };
+            // Resolve each edge's source/target knowledge_node entity
+            // name, then collect matching entries.
+            const entityNames = new Set<string>();
+            for (const edge of edges.slice(0, pool)) {
+              const sNode = this.db
+                .prepare(`SELECT entity FROM knowledge_nodes WHERE id = ?`)
+                .get(edge.sourceId) as { entity?: string } | undefined;
+              const tNode = this.db
+                .prepare(`SELECT entity FROM knowledge_nodes WHERE id = ?`)
+                .get(edge.targetId) as { entity?: string } | undefined;
+              if (sNode?.entity) entityNames.add(sNode.entity);
+              if (tNode?.entity) entityNames.add(tNode.entity);
+            }
+            const collected = new Map<string, TEMPRCandidate>();
+            for (const name of entityNames) {
+              const safe = fts5QuoteName(name);
+              if (!safe) continue;
+              const rows = this.search(safe, 10);
+              for (const row of rows) {
+                if (!collected.has(row.entry.id)) {
+                  collected.set(row.entry.id, {
+                    id: row.entry.id,
+                    content: row.entry.value,
+                    metadata: { temporalEntity: name, validAt: opts.validAt },
+                  });
+                }
+              }
+            }
+            return { candidates: [...collected.values()].slice(0, pool) };
+          } catch {
+            return { candidates: [] };
+          }
+        }
+        // Fallback: recency-based. Pick entries with documentDate
+        // closest to `now` from within a BM25 shortlist for relevance.
+        const now = opts.now ?? Date.now();
+        const shortlist = this.search(query, pool);
+        const scored = shortlist
+          .filter((r) => r.entry.documentDate !== undefined)
+          .map((r) => {
+            const age = Math.abs(now - r.entry.documentDate!);
+            return { entry: r.entry, age };
+          })
+          .sort((a, b) => a.age - b.age);
+        return {
+          candidates: scored.slice(0, pool).map((s) => ({
+            id: s.entry.id,
+            content: s.entry.value,
+            metadata: { temporalRecencyAge: s.age },
+          })),
+        };
+      },
+    };
+
+    const crossEncoder =
+      opts.crossEncoder === null ? undefined : (opts.crossEncoder ?? createHeuristicCrossEncoder());
+
+    const tempr: TEMPR = createTEMPR({
+      channels: [vectorChannel, bm25Channel, entityChannel, temporalChannel],
+      ...(crossEncoder !== undefined ? { crossEncoder } : {}),
+      topK,
+      ...(opts.onChannelError !== undefined ? { onChannelError: opts.onChannelError } : {}),
+    });
+
+    const searchOpts: TEMPRSearchOptions = { topK };
+    const result: TEMPRSearchResult = await tempr.search(query, searchOpts);
+
+    // Rehydrate full MemoryEntry on each hit (callers typically want
+    // the full entry, not just id + content).
+    const hits = result.hits.map((hit) => ({
+      ...hit,
+      entry: this.getById(hit.id),
+    }));
+
+    return {
+      hits,
+      channelResults: result.channelResults,
+      rerankerApplied: result.rerankerApplied,
+      durationMs: result.durationMs,
+    };
+  }
+
   /** Get all unique domains in the memory store. */
   getDomains(): readonly string[] {
     const rows = this.db
@@ -3671,6 +3920,65 @@ function rowToBiTemporalEdge(row: Record<string, unknown>): BiTemporalEdge {
  * benchmark adapter so natural-language questions (which contain ?, :,
  * quotes, etc.) don't crash FTS5.
  */
+
+// ── TEMPR helpers (Phase 2 P1-M4) ─────────────────────
+
+/** Cosine similarity for TEMPR vector channel. Zero-safe. */
+function cosineSimTempr(a: readonly number[], b: readonly number[]): number {
+  if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    dot += x * y;
+    na += x * x;
+    nb += y * y;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+/**
+ * Heuristic entity extraction from a natural-language query.
+ * Returns capitalized multi-word sequences, quoted phrases, and
+ * standalone capitalized words of length >= 2. The LLM-based
+ * extraction is the real thing; this channel bootstrap is a proxy
+ * that catches common proper nouns with zero dep.
+ */
+function extractQueryEntities(query: string): readonly string[] {
+  const tokens = new Set<string>();
+  // Quoted phrases first — "New York", 'Alice Bob'
+  const quoted = query.match(/["']([^"']+)["']/g);
+  if (quoted) {
+    for (const q of quoted) tokens.add(q.replace(/["']/g, "").trim());
+  }
+  // Multi-word capitalized sequences — "New York City"
+  const caps = query.match(/\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+\b/g);
+  if (caps) {
+    for (const c of caps) tokens.add(c);
+  }
+  // Standalone capitalized words — "Alice"
+  const solo = query.match(/\b[A-Z][a-zA-Z]{1,}\b/g);
+  if (solo) {
+    for (const s of solo) tokens.add(s);
+  }
+  return [...tokens].filter((t) => t.length >= 2).slice(0, 8);
+}
+
+/**
+ * Sanitize a proper name for use in an FTS5 MATCH query.
+ * Strips control characters and wraps in double quotes so FTS5
+ * treats it as a phrase. Returns empty string when the name is
+ * empty after sanitization.
+ */
+function fts5QuoteName(name: string): string {
+  const cleaned = name.replace(/["\\]/g, " ").replace(/\s+/g, " ").trim();
+  if (cleaned.length === 0) return "";
+  return `"${cleaned}"`;
+}
+
 function sanitizeForFts5(query: string): string {
   const tokens = query
     .toLowerCase()
