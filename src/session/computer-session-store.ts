@@ -27,6 +27,7 @@ export type SessionStatus =
   | "claimed"
   | "running"
   | "awaiting_approval"
+  | "handed_off"
   | "done"
   | "failed";
 
@@ -39,8 +40,31 @@ export type SessionEventType =
   | "cursor"
   | "frame"
   | "file_write"
+  | "handoff_initiated"
+  | "handoff_accepted"
+  | "handoff_expired"
   | "done"
   | "error";
+
+export type HandoffState = "pending" | "accepted" | "expired";
+
+/**
+ * Audit-trail record of a handoff attempt. Kept on the session itself so the
+ * full chain of custody survives even after the session terminates. Per the
+ * F14 design, transfers are never silently dropped — every attempt (accepted
+ * or expired) leaves a trace here for debugging and compliance.
+ */
+export interface HandoffRecord {
+  readonly id: string;
+  readonly fromDeviceId: string;
+  readonly toDeviceId: string;
+  readonly reason: string | null;
+  readonly requestedAt: number;
+  readonly acceptedAt: number | null;
+  readonly expiredAt: number | null;
+  readonly expiresAt: number;
+  readonly state: HandoffState;
+}
 
 export interface TaskSpec {
   readonly task: string;
@@ -69,6 +93,16 @@ export interface Session {
   readonly events: readonly SessionEvent[];
   readonly result: Readonly<Record<string, unknown>> | null;
   readonly pendingApprovalId: string | null;
+  /** F14 — id of the in-flight handoff, if any. Null unless status=handed_off. */
+  readonly pendingHandoffId: string | null;
+  /** F14 — full audit trail of every handoff attempted against this session. */
+  readonly handoffs: readonly HandoffRecord[];
+  /**
+   * F14 — status snapshot captured when a handoff was initiated. On accept,
+   * the session returns to this exact status so the runner can pick up where
+   * the previous claimant paused. Null outside of the handed_off window.
+   */
+  readonly handoffResumeStatus: SessionStatus | null;
 }
 
 export interface PendingApproval {
@@ -121,6 +155,60 @@ export class SessionIllegalTransitionError extends Error {
   }
 }
 
+// ── F14 — Cross-session resume errors (QB #6: honest failures) ─
+
+export class ErrorDeviceNotRegistered extends Error {
+  readonly code = "HANDOFF_DEVICE_NOT_REGISTERED";
+  readonly deviceId: string;
+  constructor(deviceId: string) {
+    super(`Handoff target device is not registered: ${deviceId}`);
+    this.name = "ErrorDeviceNotRegistered";
+    this.deviceId = deviceId;
+  }
+}
+
+export class ErrorNotClaimed extends Error {
+  readonly code = "HANDOFF_NOT_CLAIMED";
+  readonly sessionId: string;
+  constructor(sessionId: string) {
+    super(`Cannot hand off session ${sessionId}: not claimed`);
+    this.name = "ErrorNotClaimed";
+    this.sessionId = sessionId;
+  }
+}
+
+export class ErrorHandoffInFlight extends Error {
+  readonly code = "HANDOFF_IN_FLIGHT";
+  readonly sessionId: string;
+  readonly existingHandoffId: string;
+  constructor(sessionId: string, existingHandoffId: string) {
+    super(`Session ${sessionId} already has an in-flight handoff: ${existingHandoffId}`);
+    this.name = "ErrorHandoffInFlight";
+    this.sessionId = sessionId;
+    this.existingHandoffId = existingHandoffId;
+  }
+}
+
+export class ErrorHandoffExpired extends Error {
+  readonly code = "HANDOFF_EXPIRED";
+  readonly handoffId: string;
+  constructor(handoffId: string) {
+    super(`Handoff ${handoffId} has expired`);
+    this.name = "ErrorHandoffExpired";
+    this.handoffId = handoffId;
+  }
+}
+
+export class ErrorHandoffNotFound extends Error {
+  readonly code = "HANDOFF_NOT_FOUND";
+  readonly handoffId: string;
+  constructor(handoffId: string) {
+    super(`Handoff not found: ${handoffId}`);
+    this.name = "ErrorHandoffNotFound";
+    this.handoffId = handoffId;
+  }
+}
+
 // ── State transition matrix ────────────────────────────────
 
 const ALLOWED_TRANSITIONS: Readonly<Record<SessionStatus, readonly SessionStatus[]>> = {
@@ -128,10 +216,15 @@ const ALLOWED_TRANSITIONS: Readonly<Record<SessionStatus, readonly SessionStatus
   // finished task at any point in its lifecycle (including "claimed" before the
   // first step emits). Illegal transitions are still guarded for STEP and
   // APPROVE (which have specific precondition requirements).
+  //
+  // F14: any non-terminal claim-bearing status can transition to handed_off
+  // while a transfer is in flight. handed_off can resolve back to claimed
+  // (accept) or back to the pre-handoff status (expire), or to failed (abort).
   pending: ["claimed", "done", "failed"],
-  claimed: ["running", "done", "failed"],
-  running: ["awaiting_approval", "done", "failed"],
-  awaiting_approval: ["running", "done", "failed"],
+  claimed: ["running", "handed_off", "done", "failed"],
+  running: ["awaiting_approval", "handed_off", "done", "failed"],
+  awaiting_approval: ["running", "handed_off", "done", "failed"],
+  handed_off: ["claimed", "running", "awaiting_approval", "done", "failed"],
   done: [],
   failed: [],
 };
@@ -195,6 +288,9 @@ export class ComputerSessionStore {
       events: [createdEvent],
       result: null,
       pendingApprovalId: null,
+      pendingHandoffId: null,
+      handoffs: [],
+      handoffResumeStatus: null,
     };
 
     this.sessions.set(id, session);
@@ -390,6 +486,261 @@ export class ComputerSessionStore {
     this.sessions.set(params.sessionId, next);
     this.emitEvent(event);
     return next;
+  }
+
+  // ── Handoff (F14 — cross-session resume) ──────────────
+  //
+  // Three phases. `initiateHandoff` is called by the CURRENT claimant; the
+  // session transitions to `handed_off` and a HandoffRecord is pushed onto the
+  // audit trail. The target device must then call `acceptHandoff` within the
+  // configured TTL; accepting updates claimedByDeviceId atomically with the
+  // resume event. If no accept arrives, `expireHandoff` rolls back to the
+  // prior status. Per QB #6, every failure mode raises a typed error; per
+  // QB #7, per-session state lives here — no module globals.
+
+  /**
+   * Begin a handoff: the claimant transfers control to `toDeviceId`. The
+   * target device registration is validated by the caller via the
+   * `isTargetRegistered` predicate (so this store stays decoupled from the
+   * device-registry module). TTL is milliseconds from now.
+   *
+   * Throws:
+   *   - ErrorNotClaimed        if session has no claimant (only claimed,
+   *                             running, or awaiting_approval may hand off)
+   *   - SessionUnauthorizedError
+   *                             if deviceId isn't the current claimant
+   *   - ErrorHandoffInFlight   if a previous handoff is still pending
+   *   - ErrorDeviceNotRegistered
+   *                             if `isTargetRegistered(toDeviceId)` is false
+   *   - SessionIllegalTransitionError
+   *                             if session is terminal
+   */
+  initiateHandoff(params: {
+    readonly sessionId: string;
+    readonly fromDeviceId: string;
+    readonly toDeviceId: string;
+    readonly reason?: string | null;
+    readonly ttlMs: number;
+    readonly isTargetRegistered: (deviceId: string) => boolean;
+  }): { readonly session: Session; readonly handoff: HandoffRecord } {
+    const current = this.requireSession(params.sessionId);
+
+    // Must have an active claimant; the claimant must match fromDeviceId.
+    if (current.claimedByDeviceId === null) {
+      throw new ErrorNotClaimed(params.sessionId);
+    }
+    // Do not allow handoff initiation on a session already in the handed_off
+    // state — exactly one transfer may be pending at a time.
+    if (current.status === "handed_off") {
+      throw new ErrorHandoffInFlight(params.sessionId, current.pendingHandoffId ?? "unknown");
+    }
+    if (isTerminal(current.status)) {
+      throw new SessionIllegalTransitionError(params.sessionId, current.status, "handed_off");
+    }
+    if (current.claimedByDeviceId !== params.fromDeviceId) {
+      throw new SessionUnauthorizedError(
+        params.sessionId,
+        params.fromDeviceId,
+        `expected claimant ${current.claimedByDeviceId}`,
+      );
+    }
+
+    // Target must be a registered device — prevents lost handoffs to ghost
+    // ids (typo, stale client, malicious spoof). Caller supplies the
+    // predicate so the store stays agnostic to the registry implementation.
+    if (!params.isTargetRegistered(params.toDeviceId)) {
+      throw new ErrorDeviceNotRegistered(params.toDeviceId);
+    }
+
+    const now = Date.now();
+    const handoffId = `ho-${randomUUID()}`;
+    const handoff: HandoffRecord = {
+      id: handoffId,
+      fromDeviceId: params.fromDeviceId,
+      toDeviceId: params.toDeviceId,
+      reason: params.reason ?? null,
+      requestedAt: now,
+      acceptedAt: null,
+      expiredAt: null,
+      expiresAt: now + params.ttlMs,
+      state: "pending",
+    };
+
+    const event = this.appendEvent(current, "handoff_initiated", {
+      handoffId,
+      fromDeviceId: params.fromDeviceId,
+      toDeviceId: params.toDeviceId,
+      reason: handoff.reason,
+      expiresAt: handoff.expiresAt,
+    });
+
+    const next = this.transition(current, "handed_off", {
+      events: [...current.events, event],
+      pendingHandoffId: handoffId,
+      handoffs: [...current.handoffs, handoff],
+      handoffResumeStatus: current.status,
+    });
+    this.sessions.set(params.sessionId, next);
+    this.emitEvent(event);
+    return { session: next, handoff };
+  }
+
+  /**
+   * Target accepts a pending handoff. Atomically updates claimedByDeviceId,
+   * transitions the session out of handed_off back to the pre-handoff status
+   * (or `claimed` if the session was previously awaiting first step), and
+   * appends an accept event + updates the audit record.
+   *
+   * Throws:
+   *   - ErrorHandoffNotFound    if handoffId doesn't exist on this session
+   *   - ErrorHandoffExpired     if accept arrives after expiresAt
+   *   - SessionUnauthorizedError
+   *                              if deviceId isn't the handoff target
+   *   - SessionIllegalTransitionError
+   *                              if session isn't in the handed_off state
+   */
+  acceptHandoff(params: {
+    readonly sessionId: string;
+    readonly handoffId: string;
+    readonly deviceId: string;
+    readonly now?: number;
+  }): Session {
+    const current = this.requireSession(params.sessionId);
+    const now = params.now ?? Date.now();
+
+    // Must be in handed_off state (post-initiate, pre-resolution).
+    if (current.status !== "handed_off") {
+      throw new SessionIllegalTransitionError(params.sessionId, current.status, "claimed");
+    }
+    if (current.pendingHandoffId !== params.handoffId) {
+      throw new ErrorHandoffNotFound(params.handoffId);
+    }
+
+    const record = current.handoffs.find((h) => h.id === params.handoffId);
+    if (!record) {
+      throw new ErrorHandoffNotFound(params.handoffId);
+    }
+
+    // Only the named target may accept. Audit-relevant: record the attempt
+    // even when the device is wrong would be nice, but that would let any
+    // device force ledger growth via brute forcing ids. Reject without log.
+    if (record.toDeviceId !== params.deviceId) {
+      throw new SessionUnauthorizedError(
+        params.sessionId,
+        params.deviceId,
+        `expected handoff target ${record.toDeviceId}`,
+      );
+    }
+
+    // TTL — late accept rolls back and records the expiry.
+    if (now > record.expiresAt) {
+      // Expire atomically with the reject: caller sees the session reverted
+      // to pre-handoff status and the audit trail shows the expiry.
+      this.expireHandoff({
+        sessionId: params.sessionId,
+        handoffId: params.handoffId,
+        now,
+      });
+      throw new ErrorHandoffExpired(params.handoffId);
+    }
+
+    const resumeStatus = current.handoffResumeStatus ?? "claimed";
+    const acceptedRecord: HandoffRecord = {
+      ...record,
+      state: "accepted",
+      acceptedAt: now,
+    };
+    const nextHandoffs = current.handoffs.map((h) =>
+      h.id === params.handoffId ? acceptedRecord : h,
+    );
+
+    const event = this.appendEvent(current, "handoff_accepted", {
+      handoffId: params.handoffId,
+      fromDeviceId: record.fromDeviceId,
+      toDeviceId: params.deviceId,
+      resumeStatus,
+    });
+
+    const next = this.transition(current, resumeStatus, {
+      events: [...current.events, event],
+      claimedByDeviceId: params.deviceId,
+      pendingHandoffId: null,
+      handoffs: nextHandoffs,
+      handoffResumeStatus: null,
+    });
+    this.sessions.set(params.sessionId, next);
+    this.emitEvent(event);
+    return next;
+  }
+
+  /**
+   * Mark a pending handoff expired and roll the session back to its
+   * pre-handoff status (retaining the ORIGINAL claimant). Used both
+   * externally (by a TTL timer) and internally (by acceptHandoff when the
+   * accept arrives late). Idempotent: calling on a non-pending handoff
+   * throws ErrorHandoffNotFound; calling when the session isn't in
+   * handed_off throws SessionIllegalTransitionError. Callers that may race
+   * with an accept should be prepared for a stale ErrorHandoffNotFound
+   * (the accept won the race).
+   */
+  expireHandoff(params: {
+    readonly sessionId: string;
+    readonly handoffId: string;
+    readonly now?: number;
+  }): Session {
+    const current = this.requireSession(params.sessionId);
+    const now = params.now ?? Date.now();
+
+    if (current.status !== "handed_off") {
+      throw new SessionIllegalTransitionError(
+        params.sessionId,
+        current.status,
+        current.handoffResumeStatus ?? "claimed",
+      );
+    }
+    if (current.pendingHandoffId !== params.handoffId) {
+      throw new ErrorHandoffNotFound(params.handoffId);
+    }
+
+    const record = current.handoffs.find((h) => h.id === params.handoffId);
+    if (!record || record.state !== "pending") {
+      throw new ErrorHandoffNotFound(params.handoffId);
+    }
+
+    const expiredRecord: HandoffRecord = {
+      ...record,
+      state: "expired",
+      expiredAt: now,
+    };
+    const nextHandoffs = current.handoffs.map((h) =>
+      h.id === params.handoffId ? expiredRecord : h,
+    );
+    const resumeStatus = current.handoffResumeStatus ?? "claimed";
+
+    const event = this.appendEvent(current, "handoff_expired", {
+      handoffId: params.handoffId,
+      fromDeviceId: record.fromDeviceId,
+      toDeviceId: record.toDeviceId,
+      resumeStatus,
+    });
+
+    const next = this.transition(current, resumeStatus, {
+      events: [...current.events, event],
+      pendingHandoffId: null,
+      handoffs: nextHandoffs,
+      handoffResumeStatus: null,
+      // claimedByDeviceId unchanged — original claimant keeps control.
+    });
+    this.sessions.set(params.sessionId, next);
+    this.emitEvent(event);
+    return next;
+  }
+
+  /** Retrieve a specific handoff record (from audit trail). */
+  getHandoff(sessionId: string, handoffId: string): HandoffRecord | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    return session.handoffs.find((h) => h.id === handoffId) ?? null;
   }
 
   // ── Read APIs ─────────────────────────────────────────

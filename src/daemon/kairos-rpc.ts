@@ -42,7 +42,13 @@ import {
   SessionAlreadyClaimedError,
   SessionUnauthorizedError,
   SessionIllegalTransitionError,
+  ErrorDeviceNotRegistered,
+  ErrorNotClaimed,
+  ErrorHandoffInFlight,
+  ErrorHandoffExpired,
+  ErrorHandoffNotFound,
 } from "../session/computer-session-store.js";
+import { SessionHandoffManager } from "../session/session-handoff.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -129,6 +135,12 @@ function serializeSession(s: ComputerSessionRecord): Record<string, unknown> {
     eventCount: s.events.length,
     pendingApprovalId: s.pendingApprovalId,
     result: s.result,
+    // F14 — cross-session resume state. Surfaces can tell whether a transfer
+    // is in flight, inspect the audit trail, and know which status to resume
+    // to once the transfer lands.
+    pendingHandoffId: s.pendingHandoffId,
+    handoffs: s.handoffs,
+    handoffResumeStatus: s.handoffResumeStatus,
   };
 }
 
@@ -147,6 +159,13 @@ function toRpcError(err: unknown): Error {
   if (err instanceof SessionAlreadyClaimedError) return err;
   if (err instanceof SessionUnauthorizedError) return err;
   if (err instanceof SessionIllegalTransitionError) return err;
+  // F14 cross-session-resume errors — preserve their classes so callers can
+  // discriminate on `.code` instead of parsing message strings.
+  if (err instanceof ErrorDeviceNotRegistered) return err;
+  if (err instanceof ErrorNotClaimed) return err;
+  if (err instanceof ErrorHandoffInFlight) return err;
+  if (err instanceof ErrorHandoffExpired) return err;
+  if (err instanceof ErrorHandoffNotFound) return err;
   if (err instanceof Error) return err;
   return new Error(String(err));
 }
@@ -640,6 +659,16 @@ export class KairosRPCHandler {
     }
   >();
 
+  // F14 — cross-session resume (handoff). The manager lifts TTL bookkeeping
+  // and UnifiedEvent broadcasting out of the store so the store stays a
+  // pure state machine. The isTargetRegistered predicate defaults to
+  // "trust the caller" (test-friendly); setRuntime wires it to the
+  // dispatch plane's device registry when available, and setDaemon hooks
+  // broadcasts into the plane once the daemon injects it.
+  private readonly computerSessionHandoff = new SessionHandoffManager({
+    store: this.computerSessionStore,
+  });
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -663,6 +692,16 @@ export class KairosRPCHandler {
   }
 
   /**
+   * Test-visibility accessor for the F14 handoff manager. External callers
+   * should route through the `computer.session.handoff` / `acceptHandoff`
+   * / `expireHandoff` RPC methods; this is exposed only so tests can
+   * assert TTL bookkeeping and deterministic scheduler swapping.
+   */
+  getComputerSessionHandoff(): SessionHandoffManager {
+    return this.computerSessionHandoff;
+  }
+
+  /**
    * Attach a WotannRuntime instance to route RPC calls to.
    */
   setRuntime(runtime: WotannRuntime): void {
@@ -670,6 +709,19 @@ export class KairosRPCHandler {
     // Register self-improvement handlers now that runtime and daemon are available
     this.registerSelfImprovementHandlers();
     this.registerSurfaceHandlers();
+
+    // F14 — hook the handoff manager into the dispatch plane so every
+    // initiate/accept/expire reaches surfaces registered via F11's
+    // SurfaceRegistry (phone push, watch haptic, TUI status, CarPlay
+    // count, etc). Best-effort: if the runtime doesn't expose a plane,
+    // the manager simply runs without broadcast side-effects.
+    try {
+      const plane = runtime.getDispatchPlane();
+      this.computerSessionHandoff.setBroadcast((ev) => plane.broadcastUnifiedEvent(ev));
+    } catch {
+      // Dispatch plane not available — handoff still works, just without
+      // cross-surface fan-out beyond the store's own event stream.
+    }
   }
 
   /**
@@ -4875,6 +4927,75 @@ export class KairosRPCHandler {
               : undefined,
           error: typeof error === "string" ? error : undefined,
         });
+        return serializeSession(session);
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    // ── F14: cross-session resume (phone start -> desktop continue -> TUI finish) ──
+    //
+    // `computer.session.handoff` transfers the claim from the current device
+    // to another registered device. The source loses write permission the
+    // moment initiate succeeds; the target acquires it on
+    // `computer.session.acceptHandoff`. TTL is enforced by
+    // SessionHandoffManager — a late accept receives ErrorHandoffExpired.
+    //
+    // Full audit trail (every handoff attempt, accepted or expired) is kept
+    // on the session via the store's handoffs array, accessible through any
+    // session-reading RPC (create/claim/step/close/list/stream responses).
+    this.handlers.set("computer.session.handoff", async (params) => {
+      const sessionId = params["sessionId"];
+      const fromDeviceId = params["fromDeviceId"] ?? params["deviceId"];
+      const toDeviceId = params["toDeviceId"];
+      const reason = params["reason"];
+      const ttlMs = params["ttlMs"];
+      if (typeof sessionId !== "string") throw new Error("sessionId required");
+      if (typeof fromDeviceId !== "string") throw new Error("fromDeviceId required");
+      if (typeof toDeviceId !== "string") throw new Error("toDeviceId required");
+      try {
+        const { session, handoff } = this.computerSessionHandoff.initiate({
+          sessionId,
+          fromDeviceId,
+          toDeviceId,
+          reason: typeof reason === "string" ? reason : null,
+          ttlMs: typeof ttlMs === "number" && ttlMs > 0 ? ttlMs : undefined,
+        });
+        return {
+          session: serializeSession(session),
+          handoff,
+        };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("computer.session.acceptHandoff", async (params) => {
+      const sessionId = params["sessionId"];
+      const handoffId = params["handoffId"];
+      const deviceId = params["deviceId"];
+      if (typeof sessionId !== "string") throw new Error("sessionId required");
+      if (typeof handoffId !== "string") throw new Error("handoffId required");
+      if (typeof deviceId !== "string") throw new Error("deviceId required");
+      try {
+        const session = this.computerSessionHandoff.accept({
+          sessionId,
+          handoffId,
+          deviceId,
+        });
+        return serializeSession(session);
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("computer.session.expireHandoff", async (params) => {
+      const sessionId = params["sessionId"];
+      const handoffId = params["handoffId"];
+      if (typeof sessionId !== "string") throw new Error("sessionId required");
+      if (typeof handoffId !== "string") throw new Error("handoffId required");
+      try {
+        const session = this.computerSessionHandoff.expire({ sessionId, handoffId });
         return serializeSession(session);
       } catch (err) {
         throw toRpcError(err);
