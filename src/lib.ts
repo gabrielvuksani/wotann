@@ -1336,20 +1336,13 @@ export {
   type SelfImprovementReport,
 } from "./cli/self-improve.js";
 
-// ── Phase F5 — Base Channel Adapter ────────────────────
-export {
-  BaseChannelAdapter,
-  type ChannelAdapterConfig,
-  type InboundMessage,
-  type OutboundMessage,
-  type ConnectionState,
-  type MessageHandler,
-} from "./channels/base-adapter.js";
-
-// EchoChannelAdapter — first concrete subclass of BaseChannelAdapter.
-// Reference implementation + in-process echo channel for dev-loop tests.
-// Added to close the "BaseChannelAdapter has 0 extenders" finding.
-export { EchoChannelAdapter, type EchoChannelSnapshot } from "./channels/echo-channel-adapter.js";
+// ── Phase F5 removed 2026-04-21 ─────────────────────────
+// MASTER_PLAN_V8.md §6 P2 polish: the speculative base class and
+// its single "audit theater" extender were deleted. Real channel
+// adapters implement the interface from src/channels/adapter.ts
+// (start/stop/isConnected) or src/channels/gateway.ts
+// (connect/disconnect/connected). See AUDIT_LANE_1_ARCHITECTURE.md
+// §3.2 + §6.4 for the rationale.
 
 // ── Phase G5 — Cross-Device Context ────────────────────
 export {
