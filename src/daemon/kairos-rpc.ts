@@ -50,6 +50,14 @@ import {
 } from "../session/computer-session-store.js";
 import { SessionHandoffManager } from "../session/session-handoff.js";
 import { FleetView, type FleetSnapshot } from "../session/fleet-view.js";
+import {
+  WatchDispatchRegistry,
+  ErrorUnknownTemplate as WatchErrorUnknownTemplate,
+  ErrorInvalidArgs as WatchErrorInvalidArgs,
+  ErrorRateLimit as WatchErrorRateLimit,
+  ErrorDeviceNotRegisteredForDispatch as WatchErrorDeviceNotRegistered,
+  type DispatchTemplate,
+} from "../session/watch-dispatch.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -167,6 +175,12 @@ function toRpcError(err: unknown): Error {
   if (err instanceof ErrorHandoffInFlight) return err;
   if (err instanceof ErrorHandoffExpired) return err;
   if (err instanceof ErrorHandoffNotFound) return err;
+  // F12 — Watch dispatch errors. Preserve classes so JSON-RPC clients can
+  // discriminate on `.code` / `.name` and surface localized UI strings.
+  if (err instanceof WatchErrorUnknownTemplate) return err;
+  if (err instanceof WatchErrorInvalidArgs) return err;
+  if (err instanceof WatchErrorRateLimit) return err;
+  if (err instanceof WatchErrorDeviceNotRegistered) return err;
   if (err instanceof Error) return err;
   return new Error(String(err));
 }
@@ -685,6 +699,17 @@ export class KairosRPCHandler {
     }
   >();
 
+  // F12 — Watch new-task dispatch primitive. Templates keep dispatches
+  // atomic for the constrained surface; the registry auto-claims on
+  // create so the session binds to the watch device with no extra RPC.
+  // Per-handler instance per QB #7 — the rate-limit ledger + template
+  // registry live here, not in module globals. Default templates (seed
+  // from DEFAULT_TEMPLATES) cover URL summarize / note capture /
+  // contact message / build project.
+  private readonly watchDispatch = new WatchDispatchRegistry({
+    store: this.computerSessionStore,
+  });
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -715,6 +740,16 @@ export class KairosRPCHandler {
    */
   getComputerSessionHandoff(): SessionHandoffManager {
     return this.computerSessionHandoff;
+  }
+
+  /**
+   * Test-visibility accessor for the F12 Watch dispatch registry. External
+   * callers should route through the `watch.templates` / `watch.dispatch`
+   * RPC methods; this exists so tests can seed custom templates, adjust
+   * rate-limit config, or inject a deterministic clock.
+   */
+  getWatchDispatchRegistry(): WatchDispatchRegistry {
+    return this.watchDispatch;
   }
 
   /**
@@ -5142,6 +5177,7 @@ export class KairosRPCHandler {
     });
 
     this.registerFleetHandlers();
+    this.registerWatchDispatchHandlers();
   }
 
   // ── F15: Multi-agent fleet view RPCs ──────────────────────
@@ -5225,6 +5261,82 @@ export class KairosRPCHandler {
         snapshots: [seed],
         closed: false,
       };
+    });
+  }
+
+  // ── F12: Apple Watch new-task dispatch RPCs ────────────────
+  //
+  // Per docs/internal/CROSS_SURFACE_SYNERGY_DESIGN.md §Flow 3, the Watch
+  // already has APPROVE primitives (F1) but cannot DISPATCH a new task.
+  // F12 exposes two endpoints:
+  //
+  //   - watch.templates  — list registered dispatch templates (filterable
+  //                        by an opaque policy payload forwarded to the
+  //                        registry's list() filter)
+  //   - watch.dispatch   — create a new ComputerSession from a template,
+  //                        validating slot schema, enforcing per-device
+  //                        rate limit, and auto-claiming on creation.
+  //
+  // iOS/watchOS-side WCSession plumbing is OUT OF SCOPE for F12 — this
+  // surface is the server-side primitive the mobile team will wire to.
+  private registerWatchDispatchHandlers(): void {
+    this.handlers.set("watch.templates", async (params) => {
+      // Optional `policyTags` forwarded for caller-side filtering. An
+      // empty list filters nothing; a non-empty list retains templates
+      // that either have no policyTags or whose tags intersect.
+      const rawTags = (params as Record<string, unknown>)["policyTags"];
+      const tags = Array.isArray(rawTags)
+        ? (rawTags as unknown[]).filter((v): v is string => typeof v === "string")
+        : null;
+      const filter = tags
+        ? (t: DispatchTemplate): boolean => {
+            const tTags = (t as DispatchTemplate & { policyTags?: readonly string[] }).policyTags;
+            if (!tTags || tTags.length === 0) return true;
+            return tTags.some((tag) => tags.includes(tag));
+          }
+        : undefined;
+      const list = this.watchDispatch.list(filter);
+      return {
+        templates: list.map((t) => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          slots: t.slots.map((s) => ({
+            name: s.name,
+            type: s.type,
+            required: s.required,
+            prompt: s.prompt ?? null,
+            maxLength: s.maxLength ?? null,
+          })),
+          defaults: t.defaults,
+        })),
+      };
+    });
+
+    this.handlers.set("watch.dispatch", async (params) => {
+      const templateId = params["templateId"];
+      const deviceId = params["deviceId"];
+      const slotsIn = params["slots"];
+      if (typeof templateId !== "string" || templateId.trim() === "") {
+        throw new Error("templateId (non-empty string) required");
+      }
+      if (typeof deviceId !== "string" || deviceId.trim() === "") {
+        throw new Error("deviceId (non-empty string) required");
+      }
+      const slots: Record<string, unknown> =
+        slotsIn && typeof slotsIn === "object" && !Array.isArray(slotsIn)
+          ? (slotsIn as Record<string, unknown>)
+          : {};
+      try {
+        const session = this.watchDispatch.dispatch({
+          templateId,
+          slots,
+          deviceId,
+        });
+        return { session: serializeSession(session) };
+      } catch (err) {
+        throw toRpcError(err);
+      }
     });
   }
 
