@@ -65,6 +65,7 @@ import {
   CHECKPOINT_VERSION,
   type AutopilotCheckpoint,
 } from "../autopilot/checkpoint.js";
+import { PhasedExecutor, type PhasedExecutorState } from "./phased-executor.js";
 
 export interface AutonomousConfig {
   readonly maxCycles: number;
@@ -236,6 +237,29 @@ const DEFAULT_CIRCUIT_BREAKER: CircuitBreakerState = {
   tripped: false,
 };
 
+/**
+ * Canonical per-cycle phases for AutonomousExecutor (P2 unification).
+ * Each autonomous cycle walks these in strict order:
+ *   plan     — select strategy, build prompt (oracle guidance, context guard)
+ *   execute  — run the supplied executor callback
+ *   verify   — run tests/typecheck/lint
+ *   recover  — on failure, build recovery prompt for the next cycle
+ *
+ * These names are the contract that phase-aware tooling (phase-gate,
+ * plateau detector, dual-persona reviewer, long-horizon orchestrator) can
+ * consult to align their behaviour with what autonomous.ts is actually
+ * doing. The executor owns the handlers; phased execution is a view over
+ * the existing cycle machinery, not a replacement.
+ */
+export const AUTONOMOUS_CYCLE_PHASES = ["plan", "execute", "verify", "recover"] as const;
+export type AutonomousCyclePhase = (typeof AUTONOMOUS_CYCLE_PHASES)[number];
+
+/** Lightweight context threaded through AutonomousExecutor's PhasedExecutor view. */
+interface AutonomousPhasedContext {
+  readonly cycle: number;
+  readonly strategy: Strategy;
+}
+
 export class AutonomousExecutor {
   private readonly config: AutonomousConfig;
   private modeState: AutonomousModeState | null = null;
@@ -247,12 +271,47 @@ export class AutonomousExecutor {
   /** Optional progress callback for background agent streaming */
   private readonly onProgress?: (progress: AutonomousProgress) => void;
 
+  /**
+   * PhasedExecutor view over the per-cycle phases. Not used to drive the
+   * actual cycle (the existing execute() loop stays in charge), but
+   * exposes the canonical phase set + transition validation via
+   * getPhasedState() so phase-aware tooling and UI can align with what
+   * autonomous.ts is doing.
+   */
+  private readonly cyclePhaseExecutor: PhasedExecutor<
+    AutonomousCyclePhase,
+    AutonomousPhasedContext
+  >;
+
   constructor(
     config?: Partial<AutonomousConfig>,
     onProgress?: (progress: AutonomousProgress) => void,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.onProgress = onProgress;
+    this.cyclePhaseExecutor = new PhasedExecutor({
+      phases: AUTONOMOUS_CYCLE_PHASES,
+      handlers: {
+        plan: async (ctx) => ctx,
+        execute: async (ctx) => ctx,
+        verify: async (ctx) => ctx,
+        recover: async (ctx) => ctx,
+      },
+    });
+  }
+
+  /**
+   * Expose the canonical per-cycle phase list + observable state from the
+   * underlying PhasedExecutor. Part of the P2 unification — every phased
+   * orchestrator exposes this accessor.
+   */
+  getPhasedState(): PhasedExecutorState<AutonomousCyclePhase> {
+    return this.cyclePhaseExecutor.observableState();
+  }
+
+  /** Return the canonical per-cycle phase ordering. */
+  getCyclePhases(): readonly AutonomousCyclePhase[] {
+    return this.cyclePhaseExecutor.getPhases();
   }
 
   /** Enter autonomous mode (for mode cycling — Ctrl+A) */
