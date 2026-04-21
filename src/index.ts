@@ -5542,6 +5542,57 @@ acpCmd
     );
   });
 
+// P1-C10: publish WOTANN's own agent.json into the Zed/JetBrains/Air
+// ACP registry. Inverse of `list/install/refresh` (which CONSUMES the
+// registry). See docs/internal/RESEARCH_CONDUCTOR_JEAN_ZED_PLUS.md §3.3.
+acpCmd
+  .command("register")
+  .description("Publish WOTANN's agent.json to the Zed/JetBrains/Air ACP registry")
+  .option("--registry-url <url>", "Registry endpoint to POST the manifest to")
+  .option(
+    "--registry-token <token>",
+    "Bearer token for the registry (ignored without --registry-url)",
+  )
+  .option(
+    "--manifest-out <path>",
+    "Override where to write the manifest (default: ./wotann-acp/agent.json)",
+  )
+  .option("--package-json <path>", "Override path to package.json (default: ./package.json)")
+  .option("--id <id>", "Override the manifest id (default: kebab-case of package name)")
+  .option("--description <text>", "Override the manifest description")
+  .option("--icon <url>", "Icon URL for the registry UI")
+  .option("--dry-run", "Build + validate + print without touching disk or network", false)
+  .action(
+    async (opts: {
+      registryUrl?: string;
+      registryToken?: string;
+      manifestOut?: string;
+      packageJson?: string;
+      id?: string;
+      description?: string;
+      icon?: string;
+      dryRun?: boolean;
+    }) => {
+      const { runAcpRegisterCommand } = await import("./cli/commands/acp-register.js");
+      const result = await runAcpRegisterCommand({
+        ...(opts.registryUrl !== undefined ? { registryUrl: opts.registryUrl } : {}),
+        ...(opts.registryToken !== undefined ? { registryToken: opts.registryToken } : {}),
+        ...(opts.manifestOut !== undefined ? { manifestOut: opts.manifestOut } : {}),
+        ...(opts.packageJson !== undefined ? { packageJsonPath: opts.packageJson } : {}),
+        ...(opts.id !== undefined ? { id: opts.id } : {}),
+        ...(opts.description !== undefined ? { description: opts.description } : {}),
+        ...(opts.icon !== undefined ? { icon: opts.icon } : {}),
+        ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
+      });
+      for (const line of result.lines) {
+        console.log(line);
+      }
+      if (!result.success) {
+        process.exit(1);
+      }
+    },
+  );
+
 // ── wotann import-design ───────────────────────────────────
 // F7: Receiver for Claude Design handoff bundles (Anthropic Labs, 2026-04-17).
 
