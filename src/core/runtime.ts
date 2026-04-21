@@ -32,6 +32,7 @@ import { buildStablePrefix } from "../memory/stable-prefix.js";
 import { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
 import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pipeline.js";
 import { assembleSystemPromptParts, wrapPromptWithThinkInCode } from "../prompt/engine.js";
+import { stripIsoTimestampsFromPrompt } from "../prompt/system-prompt.js";
 import { canBypass, executeBypass } from "../utils/wasm-bypass.js";
 import { CostTracker } from "../telemetry/cost-tracker.js";
 import { ToolTimingLogger, ToolTimingBaseline } from "../tools/tool-timing.js";
@@ -1710,12 +1711,21 @@ export class WotannRuntime {
     // snapshot (git HEAD/branch/dirty, tree, filtered env, services,
     // log tail, lockfile shas). Cached for the session lifetime. Opt
     // out with `skipBootstrapSnapshot: true` for benchmark runs.
+    //
+    // P1-B8 KV-cache timestamp safety: the snapshot formatter injects
+    // `Captured: <ISO>` into the prompt, which would drift sub-second
+    // and kill the provider-side prefix cache across adjacent-session
+    // boundaries. We post-process via `stripIsoTimestampsFromPrompt`
+    // so every `YYYY-MM-DDTHH:MM:SS.sssZ` collapses to its date-only
+    // prefix in the prompt rendering. The snapshot's raw `capturedAt`
+    // Date on disk stays full-precision — only the cacheable prompt
+    // emission is date-sliced.
     try {
       const snapshot = await this.bootstrapCache.getOrCapture({
         workspaceRoot: this.config.workingDir,
         bypass: this.config.skipBootstrapSnapshot === true,
       });
-      this.bootstrapPrompt = formatSnapshotForPrompt(snapshot);
+      this.bootstrapPrompt = stripIsoTimestampsFromPrompt(formatSnapshotForPrompt(snapshot));
     } catch {
       // Never crash agent init if bootstrap capture itself throws
       // (honest failure: leave the prompt section empty, log nothing

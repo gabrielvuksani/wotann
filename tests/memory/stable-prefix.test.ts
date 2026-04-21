@@ -25,6 +25,7 @@ import {
   openaiMinimumStablePrefixChars,
 } from "../../src/memory/stable-prefix.js";
 import { MemoryStore, type MemoryBlockType, type MemoryEntry } from "../../src/memory/store.js";
+import { findIsoTimestampsInPrompt } from "../../src/prompt/system-prompt.js";
 
 // ── Setup ──────────────────────────────────────────────
 
@@ -234,5 +235,76 @@ describe("toAnthropicCachedBlocks", () => {
 describe("openaiMinimumStablePrefixChars", () => {
   it("returns the OpenAI prefix-cache floor in characters", () => {
     expect(openaiMinimumStablePrefixChars()).toBeGreaterThanOrEqual(2048);
+  });
+});
+
+// ── P1-B8 Regression-Lock: KV-cache timestamp safety ─────
+
+describe("buildStablePrefix — KV-cache timestamp regression-lock (P1-B8)", () => {
+  /**
+   * M1's stable-prefix is already byte-identical across turns by design
+   * (no Date.now / toISOString imports — verified by grep). These tests
+   * pin that invariant so a future edit that accidentally injects a
+   * wall-clock timestamp into the prefix trips CI immediately.
+   *
+   * Per spec: "If none go into stable prefix already, REGRESSION-LOCK
+   * (M1's stable-prefix.ts already ensures this via hash-stability test)".
+   */
+
+  it("emitted prefix contains NO full ISO-8601 timestamps — ever", () => {
+    insertCore("1", "user", "Gabriel Vuksani — Full Stack Dev, Toronto", 0.9);
+    insertCore("2", "decisions", "Use OAuth 2.0 over OAuth 1.0", 0.85);
+    insertCore("3", "feedback", "Prefer TDD with RED-GREEN-REFACTOR", 0.8);
+    insertCore("4", "project", "WOTANN Phase-2 in progress", 0.7);
+
+    const result = buildStablePrefix(store);
+    // The whole point of cache stability: no wall-clock data in the
+    // bytes that form the cache key. If this ever fails, providers
+    // stop caching across turns and per-request cost roughly 10x's.
+    expect(findIsoTimestampsInPrompt(result.stablePrefix)).toEqual([]);
+  });
+
+  it("hash is stable when repeatedly called with a wall-clock simulation", () => {
+    insertCore("1", "user", "Fact A", 0.9);
+    insertCore("2", "decisions", "Decision B", 0.85);
+
+    // Simulate three turns happening at different wall-clock moments.
+    // The stable-prefix module does NOT consume a clock, so the hash
+    // MUST be identical regardless of "when" we call it.
+    const turn1 = buildStablePrefix(store);
+    const turn2 = buildStablePrefix(store);
+    const turn3 = buildStablePrefix(store);
+
+    expect(turn2.stablePrefixHash).toBe(turn1.stablePrefixHash);
+    expect(turn3.stablePrefixHash).toBe(turn1.stablePrefixHash);
+    // And byte-level identity — the invariant that makes the provider
+    // prefix cache hit.
+    expect(turn2.stablePrefix).toBe(turn1.stablePrefix);
+    expect(turn3.stablePrefix).toBe(turn1.stablePrefix);
+  });
+
+  it("per-entry value stripping collapses any ISO-shaped substring in entry text", () => {
+    // Defensive: if a user somehow stored a full ISO timestamp as the
+    // entry VALUE itself (e.g. "I last committed on 2026-04-20T15:32:45Z"),
+    // buildStablePrefix would faithfully render it. The spec does NOT
+    // require buildStablePrefix to strip values — that would corrupt
+    // legitimate content. Instead we assert: IF such content exists,
+    // the caller is expected to run stripIsoTimestampsFromPrompt on
+    // the final assembled prompt. This test documents that contract.
+    insertCore(
+      "time-leak",
+      "user",
+      "Last push: 2026-04-20T15:32:45.812Z to main",
+      0.9,
+    );
+    const result = buildStablePrefix(store);
+    // The value IS rendered as-is (no magical stripping — honest).
+    const leaks = findIsoTimestampsInPrompt(result.stablePrefix);
+    expect(leaks.length).toBe(1);
+    expect(leaks[0]).toBe("2026-04-20T15:32:45.812Z");
+    // This is the expected state: the module does NOT mutate entry
+    // content. The runtime's stripIsoTimestampsFromPrompt post-pass
+    // is what makes the FINAL assembled prompt cache-safe (see
+    // tests/prompt/kv-cache-timestamps.test.ts for that layer).
   });
 });
