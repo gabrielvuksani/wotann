@@ -759,6 +759,46 @@ export class ComputerSessionStore {
     return filtered.sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  /**
+   * List sessions whose active device (claimant if claimed, else creator)
+   * matches the predicate. Added for F15 (fleet view) so surface-scoped
+   * filters can live on the store and benefit from future indexing without
+   * requiring callers to replicate the "active device" logic.
+   *
+   * Pure read — no side effects, returns a fresh readonly array sorted by
+   * createdAt (oldest first) to match `list()`'s conventions.
+   */
+  listByActiveDevice(predicate: (deviceId: string) => boolean): readonly Session[] {
+    const values = [...this.sessions.values()];
+    const filtered = values.filter((s) => {
+      const active = s.claimedByDeviceId ?? s.creatorDeviceId;
+      return predicate(active);
+    });
+    return filtered.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /**
+   * Count sessions grouped by status. Zero-fills every status key so
+   * callers can index without guards. Added for F15's `fleet.summary`
+   * lightweight RPC — cheaper than serializing the full list over the
+   * wire when only counts are needed (watch / carplay / badge UIs).
+   */
+  countByStatus(): Readonly<Record<SessionStatus, number>> {
+    const counts: Record<SessionStatus, number> = {
+      pending: 0,
+      claimed: 0,
+      running: 0,
+      awaiting_approval: 0,
+      handed_off: 0,
+      done: 0,
+      failed: 0,
+    };
+    for (const s of this.sessions.values()) {
+      counts[s.status] += 1;
+    }
+    return counts;
+  }
+
   size(): number {
     return this.sessions.size;
   }
