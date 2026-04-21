@@ -3,7 +3,13 @@
  *
  * Parses specifications, generates implementation plans, executes phased work
  * (research -> implement -> test -> review -> ship), and tracks progress.
+ *
+ * P2 migration: the canonical phase ordering now lives in a PhasedExecutor
+ * instance (see phased-executor.ts). Public API preserved — `getPhases()`
+ * is added as the canonical single-source-of-truth for the phase list.
  */
+
+import { PhasedExecutor } from "./phased-executor.js";
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -112,6 +118,45 @@ export class SpecToShipPipeline {
     totalTasks: 0,
     percentComplete: 0,
   };
+
+  /**
+   * Lightweight context threaded through the PhasedExecutor view.
+   * Not used to drive actual execution (executePlan stays in charge);
+   * provides canonical phase ordering + transition validation for
+   * phase-aware tooling / telemetry.
+   */
+  private readonly phasedExecutor: PhasedExecutor<
+    PipelinePhase,
+    { readonly tasksVisited: readonly string[] }
+  >;
+
+  constructor() {
+    // Mirror PHASE_ORDER into the PhasedExecutor so both stay in lockstep.
+    // Handlers are no-ops because the real execution lives in executePlan()
+    // (phase loops + dep-checking + task runners). This gives us
+    // transition validation and observable state for free, without
+    // restructuring the execution machinery.
+    this.phasedExecutor = new PhasedExecutor({
+      phases: PHASE_ORDER,
+      handlers: {
+        research: async (ctx) => ctx,
+        implement: async (ctx) => ctx,
+        test: async (ctx) => ctx,
+        review: async (ctx) => ctx,
+        ship: async (ctx) => ctx,
+      },
+    });
+  }
+
+  /**
+   * Return the canonical phase ordering, sourced from PhasedExecutor.
+   * External consumers (UI, telemetry, progress reporters) can iterate
+   * this to render progress in the correct order. Part of the P2
+   * unification: every phased orchestrator exposes `getPhases()`.
+   */
+  getPhases(): readonly PipelinePhase[] {
+    return this.phasedExecutor.getPhases();
+  }
 
   /**
    * Parse a spec/requirements document into structured form.

@@ -237,4 +237,18 @@ describe("SpecToShipPipeline", () => {
       expect(progress.completedPhases.length).toBe(5);
     });
   });
+
+  describe("getPhases (P2 PhasedExecutor migration)", () => {
+    it("exposes canonical phase ordering via PhasedExecutor", () => {
+      const p = new SpecToShipPipeline();
+      expect(p.getPhases()).toEqual(["research", "implement", "test", "review", "ship"]);
+    });
+
+    it("getPhases() is stable across multiple calls (same instance)", () => {
+      const p = new SpecToShipPipeline();
+      const first = p.getPhases();
+      const second = p.getPhases();
+      expect(first).toEqual(second);
+    });
+  });
 });
