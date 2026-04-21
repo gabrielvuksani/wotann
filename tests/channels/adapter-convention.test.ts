@@ -9,8 +9,8 @@
  * (`EchoChannelAdapter`) out of 31 channel adapters (~3%). That
  * extender was itself "audit theater" — explicitly added only to
  * close the "BaseChannelAdapter has 0 extenders" finding
- * (see src/lib.ts:1351 prior to the deletion commit). The class's
- * API surface (`doConnect/doDisconnect/doSend` with `OutboundMessage`
+ * (see src/lib.ts before the deletion commit). The class's API
+ * surface (`doConnect/doDisconnect/doSend` with `OutboundMessage`
  * carrying `recipientId`) is incompatible with both production
  * `ChannelAdapter` interfaces (`adapter.ts` and `gateway.ts`), so
  * no real adapter could migrate without a full rewrite.
@@ -19,16 +19,19 @@
  *   1. Real adapters implement one of the two blessed ChannelAdapter
  *      interfaces from `adapter.ts` (start/stop/isConnected) or
  *      `gateway.ts` (connect/disconnect/connected).
- *   2. `base-adapter.ts` and `echo-channel-adapter.ts` are absent —
- *      preventing re-introduction without deliberate decision.
- *   3. `lib.ts` no longer re-exports `BaseChannelAdapter` /
- *      `EchoChannelAdapter`.
+ *   2. The deleted modules are not re-committed — verified via
+ *      `git ls-files`, which is authoritative against the repo
+ *      index (and immune to ShadowGit test-setup resurrection of
+ *      untracked copies on disk).
+ *   3. `src/lib.ts` no longer re-exports the removed symbols.
+ *   4. No TRACKED source file in src/channels/ imports the removed
+ *      modules — deletion firewall against re-introduction.
  */
 
 import { describe, it, expect } from "vitest";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 
 // Sample representative adapters from both blessed paths:
 import { SlackAdapter } from "../../src/channels/slack.js";
@@ -40,23 +43,51 @@ import { WebhookAdapter } from "../../src/channels/webhook.js";
 
 const REPO_ROOT = join(__dirname, "..", "..");
 
+/**
+ * Read the repo's tracked-files set. This is the authoritative
+ * "what's committed" answer — ShadowGit may resurrect deleted
+ * files as UNTRACKED copies during test runs (it snapshots the
+ * workspace for checkpoint/restore), so disk-existsSync is not
+ * a reliable source of truth. git ls-files only lists paths in
+ * the index.
+ *
+ * Uses execFileSync (no shell) for safety — no user input is
+ * involved but this matches the repo's security convention.
+ */
+function trackedFiles(): Set<string> {
+  const raw = execFileSync("git", ["ls-files"], {
+    cwd: REPO_ROOT,
+    encoding: "utf-8",
+  });
+  return new Set(raw.split("\n").filter(Boolean));
+}
+
 describe("channel adapter convention — post-base-adapter deletion", () => {
-  it("BaseChannelAdapter source file is absent", () => {
-    const baseAdapterPath = join(REPO_ROOT, "src/channels/base-adapter.ts");
-    expect(existsSync(baseAdapterPath)).toBe(false);
+  it("src/channels/base-adapter.ts is not tracked by git", () => {
+    const tracked = trackedFiles();
+    expect(tracked.has("src/channels/base-adapter.ts")).toBe(false);
   });
 
-  it("EchoChannelAdapter source file is absent", () => {
-    const echoPath = join(REPO_ROOT, "src/channels/echo-channel-adapter.ts");
-    expect(existsSync(echoPath)).toBe(false);
+  it("src/channels/echo-channel-adapter.ts is not tracked by git", () => {
+    const tracked = trackedFiles();
+    expect(tracked.has("src/channels/echo-channel-adapter.ts")).toBe(false);
   });
 
-  it("lib.ts does not re-export BaseChannelAdapter or EchoChannelAdapter", async () => {
+  it("tests/channels/echo-channel-adapter.test.ts is not tracked by git", () => {
+    const tracked = trackedFiles();
+    expect(tracked.has("tests/channels/echo-channel-adapter.test.ts")).toBe(false);
+  });
+
+  it("src/lib.ts does not re-export BaseChannelAdapter or EchoChannelAdapter", async () => {
     const libContent = await readFile(join(REPO_ROOT, "src/lib.ts"), "utf-8");
-    expect(libContent).not.toMatch(/BaseChannelAdapter/);
-    expect(libContent).not.toMatch(/EchoChannelAdapter/);
-    expect(libContent).not.toMatch(/base-adapter/);
-    expect(libContent).not.toMatch(/echo-channel-adapter/);
+    // No exports and no imports of the removed modules. We tolerate the
+    // word appearing inside an intentional `// removed:` comment by
+    // checking for actual `export {...BaseChannelAdapter...}` statements
+    // and `from "./channels/base-adapter"` import specifiers.
+    expect(libContent).not.toMatch(/export\s*\{[^}]*BaseChannelAdapter/);
+    expect(libContent).not.toMatch(/export\s*\{[^}]*EchoChannelAdapter/);
+    expect(libContent).not.toMatch(/from\s+["'][^"']*channels\/base-adapter/);
+    expect(libContent).not.toMatch(/from\s+["'][^"']*channels\/echo-channel-adapter/);
   });
 
   it("Slack, Telegram, Discord conform to the adapter.ts ChannelAdapter shape", () => {
@@ -103,28 +134,26 @@ describe("channel adapter convention — post-base-adapter deletion", () => {
     }
   });
 
-  it("no source file in src/channels/ or src/lib.ts imports from base-adapter or echo-channel-adapter", async () => {
-    // Targeted scan of the only dirs that ever referenced these modules.
-    // A broad glob would be wider but pulls in extra deps; a focused
-    // readdir is sufficient because external callers never imported
-    // these modules — they were re-exported from src/lib.ts only.
-    const { readdir } = await import("node:fs/promises");
+  it("no tracked source file imports from base-adapter or echo-channel-adapter", async () => {
+    // Scan only git-tracked .ts files in src/channels/ + src/lib.ts.
+    // Using the tracked set filters out ShadowGit-resurrected untracked
+    // copies that a disk walk would pick up.
+    const tracked = trackedFiles();
     const targets: string[] = [];
-    const channelsDir = join(REPO_ROOT, "src/channels");
-    for (const entry of await readdir(channelsDir)) {
-      if (entry.endsWith(".ts")) targets.push(join(channelsDir, entry));
+    for (const rel of tracked) {
+      if (rel === "src/lib.ts") targets.push(rel);
+      else if (rel.startsWith("src/channels/") && rel.endsWith(".ts")) targets.push(rel);
     }
-    targets.push(join(REPO_ROOT, "src/lib.ts"));
 
     const offenders: string[] = [];
-    for (const abs of targets) {
-      const content = await readFile(abs, "utf-8");
+    for (const rel of targets) {
+      const content = await readFile(join(REPO_ROOT, rel), "utf-8");
       // Match `from "./base-adapter"`, `from "./base-adapter.js"`, etc.
       if (/from\s+["'][^"']*\/base-adapter(\.js)?["']/.test(content)) {
-        offenders.push(`${abs}: imports base-adapter`);
+        offenders.push(`${rel}: imports base-adapter`);
       }
       if (/from\s+["'][^"']*\/echo-channel-adapter(\.js)?["']/.test(content)) {
-        offenders.push(`${abs}: imports echo-channel-adapter`);
+        offenders.push(`${rel}: imports echo-channel-adapter`);
       }
     }
     expect(offenders, `Stale imports after deletion:\n${offenders.join("\n")}`).toEqual([]);
