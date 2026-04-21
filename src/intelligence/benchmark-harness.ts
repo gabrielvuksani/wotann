@@ -38,6 +38,7 @@ import {
   type TauBenchDomain,
 } from "./benchmark-runners/tau-bench.js";
 import { majorityAnswer } from "../orchestration/council.js";
+import { answersEqual, normalizeAnswer } from "./answer-normalizer.js";
 
 // -- Types -------------------------------------------------------------------
 
@@ -469,7 +470,13 @@ export class BenchmarkHarness {
         responses.push(acc);
       }
       const { answer, confidence } = majorityAnswer(responses);
-      const passed = answer.toLowerCase().includes(test.expected.toLowerCase());
+      // Score via answer-normalizer (3-5% GAIA recovery): try canonical
+      // exact-match first, fall back to substring (prose containment).
+      const passed =
+        answersEqual(answer, test.expected, { lowercase: true }) ||
+        normalizeAnswer(answer, { lowercase: true }).includes(
+          normalizeAnswer(test.expected, { lowercase: true }),
+        );
       const score = passed ? test.maxScore : 0;
       details.push({ testId: test.id, passed, expected: test.expected, actual: answer, score });
       totalScore += score;

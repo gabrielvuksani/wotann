@@ -110,6 +110,14 @@ export {
   type ChannelHealth,
   type DispatchTask,
 } from "./channels/unified-dispatch.js";
+export {
+  parseTerminalMention,
+  buildTerminalAttachment,
+  inlineAttachment,
+  type TerminalSnapshot,
+  type TerminalAttachment,
+  type MentionParseResult,
+} from "./channels/terminal-mention.js";
 
 // ── Identity ─────────────────────────────────────────────
 export {
@@ -145,6 +153,11 @@ export {
   type AmbientSignalType,
 } from "./intelligence/ambient-awareness.js";
 export {
+  normalizeAnswer,
+  answersEqual,
+  type NormalizeOptions,
+} from "./intelligence/answer-normalizer.js";
+export {
   DeepResearchEngine,
   decomposeQuery,
   extractKeywords,
@@ -166,6 +179,17 @@ export {
   type CanvasHunk,
   type CanvasStats,
 } from "./ui/canvas.js";
+export {
+  buildReading as buildContextMeterReading,
+  renderRadialAscii as renderContextMeterRadial,
+  renderBreakdown as renderContextMeterBreakdown,
+  applyDelta as applyContextMeterDelta,
+  emptyBudget as emptyContextMeterBudget,
+  type ContextBudget,
+  type ContextCategory,
+  type ContextMeterReading,
+  type ContextSlice,
+} from "./ui/context-meter.js";
 
 // ── Marketplace ──────────────────────────────────────────
 // S5-3: MCPMarketplace removed — vaporware (hardcoded 5 entries, fake
@@ -199,6 +223,35 @@ export {
   type CoordinatorTask,
   type CoordinatorWorktree,
 } from "./orchestration/coordinator.js";
+export {
+  coordinateParallel,
+  defaultSynthesizer,
+  createLlmSynthesizer,
+  type AgentTask,
+  type AgentResult,
+  type CoordinatorConfig as ParallelCoordinatorConfig,
+  type AgentExecutor,
+  type Synthesizer,
+  type CoordinatedOutcome,
+} from "./orchestration/parallel-coordinator.js";
+export {
+  speculativeExecute,
+  type SpeculativeCandidate,
+  type SpeculativeConfig,
+  type SpeculativeResult,
+} from "./orchestration/speculative-execution.js";
+export {
+  validateScript as validateCodeModeScript,
+  substituteRefs as substituteCodeModeRefs,
+  executeScript as executeCodeModeScript,
+  type CodeModeScript,
+  type CodeModeStep,
+  type CodeModeExecution,
+  type StepResult as CodeModeStepResult,
+  type ValidationProblem as CodeModeValidationProblem,
+  type ToolRunner as CodeModeToolRunner,
+  type ExecuteOptions as CodeModeExecuteOptions,
+} from "./orchestration/code-mode.js";
 
 // ── Tools ────────────────────────────────────────────────
 export {
