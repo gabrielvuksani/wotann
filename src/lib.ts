@@ -1358,3 +1358,44 @@ export {
   type UnifiedContext,
   type ContextEvent,
 } from "./intelligence/cross-device-context.js";
+
+// ── P1-O — Workflows (Archon/Conductor DO_WHILE) ───────
+export {
+  parseWorkflow,
+  topoSort as workflowTopoSort,
+  runWorkflow,
+  interpolate as interpolateWorkflowTemplate,
+  evaluateCondition as evaluateWorkflowCondition,
+  type Workflow,
+  type WorkflowNode,
+  type WorkflowNodeKind,
+  type NodeResult,
+  type RunContext as WorkflowRunContext,
+  type WorkflowExecutors,
+  type WorkflowRunResult,
+} from "./workflows/workflow-runner.js";
+
+// ── P1-O — Budget Enforcer (Phase 4 Sprint B2) ─────────
+export {
+  BudgetEnforcer,
+  budgetForTier,
+  type BudgetConfig,
+  type BudgetSnapshot,
+  type StopReason as BudgetStopReason,
+  type CostReader,
+} from "./intelligence/budget-enforcer.js";
+
+// ── P1-O — Raven mascot state (C17) ─────────────────────
+export {
+  initialState as initialRavenState,
+  deriveMood as deriveRavenMood,
+  tick as tickRavenState,
+  nextDelayMs as nextRavenDelayMs,
+  renderAscii as renderRavenAscii,
+  RAVEN_TUNING,
+  type RavenState,
+  type RavenMood,
+  type RavenContext,
+  type EyeState,
+  type Facing,
+} from "./ui/raven/raven-state.js";

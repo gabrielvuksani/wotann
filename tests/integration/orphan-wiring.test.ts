@@ -150,3 +150,81 @@ describe("P1-O orphan wiring — benchmark-harness uses answer-normalizer", () =
     expect(wotann.answersEqual("```\nParis\n```", "Paris")).toBe(true);
   });
 });
+
+describe("P1-O batch 2 — additional orphan wiring", () => {
+  it("exports workflows/workflow-runner helpers", () => {
+    expect(typeof wotann.parseWorkflow).toBe("function");
+    expect(typeof wotann.workflowTopoSort).toBe("function");
+    expect(typeof wotann.runWorkflow).toBe("function");
+    expect(typeof wotann.interpolateWorkflowTemplate).toBe("function");
+    expect(typeof wotann.evaluateWorkflowCondition).toBe("function");
+  });
+
+  it("parses a small workflow YAML through the public API", () => {
+    const yaml = `
+name: test-flow
+nodes:
+  - id: a
+    kind: bash
+    bash: "echo hi"
+  - id: b
+    kind: prompt
+    prompt: "Use \${a} to continue"
+    depends_on: [a]
+`;
+    const wf = wotann.parseWorkflow(yaml);
+    expect(wf.name).toBe("test-flow");
+    expect(wf.nodes.length).toBe(2);
+    const sorted = wotann.workflowTopoSort(wf.nodes);
+    expect(sorted[0]!.id).toBe("a");
+    expect(sorted[1]!.id).toBe("b");
+  });
+
+  it("exports intelligence/budget-enforcer helpers", () => {
+    expect(typeof wotann.BudgetEnforcer).toBe("function");
+    expect(typeof wotann.budgetForTier).toBe("function");
+  });
+
+  it("BudgetEnforcer stops when wall-clock exhausted (smoke)", () => {
+    const budget = new wotann.BudgetEnforcer({ maxWallClockMs: 1 });
+    // Wait enough to exceed 1ms
+    const start = Date.now();
+    while (Date.now() - start < 5) {
+      // busy-wait a few ms
+    }
+    expect(budget.shouldStop()).toBe(true);
+  });
+
+  it("budgetForTier returns a usable enforcer for free vs sonnet", () => {
+    const free = wotann.budgetForTier("free", 60_000);
+    const sonnet = wotann.budgetForTier("sonnet", 60_000);
+    // Both should start non-stopped
+    expect(free.shouldStop()).toBe(false);
+    expect(sonnet.shouldStop()).toBe(false);
+  });
+
+  it("exports ui/raven-state helpers", () => {
+    expect(typeof wotann.initialRavenState).toBe("function");
+    expect(typeof wotann.deriveRavenMood).toBe("function");
+    expect(typeof wotann.tickRavenState).toBe("function");
+    expect(typeof wotann.renderRavenAscii).toBe("function");
+    expect(wotann.RAVEN_TUNING).toBeTypeOf("object");
+  });
+
+  it("raven-state transitions into thinking when tool is active", () => {
+    const initial = wotann.initialRavenState(0);
+    const next = wotann.tickRavenState(
+      initial,
+      {
+        idleMs: 0,
+        toolActive: true,
+        recentErrors: 0,
+        justCompleted: false,
+        listening: false,
+      },
+      100,
+    );
+    expect(next.mood).toBe("thinking");
+    expect(next.revision).toBe(initial.revision + 1);
+  });
+});
