@@ -49,6 +49,28 @@ export interface MemoryRelationship {
   readonly createdAt: number;
   /** Free-text rationale (e.g. "v2 supersedes v1 because of fine-print change"). */
   readonly rationale?: string;
+  /**
+   * Bi-temporal KNOWLEDGE-TIME axis (P1-M5, Zep/Graphiti port).
+   * ISO-8601 string. When the underlying fact became true in the real
+   * world. undefined on legacy rows — readers should default to createdAt.
+   */
+  readonly validFrom?: string;
+  /**
+   * Bi-temporal KNOWLEDGE-TIME axis. ISO-8601 string or null.
+   * null = fact is still true; undefined = unknown (legacy row).
+   */
+  readonly validTo?: string | null;
+  /**
+   * Bi-temporal INGEST-TIME axis (P1-M5, Zep/Graphiti port).
+   * ISO-8601 string. When WOTANN first recorded this edge. undefined on
+   * legacy rows — readers should default to createdAt.
+   */
+  readonly recordedFrom?: string;
+  /**
+   * Bi-temporal INGEST-TIME axis. ISO-8601 string or null.
+   * null = still known to WOTANN; undefined = unknown (legacy row).
+   */
+  readonly recordedTo?: string | null;
 }
 
 export interface RelationshipClassifier {
@@ -174,9 +196,7 @@ export function createLlmClassifier(query: LlmQuery): RelationshipClassifier {
  * JSON inside a fenced ```json block. Returns null on garbage or when
  * the model said "none".
  */
-export function parseClassifierResponse(
-  raw: string,
-): {
+export function parseClassifierResponse(raw: string): {
   readonly kind: MemoryRelationshipKind;
   readonly confidence: number;
   readonly rationale?: string;

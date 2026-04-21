@@ -67,6 +67,13 @@ import {
 import { EntitySchema, type Entity } from "./entity-types.js";
 import { createHeuristicClassifier, resolveLatest, partitionByKind } from "./relationship-types.js";
 import {
+  validateDate,
+  validateDateOrNull,
+  type BiTemporalEdge,
+  type BiTemporalInsertOptions,
+  type SnapshotQuery,
+} from "./bi-temporal-edges.js";
+import {
   IncrementalIndexer,
   computeContentSha,
   type IndexerOptions,
@@ -511,6 +518,41 @@ export class MemoryStore {
     this.db
       .prepare(
         `CREATE INDEX IF NOT EXISTS idx_kg_edges_temporal ON knowledge_edges(valid_from, valid_to)`,
+      )
+      .run();
+
+    // ── Bi-Temporal Ingest Axis Migration (Phase 2 P1-M5, Zep/Graphiti port) ──
+    // Adds the SECOND time axis to knowledge_edges. The knowledge-time
+    // axis (valid_from/valid_to) was wired in M7; this migration adds
+    // the ingest-time axis (recorded_from/recorded_to) so callers can
+    // answer "what did WOTANN know about X on date Y?". Legacy rows
+    // default recorded_from = created_at so they behave as if inserted
+    // at creation time; recorded_to stays null (still known). This is
+    // non-breaking — existing readers (getActiveEdgesAt, etc.) ignore
+    // the new columns.
+    this.migrateAddColumn(
+      "knowledge_edges",
+      "recorded_from",
+      "TEXT NOT NULL DEFAULT (datetime('now'))",
+    );
+    this.migrateAddColumn("knowledge_edges", "recorded_to", "TEXT");
+    this.db
+      .prepare(
+        `CREATE INDEX IF NOT EXISTS idx_kg_edges_recorded ON knowledge_edges(recorded_from, recorded_to)`,
+      )
+      .run();
+    // Back-fill legacy rows: set recorded_from = created_at where the
+    // ALTER TABLE default (datetime('now')) would otherwise stamp the
+    // migration time, not the original insert time. Only touches rows
+    // where recorded_from is equal to the default we just added (i.e.
+    // the ones we can't distinguish from genuine inserts). Safe because
+    // we only update when the stored value exceeds created_at — i.e.
+    // this row was materialized BEFORE the migration.
+    this.db
+      .prepare(
+        `UPDATE knowledge_edges
+         SET recorded_from = created_at
+         WHERE recorded_from > created_at`,
       )
       .run();
 
@@ -1239,14 +1281,206 @@ export class MemoryStore {
     validFrom?: string,
   ): string {
     const id = randomUUID();
+    const now = new Date().toISOString();
     this.db
       .prepare(
         `
-      INSERT INTO knowledge_edges (id, source_id, target_id, relation, weight, valid_from) VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO knowledge_edges (id, source_id, target_id, relation, weight, valid_from, recorded_from) VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
       )
-      .run(id, sourceId, targetId, relation, weight, validFrom ?? new Date().toISOString());
+      .run(id, sourceId, targetId, relation, weight, validFrom ?? now, now);
     return id;
+  }
+
+  // ── Bi-Temporal Edges (Phase 2 P1-M5, Zep/Graphiti port) ──
+
+  /**
+   * Insert a bi-temporal knowledge edge. Both axes are independent:
+   *   - valid_from / valid_to:     when the fact is true in the world
+   *   - recorded_from / recorded_to: when WOTANN knew the fact
+   *
+   * Defaults:
+   *   - valid_from     = options.validFrom ?? now
+   *   - valid_to       = options.validTo ?? null (still valid)
+   *   - recorded_from  = options.recordedFrom ?? now (set automatically
+   *                      on every insert — the "when WOTANN learned it"
+   *                      timestamp is typically right-now)
+   *   - recorded_to    = null (still known)
+   *
+   * Throws ValidationError on malformed dates.
+   */
+  addBiTemporalEdge(
+    sourceId: string,
+    targetId: string,
+    relation: string,
+    options: BiTemporalInsertOptions = {},
+  ): string {
+    const now = new Date().toISOString();
+    const validFrom = options.validFrom ? validateDate(options.validFrom, "validFrom") : now;
+    const validTo = validateDateOrNull(options.validTo ?? null, "validTo");
+    const recordedFrom = options.recordedFrom
+      ? validateDate(options.recordedFrom, "recordedFrom")
+      : now;
+    const weight = options.weight ?? 1.0;
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO knowledge_edges
+         (id, source_id, target_id, relation, weight, valid_from, valid_to, recorded_from, recorded_to)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(id, sourceId, targetId, relation, weight, validFrom, validTo, recordedFrom, null);
+    return id;
+  }
+
+  /**
+   * Retract an edge on the ingest-time axis (the fact is no longer
+   * known to WOTANN). Optionally also closes the knowledge-time axis
+   * when `factEndedAt` is supplied — use when WOTANN learns a fact was
+   * wrong AND knows when the fact stopped being true.
+   *
+   * The row is NOT deleted — historical queries (queryKnownAt(past))
+   * still see it. This preserves the "WOTANN knew this between dates
+   * X and Y" audit trail that Zep/Graphiti uses for knowledge updates.
+   */
+  retractBiTemporalEdge(
+    edgeId: string,
+    input: {
+      readonly retractedAt?: string;
+      readonly factEndedAt?: string | null;
+    } = {},
+  ): boolean {
+    const retractedAt = input.retractedAt ?? new Date().toISOString();
+    validateDate(retractedAt, "retractedAt");
+    if (input.factEndedAt !== undefined) {
+      const validTo = validateDateOrNull(input.factEndedAt, "factEndedAt");
+      const info = this.db
+        .prepare(
+          `UPDATE knowledge_edges
+           SET recorded_to = ?, valid_to = ?
+           WHERE id = ? AND recorded_to IS NULL`,
+        )
+        .run(retractedAt, validTo, edgeId);
+      return info.changes > 0;
+    }
+    const info = this.db
+      .prepare(
+        `UPDATE knowledge_edges
+         SET recorded_to = ?
+         WHERE id = ? AND recorded_to IS NULL`,
+      )
+      .run(retractedAt, edgeId);
+    return info.changes > 0;
+  }
+
+  /**
+   * Fetch a single bi-temporal edge by id. Returns null when missing.
+   * Handles legacy rows (null recorded_from) by falling back to
+   * created_at per the migration spec.
+   */
+  getBiTemporalEdge(edgeId: string): BiTemporalEdge | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, source_id, target_id, relation, weight,
+                valid_from, valid_to, recorded_from, recorded_to, created_at
+         FROM knowledge_edges WHERE id = ?`,
+      )
+      .get(edgeId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return rowToBiTemporalEdge(row);
+  }
+
+  /**
+   * Query edges that were VALID (true in the world) at `date`.
+   * Ignores the ingest-time axis entirely — even retracted edges are
+   * returned if they were valid at the given date.
+   */
+  queryValidAt(date: string): readonly BiTemporalEdge[] {
+    validateDate(date, "date");
+    const rows = this.db
+      .prepare(
+        `SELECT id, source_id, target_id, relation, weight,
+                valid_from, valid_to, recorded_from, recorded_to, created_at
+         FROM knowledge_edges
+         WHERE valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)`,
+      )
+      .all(date, date) as Record<string, unknown>[];
+    return rows.map(rowToBiTemporalEdge);
+  }
+
+  /**
+   * Query edges that WOTANN KNEW at `date` on the ingest-time axis.
+   * Ignores the knowledge-time axis — even edges that represent
+   * historical (no-longer-valid) facts are returned if WOTANN knew
+   * about them at the given date.
+   */
+  queryKnownAt(date: string): readonly BiTemporalEdge[] {
+    validateDate(date, "date");
+    const rows = this.db
+      .prepare(
+        `SELECT id, source_id, target_id, relation, weight,
+                valid_from, valid_to, recorded_from, recorded_to, created_at
+         FROM knowledge_edges
+         WHERE recorded_from <= ? AND (recorded_to IS NULL OR recorded_to > ?)`,
+      )
+      .all(date, date) as Record<string, unknown>[];
+    return rows.map(rowToBiTemporalEdge);
+  }
+
+  /**
+   * Query edges matching BOTH axes: the fact was true in the world at
+   * `validAt` AND WOTANN knew the fact at `knownAt`. This is the
+   * canonical Zep/Graphiti snapshot query — "what was WOTANN's picture
+   * of the world as of date X?".
+   */
+  querySnapshot(q: SnapshotQuery): readonly BiTemporalEdge[] {
+    validateDate(q.validAt, "validAt");
+    validateDate(q.knownAt, "knownAt");
+    const rows = this.db
+      .prepare(
+        `SELECT id, source_id, target_id, relation, weight,
+                valid_from, valid_to, recorded_from, recorded_to, created_at
+         FROM knowledge_edges
+         WHERE valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)
+           AND recorded_from <= ? AND (recorded_to IS NULL OR recorded_to > ?)`,
+      )
+      .all(q.validAt, q.validAt, q.knownAt, q.knownAt) as Record<string, unknown>[];
+    return rows.map(rowToBiTemporalEdge);
+  }
+
+  /**
+   * Replace an edge: invalidate the old one on BOTH axes (fact ended
+   * AND knowledge retracted) and insert a new edge carrying the
+   * successor fact. Returns the new edge id. This is the canonical
+   * Zep/Graphiti contradiction-handling flow: "we used to think X, now
+   * we think Y — the switchover happened at time T".
+   */
+  replaceBiTemporalEdge(
+    oldEdgeId: string,
+    input: {
+      readonly sourceId: string;
+      readonly targetId: string;
+      readonly relation: string;
+      readonly at?: string;
+      readonly weight?: number;
+    },
+  ): string | null {
+    const at = input.at ?? new Date().toISOString();
+    validateDate(at, "at");
+    const existing = this.getBiTemporalEdge(oldEdgeId);
+    if (!existing) return null;
+    const tx = this.db.transaction(() => {
+      this.retractBiTemporalEdge(oldEdgeId, {
+        retractedAt: at,
+        factEndedAt: at,
+      });
+      return this.addBiTemporalEdge(input.sourceId, input.targetId, input.relation, {
+        validFrom: at,
+        recordedFrom: at,
+        ...(input.weight !== undefined ? { weight: input.weight } : {}),
+      });
+    });
+    return tx();
   }
 
   /**
@@ -3396,6 +3630,39 @@ function blockTypeFromMemvid(category: string): MemoryBlockType {
   return (valid as readonly string[]).includes(category)
     ? (category as MemoryBlockType)
     : "reference";
+}
+
+/**
+ * Map a knowledge_edges row onto a BiTemporalEdge. Legacy rows that
+ * predate the P1-M5 migration may have null/empty recorded_from — fall
+ * back to created_at so the consumer always gets a populated axis.
+ */
+function rowToBiTemporalEdge(row: Record<string, unknown>): BiTemporalEdge {
+  const id = row["id"] as string;
+  const sourceId = row["source_id"] as string;
+  const targetId = row["target_id"] as string;
+  const relation = row["relation"] as string;
+  const weight = typeof row["weight"] === "number" ? (row["weight"] as number) : 1.0;
+  const createdAt = row["created_at"] as string | undefined;
+  const validFromRaw = row["valid_from"] as string | null | undefined;
+  const recordedFromRaw = row["recorded_from"] as string | null | undefined;
+  return {
+    id,
+    sourceId,
+    targetId,
+    relation,
+    weight,
+    validFrom:
+      validFromRaw && validFromRaw.length > 0
+        ? validFromRaw
+        : (createdAt ?? new Date(0).toISOString()),
+    validTo: (row["valid_to"] as string | null) ?? null,
+    recordedFrom:
+      recordedFromRaw && recordedFromRaw.length > 0
+        ? recordedFromRaw
+        : (createdAt ?? new Date(0).toISOString()),
+    recordedTo: (row["recorded_to"] as string | null) ?? null,
+  };
 }
 
 /**
