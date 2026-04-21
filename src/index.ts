@@ -431,6 +431,70 @@ program
     },
   );
 
+// ── wotann best-of-n (Cursor 3 /best-of-n port — P1-C6) ──────
+
+program
+  .command("best-of-n <prompt>")
+  .description("Run N parallel agent rollouts, critic-pick winner (leverages P1-B10 CriticRerank)")
+  .option("-n, --count <N>", "Number of parallel rollouts", "3")
+  .option("--provider <provider>", "Override provider for rollouts + critic")
+  .option("--isolate", "Run each rollout in its own git worktree")
+  .action(
+    async (prompt: string, options: { count?: string; provider?: string; isolate?: boolean }) => {
+      const { runBestOfN } = await import("./cli/commands/best-of-n.js");
+      const { llmQueryCritic } = await import("./intelligence/critic-model.js");
+      const { createRuntime } = await import("./core/runtime.js");
+      const { runRuntimeQuery } = await import("./cli/runtime-query.js");
+
+      const N = Math.max(1, parseInt(options.count ?? "3", 10) || 3);
+      const runtime = await createRuntime(process.cwd(), "default");
+
+      console.log(chalk.bold(`\n  best-of-${N}: "${prompt.slice(0, 60)}..."\n`));
+
+      try {
+        const result = await runBestOfN({
+          task: { task: prompt },
+          N,
+          isolate: options.isolate === true,
+          rollout: async (task, _idx) => {
+            const queryOpts: { prompt: string; provider?: ProviderName } = {
+              prompt: task.task,
+            };
+            if (options.provider) {
+              queryOpts.provider = options.provider as ProviderName;
+            }
+            const res = await runRuntimeQuery(runtime, queryOpts);
+            return {
+              output: res.output || res.errors.join("\n"),
+              metadata: {
+                model: res.model,
+                tokensUsed: res.tokensUsed,
+              },
+            };
+          },
+          critic: llmQueryCritic(async (critPrompt) => {
+            const queryOpts: { prompt: string; provider?: ProviderName } = {
+              prompt: critPrompt,
+            };
+            if (options.provider) {
+              queryOpts.provider = options.provider as ProviderName;
+            }
+            const res = await runRuntimeQuery(runtime, queryOpts);
+            return res.output || "";
+          }),
+        });
+        for (const line of result.lines) {
+          console.log(line);
+        }
+        if (!result.success) {
+          process.exit(1);
+        }
+      } finally {
+        runtime.close();
+      }
+    },
+  );
+
 // ── wotann cli-registry (C32) ────────────────────────────────
 
 program
