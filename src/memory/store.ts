@@ -126,6 +126,7 @@ import {
   type RetrievalModeResult,
   type RetrievalContext,
 } from "./retrieval-registry.js";
+import type { MemoryProvider } from "./pluggable-provider.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -300,7 +301,12 @@ export interface ConsolidationReport {
   readonly decisionLogged: number;
 }
 
-export class MemoryStore {
+export class MemoryStore implements MemoryProvider {
+  /** MemoryProvider contract: stable identifier for the SQLite + FTS5 backend. */
+  readonly name = "sqlite";
+  /** MemoryProvider contract: semver of the MemoryStore implementation. */
+  readonly version = "1.0.0";
+
   private readonly db: Database.Database;
   private readonly dbPath: string;
   /**
@@ -327,10 +333,21 @@ export class MemoryStore {
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
-    this.initialize();
+    this.initializeSchema();
   }
 
-  private initialize(): void {
+  /**
+   * MemoryProvider contract. Idempotent — schema is created in the
+   * constructor via `initializeSchema()`, so this is a no-op for
+   * already-constructed instances. Exposed for contract conformance
+   * with async backends that defer connection/table creation.
+   */
+  initialize(): void {
+    // Schema already created in constructor. Re-running is safe
+    // (all DDL is IF NOT EXISTS) but unnecessary.
+  }
+
+  private initializeSchema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS memory_entries (
         id TEXT PRIMARY KEY,
@@ -1091,6 +1108,76 @@ export class MemoryStore {
     `,
       )
       .run(id);
+  }
+
+  /**
+   * MemoryProvider contract: structured update of an existing entry.
+   * Builds a dynamic UPDATE with only the supplied fields, preserving
+   * every other column. Silent no-op when `updates` is empty or the id
+   * does not exist — matches `InMemoryProvider.update` semantics.
+   *
+   * NOTE: separate from `replace()` which is the legacy key/value-only
+   * mutation used by `memoryReplace()`. `update()` additionally supports
+   * `verified` and `confidence` columns required by the interface.
+   */
+  update(
+    id: string,
+    updates: { key?: string; value?: string; verified?: boolean; confidence?: number },
+  ): void {
+    const sets: string[] = [];
+    const params: (string | number | null)[] = [];
+    if (updates.key !== undefined) {
+      sets.push("key = ?");
+      params.push(updates.key);
+    }
+    if (updates.value !== undefined) {
+      sets.push("value = ?");
+      params.push(updates.value);
+    }
+    if (updates.verified !== undefined) {
+      sets.push("verified = ?");
+      params.push(updates.verified ? 1 : 0);
+    }
+    if (updates.confidence !== undefined) {
+      sets.push("confidence = ?");
+      params.push(updates.confidence);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    params.push(id);
+    this.db.prepare(`UPDATE memory_entries SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+  }
+
+  /**
+   * MemoryProvider contract: hard-delete by id. Distinct from
+   * `archive()` (soft-delete via the `archived` column). Hard-delete
+   * cascades to FTS5 shadow table via SQLite foreign-key triggers.
+   */
+  delete(id: string): void {
+    this.db.prepare(`DELETE FROM memory_entries WHERE id = ?`).run(id);
+  }
+
+  /**
+   * MemoryProvider contract: total count of non-archived entries.
+   * Thin alias over `getEntryCount()` so conforming callers have a
+   * stable name across providers.
+   */
+  count(): number {
+    return this.getEntryCount();
+  }
+
+  /**
+   * MemoryProvider contract: basic liveness probe. Issues a trivial
+   * `SELECT 1` to confirm the SQLite handle is open and responsive.
+   * Returns false on any exception rather than throwing.
+   */
+  healthCheck(): boolean {
+    try {
+      const row = this.db.prepare("SELECT 1 AS ok").get() as { ok: number } | undefined;
+      return row?.ok === 1;
+    } catch {
+      return false;
+    }
   }
 
   getById(id: string): MemoryEntry | null {

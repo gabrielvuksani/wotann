@@ -17,45 +17,68 @@ import type { MemoryEntry, MemorySearchResult, MemoryLayer, MemoryBlockType } fr
 
 // ── Provider Interface ──────────────────────────────────────
 
+/**
+ * MemoryProvider contract.
+ *
+ * Return types use `T | Promise<T>` so both synchronous backends
+ * (e.g. `MemoryStore` wrapping `better-sqlite3`, which is sync by
+ * design) and asynchronous backends (e.g. cloud/remote providers,
+ * `InMemoryProvider` written async-first) satisfy the same interface
+ * without forcing either dialect to convert. Callers that want a
+ * uniform async view can always `await` the return value — awaiting a
+ * non-promise value is a no-op.
+ */
 export interface MemoryProvider {
   readonly name: string;
   readonly version: string;
 
   /** Initialize the provider (create tables, connect, etc.) */
-  initialize(): Promise<void>;
+  initialize(): void | Promise<void>;
 
   /** Shutdown gracefully */
-  close(): Promise<void>;
+  close(): void | Promise<void>;
 
   /** Insert a memory entry */
-  insert(entry: Omit<MemoryEntry, "createdAt" | "updatedAt">): Promise<void>;
+  insert(entry: Omit<MemoryEntry, "createdAt" | "updatedAt">): void | Promise<void>;
 
   /** Update an existing entry */
-  update(id: string, updates: { key?: string; value?: string; verified?: boolean; confidence?: number }): Promise<void>;
+  update(
+    id: string,
+    updates: { key?: string; value?: string; verified?: boolean; confidence?: number },
+  ): void | Promise<void>;
 
   /** Get entry by ID */
-  getById(id: string): Promise<MemoryEntry | null>;
+  getById(id: string): (MemoryEntry | null) | Promise<MemoryEntry | null>;
 
   /** Get entries by layer */
-  getByLayer(layer: MemoryLayer, limit?: number): Promise<readonly MemoryEntry[]>;
+  getByLayer(
+    layer: MemoryLayer,
+    limit?: number,
+  ): readonly MemoryEntry[] | Promise<readonly MemoryEntry[]>;
 
   /** Get entries by block type */
-  getByBlock(blockType: MemoryBlockType, limit?: number): Promise<readonly MemoryEntry[]>;
+  getByBlock(
+    blockType: MemoryBlockType,
+    limit?: number,
+  ): readonly MemoryEntry[] | Promise<readonly MemoryEntry[]>;
 
   /** Full-text search */
-  search(query: string, limit?: number): Promise<readonly MemorySearchResult[]>;
+  search(
+    query: string,
+    limit?: number,
+  ): readonly MemorySearchResult[] | Promise<readonly MemorySearchResult[]>;
 
   /** Delete an entry */
-  delete(id: string): Promise<void>;
+  delete(id: string): void | Promise<void>;
 
   /** Archive an entry (soft delete) */
-  archive(id: string): Promise<void>;
+  archive(id: string): void | Promise<void>;
 
   /** Get total entry count */
-  count(): Promise<number>;
+  count(): number | Promise<number>;
 
   /** Check if provider is healthy */
-  healthCheck(): Promise<boolean>;
+  healthCheck(): boolean | Promise<boolean>;
 }
 
 // ── Provider Registry ───────────────────────────────────────
@@ -107,7 +130,10 @@ export class InMemoryProvider implements MemoryProvider {
     });
   }
 
-  async update(id: string, updates: { key?: string; value?: string; verified?: boolean; confidence?: number }): Promise<void> {
+  async update(
+    id: string,
+    updates: { key?: string; value?: string; verified?: boolean; confidence?: number },
+  ): Promise<void> {
     const existing = this.entries.get(id);
     if (!existing) return;
     this.entries.set(id, {
@@ -129,7 +155,10 @@ export class InMemoryProvider implements MemoryProvider {
       .slice(0, limit);
   }
 
-  async getByBlock(blockType: MemoryBlockType, limit: number = 100): Promise<readonly MemoryEntry[]> {
+  async getByBlock(
+    blockType: MemoryBlockType,
+    limit: number = 100,
+  ): Promise<readonly MemoryEntry[]> {
     return [...this.entries.values()]
       .filter((e) => e.blockType === blockType && !e.archived)
       .slice(0, limit);
@@ -138,7 +167,11 @@ export class InMemoryProvider implements MemoryProvider {
   async search(query: string, limit: number = 20): Promise<readonly MemorySearchResult[]> {
     const lower = query.toLowerCase();
     return [...this.entries.values()]
-      .filter((e) => !e.archived && (e.key.toLowerCase().includes(lower) || e.value.toLowerCase().includes(lower)))
+      .filter(
+        (e) =>
+          !e.archived &&
+          (e.key.toLowerCase().includes(lower) || e.value.toLowerCase().includes(lower)),
+      )
       .slice(0, limit)
       .map((entry) => ({
         entry,
@@ -292,7 +325,7 @@ export function calculateFreshness(
   const ageHours = (now - created) / (1000 * 60 * 60);
 
   // Exponential decay: half-life of 168 hours (1 week)
-  const decay = Math.exp(-0.693 * ageHours / 168);
+  const decay = Math.exp((-0.693 * ageHours) / 168);
 
   // Verification boost: verified memories decay 3x slower effectively
   const verificationBoost = verified ? 1.5 : 1.0;
@@ -301,7 +334,7 @@ export function calculateFreshness(
   let verificationFreshness = 1.0;
   if (verified && verifiedAt) {
     const verifiedAge = (now - new Date(verifiedAt).getTime()) / (1000 * 60 * 60);
-    verificationFreshness = Math.exp(-0.693 * verifiedAge / 336); // 2-week half-life
+    verificationFreshness = Math.exp((-0.693 * verifiedAge) / 336); // 2-week half-life
   }
 
   return Math.min(1.0, baseConfidence * decay * verificationBoost * verificationFreshness);
@@ -314,8 +347,18 @@ export function detectContradiction(
   newKey: string,
   newValue: string,
   existingEntries: readonly MemoryEntry[],
-): readonly { existingId: string; existingKey: string; existingValue: string; conflictType: "direct" | "indirect" }[] {
-  const contradictions: { existingId: string; existingKey: string; existingValue: string; conflictType: "direct" | "indirect" }[] = [];
+): readonly {
+  existingId: string;
+  existingKey: string;
+  existingValue: string;
+  conflictType: "direct" | "indirect";
+}[] {
+  const contradictions: {
+    existingId: string;
+    existingKey: string;
+    existingValue: string;
+    conflictType: "direct" | "indirect";
+  }[] = [];
 
   for (const existing of existingEntries) {
     // Direct conflict: same key, different value
