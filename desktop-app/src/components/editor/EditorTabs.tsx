@@ -2,7 +2,6 @@
  * Editor Tabs — multi-tab file editing with close, pin, drag reorder.
  */
 
-import { useCallback } from "react";
 import type { OpenFile } from "../../types";
 import { getLanguageFromPath } from "./MonacoEditor";
 import { color } from "../../design/tokens.generated";

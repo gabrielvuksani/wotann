@@ -70,7 +70,8 @@ export function PromptInput() {
   const [attachments, setAttachments] = useState<readonly AttachedFile[]>([]);
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
   const [showAtMenu, setShowAtMenu] = useState(false);
-  const [atQuery, setAtQuery] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [, setAtQuery] = useState("");
   const [atFiles, setAtFiles] = useState<string[]>([]);
   const [atIndex, setAtIndex] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);

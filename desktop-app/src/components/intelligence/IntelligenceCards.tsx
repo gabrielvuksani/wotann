@@ -19,10 +19,6 @@ import type {
   PWRStatus,
   AmbientStatus,
   Trigger,
-  DeviceContext,
-  IdleStatus,
-  SpecDivergence,
-  FileSearchResult,
 } from "./intelligenceUtils";
 
 // ── Health Score Card ─────────────────────────────────
