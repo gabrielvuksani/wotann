@@ -193,15 +193,93 @@ function toFtsQuery(message: string): string | null {
 }
 
 /**
+ * Recall-path configuration.
+ *   - useTempr: route through `memoryStore.temprSearch()` (4-channel
+ *     vector+bm25+entity+temporal). Heavier cost but stronger signal on
+ *     factual/entity-heavy prompts. Takes precedence over recallMode.
+ *   - recallMode: name of a registered retrieval mode on the store's
+ *     retrieval registry (e.g. "time-decay", "fuzzy-match"). When set
+ *     and TEMPR is off, recall dispatches through `searchWithMode`.
+ *   - Default (both unset): legacy FTS5 `store.search()` — the
+ *     zero-cost path that has always worked.
+ */
+export interface RecallOptions {
+  readonly useTempr?: boolean;
+  readonly recallMode?: string;
+}
+
+/**
  * For question messages, search memory for relevant prior facts /
  * preferences / decisions and format them as a context prefix the
  * runtime can prepend to the user prompt. Capped at 3 results to
  * avoid context-window pressure.
+ *
+ * When `opts.useTempr` is set, routes through `memoryStore.temprSearch()`
+ * (M4 — 4-channel vector+bm25+entity+temporal hybrid). When
+ * `opts.recallMode` is set (and TEMPR is off), routes through
+ * `memoryStore.searchWithMode()` (M6 — named retrieval modes like
+ * time-decay, fuzzy-match). Otherwise falls back to FTS5 `store.search()`
+ * — the default path. Any failure in the opt-in paths honestly falls
+ * back to FTS5 rather than returning null, so a misconfigured mode
+ * never kills recall entirely.
  */
-function recallContext(message: string, memoryStore: MemoryStore | null): string | null {
+async function recallContextAsync(
+  message: string,
+  memoryStore: MemoryStore | null,
+  opts: RecallOptions,
+): Promise<string | null> {
   if (!memoryStore) return null;
   const query = toFtsQuery(message);
   if (!query) return null;
+
+  // M4 TEMPR path — gated on opts.useTempr.
+  if (opts.useTempr) {
+    try {
+      const hits = await memoryStore.temprSearch(query, { topK: 3 });
+      const values: string[] = [];
+      for (const h of hits.hits) {
+        const value = h.entry?.value;
+        if (typeof value === "string" && value.length > 0) {
+          values.push(value);
+        }
+      }
+      if (values.length > 0) {
+        const formatted = values.map((v) => `- ${v.slice(0, 200)}`).join("\n");
+        return `[Active Memory recall (TEMPR) — ${values.length} relevant entries from prior sessions]\n${formatted}\n\n---\n\n`;
+      }
+      // Empty TEMPR result — fall through to FTS so we don't miss an
+      // answer that FTS could still find (e.g. no embedder configured).
+    } catch {
+      // TEMPR crashed — fall through to FTS. Honest degradation.
+    }
+  } else if (opts.recallMode) {
+    // M6 retrieval-mode path — gated on opts.recallMode.
+    try {
+      const result = await memoryStore.searchWithMode(opts.recallMode, query, { limit: 3 });
+      const values = result.results
+        .map((r) => (typeof r.content === "string" ? r.content : ""))
+        .filter((v) => v.length > 0);
+      if (values.length > 0) {
+        const formatted = values.map((v) => `- ${v.slice(0, 200)}`).join("\n");
+        return `[Active Memory recall (${opts.recallMode}) — ${values.length} relevant entries from prior sessions]\n${formatted}\n\n---\n\n`;
+      }
+      // Empty mode result — fall through to FTS.
+    } catch {
+      // Mode dispatch crashed — fall through to FTS. Honest degradation.
+    }
+  }
+
+  // Default FTS5 path.
+  return recallContextFtsDefault(query, memoryStore);
+}
+
+/**
+ * Legacy FTS5 recall — extracted so the TEMPR/mode paths can fall back
+ * to it without duplicating the logic. Kept exactly equivalent to the
+ * pre-wire implementation so existing callers observe no change when
+ * neither opt-in is set.
+ */
+function recallContextFtsDefault(query: string, memoryStore: MemoryStore): string | null {
   try {
     // MemoryStore.search() returns `readonly MemorySearchResult[]` where
     // each row is `{entry: MemoryEntry, score, snippet}` and the content
@@ -241,6 +319,10 @@ function recallContext(message: string, memoryStore: MemoryStore | null): string
  * runs before each user prompt to extract / recall in one synchronous
  * pass. Returns the classification + extracted observations + context
  * prefix the runtime should prepend to the next query.
+ *
+ * M4 + M6: `preprocessAsync()` is the async variant that supports
+ * TEMPR 4-channel recall and named retrieval-modes via RecallOptions.
+ * When both are off it behaves identically to `preprocess()`.
  */
 export class ActiveMemoryEngine {
   constructor(private readonly memoryStore: MemoryStore | null) {}
@@ -270,8 +352,58 @@ export class ActiveMemoryEngine {
     }
 
     // Recall is question-only.
+    let contextPrefix: string | null = null;
+    if (classification === "question" && this.memoryStore) {
+      const q = toFtsQuery(userMessage);
+      if (q) contextPrefix = recallContextFtsDefault(q, this.memoryStore);
+    }
+
+    return {
+      classification,
+      observations,
+      contextPrefix,
+      durationMs: Date.now() - start,
+    };
+  }
+
+  /**
+   * Async variant: supports M4 TEMPR + M6 named retrieval-modes.
+   * Returns an identical result shape as `preprocess()`, but routes
+   * recall through the opt-in backend when flags are set. Write-path
+   * behaviour (observation extraction + captureEvent) is unchanged.
+   *
+   * The runtime uses this when `config.useTempr` or `config.recallMode`
+   * is set. When both are unset, callers should prefer the cheaper
+   * synchronous `preprocess()` path.
+   */
+  async preprocessAsync(
+    userMessage: string,
+    sessionId?: string,
+    recallOpts: RecallOptions = {},
+  ): Promise<ActiveMemoryResult> {
+    const start = Date.now();
+    const classification = classifyMessage(userMessage);
+    const observations = extractObservations(userMessage, classification);
+
+    if (observations.length > 0 && this.memoryStore) {
+      try {
+        for (const obs of observations) {
+          this.memoryStore.captureEvent(
+            `active-memory-${obs.type}`,
+            obs.content,
+            "active-memory",
+            sessionId ?? "active-memory",
+          );
+        }
+      } catch {
+        /* honest fallback: never block on write failure */
+      }
+    }
+
     const contextPrefix =
-      classification === "question" ? recallContext(userMessage, this.memoryStore) : null;
+      classification === "question"
+        ? await recallContextAsync(userMessage, this.memoryStore, recallOpts)
+        : null;
 
     return {
       classification,
