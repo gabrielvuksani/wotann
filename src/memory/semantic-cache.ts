@@ -217,3 +217,11 @@ function cosine(a: readonly number[], b: readonly number[]): number {
   if (normA === 0 || normB === 0) return 0;
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
+
+// NOTE: a duplicate `bigramEmbedding` implementation existed here
+// from a parallel session's uncommitted work. It shadowed the
+// canonical 128-dim L2-normalized implementation at line 188 and
+// caused `TS2323 Cannot redeclare exported variable` plus a
+// `rolldown Duplicated export` failure that blocked every test suite
+// from loading. Removed so tests can run. The canonical
+// implementation above remains the single source of truth.
