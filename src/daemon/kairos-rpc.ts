@@ -110,6 +110,17 @@ import {
   ErrorSessionNotFound as CursorErrorSessionNotFound,
   type CursorAction,
 } from "../session/cursor-stream.js";
+import {
+  LiveActivityManager,
+  ErrorSessionNotFound as LiveActivityErrorSessionNotFound,
+  ErrorTitleTooLong as LiveActivityErrorTitleTooLong,
+  ErrorInvalidTitle as LiveActivityErrorInvalidTitle,
+  ErrorInvalidProgress as LiveActivityErrorInvalidProgress,
+  ErrorInvalidIcon as LiveActivityErrorInvalidIcon,
+  ErrorInvalidExpandedDetail as LiveActivityErrorInvalidExpandedDetail,
+  type StepUpdate as LiveActivityStepUpdate,
+  type ExpandedStep as LiveActivityExpandedStep,
+} from "../session/live-activity.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -283,6 +294,36 @@ function serializeDeliveryEvent(e: DeliveryEvent): Record<string, unknown> {
   return out;
 }
 
+// F3 — Live Activity step serializer. Emits both compact + expanded
+// payload shapes so iOS Dynamic Island can render the rolled view
+// without re-fetching. `icon` / `expandedDetail` are intentionally
+// omitted (rather than explicitly `undefined`) when the caller didn't
+// supply them so the wire payload stays tight.
+function serializeLiveActivityStep(step: LiveActivityExpandedStep): Record<string, unknown> {
+  const compact: Record<string, unknown> = {
+    sessionId: step.sessionId,
+    title: step.title,
+    progress: step.progress,
+  };
+  if (step.icon !== undefined) compact["icon"] = step.icon;
+
+  const expanded: Record<string, unknown> = {
+    sessionId: step.sessionId,
+    title: step.title,
+    progress: step.progress,
+    firstSeenAt: step.firstSeenAt,
+    lastUpdatedAt: step.lastUpdatedAt,
+  };
+  if (step.icon !== undefined) expanded["icon"] = step.icon;
+  if (step.expandedDetail !== undefined) expanded["expandedDetail"] = step.expandedDetail;
+
+  return {
+    sessionId: step.sessionId,
+    compact,
+    expanded,
+  };
+}
+
 function toRpcError(err: unknown): Error {
   if (err instanceof SessionNotFoundError) return err;
   if (err instanceof SessionAlreadyClaimedError) return err;
@@ -345,6 +386,15 @@ function toRpcError(err: unknown): Error {
   // `.code` (CURSOR_INVALID_COORDINATES / CURSOR_SESSION_NOT_FOUND).
   if (err instanceof CursorErrorInvalidCoordinates) return err;
   if (err instanceof CursorErrorSessionNotFound) return err;
+  // F3 — Live Activity errors. Preserve classes so JSON-RPC clients
+  // (iOS Dynamic Island + Watch complication + TUI HUD) discriminate
+  // on `.code` (LIVE_ACTIVITY_*) without parsing message bodies.
+  if (err instanceof LiveActivityErrorSessionNotFound) return err;
+  if (err instanceof LiveActivityErrorTitleTooLong) return err;
+  if (err instanceof LiveActivityErrorInvalidTitle) return err;
+  if (err instanceof LiveActivityErrorInvalidProgress) return err;
+  if (err instanceof LiveActivityErrorInvalidIcon) return err;
+  if (err instanceof LiveActivityErrorInvalidExpandedDetail) return err;
   if (err instanceof Error) return err;
   return new Error(String(err));
 }
@@ -937,6 +987,29 @@ export class KairosRPCHandler {
   // deterministic coverage.
   private readonly cursorStream = new CursorStream({ store: this.computerSessionStore });
 
+  // F3 — Live Activity manager. Sits on top of the F1 session store and
+  // rate-limits `step` updates to 1/sec per session for APNs budget. The
+  // per-session state (last-emit timestamp, stashed burst, current step)
+  // lives on the manager per QB #7. Broadcast is wired in setRuntime once
+  // the dispatch plane is available; without a plane the manager still
+  // records pending state so surfaces can pull via `liveActivity.pending`.
+  private readonly liveActivity = new LiveActivityManager({
+    store: this.computerSessionStore,
+  });
+  // Polling subscriptions follow the same shape as F6 approvals / F9
+  // delivery: NDJSON IPC can't carry long-lived push streams, so the
+  // client calls `liveActivity.subscribe` to seed a subscription id then
+  // polls with `{subscriptionId}` to drain buffered steps since the last
+  // poll.
+  private readonly liveActivitySubscriptions = new Map<
+    string,
+    {
+      readonly events: Array<Record<string, unknown>>;
+      readonly dispose: () => void;
+      lastPolledAt: number;
+    }
+  >();
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -1062,6 +1135,17 @@ export class KairosRPCHandler {
   }
 
   /**
+   * Test-visibility accessor for the F3 Live Activity manager. External
+   * callers route through `liveActivity.step` / `liveActivity.pending` /
+   * `liveActivity.subscribe` RPCs; this exposes the manager so tests can
+   * swap in a fake clock and deterministically exercise the 1-per-second
+   * rate-limit path without wall-clock dependence (QB #12).
+   */
+  getLiveActivity(): LiveActivityManager {
+    return this.liveActivity;
+  }
+
+  /**
    * Attach a WotannRuntime instance to route RPC calls to.
    */
   setRuntime(runtime: WotannRuntime): void {
@@ -1149,6 +1233,20 @@ export class KairosRPCHandler {
     } catch {
       // Dispatch plane not available — cursor emits still land on the
       // F1 event log; only cross-surface fan-out is skipped.
+    }
+    // F3 — hook the Live Activity manager into the dispatch plane. Each
+    // rate-limited step fans out as a UnifiedEvent{type:"step"} carrying
+    // both compact + expanded payload shapes so iOS Dynamic Island,
+    // Watch complication, TUI HUD can pick whichever they render.
+    // Best-effort identical to F2/F5/F6/F9 — tests without a plane still
+    // exercise the pending() / subscribe() paths for assertion.
+    try {
+      const plane = runtime.getDispatchPlane();
+      this.liveActivity.setBroadcast((ev) => plane.broadcastUnifiedEvent(ev));
+    } catch {
+      // Dispatch plane not available — liveActivity.pending() still
+      // returns the latest dispatched step; only cross-surface fan-out
+      // is skipped.
     }
     this.fileDelivery.setCreationExists(({ sessionId, filename }) => {
       return this.creationsStore.get({ sessionId, filename }) !== null;
@@ -5570,6 +5668,7 @@ export class KairosRPCHandler {
     this.registerApprovalHandlers();
     this.registerDeliveryHandlers();
     this.registerCursorHandlers();
+    this.registerLiveActivityHandlers();
   }
 
   // ── F2: Cursor stream RPCs (real-time coordinate events) ──
@@ -5722,6 +5821,135 @@ export class KairosRPCHandler {
         subscriptionId: subId,
         events: replay.map(serializeEvent),
         more: buffer.length > replay.length,
+        closed: false,
+      };
+    });
+  }
+
+  // ── F3: Live Activity RPCs (iOS Dynamic Island) ──────────
+  //
+  // Per MASTER_PLAN_V8 §5 P1-F3 (2 days), F1 already ships `step` as a
+  // valid SessionEvent type AND a valid UnifiedEventType. F3 adds a
+  // rate-limited marshaling layer (LiveActivityManager) on top so iOS
+  // Dynamic Island / Live Activities get a compact progress payload
+  // WITHOUT being flooded by raw step events (APNs budget).
+  //
+  //   - liveActivity.step       — enqueue a step update (title, progress,
+  //                               icon, expandedDetail). Rate-limited to
+  //                               1/sec per session; bursts newest-wins.
+  //   - liveActivity.pending    — current dispatched step per session
+  //                               (optional `sessionId` param; without,
+  //                               returns ALL active sessions' steps).
+  //   - liveActivity.subscribe  — polling subscription for steps emitted
+  //                               across every session. Mirrors the F6
+  //                               approvals.subscribe polling shape so
+  //                               iOS/CLI clients can reuse their
+  //                               subscription plumbing.
+  //
+  // Errors surface as JSON-RPC errors with typed `.code`:
+  //   LIVE_ACTIVITY_SESSION_NOT_FOUND, LIVE_ACTIVITY_TITLE_TOO_LONG,
+  //   LIVE_ACTIVITY_INVALID_PROGRESS, LIVE_ACTIVITY_INVALID_TITLE,
+  //   LIVE_ACTIVITY_INVALID_ICON, LIVE_ACTIVITY_INVALID_EXPANDED_DETAIL.
+  private registerLiveActivityHandlers(): void {
+    this.handlers.set("liveActivity.step", async (params) => {
+      const sessionId = params["sessionId"];
+      const title = params["title"];
+      const progress = params["progress"];
+      const icon = params["icon"];
+      const expandedDetail = params["expandedDetail"];
+
+      if (typeof sessionId !== "string" || sessionId.trim() === "") {
+        throw new Error("sessionId (non-empty string) required");
+      }
+      if (typeof title !== "string") {
+        throw new Error("title (string) required");
+      }
+      if (typeof progress !== "number") {
+        throw new Error("progress (number) required");
+      }
+
+      const update: LiveActivityStepUpdate = (() => {
+        const base = { sessionId, title, progress };
+        if (typeof icon === "string") {
+          if (typeof expandedDetail === "string") {
+            return { ...base, icon, expandedDetail };
+          }
+          return { ...base, icon };
+        }
+        if (typeof expandedDetail === "string") {
+          return { ...base, expandedDetail };
+        }
+        return base;
+      })();
+
+      try {
+        const outcome = this.liveActivity.step(update);
+        return { outcome };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+
+    this.handlers.set("liveActivity.pending", async (params) => {
+      const sessionIdParam = params["sessionId"];
+      if (typeof sessionIdParam === "string" && sessionIdParam.length > 0) {
+        const pending = this.liveActivity.pending(sessionIdParam);
+        return {
+          pending: pending ? [serializeLiveActivityStep(pending)] : [],
+        };
+      }
+      // No filter — return every active session's step.
+      const all = this.liveActivity.pendingAll();
+      return {
+        pending: all.map(serializeLiveActivityStep),
+      };
+    });
+
+    this.handlers.set("liveActivity.subscribe", async (params) => {
+      const subscriptionIdIn = params["subscriptionId"];
+      const closeAfter = params["close"] === true;
+      const maxEvents =
+        typeof params["maxEvents"] === "number" && (params["maxEvents"] as number) > 0
+          ? Math.min(params["maxEvents"] as number, 1000)
+          : 256;
+
+      // Poll path — drain buffered steps from an existing subscription.
+      if (typeof subscriptionIdIn === "string" && subscriptionIdIn.length > 0) {
+        const sub = this.liveActivitySubscriptions.get(subscriptionIdIn);
+        if (!sub) {
+          throw new Error(`subscription not found: ${subscriptionIdIn}`);
+        }
+        const drained = sub.events.splice(0, maxEvents);
+        sub.lastPolledAt = Date.now();
+        if (closeAfter) {
+          sub.dispose();
+          this.liveActivitySubscriptions.delete(subscriptionIdIn);
+        }
+        return {
+          subscriptionId: subscriptionIdIn,
+          events: drained,
+          more: sub.events.length > 0,
+          closed: closeAfter,
+        };
+      }
+
+      // Fresh subscription. Buffer grows as steps dispatch; poll drains.
+      const subId = `las-${randomUUID()}`;
+      const buffer: Array<Record<string, unknown>> = [];
+      const dispose = this.liveActivity.subscribe((step) => {
+        buffer.push(serializeLiveActivityStep(step));
+        // Hard cap to protect memory when a subscriber stops polling.
+        if (buffer.length > 10_000) buffer.splice(0, buffer.length - 10_000);
+      });
+      this.liveActivitySubscriptions.set(subId, {
+        events: buffer,
+        dispose,
+        lastPolledAt: Date.now(),
+      });
+      return {
+        subscriptionId: subId,
+        events: [],
+        more: false,
         closed: false,
       };
     });
