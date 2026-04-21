@@ -118,6 +118,14 @@ import {
   type TEMPRCandidate,
 } from "./tempr.js";
 import { createHeuristicCrossEncoder, type CrossEncoder } from "./cross-encoder.js";
+import {
+  createDefaultRetrievalRegistry,
+  type RetrievalRegistry,
+  type RetrievalMode,
+  type RetrievalModeOptions,
+  type RetrievalModeResult,
+  type RetrievalContext,
+} from "./retrieval-registry.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -3878,6 +3886,71 @@ export class MemoryStore {
       createdAt: (r["created_at"] as number) ?? 0,
       ...(r["rationale"] ? { rationale: r["rationale"] as string } : {}),
     }));
+  }
+
+  // ── Phase 2 P1-M6: retrieval-mode dispatcher ─────────────────
+  //
+  // Cognee exposes a menu of ~14 retrieval modes. WOTANN owns 2 native
+  // retrievers (FTS5 search, hybrid TEMPR) plus 10 narrow functions in
+  // extended-search-types.ts. P1-M6 adds 12 more single-axis modes and
+  // exposes them via a registry. `searchWithMode` is the store-level
+  // dispatch entry: callers pass a mode name + options, we route
+  // through the registry and inject a RetrievalContext pre-wired with
+  // this store.
+  //
+  // Quality bar #3 (sibling-site scan): the registry is lazily
+  // allocated — no cost to callers that never use a mode.
+
+  private retrievalRegistrySlot: RetrievalRegistry | null = null;
+
+  private getRetrievalRegistry(): RetrievalRegistry {
+    if (this.retrievalRegistrySlot) return this.retrievalRegistrySlot;
+    this.retrievalRegistrySlot = createDefaultRetrievalRegistry();
+    return this.retrievalRegistrySlot;
+  }
+
+  /**
+   * Register a custom retrieval mode on this store's registry. Callers
+   * that want a custom mode (e.g. a domain-specific reranker) can push
+   * it in here and then dispatch via `searchWithMode`.
+   */
+  registerRetrievalMode(mode: RetrievalMode): void {
+    this.getRetrievalRegistry().register(mode);
+  }
+
+  /** List every retrieval mode name available on this store. */
+  listRetrievalModes(): readonly string[] {
+    return this.getRetrievalRegistry()
+      .list()
+      .map((m) => m.name);
+  }
+
+  /**
+   * Dispatch a retrieval mode by name. When the mode is not
+   * registered, returns an empty result with an "unknown-mode"
+   * scoring note rather than throwing. This keeps callers in callback
+   * chains from needing to guard every dispatch.
+   */
+  async searchWithMode(
+    modeName: string,
+    query: string,
+    opts?: RetrievalModeOptions,
+  ): Promise<RetrievalModeResult> {
+    const registry = this.getRetrievalRegistry();
+    const mode = registry.get(modeName);
+    if (!mode) {
+      return {
+        mode: modeName,
+        results: [],
+        scoring: {
+          method: "unknown-mode",
+          isHeuristic: true,
+          notes: `mode "${modeName}" is not registered`,
+        },
+      };
+    }
+    const ctx: RetrievalContext = { store: this };
+    return mode.search(ctx, query, opts);
   }
 
   close(): void {
