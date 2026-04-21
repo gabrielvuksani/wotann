@@ -85,6 +85,15 @@ import {
   ErrorRangeUnsatisfiable as FileGetErrorRangeUnsatisfiable,
   ErrorInvalidPath as FileGetErrorInvalidPath,
 } from "../session/file-get-handler.js";
+import {
+  ApprovalQueue,
+  ErrorApprovalNotFound,
+  ErrorAlreadyDecided,
+  ErrorExpired as ApprovalErrorExpired,
+  ErrorInvalidPayload as ApprovalErrorInvalidPayload,
+  type ApprovalEvent,
+  type ApprovalRecord,
+} from "../session/approval-queue.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -190,6 +199,37 @@ function serializeEvent(e: ComputerSessionEvent): Record<string, unknown> {
   };
 }
 
+function serializeApprovalRecord(r: ApprovalRecord): Record<string, unknown> {
+  // The typed payload is serialised as-is — JSON-RPC consumers rely on
+  // `payload.kind` to discriminate (shell-exec/file-write/destructive/custom)
+  // and render the appropriate cell.
+  return {
+    approvalId: r.approvalId,
+    sessionId: r.sessionId,
+    payload: r.payload as unknown as Record<string, unknown>,
+    summary: r.summary,
+    riskLevel: r.riskLevel,
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+    state: r.state,
+    decision: r.decision,
+    deciderDeviceId: r.deciderDeviceId,
+    decidedAt: r.decidedAt,
+  };
+}
+
+function serializeApprovalEvent(e: ApprovalEvent): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    type: e.type,
+    approvalId: e.approvalId,
+    sessionId: e.sessionId,
+    timestamp: e.timestamp,
+    record: serializeApprovalRecord(e.record),
+  };
+  if (e.decision !== undefined) out["decision"] = e.decision;
+  return out;
+}
+
 function toRpcError(err: unknown): Error {
   if (err instanceof SessionNotFoundError) return err;
   if (err instanceof SessionAlreadyClaimedError) return err;
@@ -233,6 +273,13 @@ function toRpcError(err: unknown): Error {
   if (err instanceof FileGetErrorFileTooLarge) return err;
   if (err instanceof FileGetErrorRangeUnsatisfiable) return err;
   if (err instanceof FileGetErrorInvalidPath) return err;
+  // F6 — Approval queue errors. Preserve classes so JSON-RPC clients
+  // (iOS approval sheet, watch, CarPlay) discriminate on `.code` and
+  // surface localized UI strings without parsing message bodies.
+  if (err instanceof ErrorApprovalNotFound) return err;
+  if (err instanceof ErrorAlreadyDecided) return err;
+  if (err instanceof ApprovalErrorExpired) return err;
+  if (err instanceof ApprovalErrorInvalidPayload) return err;
   if (err instanceof Error) return err;
   return new Error(String(err));
 }
@@ -786,6 +833,20 @@ export class KairosRPCHandler {
   // Tests swap in their own via setFileGetHandlerForTest.
   private fileGetHandler: FileGetHandler | null = null;
 
+  // F6 — Approval subscription channel. Queue lives per-handler (QB #7 —
+  // per-session state, not a module global) so tests construct their own.
+  // Broadcast is wired in setRuntime once the dispatch plane is available.
+  // Polling subscribers buffer events here until a drain call comes in.
+  private readonly approvalQueue = new ApprovalQueue();
+  private readonly approvalSubscriptions = new Map<
+    string,
+    {
+      readonly events: ApprovalEvent[];
+      readonly dispose: () => void;
+      lastPolledAt: number;
+    }
+  >();
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -879,6 +940,16 @@ export class KairosRPCHandler {
   }
 
   /**
+   * Test-visibility accessor for the F6 approval queue. External callers
+   * route through `approvals.pending` / `approvals.subscribe` /
+   * `approvals.decide` RPCs; this exists so tests can seed approvals
+   * directly and assert subscription semantics without polling round-trips.
+   */
+  getApprovalQueue(): ApprovalQueue {
+    return this.approvalQueue;
+  }
+
+  /**
    * Attach a WotannRuntime instance to route RPC calls to.
    */
   setRuntime(runtime: WotannRuntime): void {
@@ -911,6 +982,19 @@ export class KairosRPCHandler {
     } catch {
       // Dispatch plane not available — creations still works, just
       // without cross-surface fan-out. Surfaces can still poll `list`.
+    }
+
+    // F6 — hook the approval queue into the dispatch plane. Each
+    // enqueue/decide/expire fires a UnifiedEvent{type:"approval"} so
+    // watches, phones, and CarPlay can render approval UI without
+    // subscribing to the full session event stream. Same best-effort
+    // pattern as F5/F14 — tests without a plane still see local events
+    // via ApprovalQueue.subscribe.
+    try {
+      const plane = runtime.getDispatchPlane();
+      this.approvalQueue.setBroadcast((ev) => plane.broadcastUnifiedEvent(ev));
+    } catch {
+      // Dispatch plane not available — approvals still work locally.
     }
 
     // F7 — bind the file.get handler to the runtime's working directory.
@@ -5325,6 +5409,7 @@ export class KairosRPCHandler {
     this.registerCarPlayDispatchHandlers();
     this.registerCreationsHandlers();
     this.registerFileGetHandlers();
+    this.registerApprovalHandlers();
   }
 
   // ── F15: Multi-agent fleet view RPCs ──────────────────────
@@ -5802,6 +5887,121 @@ export class KairosRPCHandler {
           total: resp.total,
           sha256: resp.sha256,
         };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+  }
+
+  // ── F6: Approval subscription channel RPCs ─────────────────
+  //
+  // Per docs/internal/CROSS_SURFACE_SYNERGY_DESIGN.md §P1-S6 and
+  // MASTER_PLAN_V8 §5 P1-F6 (1 day), F1 shipped `computer.session.approve`
+  // as part of the full session event stream. F6 adds a dedicated
+  // subscription so small surfaces (watch, background phone, CarPlay) can
+  // receive approval requests without subscribing to every cursor/step/
+  // frame event.
+  //
+  // Three endpoints:
+  //
+  //   - approvals.pending      — snapshot of pending approvals (optionally
+  //                              filtered by sessionId).
+  //   - approvals.subscribe    — polling subscription. First call seeds a
+  //                              subscriptionId with an empty event buffer;
+  //                              subsequent calls drain accumulated events
+  //                              and optionally close the subscription.
+  //   - approvals.decide       — resolve a pending approval (allow|deny);
+  //                              deciderDeviceId is recorded on the record.
+  //
+  // NDJSON IPC can't carry long-lived push streams, so `approvals.subscribe`
+  // is a polling protocol same as `computer.session.stream` / `fleet.watch`.
+  // Auto-expire (sweepExpired) runs on every poll so callers who never
+  // decide still see a terminal transition in the stream.
+  private registerApprovalHandlers(): void {
+    this.handlers.set("approvals.pending", async (params) => {
+      // Sweep first so the list is fresh — callers expect expired entries
+      // to NOT appear in pending.
+      this.approvalQueue.sweepExpired();
+      const sessionId = params["sessionId"];
+      const list =
+        typeof sessionId === "string" && sessionId.length > 0
+          ? this.approvalQueue.pendingForSession(sessionId)
+          : this.approvalQueue.pending();
+      return { pending: list.map(serializeApprovalRecord) };
+    });
+
+    this.handlers.set("approvals.subscribe", async (params) => {
+      const subscriptionIdIn = params["subscriptionId"];
+      const closeAfter = params["close"] === true;
+      const maxEvents =
+        typeof params["maxEvents"] === "number" && (params["maxEvents"] as number) > 0
+          ? Math.min(params["maxEvents"] as number, 1000)
+          : 256;
+
+      // Poll path — drain buffered events from an existing subscription.
+      if (typeof subscriptionIdIn === "string" && subscriptionIdIn.length > 0) {
+        const sub = this.approvalSubscriptions.get(subscriptionIdIn);
+        if (!sub) {
+          throw new Error(`subscription not found: ${subscriptionIdIn}`);
+        }
+        // Sweep first so expired events flow through the stream.
+        this.approvalQueue.sweepExpired();
+        // Drain up to maxEvents and compact the buffer.
+        const drained = sub.events.splice(0, maxEvents);
+        sub.lastPolledAt = Date.now();
+        if (closeAfter) {
+          sub.dispose();
+          this.approvalSubscriptions.delete(subscriptionIdIn);
+        }
+        return {
+          subscriptionId: subscriptionIdIn,
+          events: drained.map(serializeApprovalEvent),
+          more: sub.events.length > 0,
+          closed: closeAfter,
+        };
+      }
+
+      // Fresh subscription. Buffer grows as events fire; poll drains.
+      const subId = `aps-${randomUUID()}`;
+      const buffer: ApprovalEvent[] = [];
+      const dispose = this.approvalQueue.subscribe((event) => {
+        buffer.push(event);
+        // Hard cap — protect memory when a subscriber forgets to poll.
+        if (buffer.length > 10_000) buffer.splice(0, buffer.length - 10_000);
+      });
+      this.approvalSubscriptions.set(subId, {
+        events: buffer,
+        dispose,
+        lastPolledAt: Date.now(),
+      });
+      return {
+        subscriptionId: subId,
+        events: [],
+        more: false,
+        closed: false,
+      };
+    });
+
+    this.handlers.set("approvals.decide", async (params) => {
+      const approvalId = params["approvalId"];
+      const decision = params["decision"];
+      const deciderDeviceId = params["deciderDeviceId"];
+      if (typeof approvalId !== "string" || approvalId.trim() === "") {
+        throw new Error("approvalId (non-empty string) required");
+      }
+      if (decision !== "allow" && decision !== "deny") {
+        throw new Error("decision must be allow|deny");
+      }
+      if (typeof deciderDeviceId !== "string" || deciderDeviceId.trim() === "") {
+        throw new Error("deciderDeviceId (non-empty string) required");
+      }
+      try {
+        const record = this.approvalQueue.decide({
+          approvalId,
+          decision,
+          deciderDeviceId,
+        });
+        return { approval: serializeApprovalRecord(record) };
       } catch (err) {
         throw toRpcError(err);
       }
