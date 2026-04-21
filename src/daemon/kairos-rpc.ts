@@ -75,6 +75,16 @@ import {
   ErrorPathTraversal as CreationsErrorPathTraversal,
   ErrorDiskFull as CreationsErrorDiskFull,
 } from "../session/creations.js";
+import {
+  FileGetHandler,
+  ErrorFileNotFound as FileGetErrorFileNotFound,
+  ErrorPathTraversal as FileGetErrorPathTraversal,
+  ErrorSymlinkEscape as FileGetErrorSymlinkEscape,
+  ErrorBinaryNotAsciiSafe as FileGetErrorBinaryNotAsciiSafe,
+  ErrorFileTooLarge as FileGetErrorFileTooLarge,
+  ErrorRangeUnsatisfiable as FileGetErrorRangeUnsatisfiable,
+  ErrorInvalidPath as FileGetErrorInvalidPath,
+} from "../session/file-get-handler.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -212,6 +222,17 @@ function toRpcError(err: unknown): Error {
   if (err instanceof CreationsErrorInvalidSessionId) return err;
   if (err instanceof CreationsErrorPathTraversal) return err;
   if (err instanceof CreationsErrorDiskFull) return err;
+  // F7 — file.get handler errors. Same class-preservation rationale:
+  // JSON-RPC clients (iOS ShareLink + desktop + TUI) discriminate on
+  // `.code` (FILE_GET_NOT_FOUND / FILE_GET_PATH_TRAVERSAL / ...) so
+  // the UI can render localized strings without parsing the message.
+  if (err instanceof FileGetErrorFileNotFound) return err;
+  if (err instanceof FileGetErrorPathTraversal) return err;
+  if (err instanceof FileGetErrorSymlinkEscape) return err;
+  if (err instanceof FileGetErrorBinaryNotAsciiSafe) return err;
+  if (err instanceof FileGetErrorFileTooLarge) return err;
+  if (err instanceof FileGetErrorRangeUnsatisfiable) return err;
+  if (err instanceof FileGetErrorInvalidPath) return err;
   if (err instanceof Error) return err;
   return new Error(String(err));
 }
@@ -758,6 +779,13 @@ export class KairosRPCHandler {
   // in setRuntime once the dispatch plane is available.
   private readonly creationsStore = new CreationsStore();
 
+  // F7 — file.get handler. Generalises F5's creations.get to arbitrary
+  // workspace files with HTTP-style range-request support. Nulled until
+  // setRuntime wires it to the runtime's working-dir — the handler
+  // needs a non-degenerate rootDir and the runtime owns that value.
+  // Tests swap in their own via setFileGetHandlerForTest.
+  private fileGetHandler: FileGetHandler | null = null;
+
   constructor() {
     this.registerBuiltinMethods();
   }
@@ -809,6 +837,25 @@ export class KairosRPCHandler {
    */
   getCreationsStore(): CreationsStore {
     return this.creationsStore;
+  }
+
+  /**
+   * Test-visibility setter for the F7 file.get handler. Production wires
+   * this via setRuntime() using runtime.getWorkingDir(); tests bind a
+   * tmp rootDir. Exposed on the public surface because several test
+   * suites need it — the alternative (casting to access a private
+   * field) is brittle and unsafe across refactors.
+   */
+  setFileGetHandlerForTest(fgh: FileGetHandler | null): void {
+    this.fileGetHandler = fgh;
+  }
+
+  /**
+   * Test-visibility accessor for the F7 file.get handler. Returns null
+   * until setRuntime() or setFileGetHandlerForTest() binds one.
+   */
+  getFileGetHandler(): FileGetHandler | null {
+    return this.fileGetHandler;
   }
 
   /**
@@ -864,6 +911,21 @@ export class KairosRPCHandler {
     } catch {
       // Dispatch plane not available — creations still works, just
       // without cross-surface fan-out. Surfaces can still poll `list`.
+    }
+
+    // F7 — bind the file.get handler to the runtime's working directory.
+    // We refuse to wire a handler for "/" or "" — those would let any
+    // absolute path pass the workspace check. If the runtime has no
+    // meaningful working dir (fresh-start, tests without cwd overrides),
+    // the handler stays null and file.get returns a cleanly-formed
+    // "not configured" error rather than serving arbitrary host files.
+    try {
+      const workingDir = runtime.getWorkingDir();
+      if (typeof workingDir === "string" && workingDir.length > 0 && workingDir !== "/") {
+        this.fileGetHandler = new FileGetHandler({ rootDir: workingDir });
+      }
+    } catch {
+      // Best-effort — runtime may not expose getWorkingDir in every test.
     }
   }
 
@@ -5262,6 +5324,7 @@ export class KairosRPCHandler {
     this.registerWatchDispatchHandlers();
     this.registerCarPlayDispatchHandlers();
     this.registerCreationsHandlers();
+    this.registerFileGetHandlers();
   }
 
   // ── F15: Multi-agent fleet view RPCs ──────────────────────
@@ -5647,6 +5710,98 @@ export class KairosRPCHandler {
           filename: typeof filename === "string" ? filename : undefined,
         });
         return { deleted };
+      } catch (err) {
+        throw toRpcError(err);
+      }
+    });
+  }
+
+  // ── F7: General-purpose file.get with range support ───────
+  //
+  // Per docs/internal/CROSS_SURFACE_SYNERGY_DESIGN.md §P1-F7, iOS
+  // ShareLink needs to fetch arbitrary workspace files (not just agent-
+  // created ones) with HTTP-style range support so it can render
+  // progress bars + resume interrupted downloads.
+  //
+  // Parameters:
+  //   path        — workspace-relative path (or absolute, validated
+  //                 inside workspace)
+  //   range?      — {start, end?} inclusive byte range
+  //   asBase64?   — true to get base64 bytes (required for binary)
+  //
+  // Returns:
+  //   content         — utf-8 or base64 string
+  //   encoding        — "utf-8" | "base64"
+  //   contentType     — inferred from extension / sniffed
+  //   contentRange?   — "bytes <s>-<e>/<total>" (only on ranged reads)
+  //   total           — full file size
+  //   sha256          — hash of RETURNED bytes (per-chunk integrity)
+  //
+  // Errors surface as JSON-RPC errors with typed `.code`:
+  //   FILE_GET_NOT_FOUND / _PATH_TRAVERSAL / _SYMLINK_ESCAPE /
+  //   _BINARY_NOT_ASCII_SAFE / _FILE_TOO_LARGE / _RANGE_UNSATISFIABLE /
+  //   _INVALID_PATH.
+  //
+  // Distinct from the existing `file.get` in companion-server.ts (line
+  // ~1631), which is a legacy iOS bridge wired through FileShare. This
+  // daemon-level handler is the canonical path; future iOS ShareLink
+  // work will migrate to the kairos RPC.
+  private registerFileGetHandlers(): void {
+    this.handlers.set("file.get", async (params) => {
+      const fgh = this.fileGetHandler;
+      if (!fgh) {
+        // Honest failure (QB #6): we don't silently return an empty file
+        // when misconfigured. Callers should have setRuntime() called
+        // before hitting file.get; tests that need isolation use
+        // setFileGetHandlerForTest.
+        throw new Error(
+          "file.get handler not configured; runtime must be attached with a non-degenerate working dir",
+        );
+      }
+      const path = params["path"];
+      if (typeof path !== "string") {
+        throw new Error("path (string) required");
+      }
+      const rangeRaw = params["range"];
+      const asBase64Raw = params["asBase64"];
+
+      // Validate range shape BEFORE handing to the handler so we get a
+      // crisp JSON-RPC error rather than an opaque type-cast failure.
+      let range: { start: number; end?: number } | undefined;
+      if (rangeRaw !== undefined) {
+        if (typeof rangeRaw !== "object" || rangeRaw === null || Array.isArray(rangeRaw)) {
+          throw new Error("range must be an object with a numeric start");
+        }
+        const r = rangeRaw as Record<string, unknown>;
+        const start = r["start"];
+        const end = r["end"];
+        if (typeof start !== "number") {
+          throw new Error("range.start (number) required");
+        }
+        if (end !== undefined && typeof end !== "number") {
+          throw new Error("range.end must be a number when present");
+        }
+        range = end === undefined ? { start } : { start, end };
+      }
+
+      const asBase64 = asBase64Raw === true;
+
+      try {
+        const resp = fgh.serve({
+          requestedPath: path,
+          ...(range !== undefined ? { range } : {}),
+          asBase64,
+        });
+        // Return the response object directly — keys match the wire
+        // contract documented in the comment above.
+        return {
+          content: resp.content,
+          encoding: resp.encoding,
+          contentType: resp.contentType,
+          ...(resp.contentRange !== undefined ? { contentRange: resp.contentRange } : {}),
+          total: resp.total,
+          sha256: resp.sha256,
+        };
       } catch (err) {
         throw toRpcError(err);
       }
