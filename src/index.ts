@@ -5762,6 +5762,84 @@ designCmd
     },
   );
 
+// ── wotann design mode ──────────────────────────────────────
+// P1-C7: Cursor 3 Design Mode + Canvases port. Canvases are
+// durable, serializable design artifacts persisted under
+// ~/.wotann/canvases. Actions: create | list | edit | export |
+// delete. `edit` accepts a JSON-encoded CanvasOperation so the
+// command can be scripted by other tools without a REPL.
+const designModeCmd = designCmd
+  .command("mode")
+  .description("Work with Canvases (Cursor 3 Design Mode port)");
+
+designModeCmd
+  .command("create <name>")
+  .description("Create a new canvas under ~/.wotann/canvases/")
+  .action(async (name: string) => {
+    const { runDesignModeCommand } = await import("./cli/commands/design-mode.js");
+    const result = await runDesignModeCommand({ action: "create", name });
+    for (const line of result.lines) process.stderr.write(`${line}\n`);
+    process.exit(result.success ? 0 : 2);
+  });
+
+designModeCmd
+  .command("list")
+  .description("List persisted canvases")
+  .action(async () => {
+    const { runDesignModeCommand } = await import("./cli/commands/design-mode.js");
+    const result = await runDesignModeCommand({ action: "list" });
+    for (const line of result.lines) process.stderr.write(`${line}\n`);
+    process.exit(result.success ? 0 : 2);
+  });
+
+designModeCmd
+  .command("edit <id> <opJson>")
+  .description("Apply a JSON-encoded CanvasOperation (rename|add-element|...) and save")
+  .action(async (id: string, opJson: string) => {
+    const { runDesignModeCommand } = await import("./cli/commands/design-mode.js");
+    const result = await runDesignModeCommand({
+      action: "edit",
+      canvasId: id,
+      opJson,
+    });
+    for (const line of result.lines) process.stderr.write(`${line}\n`);
+    process.exit(result.success ? 0 : 2);
+  });
+
+designModeCmd
+  .command("export <id>")
+  .description("Emit JSX/TSX code for a canvas")
+  .option("--format <format>", "Output format: tsx | jsx (default: tsx)", "tsx")
+  .option("--output <file>", "Write code to file instead of stdout")
+  .action(async (id: string, opts: { format?: string; output?: string }) => {
+    const { runDesignModeCommand } = await import("./cli/commands/design-mode.js");
+    const fmt: "jsx" | "tsx" = opts.format === "jsx" ? "jsx" : "tsx";
+    const cmdOpts: Parameters<typeof runDesignModeCommand>[0] = {
+      action: "export",
+      canvasId: id,
+      format: fmt,
+    };
+    if (opts.output !== undefined) {
+      (cmdOpts as { output?: string }).output = opts.output;
+    }
+    const result = await runDesignModeCommand(cmdOpts);
+    for (const line of result.lines) process.stderr.write(`${line}\n`);
+    if (result.success && opts.output === undefined && result.output) {
+      process.stdout.write(result.output);
+    }
+    process.exit(result.success ? 0 : 2);
+  });
+
+designModeCmd
+  .command("delete <id>")
+  .description("Delete a canvas from disk")
+  .action(async (id: string) => {
+    const { runDesignModeCommand } = await import("./cli/commands/design-mode.js");
+    const result = await runDesignModeCommand({ action: "delete", canvasId: id });
+    for (const line of result.lines) process.stderr.write(`${line}\n`);
+    process.exit(result.success ? 0 : 2);
+  });
+
 // ── wotann shell snapshot ───────────────────────────────────
 // Phase 13 Wave 3B: Codex parity — save + restore a PTY-less shell
 // session's state (cwd + env + history) to ~/.wotann/shell-snapshots/.
