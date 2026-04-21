@@ -35,6 +35,7 @@ import { MemoryStore } from "../../src/memory/store.js";
 // Import agent-facts so the MemoryStore bootstrap registers — this
 // import is side-effecting; it wires `setAgentFactsModule` on load.
 import "../../src/memory/agent-facts.js";
+import { Observer } from "../../src/memory/observer.js";
 
 // ── Fixtures ───────────────────────────────────────────
 
@@ -219,6 +220,67 @@ describe("Mem0AddOnlyExtractor", () => {
     const rows = store.getByLayer("working");
     const alphaRows = rows.filter((r) => (r.tags ?? "").includes("agent:agent-alpha"));
     expect(alphaRows.length).toBeGreaterThan(0);
+  });
+});
+
+describe("Observer → Mem0 v3 wiring", () => {
+  it("routes agent-facts through ADD-only path when agentId is provided", () => {
+    // End-to-end evidence for the P1-M3 port — grep-verifiable via
+    // the `mem0-add-only` tag on persisted rows.
+    const obs = new Observer({ store, flushThreshold: 100 });
+    const result = obs.observeTurn({
+      sessionId: "obs-wire-s1",
+      agentId: "agent-obs-alpha",
+      userMessage: "Please book a flight to Reykjavik for me.",
+      assistantMessage: "I've booked your flight to Reykjavik on 2026-05-04.",
+      completedAt: 1700000000000,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Mem0 v3 agent-facts path fired — the assistant fact was captured.
+    expect(result.agentFacts.length).toBeGreaterThan(0);
+    // Store has ADD-only-tagged rows.
+    const rows = store.getByLayer("working");
+    const mem0Rows = rows.filter((r) => (r.tags ?? "").includes("mem0-add-only"));
+    expect(mem0Rows.length).toBeGreaterThan(0);
+    const agentRows = rows.filter((r) => (r.tags ?? "").includes("agent:agent-obs-alpha"));
+    expect(agentRows.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT emit agent-facts when agentId is absent (backwards compatible)", () => {
+    const obs = new Observer({ store, flushThreshold: 100 });
+    const result = obs.observeTurn({
+      sessionId: "obs-wire-s2",
+      userMessage: "Hello",
+      assistantMessage: "Hi there",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // No agent id → no Mem0 v3 path firing.
+    expect(result.agentFacts.length).toBe(0);
+    // Grep invariant: no mem0-add-only rows persisted for this
+    // session — the old P1-M1 behaviour is preserved verbatim.
+    const rows = store.getByLayer("working");
+    const mem0Rows = rows.filter(
+      (r) => r.sessionId === "obs-wire-s2" && (r.tags ?? "").includes("mem0-add-only"),
+    );
+    expect(mem0Rows.length).toBe(0);
+  });
+
+  it("MemoryStore.recordAgentFact/retrieveAgentFacts wrappers round-trip", () => {
+    store.recordAgentFact({
+      id: "wire-1",
+      agentId: "wrap-agent",
+      sessionId: "wrap-s1",
+      role: "agent",
+      type: "fact",
+      assertion: "I've committed the changes to main.",
+      confidence: 0.9,
+      extractedAt: Date.now(),
+    });
+    const rows = store.retrieveAgentFacts({ agentId: "wrap-agent" });
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.value).toContain("committed");
   });
 });
 
