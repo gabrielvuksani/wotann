@@ -27,7 +27,21 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import chalk from "chalk";
 
-const VERSION = "0.4.0";
+import { readFileSync } from "node:fs";
+
+const VERSION: string = (() => {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkgPath = resolve(here, "..", "package.json");
+    const raw = readFileSync(pkgPath, "utf8");
+    const pkg = JSON.parse(raw) as { version?: unknown };
+    return typeof pkg.version === "string" && pkg.version.length > 0
+      ? pkg.version
+      : "0.0.0-unknown";
+  } catch {
+    return "0.0.0-unknown";
+  }
+})();
 
 const program = new Command();
 
