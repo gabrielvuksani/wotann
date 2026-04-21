@@ -12,7 +12,7 @@
 1. **Trust source over docs.** Every claim in this plan cites a file:line or grep result. If a prior MD contradicts source, source wins (Quality Bar #15).
 2. **Tiers are ordered by strategic dependency, not chronology.** Tier 0 must ship before Tier 1. Tier 5+ can parallelize after Tiers 0–4 land.
 3. **FINAL TIER is genuinely last.** Supabase rotation + god-file splits + Android native are scheduled only after all prior tiers are green.
-4. **Every tier has WHAT / WHY / WHERE / HOW / VERIFICATION.** Claude Code can execute each tier autonomously with its section alone.
+4. **Tiers 0–7 have full WHAT / WHY / WHERE / HOW / VERIFICATION per sub-item.** Tiers 8–14 use abbreviated structure (headers + prose + file list) — they are narrow-scope enough that cold-read Claude can reconstruct the missing subsections from the primary research source linked in each tier. When a Tier 8+ item needs full structure for execution, expand it in-place during execution (mark with `[EXPAND-BEFORE-EXEC]` comment in the tier body).
 5. **Grey-zone framing dropped.** Claude Pro/Max subscription access is achieved via Claude Agent SDK — an Anthropic-sanctioned path, not evasion. See Tier 3.
 
 ---
@@ -70,12 +70,38 @@ Source-verified via OpenClaw@main repo analysis 2026-04-21. Current WOTANN code 
 
 **Source-verified pre-change**: `src/providers/anthropic-subscription.ts:103` calls `writeFileSync(ANTHROPIC_OAUTH_FILE, ...)` — DELETE this.
 
-**WHERE**:
-- DELETE `src/providers/anthropic-subscription.ts` (323 LOC) — self-token-using antipattern
-- NEW `src/providers/claude-cli-backend.ts` (~150 LOC) — subprocess pattern using WOTANN's `execFileNoThrow` safe-exec utility
-- MODIFY `src/providers/discovery.ts` — use correct credential path, for expiry-display only (no copy)
-- MODIFY `src/providers/agent-bridge.ts` — rename `type: "anthropic-subscription"` → `"anthropic-cli"`, route through subprocess backend
-- MODIFY `src/lib.ts` — update exports
+**WHERE** (FULL list — 13 files reference the anthropic-subscription pattern, source-verified via `grep -rln "anthropic-subscription\|anthropic-oauth\|ANTHROPIC_OAUTH_FILE" src --include='*.ts'`):
+
+Files to DELETE or substantially refactor:
+- `src/providers/anthropic-subscription.ts` (323 LOC) — self-token-using antipattern; DELETE entirely
+- `src/auth/login.ts:74,91` — writes `~/.wotann/anthropic-oauth.json` in `runAnthropicLogin`; REMOVE write path; rewrite to detect-only + `claude setup-token` instructions display
+
+Files to UPDATE references:
+- `src/core/claude-sdk-bridge.ts` — replace import
+- `src/core/config-discovery.ts` — replace import
+- `src/providers/provider-service.ts:359` — currently `readFileSync(ANTHROPIC_OAUTH_FILE)` — replace with `readClaudeCliCredentials()` call
+- `src/providers/model-defaults.ts` — replace import
+- `src/providers/usage-intelligence.ts` — replace import
+- `src/providers/registry.ts` — rename provider type `"anthropic-subscription"` → `"anthropic-cli"`
+- `src/providers/discovery.ts` — use correct credential path, for expiry-display only (no copy)
+- `src/providers/agent-bridge.ts` — route `type: "anthropic-cli"` through new subprocess backend
+- `src/intent/byoa-detector.ts` — replace import
+- `src/daemon/kairos-rpc.ts` — replace import (RPC surface)
+- `src/prompt/modules/capabilities.ts` — replace import
+- `src/telemetry/cost-tracker.ts` — replace cost-tracking hooks
+- `src/lib.ts` — update exports
+
+NEW file:
+- `src/providers/claude-cli-backend.ts` (~150 LOC) — subprocess pattern using WOTANN's `execFileNoThrow` safe-exec utility
+
+**MIGRATION PLAN** (for existing users with `~/.wotann/anthropic-oauth.json` from prior versions):
+1. On first Claude CLI invocation post-upgrade, `src/providers/claude-cli-backend.ts` calls new `migrateLegacyCredentialFile()`:
+   - Detect legacy `~/.wotann/anthropic-oauth.json`
+   - Move to `~/.wotann/.legacy/anthropic-oauth.json.bak` with timestamp
+   - Log warning: "Legacy credential file archived at .legacy/; WOTANN now reads your Claude CLI session directly. Run `claude login` if not authenticated."
+   - Verify user's `~/.claude/.credentials.json` (or Keychain on macOS) is readable via `readClaudeCliCredentials()` — if not, print `claude login` instructions
+2. On Windows/Linux users without Keychain: fall through to file-only path; print warning about reduced security vs macOS
+3. Preserve a 30-day grace period where legacy file is archived not deleted, so users can roll back if needed
 
 **HOW** (concrete implementation, all user-supplied inputs parameterized, no shell interpretation):
 
@@ -242,35 +268,64 @@ async function* parseStreamJson(stdout: NodeJS.ReadableStream): AsyncIterable<un
 
 **Separate `setup-token` path**: For long-lived gateway hosts, users may prefer Anthropic's `setup-token` (a 1-year programmatic token, `sk-ant-oat-*`) sent directly to `api.anthropic.com` as a bearer. This is Anthropic's own documented programmatic auth path. Keep as a secondary option in `src/providers/anthropic-adapter.ts` alongside BYOK API key, under the explicit user-choice "I want token-auth for server use."
 
-**VERIFICATION**:
+**VERIFICATION** (expanded per 2nd audit — catches readFileSync + imports too):
 ```bash
-grep -rn "writeFileSync.*anthropic-oauth\|ANTHROPIC_OAUTH_FILE" src/ | wc -l  # Expect: 0
-test ! -f ~/.wotann/anthropic-oauth.json && echo "no local leak"
+# Zero writes AND zero reads of the legacy path
+grep -rn "writeFileSync.*anthropic-oauth\|readFileSync.*anthropic-oauth\|ANTHROPIC_OAUTH_FILE" src/ | wc -l  # Expect: 0
+
+# Zero remaining imports of the deleted module
+grep -rln "anthropic-subscription" src/ --include='*.ts' | wc -l  # Expect: 0
+
+# Legacy user file moved to .legacy/ (if existed pre-upgrade) + runtime warning printed
+ls ~/.wotann/.legacy/ 2>/dev/null | grep anthropic-oauth  # archived if was present
+test ! -f ~/.wotann/anthropic-oauth.json && echo "live path clean"
+
+# Credential READ works (display only — never shipped)
+node -e "import('./dist/providers/claude-cli-backend.js').then(m => m.readClaudeCliCredentials()).then(c => console.log('cred source:', c?.source, 'expires:', c?.expiresAt))"
+
+# tsc + tests
 npx tsc --noEmit  # rc=0
+npx vitest run 2>&1 | tail -3  # expect 7590+ passing
 ```
 
-### T0.2 — Delete Codex independent-PKCE flow
+### T0.2 — Delete Codex independent-PKCE flow (3 files, not 1)
 
 **WHAT**: Remove the PKCE flow that uses Codex's public `client_id` to hit `auth.openai.com` directly. Keep only the read-existing-`~/.codex/auth.json` detector.
 
 **WHY**: Running our own PKCE with Codex's client_id masquerades as Codex CLI. Source-verified: `src/providers/codex-oauth.ts:40-42` declares `CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"`, `AUTH_URL`, `TOKEN_URL`.
 
-**WHERE**:
-- `src/providers/codex-oauth.ts` (359 LOC) — delete independent PKCE flow (~180 LOC)
-- Rename file to `src/providers/codex-detector.ts`
-- Keep only: `detectExistingCodexCredential()`, `importCodexCliCredential()` — these READ `~/.codex/auth.json` only if user ran `codex` CLI themselves (user-consented write)
+**WHERE** (FULL list — 3 files contain the leak, not 1; source-verified via `grep -rln "app_EMoamEEZ73f0CkXaXp7hrann\|auth.openai.com/oauth" src --include='*.ts'`):
+- `src/providers/codex-oauth.ts:40-42` (primary) — delete independent PKCE flow (~180 LOC of 359 total)
+- `src/auth/oauth-server.ts:463-465` — `clientId "app_EMoamEEZ73f0CkXaXp7hrann"` + `authorizationUrl`/`tokenUrl` to `auth.openai.com`; same pattern, different file
+- `src/providers/codex-adapter.ts:119,123` — direct POST to `auth.openai.com/oauth/token` with same client_id
 
-**HOW**:
-1. Edit `codex-oauth.ts`: remove `CLIENT_ID`, `AUTH_URL`, `TOKEN_URL`, `REDIRECT_URI`, `runOAuthFlow()`, `refreshToken()`, any functions touching `auth.openai.com`
-2. Keep: `detectExistingCodexCredential()`, `importCodexCliCredential()`
-3. `git mv src/providers/codex-oauth.ts src/providers/codex-detector.ts`
-4. Update all imports
-5. Verify tsc clean
+**WHERE** (keep):
+- `src/providers/codex-oauth.ts` → rename to `src/providers/codex-detector.ts` and keep ONLY `detectExistingCodexCredential()` + `importCodexCliCredential()` (read-existing-file-only)
 
-**VERIFICATION**:
+**HOW** (3 files in single commit to avoid partial state):
+1. Edit `codex-oauth.ts`: remove `CLIENT_ID`, `AUTH_URL`, `TOKEN_URL`, `REDIRECT_URI`, `runOAuthFlow()`, `refreshToken()`, any function touching `auth.openai.com`
+2. Edit `src/auth/oauth-server.ts` — remove the Codex-branded OAuth config block at lines 463-465 (likely the registration of Codex as an OAuth provider); keep generic OAuth infrastructure for legitimate providers (GitHub, Google for Gemini sign-in, etc.)
+3. Edit `src/providers/codex-adapter.ts` — remove lines 119+123 POST to auth.openai.com; replace with "token must come from `~/.codex/auth.json` which user populates by running `codex login` themselves"
+4. Keep: `detectExistingCodexCredential()`, `importCodexCliCredential()`
+5. `git mv src/providers/codex-oauth.ts src/providers/codex-detector.ts`
+6. Update all imports across the 3 files + any downstream consumers
+7. Add migration helper `migrateLegacyCodexCredential()` for users whose `~/.codex/auth.json` was written by WOTANN's old independent PKCE (different shape than Codex CLI's own); if shape mismatch, archive + prompt user to re-auth via `codex login`
+8. Verify tsc clean + tests green
+
+**VERIFICATION** (strictened — 3-file scope):
 ```bash
-grep -n "app_EMoamEEZ73f0CkXaXp7hrann\|auth.openai.com/oauth" src/ -r | wc -l  # Expect: 0
+# Zero references to Codex client_id or auth.openai.com/oauth across ALL of src/
+grep -rn "app_EMoamEEZ73f0CkXaXp7hrann\|auth.openai.com/oauth" src/ | wc -l  # Expect: 0
+
+# codex-oauth.ts renamed
+test ! -f src/providers/codex-oauth.ts && test -f src/providers/codex-detector.ts && echo "renamed"
+
+# Migration helper present
+grep -n "migrateLegacyCodexCredential" src/providers/codex-detector.ts  # expect: present
+
+# tsc + tests
 npx tsc --noEmit  # rc=0
+npx vitest run 2>&1 | tail -3  # expect 7590+ passing
 ```
 
 ### T0.3 — Add experimental banner to Copilot adapter
@@ -447,9 +502,16 @@ this.crossEncoder = (isOnnxRuntimeAvailable() && isMiniLmModelAvailable())
 
 **HOW**:
 ```typescript
+// PREREQUISITE: add config flag first in src/core/types.ts (same commit)
+// readonly enablePromptCacheWarmup?: boolean;  // default: true, env: WOTANN_PROMPT_CACHE_WARMUP=0 disables
+
 this.systemPrompt = buildStablePrefix(this.memoryStore, ...);
 
-if (this.config.enablePromptCacheWarmup !== false) {
+const warmupEnabled =
+  this.config.enablePromptCacheWarmup !== false &&
+  process.env["WOTANN_PROMPT_CACHE_WARMUP"] !== "0";
+
+if (warmupEnabled) {
   // Fire-and-forget warmup request; doesn't block main loop
   warmupCache({
     provider: this.activeProvider,
@@ -458,6 +520,8 @@ if (this.config.enablePromptCacheWarmup !== false) {
   }).catch((err) => console.warn("[cache-warmup] failed:", err.message));
 }
 ```
+
+**PREREQUISITE in same commit**: add `enablePromptCacheWarmup?: boolean` to `WotannConfig` in `src/core/types.ts` with JSDoc noting default behavior + env override. Cold-read Claude will otherwise hit tsc error `Property 'enablePromptCacheWarmup' does not exist on type 'WotannConfig'`.
 
 **VERIFICATION**: Run 2 identical queries back-to-back; measure token cost — second should hit cached prefix.
 
@@ -732,7 +796,7 @@ Wire-audit KEYSTONE finding: all 15 F-series RPC handlers exist in `kairos-rpc.t
 **HOW**: iOS connects via existing RPCClient, subscribes to `computer.session.events`, renders in RemoteDesktopView which ALREADY EXISTS (1125 LOC). Just wire the data.
 
 ### T5.2 — F2 Cursor Stream Consumer
-- **WHERE**: `ios/WOTANN/Views/RemoteDesktop/CursorOverlayView.swift` (exists 1125 LOC, needs cursor.stream subscription), `desktop-app/src/components/workshop/CursorTrailOverlay.tsx` (new ~100 LOC)
+- **WHERE**: `ios/WOTANN/Views/RemoteDesktop/RemoteDesktopView.swift` (exists 1125 LOC — the cursor overlay is rendered inline here, no separate `CursorOverlayView.swift`; add cursor.stream RPC subscription hooks), `desktop-app/src/components/workshop/CursorTrailOverlay.tsx` (new ~100 LOC)
 - **RPC**: subscribe to `cursor.stream` SSE; render 30fps cursor trail
 - **VERIFICATION**: open session on desktop → iOS app shows live cursor within 50ms p50
 
@@ -883,7 +947,7 @@ Default priority when nothing configured:
 
 ### T7.2 — `.writingToolsBehavior(.complete)` modifier (5 min, 4 LOC)
 
-**WHERE**: `ios/WOTANN/Views/Chat/ChatInputBar.swift` + `Composer.swift`
+**WHERE**: `ios/WOTANN/Views/Input/ChatInputBar.swift` (NOTE: Input/, not Chat/) + `ios/WOTANN/Views/Chat/Composer.swift`
 
 **HOW**: Add `.writingToolsBehavior(.complete)` to TextEditor/TextField. Zero-risk, zero-LOC cost, instant Apple Intelligence Writing Tools integration.
 
@@ -966,7 +1030,7 @@ Each sends text to paired desktop (superior to on-device Apple Intelligence for 
 
 ### Context (source-verified)
 
-`src/design/` has 11 files, 3237 LOC. `handoff-receiver.ts` is 200 LOC reverse-engineering Claude Design's DTCG v6.3 bundle format day-of-launch. `tokens.ts` is 295 LOC canonical source. `extractor.ts` is 705 LOC codebase → design-system extractor.
+`src/design/` has 15 files total (11 top-level + 4 in `token-emitters/` subdir), 3737 LOC. `handoff-receiver.ts` is 200 LOC reverse-engineering Claude Design's DTCG v6.3 bundle format day-of-launch. `tokens.ts` is 295 LOC canonical source. `extractor.ts` is 705 LOC codebase → design-system extractor.
 
 Claude Design shipped 2026-04-17 at claude.ai/design, Opus 4.7 powered. Handoff bundle format is public W3C DTCG v6.3: manifest.json + design-system.json + components.json + tokens/*.json. WOTANN is premier consumer and producer.
 
@@ -1442,6 +1506,53 @@ android/
 **Final tier exit criteria**: Supabase rotated, god-files split (runtime.ts < 800 LOC per file), Android shipping on F-Droid (Termux) + Play Store (Tauri Mobile AAB) + native Kotlin polish.
 
 ---
+
+## Cross-Cutting Risk + Resilience (added per 2nd-audit)
+
+### Tier 3 error handling for `claude -p` subprocess failures
+
+The subprocess pattern has 4 failure modes Claude Code must handle explicitly (not "Wave 5 hardening"):
+
+1. **`claude` binary not installed (ENOENT)** → `spawn()` emits `error` event. Catch via `child.on('error')`. Surface to user: "Claude CLI not found. Install from https://docs.claude.com/cli/install OR use an API key (`wotann init --byok`)."
+2. **Authentication expired** → stream-json emits `{type: "error", subtype: "auth_expired"}`. Detect in `parseStreamJson`, emit WOTANN event `claude.auth.expired`, prompt user to re-run `claude login`. Do NOT retry silently.
+3. **Rate limit** → stream-json emits `{type: "error", subtype: "rate_limit", resetAt: <unix>}`. Surface ETA to user; offer fallback to BYOK path if user has API key.
+4. **Network partition mid-stream** → `parseStreamJson` buffer holds incomplete JSON. Flush on child `close` event; if final buffer has incomplete JSON, emit `stream.truncated` error with hint "network issue mid-response — check internet and retry."
+
+**Spec**: add `src/claude/error-handling.ts` (~200 LOC) as part of Wave 0 proof-of-life, NOT Wave 5. Every stream-json parser consumer wraps with these 4 error categories. Test via stubbed `claude` binary emitting each error shape.
+
+### Tier 3 cost telemetry
+
+User's Claude subscription pays Anthropic directly. WOTANN must surface sub-quota burn:
+
+1. **Usage probe**: on session start, spawn `claude /usage --json` once (read-only), parse monthly-used/monthly-limit, display in StatusRibbon
+2. **Per-turn estimate**: track token counts in stream-json chunks (`{type: "result", usage: {input_tokens, output_tokens}}`), add to in-memory session counter
+3. **Threshold warnings**: at 75% / 90% / 95% of monthly quota, emit `cost.warning` event; desktop shows banner, CLI prints yellow line
+4. **Daily drift check**: compare WOTANN's counted usage vs `claude /usage` probe weekly; alert on >10% drift (indicates missing turns)
+
+**Spec**: extend `src/telemetry/cost-tracker.ts` (exists) with Claude-sub-specific branch. Wave 1 scope, not deferred.
+
+### Tier 3 rollback feature flag
+
+If Anthropic tightens subscription-SDK policy post-launch:
+
+1. **Env flag**: `WOTANN_SUBSCRIPTION_SDK_ENABLED=0` disables Tier 3 path entirely
+2. **Graceful fallback**: when disabled, WOTANN config-discovery prefers (a) BYOK Anthropic API key if present, (b) free-tier Groq/Gemini/DeepSeek, (c) local Ollama
+3. **User notification**: first run after flag-set displays one-time "Claude subscription path disabled — using fallback providers" message
+4. **Monitoring**: `src/providers/claude-cli-backend.ts` wraps first `invokeClaudeCli()` call with feature-flag check; if disabled, throw `FeatureDisabledError` with fallback guidance
+
+**Spec**: 50 LOC addition to Wave 0.
+
+### Documentation drift prevention
+
+V9 itself will drift as the codebase grows. Self-correcting mechanism:
+
+**NEW FILE**: `scripts/v9-drift-check.mjs` (100 LOC)
+- Reads V9 Baseline table + every `wc -l` claim + every file:line citation
+- Re-runs each check against HEAD
+- Diffs; prints `v9-drift-check FAIL: X claims stale`
+- Runs in CI as advisory (not blocking) — flags when V9 drifts >5% from reality
+
+**NEW GITHUB ACTION**: `.github/workflows/v9-drift-check.yml` — weekly cron + on-push for `docs/MASTER_PLAN_V9.md` changes. Comments on PR if V9 drifts.
 
 ## Cross-Cutting Quality Bars
 
