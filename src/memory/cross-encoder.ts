@@ -7,22 +7,21 @@
  * the query-doc PAIR jointly, not two independent embeddings.
  *
  * Hindsight's reference stack uses `cross-encoder/ms-marco-MiniLM-L-6-v2`.
- * We DO NOT ship that here:
- *   - @xenova/transformers was removed from the WOTANN dep tree
- *     (large download, poor device story, conflicts with sqlite-vec
- *     roadmap).
- *   - sqlite-vec + ONNX runtime lands in Phase 2 P1-M2; that milestone
- *     is the proper home for the real MiniLM cross-encoder.
  *
- * What we ship NOW:
+ * What we ship in this file:
  *   - `createHeuristicCrossEncoder`: a length-normalized, case-
  *     insensitive query-token-overlap scorer. Good enough to
  *     demonstrate the wire-up, deterministic, zero-dep, honest about
  *     what it is (a heuristic).
  *   - `createCrossEncoderFromFn`: inject any custom scoring function
- *     (sync or async). This is the upgrade path — once P1-M2 lands
- *     ONNX + MiniLM, the MiniLM inference call slots in through this
- *     hook without touching `TEMPR` or any caller.
+ *     (sync or async). This is the upgrade path.
+ *
+ * Phase 2 P1-M2 (OMEGA port) lands the real MiniLM path in a sibling
+ * module:
+ *   - `./onnx-cross-encoder.ts` — `createOnnxCrossEncoder({ session })`
+ *     wraps an onnxruntime-node InferenceSession and falls back to
+ *     the heuristic when the session is absent or errors. Same
+ *     `CrossEncoder` interface — drop-in.
  *
  * Quality bar #6 (honest-fail): if a scoring function throws, the
  * reranker returns candidates in ORIGINAL order with zero scores
