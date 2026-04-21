@@ -227,4 +227,24 @@ nodes:
     expect(next.mood).toBe("thinking");
     expect(next.revision).toBe(initial.revision + 1);
   });
+
+  it("exports tools/task-tool class + types", () => {
+    expect(typeof wotann.TaskTool).toBe("function");
+  });
+
+  it("TaskTool can create and list tasks end-to-end", async () => {
+    const { tmpdir } = await import("node:os");
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "wotann-tasktool-"));
+    try {
+      const tool = new wotann.TaskTool(dir);
+      const task = tool.create("First task", { priority: "high" });
+      expect(task.title).toBe("First task");
+      expect(task.priority).toBe("high");
+      expect(task.status).toBe("pending");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

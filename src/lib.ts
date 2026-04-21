@@ -1399,3 +1399,12 @@ export {
   type EyeState,
   type Facing,
 } from "./ui/raven/raven-state.js";
+
+// ── P1-O — TaskTool (agent TODO list) ──────────────────
+export {
+  TaskTool,
+  type TaskItem,
+  type TaskToolResult,
+  type TaskStatus as TaskToolStatus,
+  type TaskPriority as TaskToolPriority,
+} from "./tools/task-tool.js";
