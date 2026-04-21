@@ -28,11 +28,20 @@ interface ToolEntry {
 // is a discipline task. The previous version listed the fictional
 // "HashlineEdit" and was missing "NotebookEdit" (referenced by
 // middleware/deferred-tool-filter.ts and sandbox/security.ts).
+//
+// P1-UI8 (Phase 3): `HashlineEdits` is now a real tool — the oh-my-pi
+// hashline parser + applier in `src/tools/hashline-edits.ts`. Mid-tier
+// models achieve up to +10x edit success with this format vs str_replace.
 const TOOL_CATALOG: readonly ToolEntry[] = [
   // Core (always available)
   { name: "Read", brief: "Read files with line numbers", category: "core" },
   { name: "Write", brief: "Create or overwrite files", category: "core" },
   { name: "Edit", brief: "String replacement in files", category: "core" },
+  {
+    name: "HashlineEdits",
+    brief: "Line-anchored surgical patches via '# path:line' blocks (oh-my-pi format)",
+    category: "core",
+  },
   { name: "NotebookEdit", brief: "Jupyter notebook cell edits", category: "core" },
   { name: "Glob", brief: "File pattern matching", category: "core" },
   { name: "Grep", brief: "Content search", category: "core" },
