@@ -614,6 +614,20 @@ export {
   type DesignTokens,
   type DesignTokenEntry,
 } from "./design/design-tokens-parser.js";
+// ── Design (codebase → design-system extractor — P1-C8) ──────────────
+export {
+  DesignExtractor,
+  type DesignSystem,
+  type DesignExtractorOptions,
+  type ExtractedColor,
+  type ExtractedPalette,
+  type ExtractedSpacing,
+  type ExtractedTypography,
+  type ExtractedFontFamily,
+  type ExtractedFontSize,
+  type ExtractedFontWeight,
+  type TokenInventory,
+} from "./design/extractor.js";
 
 // ── Benchmarks (TerminalBench / SWE-bench / τ-bench / LongMemEval) ────
 export {
