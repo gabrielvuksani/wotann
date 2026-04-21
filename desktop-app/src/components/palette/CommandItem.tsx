@@ -4,6 +4,7 @@
  */
 
 import type { PaletteCommand } from "./types";
+import { color } from "../../design/tokens.generated";
 
 interface CommandItemProps {
   readonly command: PaletteCommand;
@@ -13,7 +14,8 @@ interface CommandItemProps {
   readonly dataIndex: number;
 }
 
-const APPLE_BLUE = "#0A84FF";
+// Token-backed accent — resolves to the active theme's accent at runtime.
+const APPLE_BLUE = color("accent");
 
 export function CommandItem({ command, selected, onSelect, onFocus, dataIndex }: CommandItemProps) {
   return (

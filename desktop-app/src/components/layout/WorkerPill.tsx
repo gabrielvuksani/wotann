@@ -6,6 +6,7 @@
 
 import { useRef, useEffect, useCallback } from "react";
 import { useStore } from "../../store";
+import { color } from "../../design/tokens.generated";
 
 /** Compact pill at the sidebar bottom. */
 export function WorkerPill() {
@@ -258,14 +259,14 @@ export function WorkerPill() {
               <span
                 key={a.id}
                 className="rounded-full animate-pulse"
-                style={{ width: 3, height: 3, background: "#38bdf8", boxShadow: "0 0 2px rgba(56,189,248,0.25)" }}
+                style={{ width: 3, height: 3, background: color("info"), boxShadow: "0 0 2px rgba(56,189,248,0.25)" }}
                 aria-hidden="true"
               />
             ))}
             {agents.filter((a) => a.status === "completed").length > 0 && (
               <span
                 className="rounded-full"
-                style={{ width: 3, height: 3, background: "#4ade80", boxShadow: "0 0 2px rgba(74,222,128,0.25)" }}
+                style={{ width: 3, height: 3, background: color("success"), boxShadow: "0 0 2px rgba(74,222,128,0.25)" }}
                 aria-hidden="true"
               />
             )}

@@ -5,16 +5,17 @@
 import { useCallback } from "react";
 import type { OpenFile } from "../../types";
 import { getLanguageFromPath } from "./MonacoEditor";
+import { color } from "../../design/tokens.generated";
 
-// Language → accent color for tab indicator (CSS variables with fallbacks)
+// Language → accent color for tab indicator (token-backed)
 const LANG_COLORS: Record<string, string> = {
-  typescript: "var(--color-info, #3b82f6)", typescriptreact: "var(--color-info, #3b82f6)",
-  javascript: "var(--color-warning, #FF9F0A)", javascriptreact: "var(--color-warning, #FF9F0A)",
-  python: "var(--color-success, #30D158)", rust: "var(--color-warning, #FF9F0A)",
-  go: "var(--cyan, #06b6d4)", swift: "var(--color-warning, #fb923c)",
-  json: "var(--color-text-muted, #a1a1aa)", yaml: "var(--color-text-muted, #a1a1aa)",
-  markdown: "var(--color-text-dim, #71717a)", css: "var(--color-primary, #0A84FF)",
-  html: "var(--color-error, #FF453A)", sql: "var(--color-info, #5AC8FA)",
+  typescript: color("info"), typescriptreact: color("info"),
+  javascript: color("warning"), javascriptreact: color("warning"),
+  python: color("success"), rust: color("warning"),
+  go: color("accent"), swift: color("warning"),
+  json: color("muted"), yaml: color("muted"),
+  markdown: color("muted"), css: color("accent"),
+  html: color("error"), sql: color("info"),
 };
 
 interface EditorTabsProps {
@@ -32,7 +33,7 @@ export function EditorTabs({ files, activeIndex, onSelectTab, onCloseTab }: Edit
       {files.map((file, i) => {
         const isActive = i === activeIndex;
         const lang = getLanguageFromPath(file.path);
-        const langColor = LANG_COLORS[lang] ?? "var(--color-text-ghost, #52525b)";
+        const langColor = LANG_COLORS[lang] ?? color("muted");
 
         return (
           <div
@@ -49,7 +50,7 @@ export function EditorTabs({ files, activeIndex, onSelectTab, onCloseTab }: Edit
               fontSize: "var(--font-size-xs)",
               ...(isActive
                 ? { background: "var(--accent-muted)", color: "var(--color-text-primary)" }
-                : { background: "#1C1C1E", color: "var(--color-text-muted)" }),
+                : { background: color("surface"), color: "var(--color-text-muted)" }),
             }}
             onClick={() => onSelectTab(i)}
           >

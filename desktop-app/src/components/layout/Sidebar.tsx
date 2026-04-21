@@ -18,6 +18,7 @@ import { useStore } from "../../store";
 import type { ConversationSummary } from "../../types";
 import { WorkerPill } from "./WorkerPill";
 import { ValknutSpinner } from "../wotann/ValknutSpinner";
+import { color } from "../../design/tokens.generated";
 
 // ── Relative time formatting ───────────────────────────
 
@@ -63,10 +64,10 @@ function groupByProject(conversations: readonly ConversationSummary[]): readonly
 
   const groups: ProjectGroup[] = [];
   if (pinned.length > 0) {
-    groups.push({ id: "pinned", name: "Pinned", color: "#f59e0b", items: pinned });
+    groups.push({ id: "pinned", name: "Pinned", color: color("warning"), items: pinned });
   }
   if (workspace.length > 0) {
-    groups.push({ id: "workspace", name: "Workspace", color: "#0A84FF", items: workspace });
+    groups.push({ id: "workspace", name: "Workspace", color: color("accent"), items: workspace });
   }
   return groups;
 }
@@ -524,7 +525,7 @@ function SidebarConversationRow({ conversation, isActive, status, onSelect }: Si
               style={{
                 fontSize: 13,
                 fontWeight: 500,
-                color: isActive ? "#d4d4d8" : "var(--color-text-secondary)",
+                color: isActive ? color("text") : "var(--color-text-secondary)",
               }}
             >
               {isRenaming ? (
@@ -639,10 +640,11 @@ function SidebarConversationRow({ conversation, isActive, status, onSelect }: Si
 // ── Status Dot — minimal inline indicator ─────────────
 
 function StatusDot({ status }: { readonly status: Exclude<ConversationStatus, "idle"> }) {
+  // TODO(design-token): shadow uses rgba of hex color; keep shadow hex intact since it matches bg
   const colors: Record<Exclude<ConversationStatus, "idle">, { bg: string; shadow: string; pulse: boolean }> = {
-    working: { bg: "#38bdf8", shadow: "0 0 3px rgba(56,189,248,0.2)", pulse: true },
-    pending: { bg: "#fbbf24", shadow: "0 0 2px rgba(251,191,36,0.15)", pulse: false },
-    done: { bg: "#4ade80", shadow: "0 0 2px rgba(74,222,128,0.08)", pulse: false },
+    working: { bg: color("info"), shadow: "0 0 3px rgba(56,189,248,0.2)", pulse: true },
+    pending: { bg: color("warning"), shadow: "0 0 2px rgba(251,191,36,0.15)", pulse: false },
+    done: { bg: color("success"), shadow: "0 0 2px rgba(74,222,128,0.08)", pulse: false },
   };
   const config = colors[status];
 

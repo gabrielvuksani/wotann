@@ -5,6 +5,7 @@
 
 import type { Hunk } from "../../types";
 import { HunkReview } from "./HunkReview";
+import { color } from "../../design/tokens.generated";
 
 interface MultiFileDiffProps {
   readonly hunks: readonly Hunk[];
@@ -28,7 +29,7 @@ export function MultiFileDiff({ hunks, onToggleHunk }: MultiFileDiffProps) {
   }
 
   return (
-    <div style={{ background: "#000000" }}>
+    <div style={{ background: color("background") }}>
       {hunks.map((hunk) => (
         <HunkReview key={hunk.id} hunk={hunk} onToggle={onToggleHunk} />
       ))}

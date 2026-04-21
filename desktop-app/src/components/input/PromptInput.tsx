@@ -1,14 +1,15 @@
 /**
  * Prompt input bar — Obsidian Precision design.
  * Apple-native dark aesthetic:
- * - Container: #1C1C1E bg, 12px radius, 1px solid rgba(255,255,255,0.06) border
+ * - Container: token `surface` bg, 12px radius, 1px solid rgba(255,255,255,0.06) border
  * - Focus: blue border + subtle glow
- * - Send button: filled circle, #0A84FF when text present
+ * - Send button: filled circle, token `accent` when text present
  * - Action buttons: 32px ghost touch targets
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useStore } from "../../store";
+import { color } from "../../design/tokens.generated";
 import { useStreaming } from "../../hooks/useStreaming";
 import { readDirectory, readFile } from "../../store/engine";
 import { AttachButton } from "./AttachButton";
@@ -423,7 +424,7 @@ export function PromptInput() {
           maxWidth: "var(--chat-max-width, 620px)",
           margin: "0 auto",
           position: "relative",
-          background: "#1C1C1E",
+          background: color("surface"),
           border: `1px solid ${isDragOver ? "rgba(10,132,255,0.4)" : isStreaming ? "rgba(10,132,255,0.2)" : "transparent"}`,
           borderRadius: 12,
           transition: "border-color 150ms ease, box-shadow 150ms ease",
@@ -450,8 +451,8 @@ export function PromptInput() {
               bottom: "100%",
               left: 20,
               marginBottom: 4,
-              background: "var(--surface-2, #1e1e2e)",
-              border: "1px solid var(--border-subtle, #333)",
+              background: `var(--surface-2, ${color("surface")})`,
+              border: `1px solid var(--border-subtle, ${color("border")})`,
               borderRadius: "var(--radius-md, 8px)",
               padding: "4px 0",
               minWidth: 240,
@@ -542,9 +543,9 @@ export function PromptInput() {
               background: isStreaming
                 ? "var(--color-error)"
                 : inputValue.trim()
-                  ? "#0A84FF"
-                  : "#2C2C2E",
-              color: isStreaming || inputValue.trim() ? "#FFFFFF" : "var(--color-text-dim)",
+                  ? color("accent")
+                  : color("surface"),
+              color: isStreaming || inputValue.trim() ? color("text") : "var(--color-text-dim)",
               boxShadow: inputValue.trim() && !isStreaming ? "0 2px 8px rgba(10, 132, 255, 0.25)" : "none",
               cursor: !isStreaming && !inputValue.trim() ? "default" : "pointer",
             }}

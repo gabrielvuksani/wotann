@@ -7,6 +7,7 @@
  */
 
 import { forwardRef } from "react";
+import { color } from "../../design/tokens.generated";
 
 interface CommandInputProps {
   readonly value: string;
@@ -77,7 +78,7 @@ export const CommandInput = forwardRef<HTMLInputElement, CommandInputProps>(
               padding: "3px 7px",
               borderRadius: 5,
               background: "rgba(10,132,255,0.18)",
-              color: "#0A84FF",
+              color: color("accent"),
               fontWeight: 500,
               letterSpacing: 0.2,
               textTransform: "uppercase",

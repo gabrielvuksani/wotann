@@ -7,6 +7,7 @@
 import type React from "react";
 import { useState, useRef, useEffect } from "react";
 import type { FileTreeNode } from "../../types";
+import { color } from "../../design/tokens.generated";
 
 /** Inline style tag for file tree hover — avoids modifying globals.css */
 const FILE_TREE_HOVER_STYLES = `
@@ -23,32 +24,34 @@ interface FileIconDef {
   readonly fg: string;
 }
 
+// bg uses rgba() which contains an alpha channel — left intact per token-migration rules.
+// fg is token-backed; surface-3 bg keeps legacy rgba fallback until an alpha token exists.
 const FILE_ICON_MAP: Record<string, FileIconDef> = {
-  ts:   { label: "TS", bg: "var(--color-info-muted, rgba(59,130,246,0.15))",  fg: "var(--color-info, #3b82f6)" },
-  tsx:  { label: "TS", bg: "var(--color-info-muted, rgba(59,130,246,0.15))",  fg: "var(--color-info, #3b82f6)" },
-  js:   { label: "JS", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: "var(--color-warning, #FF9F0A)" },
-  jsx:  { label: "JX", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: "var(--color-warning, #FF9F0A)" },
-  py:   { label: "PY", bg: "var(--color-success-muted, rgba(48,209,88,0.15))", fg: "var(--color-success, #30D158)" },
-  rs:   { label: "RS", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: "var(--color-warning, #FF9F0A)" },
-  go:   { label: "GO", bg: "var(--color-info-muted, rgba(6,182,212,0.15))",   fg: "var(--color-info, #06b6d4)" },
-  java: { label: "JV", bg: "var(--color-error-muted, rgba(255,69,58,0.15))",   fg: "var(--color-error, #FF453A)" },
-  swift:{ label: "SW", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: "var(--color-warning, #FF9F0A)" },
-  json: { label: "{}", bg: "var(--surface-3, rgba(161,161,170,0.12))",         fg: "var(--color-text-muted, #a1a1aa)" },
-  yaml: { label: "YM", bg: "var(--surface-3, rgba(161,161,170,0.12))",         fg: "var(--color-text-muted, #a1a1aa)" },
-  yml:  { label: "YM", bg: "var(--surface-3, rgba(161,161,170,0.12))",         fg: "var(--color-text-muted, #a1a1aa)" },
-  md:   { label: "MD", bg: "var(--color-success-muted, rgba(20,184,166,0.15))", fg: "var(--color-success, #14b8a6)" },
-  css:  { label: "CS", bg: "var(--accent-muted, rgba(10,132,255,0.15))",        fg: "var(--color-primary, #0A84FF)" },
-  scss: { label: "SC", bg: "var(--accent-muted, rgba(10,132,255,0.15))",       fg: "var(--color-primary, #0A84FF)" },
-  html: { label: "HT", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: "var(--color-warning, #FF9F0A)" },
-  sql:  { label: "SQ", bg: "var(--color-info-muted, rgba(59,130,246,0.15))",  fg: "var(--color-info, #3b82f6)" },
-  sh:   { label: "SH", bg: "var(--color-success-muted, rgba(48,209,88,0.15))", fg: "var(--color-success, #30D158)" },
-  toml: { label: "TM", bg: "var(--surface-3, rgba(161,161,170,0.12))",         fg: "var(--color-text-muted, #a1a1aa)" },
-  lock: { label: "LK", bg: "var(--surface-3, rgba(113,113,122,0.12))",         fg: "var(--color-text-dim, #71717a)" },
+  ts:   { label: "TS", bg: "var(--color-info-muted, rgba(59,130,246,0.15))",  fg: color("info") },
+  tsx:  { label: "TS", bg: "var(--color-info-muted, rgba(59,130,246,0.15))",  fg: color("info") },
+  js:   { label: "JS", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: color("warning") },
+  jsx:  { label: "JX", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: color("warning") },
+  py:   { label: "PY", bg: "var(--color-success-muted, rgba(48,209,88,0.15))", fg: color("success") },
+  rs:   { label: "RS", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: color("warning") },
+  go:   { label: "GO", bg: "var(--color-info-muted, rgba(6,182,212,0.15))",   fg: color("accent") },
+  java: { label: "JV", bg: "var(--color-error-muted, rgba(255,69,58,0.15))",   fg: color("error") },
+  swift:{ label: "SW", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: color("warning") },
+  json: { label: "{}", bg: "var(--surface-3, rgba(161,161,170,0.12))",         fg: color("muted") },
+  yaml: { label: "YM", bg: "var(--surface-3, rgba(161,161,170,0.12))",         fg: color("muted") },
+  yml:  { label: "YM", bg: "var(--surface-3, rgba(161,161,170,0.12))",         fg: color("muted") },
+  md:   { label: "MD", bg: "var(--color-success-muted, rgba(20,184,166,0.15))", fg: color("success") },
+  css:  { label: "CS", bg: "var(--accent-muted, rgba(10,132,255,0.15))",        fg: color("accent") },
+  scss: { label: "SC", bg: "var(--accent-muted, rgba(10,132,255,0.15))",       fg: color("accent") },
+  html: { label: "HT", bg: "var(--color-warning-muted, rgba(255,159,10,0.15))", fg: color("warning") },
+  sql:  { label: "SQ", bg: "var(--color-info-muted, rgba(59,130,246,0.15))",  fg: color("info") },
+  sh:   { label: "SH", bg: "var(--color-success-muted, rgba(48,209,88,0.15))", fg: color("success") },
+  toml: { label: "TM", bg: "var(--surface-3, rgba(161,161,170,0.12))",         fg: color("muted") },
+  lock: { label: "LK", bg: "var(--surface-3, rgba(113,113,122,0.12))",         fg: color("muted") },
 };
 
 function getFileIconDef(name: string): FileIconDef {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  return FILE_ICON_MAP[ext] ?? { label: "", bg: "var(--surface-3, rgba(113,113,122,0.1))", fg: "var(--color-text-dim, #71717a)" };
+  return FILE_ICON_MAP[ext] ?? { label: "", bg: "var(--surface-3, rgba(113,113,122,0.1))", fg: color("muted") };
 }
 
 // ── Git Status Dot Colors ───────────────────────────────────────────
@@ -92,7 +95,7 @@ function FolderIcon({ expanded }: { readonly expanded: boolean }) {
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
         <path
           d="M1.5 3.5A1 1 0 012.5 2.5h3.172a1 1 0 01.707.293L7.5 3.914a1 1 0 00.707.293H13.5a1 1 0 011 1V5.5H2.5v-2zM1.5 5.5h13l-1.5 7.5H3L1.5 5.5z"
-          fill="#fbbf24"
+          fill={color("warning")}
           opacity="0.9"
         />
       </svg>
@@ -102,7 +105,7 @@ function FolderIcon({ expanded }: { readonly expanded: boolean }) {
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path
         d="M2 3a1 1 0 011-1h3.172a1 1 0 01.707.293L8 3.414A1 1 0 008.707 3.707.5.5 0 008.5 4H14a1 1 0 011 1v7a1 1 0 01-1 1H2a1 1 0 01-1-1V4a1 1 0 011-1z"
-        fill="#fbbf24"
+        fill={color("warning")}
         opacity="0.85"
       />
     </svg>

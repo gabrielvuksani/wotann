@@ -5,15 +5,17 @@
  */
 
 import type { Hunk } from "../../types";
+import { color } from "../../design/tokens.generated";
 
 interface HunkReviewProps {
   readonly hunk: Hunk;
   readonly onToggle: (hunkId: string, accepted: boolean) => void;
 }
 
-const COLOR_ADD = "#30D158";
-const COLOR_REMOVE = "#FF453A";
-const COLOR_BLUE = "#0A84FF";
+const COLOR_ADD = color("success");
+const COLOR_REMOVE = color("error");
+const COLOR_BLUE = color("accent");
+// rgba alpha variants — kept literal per migration rules (no alpha tokens yet).
 const BG_ADD = "rgba(48, 209, 88, 0.12)";
 const BG_REMOVE = "rgba(255, 69, 58, 0.12)";
 const BORDER_ADD = "rgba(48, 209, 88, 0.45)";
@@ -58,7 +60,7 @@ export function HunkReview({ hunk, onToggle }: HunkReviewProps) {
               border: "none",
               cursor: "pointer",
               background: accepted ? COLOR_ADD : BG_ADD,
-              color: accepted ? "#000" : COLOR_ADD,
+              color: accepted ? color("background") : COLOR_ADD,
               transition: "all 120ms ease",
             }}
           >
@@ -76,7 +78,7 @@ export function HunkReview({ hunk, onToggle }: HunkReviewProps) {
               border: "none",
               cursor: "pointer",
               background: rejected ? COLOR_REMOVE : BG_REMOVE,
-              color: rejected ? "#000" : COLOR_REMOVE,
+              color: rejected ? color("background") : COLOR_REMOVE,
               transition: "all 120ms ease",
             }}
           >

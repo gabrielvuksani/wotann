@@ -6,6 +6,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useMonaco } from "@monaco-editor/react";
+import { color } from "../../design/tokens.generated";
 import { FileTree } from "./FileTree";
 import { EditorTabs } from "./EditorTabs";
 import { MonacoEditor, getLanguageFromPath } from "./MonacoEditor";
@@ -237,7 +238,7 @@ export function EditorPanel() {
   return (
     <div className="flex h-full" style={{ background: "var(--color-bg-primary)" }} role="region" aria-label="Code editor">
       {/* File Tree — collapses when no project open */}
-      <div className="border-r flex-shrink-0" style={{ width: fileTree.length > 0 ? 220 : 160, borderColor: "var(--border-subtle)", background: "#000000", transition: "width 200ms var(--ease-expo)" }} role="navigation" aria-label="File explorer">
+      <div className="border-r flex-shrink-0" style={{ width: fileTree.length > 0 ? 220 : 160, borderColor: "var(--border-subtle)", background: color("background"), transition: "width 200ms var(--ease-expo)" }} role="navigation" aria-label="File explorer">
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>Loading files...</span>
@@ -403,7 +404,7 @@ export function EditorPanel() {
 
         {/* Bottom toolbar: Terminal + Search + Design Mode buttons */}
         {!terminalOpen && (
-          <div className="flex items-center border-t" style={{ borderColor: "var(--border-subtle)", height: 32, background: "#1C1C1E" }}>
+          <div className="flex items-center border-t" style={{ borderColor: "var(--border-subtle)", height: 32, background: color("surface") }}>
             <button
               onClick={() => setTerminalOpen(true)}
               className="flex items-center gap-1.5 px-3 text-xs"

@@ -7,16 +7,17 @@
 import { useMemo, useState } from "react";
 import type { FileEdit, Hunk } from "../../types";
 import { MultiFileDiff } from "./MultiFileDiff";
+import { color } from "../../design/tokens.generated";
 
 interface FileDiffCardProps {
   readonly edit: FileEdit;
   readonly onHunksChange: (path: string, hunks: readonly Hunk[]) => void;
 }
 
-const COLOR_ADD = "#30D158";
-const COLOR_REMOVE = "#FF453A";
-const COLOR_BLUE = "#0A84FF";
-const CARD_BG = "#1C1C1E";
+const COLOR_ADD = color("success");
+const COLOR_REMOVE = color("error");
+const COLOR_BLUE = color("accent");
+const CARD_BG = color("surface");
 
 export function FileDiffCard({ edit, onHunksChange }: FileDiffCardProps) {
   const [expanded, setExpanded] = useState(true);
@@ -108,7 +109,7 @@ export function FileDiffCard({ edit, onHunksChange }: FileDiffCardProps) {
               style={{
                 fontSize: "13px",
                 fontWeight: 600,
-                color: "#FFFFFF",
+                color: color("text"),
                 fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
                 overflow: "hidden",
                 textOverflow: "ellipsis",

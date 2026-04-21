@@ -12,6 +12,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { commands } from "../../hooks/useTauriCommand";
 import { normalizeSymbols, SymbolRow, type RpcSymbol, type UISymbol } from "./SymbolTree";
+import { color } from "../../design/tokens.generated";
 
 interface SymbolOutlineProps {
   readonly filePath: string | null;
@@ -99,7 +100,7 @@ export function SymbolOutline({ filePath }: SymbolOutlineProps) {
     <div
       className="flex flex-col h-full"
       style={{
-        background: "#000",
+        background: color("background"),
         borderLeft: "1px solid rgba(255,255,255,0.08)",
         minWidth: 220,
       }}
@@ -144,7 +145,7 @@ export function SymbolOutline({ filePath }: SymbolOutlineProps) {
             placeholder="Filter symbols..."
             style={{
               width: "100%",
-              background: "#1C1C1E",
+              background: color("surface"),
               border: "1px solid rgba(255,255,255,0.05)",
               borderRadius: 6,
               padding: "4px 8px",
@@ -163,7 +164,7 @@ export function SymbolOutline({ filePath }: SymbolOutlineProps) {
             Open a file to see symbols
           </p>
         ) : error ? (
-          <p style={{ fontSize: 12, color: "#ff453a", padding: "12px" }}>{error}</p>
+          <p style={{ fontSize: 12, color: color("error"), padding: "12px" }}>{error}</p>
         ) : loading && symbols.length === 0 ? (
           <p style={{ fontSize: 12, color: "var(--color-text-dim)", padding: "12px" }}>Loading...</p>
         ) : filtered.length === 0 ? (

@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useState, useCallback, type JSX } from "react";
+import { color } from "../../design/tokens.generated";
 
 interface ShortcutEntry {
   readonly shortcut: string;
@@ -124,13 +125,13 @@ export function KeyboardShortcutsOverlay(): JSX.Element | null {
           width: "min(720px, 100%)",
           maxHeight: "80vh",
           overflowY: "auto",
-          background: "var(--color-bg-raised, #0C1118)",
+          background: color("background"),
           border: "1px solid var(--border-subtle, rgba(138,176,224,0.08))",
           borderRadius: 16,
           boxShadow: "0 24px 64px rgba(0,0,0,0.65), inset 0 0 0 1px rgba(255,168,67,0.06)",
           padding: 24,
           fontFamily: "var(--wotann-font-sans, 'Inter Variable', system-ui)",
-          color: "var(--color-text-primary, #E8EEF7)",
+          color: color("text"),
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
@@ -142,7 +143,7 @@ export function KeyboardShortcutsOverlay(): JSX.Element | null {
             style={{
               background: "transparent",
               border: "1px solid var(--border-subtle, rgba(138,176,224,0.12))",
-              color: "var(--color-text-muted, #9FB1C8)",
+              color: color("muted"),
               borderRadius: 6,
               padding: "4px 10px",
               fontSize: 12,
@@ -161,7 +162,7 @@ export function KeyboardShortcutsOverlay(): JSX.Element | null {
                   fontWeight: 600,
                   textTransform: "uppercase",
                   letterSpacing: "0.08em",
-                  color: "var(--color-text-muted, #9FB1C8)",
+                  color: color("muted"),
                   marginBottom: 8,
                 }}
               >
@@ -181,7 +182,7 @@ export function KeyboardShortcutsOverlay(): JSX.Element | null {
                       gap: 12,
                     }}
                   >
-                    <span style={{ color: "var(--color-text-secondary, #9FB1C8)" }}>{e.description}</span>
+                    <span style={{ color: color("muted") }}>{e.description}</span>
                     <kbd
                       style={{
                         fontFamily: "var(--wotann-font-mono, 'JetBrains Mono', ui-monospace)",
@@ -190,7 +191,7 @@ export function KeyboardShortcutsOverlay(): JSX.Element | null {
                         borderRadius: 4,
                         background: "rgba(138,176,224,0.06)",
                         border: "1px solid rgba(138,176,224,0.15)",
-                        color: "var(--color-text-primary, #E8EEF7)",
+                        color: color("text"),
                         whiteSpace: "nowrap",
                       }}
                     >
@@ -206,7 +207,7 @@ export function KeyboardShortcutsOverlay(): JSX.Element | null {
           style={{
             marginTop: 18,
             fontSize: 11,
-            color: "var(--color-text-muted, #9FB1C8)",
+            color: color("muted"),
             textAlign: "center",
             letterSpacing: "0.02em",
           }}

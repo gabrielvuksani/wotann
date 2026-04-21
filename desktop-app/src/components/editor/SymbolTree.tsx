@@ -4,6 +4,7 @@
  */
 
 import { useState } from "react";
+import { color as tokenColor } from "../../design/tokens.generated";
 
 /** LSP-ish SymbolKind numeric → readable label mapping. */
 const SYMBOL_KIND_NAMES: Record<number, string> = {
@@ -66,11 +67,12 @@ export function normalizeSymbols(symbols: readonly RpcSymbol[] | undefined, pref
 }
 
 function kindIconColor(kind: string): string {
-  if (kind === "class" || kind === "interface" || kind === "struct") return "#0A84FF";
-  if (kind === "method" || kind === "function" || kind === "constructor") return "#30d158";
-  if (kind === "property" || kind === "field") return "#ff9f0a";
+  if (kind === "class" || kind === "interface" || kind === "struct") return tokenColor("accent");
+  if (kind === "method" || kind === "function" || kind === "constructor") return tokenColor("success");
+  if (kind === "property" || kind === "field") return tokenColor("warning");
+  // TODO(design-token): no purple/violet semantic token exists; keep literal
   if (kind === "variable" || kind === "constant") return "#bf5af2";
-  return "#8e8e93";
+  return tokenColor("muted");
 }
 
 function kindIconLetter(kind: string): string {

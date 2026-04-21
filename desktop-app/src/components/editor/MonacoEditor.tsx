@@ -47,7 +47,12 @@ export function MonacoEditor({ filePath, content, language, onChange, readOnly }
   const handleMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
 
-    // Build WOTANN dark theme dynamically from CSS variables
+    // Build WOTANN dark theme dynamically from CSS variables.
+    // TODO(design-token): Monaco's defineTheme() requires bare hex strings
+    // (not CSS vars), so these fallbacks stay as literal hex values. The
+    // runtime reads the active CSS custom property first; fallbacks only
+    // fire when the variable is undefined. color() would return "var(...)"
+    // which Monaco refuses to parse.
     const style = getComputedStyle(document.documentElement);
     const cssVar = (name: string, fallback: string): string =>
       style.getPropertyValue(name).trim() || fallback;

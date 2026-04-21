@@ -14,11 +14,12 @@ import type {
   Hunk,
 } from "../../types";
 import { FileDiffCard } from "./FileDiffCard";
+import { color } from "../../design/tokens.generated";
 
-const COLOR_BLUE = "#0A84FF";
-const COLOR_ADD = "#30D158";
-const BG_MAIN = "#000000";
-const BG_CARD = "#1C1C1E";
+const COLOR_BLUE = color("accent");
+const COLOR_ADD = color("success");
+const BG_MAIN = color("background");
+const BG_CARD = color("surface");
 
 type ComposerState =
   | { readonly kind: "idle" }
@@ -133,7 +134,7 @@ export function MultiFileComposer() {
       style={{
         background: BG_MAIN,
         minHeight: "100%",
-        color: "#FFFFFF",
+        color: color("text"),
         display: "flex",
         flexDirection: "column",
       }}
@@ -173,7 +174,7 @@ export function MultiFileComposer() {
           style={{
             width: "100%",
             background: BG_CARD,
-            color: "#FFFFFF",
+            color: color("text"),
             border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: "10px",
             padding: "12px 14px",
@@ -208,7 +209,7 @@ export function MultiFileComposer() {
             {state.kind === "applied" &&
               `Applied ${state.count} file${state.count === 1 ? "" : "s"}`}
             {state.kind === "error" && (
-              <span style={{ color: "#FF453A" }}>Error: {state.message}</span>
+              <span style={{ color: color("error") }}>Error: {state.message}</span>
             )}
             {state.kind === "idle" && "⌘+Enter to plan edits"}
           </div>
@@ -249,7 +250,7 @@ export function MultiFileComposer() {
                     background: canApplyAll
                       ? COLOR_BLUE
                       : "rgba(255,255,255,0.05)",
-                    color: canApplyAll ? "#FFFFFF" : "rgba(255,255,255,0.3)",
+                    color: canApplyAll ? color("text") : "rgba(255,255,255,0.3)",
                     transition: "all 120ms ease",
                   }}
                 >
@@ -268,7 +269,7 @@ export function MultiFileComposer() {
                   border: "1px solid rgba(255,255,255,0.12)",
                   cursor: "pointer",
                   background: "transparent",
-                  color: "#FFFFFF",
+                  color: color("text"),
                 }}
               >
                 New plan
@@ -293,7 +294,7 @@ export function MultiFileComposer() {
                   color:
                     prompt.trim().length === 0
                       ? "rgba(255,255,255,0.3)"
-                      : "#FFFFFF",
+                      : color("text"),
                 }}
               >
                 Plan edits

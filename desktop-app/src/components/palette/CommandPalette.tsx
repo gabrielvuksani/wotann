@@ -10,7 +10,7 @@
  *      @foo    → scope to provider commands matching "foo"
  *      #id     → open session matching id
  *      /foo    → filter to slash commands
- *  - Apple-blue accent (#0A84FF) + dark translucent background
+ *  - Token-backed accent (via design/tokens.generated) + dark translucent background
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

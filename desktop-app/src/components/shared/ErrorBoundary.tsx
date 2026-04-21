@@ -4,6 +4,7 @@
  */
 
 import { Component, type ReactNode, type ErrorInfo } from "react";
+import { color } from "../../design/tokens.generated";
 
 interface ErrorBoundaryProps {
   readonly children: ReactNode;
@@ -130,7 +131,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               padding: "8px 24px",
               borderRadius: "var(--radius-md)",
               background: "var(--gradient-accent)",
-              color: "#fff",
+              color: color("text"),
               border: "none",
               fontSize: "var(--font-size-sm)",
               fontWeight: 600,

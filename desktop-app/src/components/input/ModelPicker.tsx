@@ -6,6 +6,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useStore } from "../../store";
+import { color } from "../../design/tokens.generated";
 
 export function ModelPicker() {
   const [open, setOpen] = useState(false);
@@ -144,7 +145,7 @@ export function ModelPicker() {
             right: 0,
             marginTop: 4,
             width: 280,
-            background: "#1C1C1E",
+            background: color("surface"),
             border: "1px solid rgba(255,255,255,0.06)",
             borderRadius: 12,
             boxShadow: "var(--shadow-lg)",
