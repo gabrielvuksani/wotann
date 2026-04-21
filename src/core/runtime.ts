@@ -379,6 +379,7 @@ import {
   type SessionIngestStoreLike,
   type KnowledgeGraphPopulator,
 } from "../memory/session-ingestion.js";
+import { createOmegaLayers, type OmegaLayers } from "../memory/omega-layers.js";
 import { detectSupersession, parseAssertionAsFact } from "../memory/knowledge-update-dynamics.js";
 import {
   ProgressiveContextLoader,
@@ -549,6 +550,20 @@ export interface RuntimeConfig {
    * full MemoryStore corpus.
    */
   readonly autoPopulateKG?: boolean;
+  /**
+   * Tier-D1 (rc.2 follow-up): construct the OMEGA 3-layer memory
+   * facade on top of the existing MemoryStore. When enabled,
+   * `getOmegaLayers()` returns a lazily-built `OmegaLayers` instance
+   * whose `layer1/layer2/layer3` read/write the existing auto_capture,
+   * memory_entries/knowledge_nodes/knowledge_edges, and memory_summaries
+   * tables respectively. Composing this facade is zero-cost when off;
+   * the table DDL runs only on first construction. Defaults to
+   * `process.env.WOTANN_OMEGA_LAYERS === "1"` so the default code path
+   * stays unchanged — retrieval modes like summary-first can opt in
+   * when they need L3 compressed summaries, without forcing every
+   * session to run the L3 DDL.
+   */
+  readonly enableOmegaLayers?: boolean;
 }
 
 export interface RuntimeStatus {
@@ -764,6 +779,13 @@ export class WotannRuntime {
   // disabled (which is the default). Zero-overhead when gated off.
   private preCompletionVerifier: PreCompletionVerifier | null = null;
   private progressiveBudget: ProgressiveBudget | null = null;
+  /**
+   * Tier-D1 OMEGA 3-layer memory facade. Lazily constructed on first
+   * getOmegaLayers() call when the gate is enabled AND memoryStore is
+   * present. The facade is a read/write view over the store; zero
+   * allocation when gated off.
+   */
+  private omegaLayers: OmegaLayers | null = null;
   /**
    * B7 goal-drift (OpenHands port, P1-B7). Lazily constructed on
    * first getGoalDriftDetector() call when the gate is enabled.
@@ -4743,6 +4765,34 @@ export class WotannRuntime {
       this.progressiveBudget = new ProgressiveBudget();
     }
     return this.progressiveBudget;
+  }
+
+  /**
+   * Tier-D1 OMEGA 3-layer memory facade. Lazily constructed on first
+   * `getOmegaLayers()` call when the gate is enabled AND a MemoryStore
+   * is present (the facade is a read/write view over the store, so it
+   * can't exist without one). Returns null when disabled, or when
+   * memoryStore is null (free-tier / memoryless mode).
+   *
+   * Composition is zero-cost when off. On first construction, the L3
+   * DDL (`memory_summaries` table creation) runs idempotently against
+   * the store's underlying sqlite handle.
+   *
+   * Gate chain:
+   *   config.enableOmegaLayers === true → always on
+   *   config.enableOmegaLayers === undefined → env WOTANN_OMEGA_LAYERS=1
+   *   config.enableOmegaLayers === false → always off (overrides env)
+   */
+  getOmegaLayers(): OmegaLayers | null {
+    const enabled =
+      this.config.enableOmegaLayers === true ||
+      (this.config.enableOmegaLayers === undefined && process.env["WOTANN_OMEGA_LAYERS"] === "1");
+    if (!enabled) return null;
+    if (!this.memoryStore) return null;
+    if (!this.omegaLayers) {
+      this.omegaLayers = createOmegaLayers({ store: this.memoryStore });
+    }
+    return this.omegaLayers;
   }
 
   /**
