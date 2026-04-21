@@ -1383,6 +1383,21 @@ export class KairosDaemon {
       message: `Unified dispatch plane started: ${result.connected.length}/${totalAdapters} adapters connected`,
       data: { connected: result.connected, failed: result.failed },
     });
+
+    // Wire the computer-session store from the RPC handler into the dispatch
+    // plane so session events propagate to every connected surface (Phase 3
+    // P1-F1). The store remains owned by KairosRPCHandler (single source of
+    // truth per QB #7); the plane is the bus.
+    if (this.rpcHandler) {
+      try {
+        const sessionStore = this.rpcHandler.getComputerSessionStore();
+        this.dispatchPlane.attachComputerSessionStore(sessionStore);
+      } catch {
+        // RPC handler method may not exist in old builds — ignore to keep
+        // startup resilient.
+      }
+    }
+
     return this.dispatchPlane;
   }
 

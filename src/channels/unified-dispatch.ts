@@ -24,11 +24,19 @@ import { randomUUID } from "node:crypto";
 import type { ChannelAdapter, ChannelMessage, ChannelType, DeviceNode } from "./gateway.js";
 import type { DispatchRoutePolicy } from "./dispatch.js";
 import { RoutePolicyEngine, createDefaultPolicy } from "./route-policies.js";
+import type { ComputerSessionStore, SessionEvent } from "../session/computer-session-store.js";
 
 // ── Task Inbox Types ─────────────────────────────────────
 
 export type TaskPriority = "critical" | "high" | "normal" | "low";
-export type TaskStatus = "pending" | "processing" | "completed" | "failed" | "snoozed" | "escalated" | "forwarded";
+export type TaskStatus =
+  | "pending"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "snoozed"
+  | "escalated"
+  | "forwarded";
 
 export interface DispatchTask {
   readonly id: string;
@@ -93,9 +101,16 @@ const DEFAULT_CONFIG: UnifiedDispatchConfig = {
 
 function classifyPriority(message: ChannelMessage): TaskPriority {
   const content = message.content.toLowerCase();
-  if (content.includes("urgent") || content.includes("critical") || content.includes("emergency")) return "critical";
-  if (content.includes("important") || content.includes("asap") || content.includes("blocking")) return "high";
-  if (content.includes("low priority") || content.includes("when you can") || content.includes("fyi")) return "low";
+  if (content.includes("urgent") || content.includes("critical") || content.includes("emergency"))
+    return "critical";
+  if (content.includes("important") || content.includes("asap") || content.includes("blocking"))
+    return "high";
+  if (
+    content.includes("low priority") ||
+    content.includes("when you can") ||
+    content.includes("fyi")
+  )
+    return "low";
   return "normal";
 }
 
@@ -111,19 +126,41 @@ function analyzeComplexity(content: string): TaskComplexity {
   const factors: string[] = [];
   let score = 0;
 
-  if (content.length > 500) { score += 2; factors.push("long-prompt"); }
-  if (content.length > 2000) { score += 3; factors.push("very-long-prompt"); }
-  if (/refactor|architect|design|migrate/i.test(content)) { score += 3; factors.push("architectural-task"); }
-  if (/debug|fix|error|bug|crash/i.test(content)) { score += 2; factors.push("debugging"); }
-  if (/test|verify|validate/i.test(content)) { score += 1; factors.push("verification"); }
-  if (/multiple files|across.*files|many.*changes/i.test(content)) { score += 2; factors.push("multi-file"); }
-  if (/security|auth|encrypt|credential/i.test(content)) { score += 2; factors.push("security-sensitive"); }
-  if (/explain|what is|how does|why/i.test(content)) { score -= 1; factors.push("informational-query"); }
+  if (content.length > 500) {
+    score += 2;
+    factors.push("long-prompt");
+  }
+  if (content.length > 2000) {
+    score += 3;
+    factors.push("very-long-prompt");
+  }
+  if (/refactor|architect|design|migrate/i.test(content)) {
+    score += 3;
+    factors.push("architectural-task");
+  }
+  if (/debug|fix|error|bug|crash/i.test(content)) {
+    score += 2;
+    factors.push("debugging");
+  }
+  if (/test|verify|validate/i.test(content)) {
+    score += 1;
+    factors.push("verification");
+  }
+  if (/multiple files|across.*files|many.*changes/i.test(content)) {
+    score += 2;
+    factors.push("multi-file");
+  }
+  if (/security|auth|encrypt|credential/i.test(content)) {
+    score += 2;
+    factors.push("security-sensitive");
+  }
+  if (/explain|what is|how does|why/i.test(content)) {
+    score -= 1;
+    factors.push("informational-query");
+  }
 
   const suggestedModel: "fast" | "balanced" | "powerful" =
-    score >= 5 ? "powerful" :
-    score >= 2 ? "balanced" :
-    "fast";
+    score >= 5 ? "powerful" : score >= 2 ? "balanced" : "fast";
 
   return { score: Math.max(0, score), factors, suggestedModel };
 }
@@ -134,13 +171,24 @@ export class UnifiedDispatchPlane {
   private readonly config: UnifiedDispatchConfig;
   private readonly adapters: Map<ChannelType, ChannelAdapter> = new Map();
   private readonly verifiedSenders: Set<string> = new Set();
-  private readonly pairingCodes: Map<string, { senderId: string; channelType: ChannelType; expiresAt: number }> = new Map();
+  private readonly pairingCodes: Map<
+    string,
+    { senderId: string; channelType: ChannelType; expiresAt: number }
+  > = new Map();
   private readonly devices: Map<string, DeviceNode> = new Map();
   private readonly inbox: Map<string, DispatchTask> = new Map();
   private readonly channelHealth: Map<ChannelType, ChannelHealth> = new Map();
   private readonly policies: Map<string, DispatchRoutePolicy> = new Map();
   private readonly routePolicyEngine: RoutePolicyEngine;
   private messageHandler: ((message: ChannelMessage) => Promise<string>) | null = null;
+
+  // Computer-session bridge (Phase 3 P1-F1). When wired, incoming SessionEvents
+  // fan out to every listener registered via `onComputerSessionEvent`. The
+  // ComputerSessionStore remains the single source of truth for session state
+  // (QB #7); this plane is the bus that carries events across surfaces.
+  private computerSessionStore: ComputerSessionStore | null = null;
+  private computerSessionDispose: (() => void) | null = null;
+  private readonly computerSessionListeners = new Set<(event: SessionEvent) => void>();
 
   constructor(config?: Partial<UnifiedDispatchConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -176,9 +224,58 @@ export class UnifiedDispatchPlane {
     this.messageHandler = handler;
   }
 
+  // ── Computer-Session Bridge (Phase 3 P1-F1) ────────────
+
+  /**
+   * Attach a ComputerSessionStore so session events flow through this plane
+   * to every registered listener. Calling again with a different store
+   * disconnects the previous one. Passing `null` tears the bridge down.
+   *
+   * QB #11 — before wiring, a sibling-site scan confirmed no other cross-surface
+   * channel carried session-like events. This is the first and canonical bridge.
+   */
+  attachComputerSessionStore(store: ComputerSessionStore | null): void {
+    if (this.computerSessionDispose) {
+      this.computerSessionDispose();
+      this.computerSessionDispose = null;
+    }
+    this.computerSessionStore = store;
+    if (store) {
+      this.computerSessionDispose = store.subscribeAll((event) => {
+        for (const listener of this.computerSessionListeners) {
+          try {
+            listener(event);
+          } catch {
+            // Listener errors must not poison the bus. Callers that need
+            // durable error signalling should wrap their own try/catch.
+          }
+        }
+      });
+    }
+  }
+
+  getComputerSessionStore(): ComputerSessionStore | null {
+    return this.computerSessionStore;
+  }
+
+  /**
+   * Register a listener for every SessionEvent that passes through the plane.
+   * Returns a disposer. Used by phone, watch, desktop, TUI bridges — any
+   * connected surface can tap the same stream without knowing about others.
+   */
+  onComputerSessionEvent(listener: (event: SessionEvent) => void): () => void {
+    this.computerSessionListeners.add(listener);
+    return () => {
+      this.computerSessionListeners.delete(listener);
+    };
+  }
+
   // ── Connection Management ────────────────────────────────
 
-  async connectAll(): Promise<{ connected: readonly ChannelType[]; failed: readonly ChannelType[] }> {
+  async connectAll(): Promise<{
+    connected: readonly ChannelType[];
+    failed: readonly ChannelType[];
+  }> {
     const connected: ChannelType[] = [];
     const failed: ChannelType[] = [];
 
@@ -209,13 +306,23 @@ export class UnifiedDispatchPlane {
 
   // ── Task Inbox Operations ────────────────────────────────
 
-  getInbox(filter?: { status?: TaskStatus; priority?: TaskPriority; channelType?: ChannelType }): readonly DispatchTask[] {
+  getInbox(filter?: {
+    status?: TaskStatus;
+    priority?: TaskPriority;
+    channelType?: ChannelType;
+  }): readonly DispatchTask[] {
     let tasks = [...this.inbox.values()];
     if (filter?.status) tasks = tasks.filter((t) => t.status === filter.status);
     if (filter?.priority) tasks = tasks.filter((t) => t.priority === filter.priority);
-    if (filter?.channelType) tasks = tasks.filter((t) => t.message.channelType === filter.channelType);
+    if (filter?.channelType)
+      tasks = tasks.filter((t) => t.message.channelType === filter.channelType);
     return tasks.sort((a, b) => {
-      const priorityOrder: Record<TaskPriority, number> = { critical: 0, high: 1, normal: 2, low: 3 };
+      const priorityOrder: Record<TaskPriority, number> = {
+        critical: 0,
+        high: 1,
+        normal: 2,
+        low: 3,
+      };
       const pDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
       return pDiff !== 0 ? pDiff : a.createdAt - b.createdAt;
     });
@@ -245,7 +352,10 @@ export class UnifiedDispatchPlane {
     return true;
   }
 
-  async forwardTask(taskId: string, targetChannels: readonly ChannelType[]): Promise<readonly ChannelType[]> {
+  async forwardTask(
+    taskId: string,
+    targetChannels: readonly ChannelType[],
+  ): Promise<readonly ChannelType[]> {
     const task = this.inbox.get(taskId);
     if (!task) return [];
 
@@ -292,7 +402,12 @@ export class UnifiedDispatchPlane {
 
   // ── Cross-Channel Routing ────────────────────────────────
 
-  async sendToChannel(channelType: ChannelType, channelId: string, content: string, replyTo?: string): Promise<boolean> {
+  async sendToChannel(
+    channelType: ChannelType,
+    channelId: string,
+    content: string,
+    replyTo?: string,
+  ): Promise<boolean> {
     const adapter = this.adapters.get(channelType);
     if (!adapter?.connected) return false;
     const ok = await adapter.send(channelId, content, replyTo);
@@ -311,7 +426,9 @@ export class UnifiedDispatchPlane {
         const ok = await adapter.send("broadcast", content);
         if (ok) {
           sent.push(type);
-          this.updateHealth(type, { messagesSent: (this.channelHealth.get(type)?.messagesSent ?? 0) + 1 });
+          this.updateHealth(type, {
+            messagesSent: (this.channelHealth.get(type)?.messagesSent ?? 0) + 1,
+          });
         }
       }
     }
@@ -324,7 +441,12 @@ export class UnifiedDispatchPlane {
   ): Promise<readonly ChannelType[]> {
     const sent: ChannelType[] = [];
     for (const target of channels) {
-      const ok = await this.sendToChannel(target.channelType, target.channelId, content, target.replyTo);
+      const ok = await this.sendToChannel(
+        target.channelType,
+        target.channelId,
+        content,
+        target.replyTo,
+      );
       if (ok) sent.push(target.channelType);
     }
     return sent;
@@ -332,7 +454,11 @@ export class UnifiedDispatchPlane {
 
   // ── Device Registration ──────────────────────────────────
 
-  registerDevice(name: string, channelType: ChannelType, capabilities: readonly string[]): DeviceNode {
+  registerDevice(
+    name: string,
+    channelType: ChannelType,
+    capabilities: readonly string[],
+  ): DeviceNode {
     const node: DeviceNode = {
       id: randomUUID(),
       name,
@@ -480,9 +606,16 @@ export class UnifiedDispatchPlane {
       this.updateHealth(task.message.channelType, { latencyMs });
 
       // Format response according to route policy (if matched)
-      const taskRoutePolicy = this.routePolicyEngine.resolvePolicy(task.message.channelType, task.message.senderId);
+      const taskRoutePolicy = this.routePolicyEngine.resolvePolicy(
+        task.message.channelType,
+        task.message.senderId,
+      );
       const response = taskRoutePolicy
-        ? this.routePolicyEngine.formatResponse(rawResponse, taskRoutePolicy.responseFormat, taskRoutePolicy.maxResponseLength)
+        ? this.routePolicyEngine.formatResponse(
+            rawResponse,
+            taskRoutePolicy.responseFormat,
+            taskRoutePolicy.maxResponseLength,
+          )
         : rawResponse;
 
       // Respond on the original channel
