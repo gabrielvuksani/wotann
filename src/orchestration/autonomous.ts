@@ -66,6 +66,8 @@ import {
   type AutopilotCheckpoint,
 } from "../autopilot/checkpoint.js";
 import { PhasedExecutor, type PhasedExecutorState } from "./phased-executor.js";
+import { GoalDriftDetector, type AgentAction, type DriftAssessment } from "./goal-drift.js";
+import type { TodoProvider } from "./todo-provider.js";
 
 export interface AutonomousConfig {
   readonly maxCycles: number;
@@ -109,6 +111,15 @@ export interface AutonomousConfig {
    * IDs match the provider we're actually querying.
    */
   readonly oracleProvider?: string;
+  /**
+   * P1-B7 goal-drift: run the GoalDriftDetector every N cycles to
+   * catch the agent wandering off its todo.md. 0 disables entirely.
+   * Default 5 — drift checks every 5 cycles balance signal vs cost.
+   * The detector itself only fires when callers supply the `goalDrift`
+   * hook on execute(), so leaving the hook unset is equivalent to
+   * disabling — default sessions pay zero drift cost.
+   */
+  readonly goalDriftCheckEveryNCycles?: number;
 }
 
 export interface AutonomousCycleResult {
@@ -197,6 +208,7 @@ const DEFAULT_CONFIG: AutonomousConfig = {
   enhancedDoomLoopDetection: true,
   contextPressureCritical: 0.9,
   enableSelfTroubleshoot: false,
+  goalDriftCheckEveryNCycles: 5,
 };
 
 /**
@@ -557,6 +569,33 @@ export class AutonomousExecutor {
       saveCheckpointPath?: string;
       trajectoryPath?: string;
       resumeCheckpoint?: AutopilotCheckpoint;
+      /**
+       * P1-B7 goal-drift wire-in (WOTANN quality bar #14 — real wiring).
+       *
+       * Callers opt into drift detection by supplying:
+       *   - detector: the GoalDriftDetector instance (from runtime.getGoalDriftDetector())
+       *   - provider: a TodoProvider (NullTodoProvider or createFsTodoProvider())
+       *   - taskId: the stable id that scopes the todo.md lookup
+       *
+       * When all three are present AND `goalDriftCheckEveryNCycles > 0`,
+       * every Nth cycle snapshots the last 5 actions, calls
+       * `detector.checkActions(todos, actions)`, and — if drift is
+       * detected — prepends a nudge to the next cycle's prompt.
+       *
+       * `onDrift` is a visibility hook (always called after each drift
+       * check runs, drift or not) so callers can log/trace. When
+       * `drift.drift === true` the nudge is ALSO appended to the
+       * prompt whether or not `onDrift` is supplied.
+       *
+       * Leaving the whole block out is equivalent to disabling
+       * drift detection for this run.
+       */
+      goalDrift?: {
+        readonly detector: GoalDriftDetector;
+        readonly provider: TodoProvider;
+        readonly taskId: string;
+        readonly onDrift?: (assessment: DriftAssessment, cycle: number) => void;
+      };
     },
   ): Promise<AutonomousResult> {
     this.enterMode(task);
@@ -574,6 +613,15 @@ export class AutonomousExecutor {
       ? selectIntelligentFirstStrategy(task)
       : "direct";
     const filesChanged: string[] = [];
+    // P1-B7 goal-drift state:
+    // - actionHistory: rolling log of last 5 strategy prompts as
+    //   AgentAction descriptors. Cheap stand-in for a real tool-call
+    //   trace; strategy+prompt is enough for relevance scoring.
+    // - driftNudge: when the last check flagged drift, the detector's
+    //   reason string is prepended to the next cycle's strategy prompt
+    //   then cleared. Consumed once per detection, not sticky.
+    const actionHistory: AgentAction[] = [];
+    let driftNudge: string | null = null;
 
     // ── Phase-13: Trajectory recorder + checkpoint-resume ──
     // Instantiated once per run; append frames on every prompt/response.
@@ -720,6 +768,34 @@ export class AutonomousExecutor {
         }
       }
 
+      // ── P1-B7 Goal-drift check (every N cycles, hook-gated) ──
+      // Snapshots the last 5 recorded AgentActions and asks the
+      // detector whether they align with pending todos. On drift,
+      // caches the reason in driftNudge for the next prompt build.
+      // Honest failure: read/check errors are logged and the cycle
+      // proceeds without a nudge, never silently swallowed as
+      // "no drift" (QB #6).
+      const driftEveryN = this.config.goalDriftCheckEveryNCycles ?? 0;
+      if (
+        callbacks?.goalDrift &&
+        driftEveryN > 0 &&
+        cycle > 0 &&
+        cycle % driftEveryN === 0 &&
+        actionHistory.length > 0
+      ) {
+        try {
+          const todos = await callbacks.goalDrift.provider.readTodo(callbacks.goalDrift.taskId);
+          const recentActions = actionHistory.slice(-5);
+          const assessment = await callbacks.goalDrift.detector.checkActions(todos, recentActions);
+          callbacks.goalDrift.onDrift?.(assessment, cycle);
+          if (assessment.drift) {
+            driftNudge = assessment.reason;
+          }
+        } catch (err) {
+          console.warn(`[autonomous] goal-drift check failed: ${(err as Error).message}`);
+        }
+      }
+
       // ── Build strategy-aware prompt ──
       const contextIntervention =
         this.modeState && this.modeState.contextUsage > this.config.contextPressureThreshold
@@ -744,10 +820,29 @@ export class AutonomousExecutor {
       );
       // Prepend oracle guidance (if any) so the worker treats it as
       // authoritative context for the next step. Consumed once, then cleared.
-      const strategyPrompt = oracleGuidance
+      let strategyPrompt = oracleGuidance
         ? `[Oracle guidance]\n${oracleGuidance}\n\n${strategyPromptBase}`
         : strategyPromptBase;
       oracleGuidance = null;
+
+      // P1-B7: prepend drift nudge when the last check flagged drift.
+      // Consumed once — next cycle starts without the nudge unless
+      // another drift check fires. Format mirrors the oracle-guidance
+      // prefix so the model treats both as "before-you-start" context.
+      if (driftNudge) {
+        strategyPrompt = `[Goal-drift warning]\nyou appear to be drifting from: ${driftNudge}\n\n${strategyPrompt}`;
+        driftNudge = null;
+      }
+
+      // Record this cycle's action for the next drift check. Captures
+      // the strategy + truncated prompt as a synthetic AgentAction —
+      // cheap, deterministic, and enough signal for the Jaccard scorer.
+      actionHistory.push({
+        kind: `cycle:${currentStrategy}`,
+        description: strategyPrompt.slice(0, 200),
+        target: `cycle-${cycle}`,
+      });
+      if (actionHistory.length > 10) actionHistory.shift();
 
       // ── Execute with heartbeat monitoring ──
       this.heartbeat();
