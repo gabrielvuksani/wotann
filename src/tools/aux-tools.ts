@@ -53,8 +53,10 @@ export function buildAuxToolDefinitions(): readonly ToolDefinition[] {
       name: "pdf.extract_text",
       description:
         "Extract text from a PDF file on disk. Uses pdftotext when available, falls " +
-        "back to a raw-byte parser otherwise. Returns text (truncated to `maxChars`), " +
-        "outline (detected chapter/section headers), and page count.",
+        "back to a raw-byte parser otherwise. Returns text (truncated to `maxChars`, " +
+        "default 50000 chars — oversized extracts end with a `[...truncated]` marker, " +
+        "do not treat truncated output as the full document), outline (detected chapter/section " +
+        "headers), and page count.",
       inputSchema: {
         type: "object",
         properties: {

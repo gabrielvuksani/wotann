@@ -39,6 +39,130 @@
 
 import type { ToolSchema } from "./types.js";
 
+// ── Schema Discipline (ForgeCode P1-B11) ────────────────────
+//
+// ForgeCode's empirical TB2 finding: models emit better tool calls when
+// the serialized JSON schema follows three conventions.
+//
+//   1. `required` appears BEFORE `properties` in key order. Some models
+//      anchor on the first key of an object — listing `required` first
+//      primes them to emit those fields first in their tool call.
+//   2. `additionalProperties: false` is explicit on every object schema —
+//      prevents models from inventing optional keys (e.g. OpenAI's strict
+//      mode rejects unknown keys with 400).
+//   3. The transform is RECURSIVE — applies to nested objects, array
+//      items, and oneOf/anyOf branches so the discipline is uniform
+//      regardless of schema depth.
+//
+// The transform is PURE — it deep-clones the input so caller schemas are
+// safe to reuse across providers. If a schema is already disciplined,
+// the transform is idempotent (no double-nesting, no duplicate keys).
+//
+// Authors continue to write tool schemas in natural JS-object-literal
+// order (`type`, `properties`, `required`). The wire format is consistent
+// at the boundary.
+
+/**
+ * Recursively rewrite a JSON schema to apply ForgeCode's discipline:
+ * emit `required` before `properties` in object schemas, and ensure
+ * every object has an explicit `additionalProperties` value (defaults
+ * to `false` when the caller omitted it).
+ *
+ * Returns a new schema tree — caller's input is not mutated.
+ *
+ * Handles:
+ *   - top-level object schemas
+ *   - nested object properties (recursive)
+ *   - arrays-of-objects via `items`
+ *   - oneOf / anyOf / allOf branches (recursive)
+ *   - primitive / null / non-object inputs (returned as-is)
+ *
+ * Does NOT handle:
+ *   - `$ref` resolution (caller must pre-resolve; `assertNoRef` guards)
+ *   - additionalProperties when already explicitly set (preserved verbatim,
+ *     even if `true` or a sub-schema)
+ */
+export function applySchemaDiscipline<T>(schema: T): T {
+  if (schema === null || schema === undefined) return schema;
+  if (typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) {
+    // Arrays at schema-tree level: recurse into each element.
+    return schema.map((item) => applySchemaDiscipline(item)) as unknown as T;
+  }
+
+  const input = schema as Record<string, unknown>;
+  const isObjectSchema = input["type"] === "object" || input["properties"] !== undefined;
+
+  // Build the output with a deterministic key order:
+  //   1. type           (if present)
+  //   2. required       (if present, BEFORE properties)
+  //   3. properties     (with each child disciplined)
+  //   4. additionalProperties  (false by default on object schemas)
+  //   5. every other key preserved in insertion order
+  const out: Record<string, unknown> = {};
+
+  if ("type" in input) out["type"] = input["type"];
+  if (isObjectSchema && "required" in input) {
+    out["required"] = input["required"];
+  } else if (!isObjectSchema && "required" in input) {
+    out["required"] = input["required"];
+  }
+
+  if (isObjectSchema && "properties" in input) {
+    const srcProps = input["properties"] as Record<string, unknown>;
+    const newProps: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(srcProps)) {
+      newProps[key] = applySchemaDiscipline(value);
+    }
+    out["properties"] = newProps;
+  }
+
+  if (isObjectSchema) {
+    // If caller set additionalProperties, preserve (even `true` or a
+    // sub-schema). If missing, default to `false` — the ForgeCode rule.
+    if ("additionalProperties" in input) {
+      const existing = input["additionalProperties"];
+      out["additionalProperties"] =
+        typeof existing === "object" && existing !== null
+          ? applySchemaDiscipline(existing)
+          : existing;
+    } else {
+      out["additionalProperties"] = false;
+    }
+  }
+
+  // Array items: recurse.
+  if ("items" in input) {
+    out["items"] = applySchemaDiscipline(input["items"]);
+  }
+
+  // oneOf / anyOf / allOf: recurse into each branch.
+  for (const key of ["oneOf", "anyOf", "allOf"] as const) {
+    if (key in input && Array.isArray(input[key])) {
+      out[key] = (input[key] as unknown[]).map((branch) => applySchemaDiscipline(branch));
+    }
+  }
+
+  // Copy every other key verbatim in original order (but skip the ones
+  // we've already placed to avoid duplicates).
+  const placed = new Set([
+    "type",
+    "required",
+    "properties",
+    "additionalProperties",
+    "items",
+    "oneOf",
+    "anyOf",
+    "allOf",
+  ]);
+  for (const [key, value] of Object.entries(input)) {
+    if (placed.has(key)) continue;
+    out[key] = value;
+  }
+
+  return out as T;
+}
+
 // ── Provider Envelope Types ─────────────────────────────────
 
 /** Anthropic Messages API tool envelope. */
@@ -135,7 +259,7 @@ export function toAnthropicTools(tools: readonly ToolSchema[]): readonly Anthrop
     out.push({
       name: t.name,
       description: t.description,
-      input_schema: t.inputSchema,
+      input_schema: applySchemaDiscipline(t.inputSchema),
     });
   }
   return out;
@@ -156,7 +280,7 @@ export function toOpenAITools(tools: readonly ToolSchema[]): readonly OpenAITool
       function: {
         name: t.name,
         description: t.description,
-        parameters: t.inputSchema,
+        parameters: applySchemaDiscipline(t.inputSchema),
       },
     });
   }
@@ -178,7 +302,7 @@ export function toCodexTools(tools: readonly ToolSchema[]): readonly CodexToolPa
       type: "function",
       name: t.name,
       description: t.description,
-      parameters: t.inputSchema,
+      parameters: applySchemaDiscipline(t.inputSchema),
     });
   }
   return out;
@@ -229,7 +353,7 @@ export function toBedrockTools(tools: readonly ToolSchema[]): readonly BedrockTo
       toolSpec: {
         name: t.name,
         description: t.description,
-        inputSchema: { json: t.inputSchema },
+        inputSchema: { json: applySchemaDiscipline(t.inputSchema) },
       },
     });
   }
@@ -298,7 +422,7 @@ export function toGeminiFunctionDeclarations(
     out.push({
       name: t.name,
       description: t.description,
-      parameters: t.inputSchema,
+      parameters: applySchemaDiscipline(t.inputSchema),
     });
   }
   return out;

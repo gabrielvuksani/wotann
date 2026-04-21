@@ -260,11 +260,56 @@ describe("toCopilotTools — fidelity", () => {
   });
 
   it("nested + arrays + enums preserved end-to-end", () => {
+    // Note: schema discipline (P1-B11) normalises `additionalProperties: false`
+    // onto every object schema that omitted it, so deep-equal against the
+    // bare caller schema is no longer the right invariant. Instead verify
+    // the data content (properties, required, enums) survived.
     const out = toCopilotTools([NESTED_OBJECT_TOOL, ARRAY_OF_OBJECTS_TOOL, ENUM_TOOL]);
     expect(out).toHaveLength(3);
+
+    // NESTED_OBJECT_TOOL already has additionalProperties set — discipline
+    // is a no-op so deep equality still holds.
     expect(out[0]!.function.parameters).toEqual(NESTED_OBJECT_TOOL.inputSchema);
-    expect(out[1]!.function.parameters).toEqual(ARRAY_OF_OBJECTS_TOOL.inputSchema);
-    expect(out[2]!.function.parameters).toEqual(ENUM_TOOL.inputSchema);
+
+    // ARRAY_OF_OBJECTS_TOOL was authored without additionalProperties — spot
+    // check that the original content survives and the normalisation ran.
+    const aoo = out[1]!.function.parameters as {
+      type: string;
+      required: string[];
+      properties: {
+        invites: {
+          type: string;
+          items: {
+            type: string;
+            required: string[];
+            properties: { email: unknown; role: { enum: string[] } };
+            additionalProperties: boolean;
+          };
+        };
+      };
+      additionalProperties: boolean;
+    };
+    expect(aoo.type).toBe("object");
+    expect(aoo.required).toEqual(["invites"]);
+    expect(aoo.additionalProperties).toBe(false);
+    expect(aoo.properties.invites.items.required).toEqual(["email"]);
+    expect(aoo.properties.invites.items.properties.role.enum).toEqual([
+      "admin",
+      "member",
+      "guest",
+    ]);
+    expect(aoo.properties.invites.items.additionalProperties).toBe(false);
+
+    // ENUM_TOOL: enum values survive verbatim, discipline adds additionalProperties.
+    const enumSchema = out[2]!.function.parameters as {
+      properties: { level: { enum: string[] }; score: { enum: number[] } };
+      required: string[];
+      additionalProperties: boolean;
+    };
+    expect(enumSchema.properties.level.enum).toEqual(["low", "medium", "high"]);
+    expect(enumSchema.properties.score.enum).toEqual([1, 2, 3, 4, 5]);
+    expect(enumSchema.required).toEqual(["level"]);
+    expect(enumSchema.additionalProperties).toBe(false);
   });
 
   it("$ref rejected", () => {

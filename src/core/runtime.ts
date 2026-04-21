@@ -2365,7 +2365,8 @@ export class WotannRuntime {
       effectiveTools.push({
         name: "web_fetch",
         description:
-          "Fetch a URL and return its text content (HTML stripped). Use for documentation, APIs, or web research.",
+          "Fetch a URL and return its text content (HTML stripped). Use for documentation, APIs, or web research. " +
+          "Output is truncated to `maxLength` characters (default 10000); truncated responses end with a `[...truncated]` marker — do not treat such output as the complete page.",
         inputSchema: {
           type: "object",
           properties: {

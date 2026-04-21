@@ -379,9 +379,25 @@ describe("wire-level tools serialization — Bedrock Converse", () => {
     const spec = body.toolConfig?.tools?.[0]?.toolSpec;
     expect(spec?.name).toBe("echo");
     expect(spec?.description).toBe("Echo back");
-    // Schema pass-through: the inner .json must match the caller's
-    // inputSchema verbatim — no key renames, no ordering changes.
-    expect(spec?.inputSchema?.json).toEqual(echoSchema);
+    // Schema discipline (P1-B11) applies to the inner .json: `required`
+    // is emitted before `properties`, `additionalProperties: false` is
+    // normalised, and all caller-supplied data survives intact. A regression
+    // that strips `required` or mutates `type:"object"` would fail here.
+    const emitted = spec?.inputSchema?.json as {
+      type: string;
+      required: string[];
+      properties: { text: { type: string } };
+      additionalProperties: boolean;
+    };
+    expect(emitted.type).toBe("object");
+    expect(emitted.required).toEqual(["text"]);
+    expect(emitted.properties.text).toEqual({ type: "string" });
+    expect(emitted.additionalProperties).toBe(false);
+    // Key-order regression lock: `required` precedes `properties` in JSON.
+    const serialized = JSON.stringify(emitted);
+    expect(serialized.indexOf('"required"')).toBeLessThan(
+      serialized.indexOf('"properties"'),
+    );
   });
 
   it("bedrock: $ref in tool schema throws before hitting the wire", async () => {
@@ -525,7 +541,23 @@ describe("wire-level tools serialization — Vertex AI", () => {
     const tool = body.tools?.[0];
     expect(tool?.name).toBe("get_weather");
     expect(tool?.description).toBe("Weather fetch");
-    expect(tool?.input_schema).toEqual(schema);
+    // Schema discipline (P1-B11): caller schema missing additionalProperties
+    // gets normalised to false; `required` emitted before `properties`.
+    // Content (type, required list, properties) preserved verbatim.
+    const emitted = tool?.input_schema as {
+      type: string;
+      required: string[];
+      properties: { city: { type: string } };
+      additionalProperties: boolean;
+    };
+    expect(emitted.type).toBe("object");
+    expect(emitted.required).toEqual(["city"]);
+    expect(emitted.properties.city).toEqual({ type: "string" });
+    expect(emitted.additionalProperties).toBe(false);
+    const serialized = JSON.stringify(emitted);
+    expect(serialized.indexOf('"required"')).toBeLessThan(
+      serialized.indexOf('"properties"'),
+    );
   });
 });
 
@@ -605,10 +637,24 @@ describe("wire-level tools serialization — Ollama /api/chat", () => {
     expect(tool?.type).toBe("function");
     expect(tool?.function?.name).toBe("search");
     expect(tool?.function?.description).toBe("Search something");
-    // Schema pass-through: exact structural equality with the caller's
-    // inputSchema. A regression that e.g. strips `required` or mutates
-    // `type: "object"` would fail here.
-    expect(tool?.function?.parameters).toEqual(schema);
+    // Schema discipline (P1-B11): `required` is emitted before `properties`,
+    // and `additionalProperties: false` is normalised onto every object
+    // schema that omitted it. Data content (type, required list, properties)
+    // survives intact.
+    const params = tool?.function?.parameters as {
+      type: string;
+      required: string[];
+      properties: { query: { type: string } };
+      additionalProperties: boolean;
+    };
+    expect(params.type).toBe("object");
+    expect(params.required).toEqual(["query"]);
+    expect(params.properties.query).toEqual({ type: "string" });
+    expect(params.additionalProperties).toBe(false);
+    const serialized = JSON.stringify(params);
+    expect(serialized.indexOf('"required"')).toBeLessThan(
+      serialized.indexOf('"properties"'),
+    );
   });
 
   it("ollama: $ref in tool schema rejected via shared serializer", async () => {
