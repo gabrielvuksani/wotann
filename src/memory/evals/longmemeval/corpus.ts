@@ -121,6 +121,23 @@ export interface LoadCorpusOptions {
   readonly seed?: number;
   /** Override the search directory (default: workingDir/.wotann/benchmarks/longmemeval). */
   readonly corpusDir?: string;
+  /**
+   * When true, throw on the first malformed instance in the JSON array
+   * instead of silently filtering. Default: false (tolerate malformed rows;
+   * drop them, but surface them in `onMalformed`).
+   */
+  readonly strict?: boolean;
+  /**
+   * Called for every malformed instance encountered (before filter or throw).
+   * Useful for CI logs and tests. `index` is the position in the JSON array.
+   */
+  readonly onMalformed?: (index: number, raw: unknown) => void;
+  /**
+   * Called when a duplicate question_id is encountered. Only the first
+   * occurrence is kept; subsequent duplicates are dropped. Default: a
+   * console.warn that names the id.
+   */
+  readonly onDuplicate?: (questionId: string, duplicateIndex: number) => void;
 }
 
 /**
@@ -156,16 +173,40 @@ export function loadLongMemEvalCorpus(
     if (!Array.isArray(parsed)) {
       throw new Error(`LongMemEval corpus at ${file} must be a JSON array of instances`);
     }
-    instances = parsed.filter(isInstance);
+
+    // Empty array → empty instances (not an error). Matches spec expectation
+    // that a legitimately-empty corpus file is loadable as a no-op.
+    if (parsed.length === 0) {
+      instances = [];
+    } else {
+      const valid: LongMemEvalInstance[] = [];
+      for (let i = 0; i < parsed.length; i++) {
+        const row = parsed[i];
+        if (isInstance(row)) {
+          valid.push(row);
+        } else {
+          opts.onMalformed?.(i, row);
+          if (opts.strict) {
+            throw new Error(
+              `LongMemEval corpus at ${file}: instance at index ${i} is malformed. ` +
+                `Expected fields: question_id, question, answer, question_type, haystack_sessions.`,
+            );
+          }
+        }
+      }
+      instances = dedupInstances(valid, opts.onDuplicate);
+    }
   } else if (opts.skipDownload) {
     instances = SMOKE_CORPUS;
   } else {
     throw new Error(
       `LongMemEval corpus not found at ${file}.\n` +
         `Download with:\n` +
+        `  node scripts/download-longmemeval.mjs --yes\n` +
+        `Or manually:\n` +
         `  mkdir -p ${corpusDir}\n` +
-        `  wget https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_${variant === "s" ? "s_cleaned" : variant === "m" ? "m_cleaned" : "oracle"}.json -O ${file}\n` +
-        `\nOr pass --skip-download to use the built-in 10-question smoke corpus.`,
+        `  curl -L -o ${file} https://huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_${variant}.json\n` +
+        `\nOr pass { skipDownload: true } to use the built-in 10-question smoke corpus.`,
     );
   }
 
@@ -193,13 +234,44 @@ const VALID_TYPES = new Set<LongMemEvalQuestionType>([
 function isInstance(raw: unknown): raw is LongMemEvalInstance {
   if (raw === null || typeof raw !== "object") return false;
   const r = raw as Record<string, unknown>;
-  if (typeof r["question_id"] !== "string") return false;
+  if (typeof r["question_id"] !== "string" || r["question_id"].length === 0) return false;
   if (typeof r["question"] !== "string") return false;
   if (typeof r["answer"] !== "string") return false;
   if (typeof r["question_type"] !== "string") return false;
   if (!VALID_TYPES.has(r["question_type"] as LongMemEvalQuestionType)) return false;
   if (!Array.isArray(r["haystack_sessions"])) return false;
   return true;
+}
+
+/**
+ * Drop duplicate instances (same question_id). Keeps the first occurrence,
+ * invokes `onDuplicate` for subsequent ones. LongMemEval upstream has
+ * occasionally shipped with accidental duplicates in `_cleaned` re-releases
+ * so we deduplicate defensively rather than silently allowing double-counting.
+ */
+function dedupInstances(
+  instances: readonly LongMemEvalInstance[],
+  onDuplicate?: (questionId: string, duplicateIndex: number) => void,
+): readonly LongMemEvalInstance[] {
+  const seen = new Set<string>();
+  const out: LongMemEvalInstance[] = [];
+  const warn =
+    onDuplicate ??
+    ((id: string): void => {
+      // eslint-disable-next-line no-console
+      console.warn(`LongMemEval corpus: dropping duplicate question_id "${id}"`);
+    });
+  for (let i = 0; i < instances.length; i++) {
+    const inst = instances[i];
+    if (!inst) continue;
+    if (seen.has(inst.question_id)) {
+      warn(inst.question_id, i);
+      continue;
+    }
+    seen.add(inst.question_id);
+    out.push(inst);
+  }
+  return out;
 }
 
 // ── Deterministic shuffle ──────────────────────────────

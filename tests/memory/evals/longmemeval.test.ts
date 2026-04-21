@@ -12,7 +12,8 @@
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import {
   loadLongMemEvalCorpus,
@@ -97,6 +98,124 @@ describe("loadLongMemEvalCorpus", () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "longmemeval_s.json"), JSON.stringify({ not: "array" }));
       expect(() => loadLongMemEvalCorpus(tmp, { skipDownload: false })).toThrow(/array/i);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  // ── P1-M10 additions ─────────────────────────────────
+
+  it("empty JSON array → empty instance list (not an error)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "wotann-lme-"));
+    try {
+      const dir = join(tmp, ".wotann", "benchmarks", "longmemeval");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "longmemeval_s.json"), "[]");
+      const instances = loadLongMemEvalCorpus(tmp, { skipDownload: false });
+      expect(instances).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("silently drops malformed instances by default and surfaces them via onMalformed", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "wotann-lme-"));
+    try {
+      const dir = join(tmp, ".wotann", "benchmarks", "longmemeval");
+      mkdirSync(dir, { recursive: true });
+      const rows: unknown[] = [
+        { missing: "everything" },
+        {
+          question_id: "ok-1",
+          question_type: "single-session-user",
+          question: "q",
+          answer: "a",
+          question_date: "2026-01-01",
+          haystack_session_ids: [],
+          haystack_dates: [],
+          haystack_sessions: [],
+          answer_session_ids: [],
+        },
+        null,
+        "not-an-object",
+      ];
+      writeFileSync(join(dir, "longmemeval_s.json"), JSON.stringify(rows));
+      const malformed: number[] = [];
+      const instances = loadLongMemEvalCorpus(tmp, {
+        skipDownload: false,
+        onMalformed: (i) => malformed.push(i),
+      });
+      expect(instances).toHaveLength(1);
+      expect(instances[0]?.question_id).toBe("ok-1");
+      expect(malformed).toEqual([0, 2, 3]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("strict mode throws on the first malformed instance", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "wotann-lme-"));
+    try {
+      const dir = join(tmp, ".wotann", "benchmarks", "longmemeval");
+      mkdirSync(dir, { recursive: true });
+      const rows: unknown[] = [{ not: "an instance" }];
+      writeFileSync(join(dir, "longmemeval_s.json"), JSON.stringify(rows));
+      expect(() =>
+        loadLongMemEvalCorpus(tmp, { skipDownload: false, strict: true }),
+      ).toThrow(/malformed/i);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates duplicate question_ids and warns via onDuplicate", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "wotann-lme-"));
+    try {
+      const dir = join(tmp, ".wotann", "benchmarks", "longmemeval");
+      mkdirSync(dir, { recursive: true });
+      const row: LongMemEvalInstance = {
+        question_id: "dup-1",
+        question_type: "single-session-user",
+        question: "q",
+        answer: "a",
+        question_date: "2026-01-01",
+        haystack_session_ids: ["s1"],
+        haystack_dates: ["2026-01-01"],
+        haystack_sessions: [[{ role: "user", content: "hi" }]],
+        answer_session_ids: ["s1"],
+      };
+      writeFileSync(join(dir, "longmemeval_s.json"), JSON.stringify([row, row, row]));
+      const dupes: string[] = [];
+      const instances = loadLongMemEvalCorpus(tmp, {
+        skipDownload: false,
+        onDuplicate: (id) => dupes.push(id),
+      });
+      expect(instances).toHaveLength(1);
+      expect(dupes).toEqual(["dup-1", "dup-1"]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects empty-string question_id as malformed", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "wotann-lme-"));
+    try {
+      const dir = join(tmp, ".wotann", "benchmarks", "longmemeval");
+      mkdirSync(dir, { recursive: true });
+      const row: Record<string, unknown> = {
+        question_id: "", // empty string — not a valid identifier
+        question_type: "single-session-user",
+        question: "q",
+        answer: "a",
+        question_date: "2026-01-01",
+        haystack_session_ids: [],
+        haystack_dates: [],
+        haystack_sessions: [],
+        answer_session_ids: [],
+      };
+      writeFileSync(join(dir, "longmemeval_s.json"), JSON.stringify([row]));
+      const instances = loadLongMemEvalCorpus(tmp, { skipDownload: false });
+      expect(instances).toHaveLength(0);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -411,5 +530,66 @@ describe("runLongMemEval", () => {
     await expect(
       runLongMemEval(LONGMEMEVAL_SMOKE_CORPUS.slice(0, 1), { mode: "runtime", topK: 2 }),
     ).rejects.toThrow(/runtime/);
+  });
+});
+
+// ── Download script (P1-M10) ──────────────────────────
+//
+// We invoke scripts/download-longmemeval.mjs as a subprocess and assert on
+// exit codes + stdout — never actually hit the network. The script is
+// explicitly opt-in, so every test either passes --dry-run or omits --yes.
+
+describe("scripts/download-longmemeval.mjs", () => {
+  const SCRIPT = resolvePath(process.cwd(), "scripts", "download-longmemeval.mjs");
+
+  it("exits 1 with usage when --yes is not passed and not a dry-run", () => {
+    const res = spawnSync(process.execPath, [SCRIPT], { encoding: "utf-8" });
+    expect(res.status).toBe(1);
+    expect(res.stderr).toMatch(/--yes/);
+  });
+
+  it("exits 0 on --dry-run and never writes to disk", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "wotann-lme-dl-"));
+    try {
+      const outDir = join(tmp, "lme");
+      const res = spawnSync(
+        process.execPath,
+        [SCRIPT, "--dry-run", `--out-dir=${outDir}`],
+        { encoding: "utf-8" },
+      );
+      expect(res.status).toBe(0);
+      expect(res.stdout).toMatch(/dry-run/i);
+      // Dir should NOT have been created.
+      expect(() => rmSync(outDir, { recursive: true })).toThrow();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("exits 4 on an invalid --variant value", () => {
+    const res = spawnSync(
+      process.execPath,
+      [SCRIPT, "--yes", "--variant=bogus"],
+      { encoding: "utf-8" },
+    );
+    expect(res.status).toBe(4);
+    expect(res.stderr).toMatch(/variant/i);
+  });
+
+  it("exits 4 on an unknown flag", () => {
+    const res = spawnSync(
+      process.execPath,
+      [SCRIPT, "--hokus-pokus"],
+      { encoding: "utf-8" },
+    );
+    expect(res.status).toBe(4);
+    expect(res.stderr).toMatch(/unknown flag/i);
+  });
+
+  it("--help prints the usage banner and exits 0", () => {
+    const res = spawnSync(process.execPath, [SCRIPT, "--help"], { encoding: "utf-8" });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toMatch(/LongMemEval corpus downloader/);
+    expect(res.stdout).toMatch(/--variant/);
   });
 });
