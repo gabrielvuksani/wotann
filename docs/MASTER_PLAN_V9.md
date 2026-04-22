@@ -12,7 +12,7 @@
 1. **Trust source over docs.** Every claim in this plan cites a file:line or grep result. If a prior MD contradicts source, source wins (Quality Bar #15).
 2. **Tiers are ordered by strategic dependency, not chronology.** Tier 0 must ship before Tier 1. Tier 5+ can parallelize after Tiers 0–4 land.
 3. **FINAL TIER is genuinely last.** Supabase rotation + god-file splits + Android native are scheduled only after all prior tiers are green.
-4. **Tiers 0–7 have full WHAT / WHY / WHERE / HOW / VERIFICATION per sub-item.** Tiers 8–14 use abbreviated structure (headers + prose + file list) — they are narrow-scope enough that cold-read Claude can reconstruct the missing subsections from the primary research source linked in each tier. When a Tier 8+ item needs full structure for execution, expand it in-place during execution (mark with `[EXPAND-BEFORE-EXEC]` comment in the tier body).
+4. **Tiers 0–7 and Tier 12 have full WHAT / WHY / WHERE / HOW / VERIFICATION per sub-item (post-A+ closure 2026-04-21).** Tier 12's 21 competitor-port items were expanded in the 3rd-pass audit. Tiers 8–11 and 13–14 + FINAL still use abbreviated structure (headers + prose + file list) — they are narrow-scope enough that cold-read Claude can reconstruct missing subsections from the primary research source linked in each tier. When a Tier 8–11/13–14 item needs full structure for execution, expand it in-place during execution (mark with `[EXPAND-BEFORE-EXEC]` comment in the tier body). **Every tier now has an Integration Test Matrix** (A+ closure) listing concrete scenarios per sub-item — happy path + failure modes + edge cases with file:line / command / assertion.
 5. **Grey-zone framing dropped.** Claude Pro/Max subscription access is achieved via Claude Agent SDK — an Anthropic-sanctioned path, not evasion. See Tier 3.
 
 ---
@@ -392,6 +392,33 @@ fix(security): T0 legal hygiene — remove TOS-violating sub-OAuth paths
 
 **Tier 0 exit criteria**: `grep -rn "writeFileSync.*oauth\|auth.openai.com/oauth" src/ | wc -l` returns 0; tsc rc=0; 7589/7597 tests still pass.
 
+**Tier 0 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T0.1 | migration — legacy oauth file present | user has `~/.wotann/anthropic-oauth.json` pre-upgrade; run first Claude invocation | file archived to `~/.wotann/.legacy/anthropic-oauth.json.bak`; warning logged |
+| T0.1 | missing creds — no Claude CLI login | no `~/.claude/.credentials.json`; invoke | prompt user to run `claude login`; no crash |
+| T0.1 | macOS Keychain path | Keychain has Claude creds | `readClaudeCliCredentials()` returns `{source: "keychain", ...}` |
+| T0.1 | malformed creds file | `~/.claude/.credentials.json` has invalid JSON | returns `null`, no throw |
+| T0.1 | linux file fallback | Keychain unavailable, file exists | returns `{source: "file", ...}` |
+| T0.1 | env scrub | `ANTHROPIC_API_KEY=x`, invoke Claude | scrubbed from env before `spawn`; `claude -p` doesn't see it |
+| T0.1 | stream-json auth_expired | Claude emits `{type: "error", subtype: "auth_expired"}` | WOTANN emits `claude.auth.expired` event, no silent retry |
+| T0.1 | stream-json rate_limit | Claude emits `{type: "error", subtype: "rate_limit"}` | user sees ETA, offered BYOK fallback |
+| T0.1 | spawn ENOENT | `claude` binary missing | user-facing message "Claude CLI not found. Install from..."; no crash |
+| T0.1 | network partition mid-stream | `claude` subprocess killed mid-response | `stream.truncated` event, partial buffer flushed |
+| T0.1 | `--permission-mode bypassPermissions` pinned | invoke `claude -p` | args array contains `--permission-mode bypassPermissions` |
+| T0.1 | `--setting-sources user` pinned | invoke `claude -p` | args array contains `--setting-sources user`, not `project` |
+| T0.2 | PKCE flow absent | grep for `app_EMoamEEZ73f0CkXaXp7hrann` | 0 matches |
+| T0.2 | codex-oauth renamed | both old path missing + new path exists | `src/providers/codex-detector.ts` exists; `src/providers/codex-oauth.ts` does not |
+| T0.2 | legacy codex cred migration | user has `~/.codex/auth.json` written by old WOTANN | shape mismatch triggers archive + `codex login` prompt |
+| T0.2 | oauth-server Codex block removed | grep `auth.openai.com/oauth` in src | 0 matches |
+| T0.2 | codex-adapter no direct POST | grep `auth.openai.com/oauth/token` | 0 matches |
+| T0.3 | Copilot experimental banner | run Copilot adapter | `[copilot] experimental` warning printed on first use |
+| T0.3 | no adapter deletion | Copilot adapter still functional | BYOK GH_TOKEN path works |
+| T0.4 | SECURITY.md updated | read `SECURITY.md` | "Subscription Provider Access Policy" section present |
+| T0.5 | Finder artifact cleanup | `find .git/refs -name '* 2'` | empty result after cleanup |
+
+---
+
 ---
 
 ## Tier 1 — Top-10 Wire-Audit Closures — 1-2 weeks / ~400 LOC high-impact unlock
@@ -592,6 +619,46 @@ if (warmupEnabled) {
 
 **Tier 1 exit criteria**: All 10 wires verified via integration tests; full suite 7600+ tests pass; tsc rc=0.
 
+**Tier 1 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T1.1 | happy path | iOS sends `computer.session.step` | `ComputerUseAgent.dispatch` called (spy), action executes, result stored |
+| T1.1 | session not claimed | `step()` returns non-claimed status | dispatch skipped, only state-machine advances |
+| T1.1 | dispatch error | action fails | `recordStepResult(sessionId, {ok: false, error})`, session status = "failed" |
+| T1.1 | computerUseAgent null | dependency not wired | graceful skip, logs warning, no crash |
+| T1.2 | SSE connect | open Workshop tab | `ComputerSessionPanel` shows live events |
+| T1.2 | SSE disconnect + reconnect | network drop | EventSource reconnects, no duplicate events |
+| T1.2 | Workshop tab without session | no active session | empty state shown, not crash |
+| T1.3 | sqlite-vec available | native module loaded | `this.vectorBackend` non-null, TEMPR uses real cosine |
+| T1.3 | sqlite-vec unavailable | module load fails | `this.vectorBackend = null`, heuristic fallback active |
+| T1.3 | real cosine similarity | insert 10 embeddings, query | top-3 results are closest by cosine, not heuristic ranking |
+| T1.4 | ONNX model present | model + runtime loaded | `this.crossEncoder = OnnxCrossEncoder` |
+| T1.4 | ONNX model missing | file absent | falls back to `HeuristicCrossEncoder` |
+| T1.4 | LongMemEval score jump | run benchmark pre+post | projected 55-68% → 82-91% |
+| T1.5 | warmup fires | session start | `warmupCache()` called within 500ms of `buildStablePrefix` |
+| T1.5 | warmup disabled via config | `enablePromptCacheWarmup: false` | warmup never fires |
+| T1.5 | warmup disabled via env | `WOTANN_PROMPT_CACHE_WARMUP=0` | warmup never fires |
+| T1.5 | cache savings measured | 2 identical queries back-to-back | second query ≥40% cheaper in tokens |
+| T1.6 | Slack HMAC valid | `v0=<hex>` signature matches | request accepted |
+| T1.6 | Slack HMAC invalid | wrong signature | 401, request rejected |
+| T1.6 | Telegram IP allowlist | allowed IP | accepted; disallowed IP rejected |
+| T1.6 | Discord Ed25519 | valid sig | accepted; invalid rejected |
+| T1.6 | WhatsApp X-Hub-Signature-256 | valid HMAC | accepted |
+| T1.6 | Teams JWT | valid JWT | accepted; expired JWT rejected |
+| T1.6 | SMS/Twilio X-Twilio-Signature | valid sig | accepted |
+| T1.7 | sandbox-audit uses resolvePermission | any tool call | single unified code path |
+| T1.7 | permission mode `ask` | high-risk tool | user prompt shown |
+| T1.7 | permission mode `bypassPermissions` | high-risk tool | executes without prompt |
+| T1.8 | self-heal on cycle failure | autonomous error | `heal()` called with recovery plan |
+| T1.8 | heal returns no plan | unrecoverable | no retry, original error surfaces |
+| T1.8 | heal succeeds | retry plan works | cycle resumes from point of failure |
+| T1.9 | searchUnified via RPC | `memory.searchUnified` call | returns fabric fan-out result |
+| T1.9 | FTS5 low-confidence fallthrough | query returns <0.3 confidence | fabric-level searched, merged |
+| T1.10 | startup sweep | `.wotann/*.tmp.*` older than 1h present | deleted on startup |
+| T1.10 | WAL preserved | `.wotann/memory.db-wal` exists | NEVER deleted, SQLite needs it |
+
+---
+
 ---
 
 ## Tier 2 — Memory SOTA Activation — 2-3 days / ~100 LOC
@@ -637,6 +704,24 @@ writeFileSync(".wotann/benchmarks/longmemeval/dataset.json", await res.text());
 **HOW**: GitHub Action cron; commits results to `docs/BENCHMARKS.md` with sparkline.
 
 **Tier 2 exit criteria**: LongMemEval-500 runs end-to-end; WOTANN publishes a real number; that number is within 2-5% of Mastra (94.87%).
+
+**Tier 2 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T2.1 | corpus downloaded | run `scripts/download-longmemeval.mjs` | `.wotann/benchmarks/longmemeval/dataset.json` exists, 500 items |
+| T2.1 | download network failure | unreachable URL | script exits 1 with clear error; no partial write |
+| T2.1 | corpus re-download skipped | file exists | script exits 0 without re-fetching |
+| T2.2 | LLM judge agrees with rule-based on simple | clear-correct answer | both score 1.0 |
+| T2.2 | LLM judge on ambiguous | gray-area answer | judge score reflects nuance, rule-based binary |
+| T2.2 | judge model unavailable | 500 error | falls back to rule-based; score tagged as fallback |
+| T2.3 | defaults flipped | fresh config | OMEGA + TEMPR enabled out of box |
+| T2.3 | env override off | `WOTANN_OMEGA=0` | OMEGA disabled |
+| T2.3 | env override on | `WOTANN_OMEGA=1` | OMEGA enabled (same as default) |
+| T2.4 | benchmark runs nightly | GHA cron fires | commit to `docs/BENCHMARKS.md` with timestamp |
+| T2.4 | benchmark page renders | open `docs/BENCHMARKS.md` | sparkline + latest score + historical trend |
+| T2.4 | benchmark regression alert | score drops >5% | CI comment on PR flagging regression |
+
+---
 
 ---
 
@@ -750,6 +835,37 @@ Full test coverage (1200 LOC), fallback paths, telemetry, `/monitor-repos` track
 
 **Tier 3 exit criteria**: WOTANN drives a Claude Pro/Max session end-to-end; user's subscription pays for inference; zero WOTANN-side token reads; all 16 middleware layers fire via hooks + canUseTool.
 
+**Tier 3 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T3.1 | proof of life — user input | TUI user types "hi" | spawns `claude -p`, sees response streamed in TUI |
+| T3.1 | stream-json parse — malformed | `claude` emits junk | skip malformed line, continue parsing next |
+| T3.1 | spawn with custom system prompt | WOTANN config has persona | `--system-prompt "<wotann>"` in args |
+| T3.2 | WOTANN MCP tools registered | Claude session | `mcp__wotann__memory_search` + 9 others discoverable |
+| T3.2 | Built-in tools disabled | --tools "" | Claude cannot Read/Write/Bash directly |
+| T3.2 | allowedTools filter | only `mcp__wotann__*` allowed | tool calls outside prefix rejected |
+| T3.3 | SessionStart hook fires | new session | hook URL called at `POST /wotann/hooks/session-start` |
+| T3.3 | UserPromptSubmit injection | MemoryInjector hook | `additionalContext` appears in prompt |
+| T3.3 | PreToolUse approval | Bash tool call | hook evaluates, approves or `defer`s |
+| T3.3 | Stop hook blocks premature | Reflector says incomplete | `decision: "block"` + `additionalContext` |
+| T3.3 | PreCompact WAL save | compaction imminent | state saved to Engram before compaction |
+| T3.4 | wotann-primary agent launched | `--agents` JSON includes primary | agent runs with `prompt`, `tools`, `model: claude-opus-4-7` |
+| T3.4 | wotann-council-member spawned | council-voting scenario | agent dispatched in isolated worktree |
+| T3.4 | agent with disallowedTools | Write not permitted | agent cannot call Write tool |
+| T3.5 | iMessage channel event | inject during live session | event surfaces as user-message-equivalent |
+| T3.5 | Slack channel reply | send outbound | posted to thread via MCP |
+| T3.5 | phone channel disconnect | network drop | reconnect with replay buffer (T12.18) |
+| T3.6 | error handling — spawn ENOENT | Claude CLI missing | user-facing install hint, no crash |
+| T3.6 | error handling — auth_expired | stream-json error subtype | `claude.auth.expired` event, prompt re-login |
+| T3.6 | error handling — rate_limit | stream-json rate_limit | ETA shown, BYOK fallback offered |
+| T3.6 | error handling — network partition | child `close` without final JSON | `stream.truncated` error, buffer flushed |
+| T3.6 | cost telemetry — quota probe | session start | `claude /usage` parsed, displayed in StatusRibbon |
+| T3.6 | cost telemetry — per-turn counter | token usage in stream | counter increments, drift check passes |
+| T3.6 | cost telemetry — threshold | 90% of monthly | cost.warning event emitted, banner shown |
+| T3.6 | rollback feature flag | `WOTANN_SUBSCRIPTION_SDK_ENABLED=0` | falls back to BYOK, user notified |
+
+---
+
 ---
 
 ## Tier 4 — MCP Apps Support (ecosystem floor) — 3-5 days / ~900 LOC
@@ -778,6 +894,22 @@ MCP Apps spec shipped Jan 26 2026, SEP-1865, ratified by Anthropic + OpenAI + MC
 **TUI fallback**: Show `[Interactive app available — open in Desktop]` for MCP Apps (TUI can't render iframes).
 
 **Tier 4 exit criteria**: Launch-partner apps (Canva, Figma, Slack) render inside WOTANN desktop. TUI shows fallback text.
+
+**Tier 4 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T4.1 | resources/list | WOTANN MCP server queried | returns UI resources with `_meta.ui.resourceUri` |
+| T4.1 | resources/read valid | URI `ui://wotann/memory-browser` | returns HTML with `text/html;profile=mcp-app` |
+| T4.1 | resources/read invalid | bogus URI | 404-equivalent error |
+| T4.2 | Canva app renders | tool returns `_meta.ui.resourceUri` | iframe rendered in desktop-app, sandboxed |
+| T4.2 | Figma app renders | same | iframe + postMessage JSON-RPC works |
+| T4.2 | Slack app renders | same | iframe; click through round-trips |
+| T4.2 | TUI fallback | running in terminal | "[Interactive app available — open in Desktop]" shown |
+| T4.2 | CSP restricts dangerous | iframe tries eval/unsafe | blocked by tauri.conf.json CSP |
+| T4.2 | iframe postMessage RPC | app calls back to host | JSON-RPC round-trips correctly |
+| T4.2 | tauri CSP allowlist | origin in allowlist | loads; unlisted origin blocked |
+
+---
 
 ---
 
@@ -861,6 +993,46 @@ Audit during Tier 5 execution — if any F-handler in `kairos-rpc.ts` isn't cove
 
 **Tier 5 exit criteria**: iOS actually receives + renders cursor stream, approval sheets appear on phone, creations browsable, Live Activity Dynamic Island lights up for task progress.
 
+**Tier 5 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T5.1 | iOS subscribes to `computer.session.events` | pair phone + desktop, start computer session | events flow, `RemoteDesktopView` renders frames |
+| T5.1 | session claim request | agent sends `claim` | iOS shows claim prompt, approve → session status = claimed |
+| T5.1 | session release | agent disconnects | iOS detects + shows "session ended" |
+| T5.2 | cursor stream | desktop agent moves cursor | iOS `CursorTrailOverlay` renders within 50ms p50 |
+| T5.2 | cursor stream backpressure | iOS slow | events dropped; latest cursor position prioritized |
+| T5.2 | cursor stream disconnect | network drop | overlay fades; reconnect resumes |
+| T5.3 | Live Activity start | autopilot begins | Dynamic Island appears with progress |
+| T5.3 | Live Activity update | task progresses | activity updates live (progress bar) |
+| T5.3 | Live Activity end | task completes | activity dismisses cleanly |
+| T5.3 | Live Activity not registered | T7.1 not done | fallback notification (no Dynamic Island) |
+| T5.4 | creation emitted | agent writes file | both iOS + desktop `CreationsBrowser` show it live |
+| T5.4 | creation deletion | agent deletes file | both surfaces remove entry |
+| T5.4 | creation offline | iOS offline during emit | queued; syncs when back online |
+| T5.5 | approval appears on phone | destructive tool call on desktop | `ApprovalSheetView` slides up on iOS |
+| T5.5 | approval timeout | user ignores 30s | auto-denied, desktop notified |
+| T5.5 | approval on multiple devices | 2 phones paired | only 1 can approve, others dismissed |
+| T5.6 | long-press ShareLink | user long-presses creation | share sheet shows iMessage/Mail |
+| T5.6 | share unsupported type | creation is binary no preview | share still shows with filename |
+| T5.7 | delivery notification | task completion | both iOS push + desktop banner |
+| T5.7 | notification respects DND | user in Do-Not-Disturb | silent delivery, visible in tray |
+| T5.8 | fan-out subscription | event published to daemon | all surface subscribers receive |
+| T5.8 | fan-out with 0 subscribers | no one subscribed | event dropped gracefully |
+| T5.9 | Watch dispatch | send dispatch | Watch app shows status, tap → iPhone launches |
+| T5.9 | Smart Stack relevance | Watch idle | relevance signal updated |
+| T5.10 | CarPlay voice | drive session | convo updates live |
+| T5.10 | CarPlay disconnect | exit car | CarPlay disconnects cleanly |
+| T5.11 | Handoff desktop → phone | user starts on desktop | phone picks up session via handoff |
+| T5.12 | Fleet Dashboard | 3 concurrent agents | all 3 visible with live cost + progress |
+| T5.12 | Fleet agent click | click one | navigates to that session |
+| T5.13 | ExploitView renders | iOS app | standalone view loads |
+| T5.13 | CouncilView renders | iOS app | standalone view loads |
+| T5.13 | pairing-skip | "Continue without pairing" | standalone mode works, no crash |
+| T5.14 | F4 iOS overlay | reuses RemoteDesktopView | already covered by T5.2 |
+| T5.15 | reserved slot | during execution, if new F handler appears | added here |
+
+---
+
 ---
 
 ## Tier 6 — Onboarding v2 (subscription-first, hardware-aware) — 31 hours / ~1840 LOC
@@ -929,6 +1101,32 @@ Default priority when nothing configured:
 **NEW FILE**: `src/cli/first-run-success.ts` (150 LOC) — post-setup "try your first prompt" screen with immediate roundtrip test.
 
 **Tier 6 exit criteria**: Time-to-first-token <90s p50 from `wotann init` to streamed output. Hardware detection ≥99% accurate on tested devices.
+
+**Tier 6 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T6.1 | MacBook Pro M3 | detect | returns tier `high`, RAM/CPU detected |
+| T6.1 | 8GB Intel Mac | detect | returns tier `low` |
+| T6.1 | Linux cloud VM | detect | returns tier `cloud-only` |
+| T6.1 | Windows desktop with GPU | detect | returns correct tier + GPU info |
+| T6.1 | detection failure | no systeminformation | returns `{tier: "unknown", reason: "..."}`, never crashes |
+| T6.2 | wizard entry | `wotann init` fresh | 5 screens rendered |
+| T6.2 | skip wizard | `wotann init --skip-wizard` | launches with defaults |
+| T6.2 | arrow keys | navigate between options | highlights update |
+| T6.2 | enter select | pick option | transitions to next screen |
+| T6.2 | resize terminal mid-wizard | shrink terminal | Ink re-renders without crash |
+| T6.3 | LM Studio running | `localhost:1234` up | detected + offered as local option |
+| T6.3 | LM Studio not running | port closed | not offered; no false positive |
+| T6.3 | LM Studio unreachable | wrong port | timeout after 500ms, no wizard block |
+| T6.4 | subscription-first priority | Claude CLI present | Claude ranked #1 by default |
+| T6.4 | fallback ladder | primary fails | next in ladder tried |
+| T6.4 | env override | `WOTANN_PROVIDER_PRIORITY` set | honored over default |
+| T6.5 | legacy config migration | pre-0.2 config present | backed up, re-onboarding offered |
+| T6.5 | no legacy | fresh install | skipped silently |
+| T6.6 | post-setup test | after config | first-prompt streams through in <90s p50 |
+| T6.6 | post-setup failure | test fails | actionable fix hint shown |
+
+---
 
 ---
 
@@ -1024,6 +1222,39 @@ Each sends text to paired desktop (superior to on-device Apple Intelligence for 
 
 **Tier 7 exit criteria**: Dynamic Island lights up with task progress (Live Activity finally registered), 4 Control Widgets in Control Center, Writing Tools shows "Rewrite with WOTANN" in any text selection context menu.
 
+**Tier 7 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T7.1 | Live Activity in correct target | build + install | TaskProgressLiveActivity in `WOTANNWidgets`, not main |
+| T7.1 | `NSSupportsLiveActivities` | Info.plist | `YES` value present |
+| T7.1 | Dynamic Island on iPhone 14+ | start task | expanded view renders |
+| T7.1 | fallback notification pre-iOS-16.1 | older iOS | notification shown instead |
+| T7.2 | Writing Tools appear | select text in ChatInputBar | "Rewrite with WOTANN" in context menu |
+| T7.2 | modifier active | TextEditor/TextField instances | both have `.writingToolsBehavior(.complete)` |
+| T7.2 | Writing Tools on non-iOS-18 | iOS 17 device | no crash, modifier no-op |
+| T7.3 | `.wLiquidGlass()` on iOS 26 | device running iOS 26 | `glassEffect()` applied |
+| T7.3 | `.wLiquidGlass()` on iOS 18 | iOS 18 device | falls back to `.ultraThinMaterial` |
+| T7.3 | sweep reach | 15 call sites updated | grep `glassEffect\|ultraThinMaterial\|wLiquidGlass` finds updated sites |
+| T7.3 | message bubble unchanged | chat | bubbles do NOT use glass (legibility preserved) |
+| T7.4 | Autopilot Control widget | add to Control Center | SetValueIntent fires on toggle |
+| T7.4 | VoiceAsk Control | tap | OpenVoiceAskIntent foregrounds app |
+| T7.4 | Relay Control | tap | clipboard relayed to desktop |
+| T7.4 | Cost Control | tap | today's cost dialog |
+| T7.5 | Rewrite AppIntent | long-press any text, AppShortcut menu | "Rewrite with WOTANN" present |
+| T7.5 | Summarize | same | "Summarize with WOTANN" present |
+| T7.5 | Expand | same | "Expand with WOTANN" present |
+| T7.5 | AppIntents call desktop | invoke + paired desktop | text sent, response returned, replaces selection |
+| T7.6 | haptic `strike` | agent action commits | rigid impact felt |
+| T7.6 | haptic `pulse` | streaming token | soft impact ×2 |
+| T7.6 | haptic `summon` | relay delivered | heavy impact + success notification |
+| T7.6 | haptic `warn` | cost threshold | warning notification |
+| T7.6 | haptic `rune` | task success | full 2-tier strike |
+| T7.6 | audio sting plays | first unlock | ≤400ms cue |
+| T7.6 | audio sting once | subsequent unlocks | no re-play |
+| T7.6 | Dynamic Type cleanup | text scaling | `Font.wotannScaled(size:)` used, no fixed sizes |
+
+---
+
 ---
 
 ## Tier 8 — Design Bridge (Claude Design competitor) — 4 weeks / ~800 LOC
@@ -1079,6 +1310,28 @@ Comments on PRs with token drift. Zero-UX team adoption.
 
 **Tier 8 exit criteria**: User prompts Claude Design → exports bundle → `wotann design apply bundle.zip` → tokens land in repo → CSS regenerates → component emission works.
 
+**Tier 8 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T8.1 | DTCG emit — colors | extract + emit | `{ "$type": "color", "$value": "#06B6D4" }` shape |
+| T8.1 | DTCG emit — typography | font size | `$type: "typography"` with correct fields |
+| T8.1 | DTCG aliases | token refs another token | `$value: "{colors.primary}"` alias syntax |
+| T8.2 | bundle write | emit to disk | manifest.json + design-system.json + components.json + tokens/*.json |
+| T8.2 | bundle zip | archive | valid zip, extractable |
+| T8.3 | bundle diff — added tokens | 2 bundles | diff lists added under additions |
+| T8.3 | bundle diff — removed | 2 bundles | diff lists removed under deletions |
+| T8.3 | bundle diff — changed | token changed value | diff shows old → new |
+| T8.4 | design export CLI | `wotann design export --format=dtcg --out ./ds/` | bundle written to `./ds/` |
+| T8.4 | design verify | `wotann design verify --against bundle.zip` | pass/fail report |
+| T8.4 | design apply | `wotann design apply bundle.zip` | goes through ApprovalQueue, tokens land |
+| T8.4 | design preview TUI | `wotann design preview` | palette + typography rendered in Ink |
+| T8.5 | round-trip identity | extract → emit → re-import | identical bundle |
+| T8.5 | TUI preview handles huge system | 500 tokens | renders without OOM |
+| T8.6 | Design MCP server up | external Claude invokes `wotann design extract` | tool returns bundle |
+| T8.7 | design drift CI | PR with token drift | GHA comment on PR with diff |
+
+---
+
 ---
 
 ## Tier 9 — `wotann build` (Full-stack builder) — 8 weeks / ~1500 LOC
@@ -1122,6 +1375,26 @@ Lucia default (zero-cloud), Clerk/Supabase-auth/Auth.js/WorkOS via skills.
 **Quality tiers**: 144 combos is too many. **Tier 1 (8 blessed combos)** get golden tests; others ship with "experimental" banner. Users pick from matrix.
 
 **Tier 9 exit criteria**: `wotann build "Todo app with auth, team collab, Stripe billing"` → scaffold picks best base → scaffolds → deploys → user gets live URL.
+
+**Tier 9 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| Scaffold | Next.js App Router pick | spec mentions "server components + streaming" | registry returns `nextjs-app-router` |
+| Scaffold | Hono+React pick | spec mentions "edge + minimal" | `hono-react-edge` |
+| Scaffold | Astro pick | spec mentions "static content site" | `astro-static` |
+| Scaffold | Expo pick | spec mentions "iOS + Android" | `expo` |
+| Scaffold | compile+boot test | picked template | boots locally, serves HTTP 200 |
+| DB | Turso provisioned | spec picks Turso | `drizzle.config.ts` generated |
+| DB | Supabase provisioned | spec picks Supabase | schema + RLS policies |
+| DB | local-sqlite default | no provider specified | `.wotann/db.sqlite` created |
+| Auth | Lucia default | zero-cloud | Lucia scaffolded |
+| Auth | Clerk skill | user asks Clerk | skill loads + scaffolds |
+| Deploy | Cloudflare Pages | default free-tier | `wrangler.toml` + `wotann deploy` deploys |
+| Deploy | Vercel | explicit | `vercel.json` + deploys |
+| CLI | `wotann build` flag parsing | 3 flags | picks correct base, deploys |
+| Golden tests | top-8 combos | each compiles + boots + serves | 8/8 green |
+
+---
 
 ---
 
@@ -1208,6 +1481,35 @@ Per-target ownership map (`user` | `agent:<taskId>`), enforces `maxAgentTabs=3`.
 
 **Tier 10 exit criteria**: `wotann browse "find cheapest USB-C cable >4 stars on Amazon, add to cart"` → agent drives tab → shows cursor trail → requests approval at checkout → ships safely.
 
+**Tier 10 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T10.P0.1 | injection confidence > 0.3 | payload contains "ignore previous" | turn halts, approval event emitted |
+| T10.P0.1 | injection confidence ≤ 0.3 | benign text | turn continues |
+| T10.P0.1 | classifier unavailable | local model fails | defaults to halt + approval (fail-safe) |
+| T10.P0.2 | `display:none` text | page has hidden content | content dropped from model context |
+| T10.P0.2 | low-contrast text | color within 10% ΔE | dropped |
+| T10.P0.2 | canvas text | canvas bitmap | OCR'd; if mismatch, dropped |
+| T10.P0.3 | Base64-encoded URL instruction | `?prompt=<base64>` with "ignore previous" | refused |
+| T10.P0.3 | legitimate long URL | >200 chars but benign | allowed |
+| T10.P0.4 | trifecta trigger | untrusted content + tool with external-comm + private data | mandatory approval |
+| T10.P0.4 | 2 of 3 | missing one element | proceeds without approval |
+| T10.1 | top-level orchestrator | task → plan → dispatch | ends with cursor-stream + approval flow |
+| T10.2 | tab registry — 3 agent tabs | 4th creation attempt | rejected with "max agent tabs exceeded" |
+| T10.3 | desktop Browse tab | opens | shows screenshot + DOM tree + chat + plan + queue |
+| T10.3 | sidebar in OS-level WOTANN | not in browser | trust boundary preserved |
+| T10.4 | `browser.plan` call | RPC | returns plan |
+| T10.4 | `browser.spawn_tab` | RPC | new tab created, registered in map |
+| T10.4 | trifecta-guard middleware | wires into pipeline | fires on every browser tool |
+| T10.5 | MVP — single tab | 2-week scope | approval at every action |
+| T10.5 | Phase 2 — multi-tab | 4-week | max 3 agent tabs |
+| T10.5 | Full — autonomous | 8-week | monitor-LLM + delegation + 10s undo |
+| Adversarial eval | <2% attack success | ≥100 unique cases | overall rate <2% |
+| Adversarial eval | regression forbidden | single case flip block→no-block | CI fails |
+| CI gate | PR touches `src/browser/` | GHA runs eval | pass/fail reflected in status |
+
+---
+
 ---
 
 ## Tier 11 — Virtual-cursor + Sleep-time compute + Cloud-offload — 4-6 weeks / ~3000 LOC
@@ -1251,97 +1553,1811 @@ Per-target ownership map (`user` | `agent:<taskId>`), enforces `maxAgentTabs=3`.
 
 **Rule**: ship 3 adapters, NOT 1 (quality bar: no vendor bias). Proves neutrality vs Anthropic Managed Agents' $58/mo.
 
+**Tier 11 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T11.1 | virtual cursor pool — 2 sessions | 2 parallel agents | 2 cursors on screen, each independent |
+| T11.1 | input arbiter @50Hz | concurrent input | sequential events at normal rate |
+| T11.1 | wallpaper color extract | K-means | cursor color contrasts with wallpaper |
+| T11.1 | sprite wiggle | mouse idle | micro-motion visible |
+| T11.1 | Bezier overlay | pathing | smooth curve to target |
+| T11.1 | macOS roll-out | macOS first | works; linux/windows skip |
+| T11.2 | sleep-time agent | between turns | summarization + memory-consolidation fire |
+| T11.2 | next-turn context smaller | after sleep-time | context reduced vs baseline |
+| T11.2 | 2.5× cost savings | measured | matches paper's claim |
+| T11.3 | Modal offload | `wotann offload --provider managed` | runs on Anthropic Managed Agents |
+| T11.3 | Fly offload | `--provider fly` | Fly machine boots, runs |
+| T11.3 | Cloudflare offload | `--provider cf` | Durable Object runs |
+| T11.3 | snapshot — cwd | tarball | reproducible on target |
+| T11.3 | snapshot — secrets excluded | env allowlist | no secrets in snapshot |
+| T11.3 | session-handle metering | cost tracked | shown in StatusRibbon |
+
 ---
 
 ## Tier 12 — Competitor Port Backlog — ongoing / ~8000 LOC
 
-**NOTE on executability**: Tier 12 is explicitly a **BACKLOG**, not a ready-to-execute blueprint. Each T12.x is a 1-4 sentence summary with file path + LOC estimate. Claude Code executing T12 items **MUST** expand the chosen item to full WHAT/WHY/WHERE/HOW/VERIFICATION structure before writing code — use the `[EXPAND-BEFORE-EXEC]` convention from the preamble. Reference Engram `research/oss-ecosystem-sweep` for additional context per item.
+**NOTE on executability**: Tier 12 was originally a **BACKLOG** with 1-4 sentence summaries per item. The A+ audit (3rd pass, 2026-04-21) required FULL decomposition of every T12.x port with WHAT/WHY/WHERE/HOW/VERIFICATION blocks so Claude Code can execute without guesswork. That decomposition is below. Reference Engram `research/oss-ecosystem-sweep` + `research/tier-b-strategic-moat` for additional context per item. `[EXPAND-BEFORE-EXEC]` no longer applies — every item is exec-ready.
 
-Priority-ordered by (leverage × proven-impact / effort):
+**Cross-cutting quality bars for T12**:
+- QB #15: every LOC estimate is a REFERENCE target. Verify current file sizes via `wc -l` before claiming "expands existing file by N".
+- QB #11: sibling-site scan before wiring — use `grep -rn "newFunctionName" src/` to find all call sites that need updating in the same commit.
+- QB #7: per-session state, not module-global — every port that holds state holds it per session.
+- QB #6: honest stubs — if the port can't be activated on current platform (macOS/Linux/Windows), emit `{ok: false, reason: "..."}`, never silent success.
+
+Priority-ordered by (leverage × proven-impact / effort). Each item is exec-ready — cold-read Claude Code in 6 months can execute without additional research.
+
+---
 
 ### T12.1 — Meta-Harness environment bootstrap (400 LOC, 2 days) — +3-5 pts TB2
 
-Stanford IRIS OPEN SOURCE (950★). ENV + git + processes + memory snapshot at session start, injected into initial prompt. `src/intelligence/environment-snapshot.ts`.
+**WHAT**: Expand WOTANN's existing `src/core/bootstrap-snapshot.ts` to match Stanford IRIS Meta-Harness's richer signal set + inject into initial system prompt + emit an "environment manifest" entry to Engram at session start. IRIS Meta-Harness (950★) demonstrates +3-5 TerminalBench 2.0 points by reducing first-10-turn discovery overhead. Current WOTANN bootstrap-snapshot captures 6 fields; extend to 10 + make default-on.
+
+**WHY**: Without upfront environment capture the agent wastes 8-15 turns running `ls`, `git status`, `cat package.json`, `node --version`, etc. before doing useful work. TerminalBench 2.0 scoring discounts these "context-establishing" turns. Source-verified: `src/core/bootstrap-snapshot.ts` exists (~30 LOC scaffold in head block), called from `src/core/runtime.ts` system-prompt assembly at approximately line 1762 (check before edit). The port doubles the captured signal set and makes bootstrap default-enabled.
+
+**WHERE** (files to EDIT, no NEW files — extend existing):
+- EDIT `src/core/bootstrap-snapshot.ts` (~+250 LOC over current size; target ~400 LOC) — add 4 fields (installed language toolchains via `which node/python/go/cargo/uv`, `docker ps --format`, active port listeners via `lsof -iTCP -sTCP:LISTEN -P -n` on macOS/Linux, shell-history last 20 cmds via `$HISTFILE` parse if readable)
+- EDIT `src/core/runtime.ts` (~+40 LOC) — wire `captureBootstrapSnapshot()` default-on + ensure `formatForPrompt(snapshot)` is inserted into system prompt before existing `localContextPrompt` block
+- EDIT `src/core/types.ts` (~+10 LOC) — add `skipBootstrapSnapshot?: boolean` to `RuntimeConfig` (default false for production, true for benchmark smoke runs where 50ms overhead matters)
+- EDIT `src/memory/store.ts` — after session init, upsert `{topic_key: "env-manifest", content: JSON.stringify(snapshot), type: "reference"}` (~+30 LOC at session-init hook)
+- NEW `tests/core/bootstrap-snapshot.test.ts` (~200 LOC) — unit tests for 10-field capture, scrub verification, failure-mode stubs
+- NEW `tests/integration/bootstrap-prompt-injection.test.ts` (~80 LOC) — assert snapshot is in system prompt at first turn
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (IRIS-meta-harness subsection).
+
+**HOW**:
+```typescript
+// src/core/bootstrap-snapshot.ts — new fields
+export interface BootstrapSnapshot {
+  tree: TreeField;
+  git: GitField;
+  env: EnvField;
+  services: ServicesField;
+  logs: LogsField;
+  lockfiles: LockfilesField;
+  toolchains: ToolchainsField;   // NEW: node/python/go/cargo/uv/ruby/java versions + paths
+  docker: DockerField;            // NEW: `docker ps --format '{{json .}}'` output or {captured: false, reason: "docker not installed"}
+  ports: PortsField;              // NEW: listening sockets with pid+cmd where available
+  shellHistory: ShellHistoryField; // NEW: last 20 cmds, PII-scrubbed (no passwords/tokens in args)
+}
+
+async function captureToolchains(): Promise<ToolchainsField> {
+  const binaries = ["node", "python3", "go", "cargo", "uv", "ruby", "java", "rustc", "deno", "bun"];
+  const out: Record<string, { path: string; version: string } | null> = {};
+  for (const bin of binaries) {
+    const { status, stdout } = await execFileNoThrow("which", [bin]);
+    if (status !== 0) { out[bin] = null; continue; }
+    const path = stdout.trim();
+    const versionProbe = await execFileNoThrow(path, ["--version"]);
+    out[bin] = { path, version: (versionProbe.stdout ?? versionProbe.stderr ?? "").trim().slice(0, 80) };
+  }
+  return { captured: true, toolchains: out };
+}
+
+// In src/core/runtime.ts, around the localContextPrompt assembly:
+if (this.config.skipBootstrapSnapshot !== true) {
+  const snapshot = await captureBootstrapSnapshot({ rootDir: this.session.cwd });
+  const block = formatForPrompt(snapshot);
+  this.localContextPrompt = block + "\n\n" + this.localContextPrompt;
+  // Also upsert into memory for later cross-session recall
+  await this.memoryStore.upsertObservation({
+    topic_key: "env-manifest",
+    type: "reference",
+    content: JSON.stringify(snapshot),
+    tags: ["bootstrap", this.session.id],
+  });
+}
+```
+
+**VERIFICATION**:
+```bash
+# Bootstrap snapshot module expanded (~400 LOC)
+wc -l src/core/bootstrap-snapshot.ts  # Expect: 380-420
+
+# All 10 fields captured in snapshot output
+node -e 'import("./dist/core/bootstrap-snapshot.js").then(m => m.captureBootstrapSnapshot({rootDir: "."})).then(s => { const keys = Object.keys(s); console.log(keys); if (!["tree","git","env","services","logs","lockfiles","toolchains","docker","ports","shellHistory"].every(k => keys.includes(k))) process.exit(1); })'
+
+# Runtime injects snapshot into system prompt
+grep -n "formatForPrompt(snapshot)" src/core/runtime.ts  # Expect: 1+ match
+
+# Default-on gate: skipBootstrapSnapshot defaults false
+grep -n "skipBootstrapSnapshot" src/core/types.ts  # Expect: defined with default false
+
+# Test suite passes
+npx vitest run tests/core/bootstrap-snapshot.test.ts tests/integration/bootstrap-prompt-injection.test.ts 2>&1 | tail -3
+
+# TB2 smoke: before/after diff
+# Save 10-turn transcript pre-wire + post-wire; count turns until first non-discovery action
+node scripts/bootstrap-impact-probe.mjs  # NEW probe; target: -5 to -8 discovery turns median
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| happy path — all 10 fields capture | `node dist/core/bootstrap-snapshot.js` in WOTANN repo | JSON with all 10 field keys present, `captured: true` on most |
+| macOS + no docker | spawn `DOCKER_HOST=invalid node dist/core/bootstrap-snapshot.js` | `docker: {captured: false, reason: "docker daemon unreachable"}` (NOT silent empty) |
+| permission denied on logs | chmod 000 `.wotann/engine.log`; run capture | `logs: {captured: false, reason: "EACCES"}` |
+| env scrub skips secrets | set `API_KEY=foo` in env, run capture | `env.filtered` does NOT contain "API_KEY" literal or "foo" value |
+| snapshot is per-session | Run 2 sessions, inspect `env-manifest` topic_key observations | 2 observations, each tagged with its session.id |
+| benchmark bypass | Run with `skipBootstrapSnapshot: true` | Snapshot field absent in system prompt; faster startup measurable |
+
+---
 
 ### T12.2 — Terminus-KIRA 6 tricks (260 LOC, 4 days) — +4-7 pts TB2
 
-Native tool calling (already have `tool-parsers/`, verify all providers), marker-based command polling (~80 LOC in terminal tool), image_read tool in terminal context (~120 LOC), smart completion verification checklist (~40 LOC), ephemeral prompt caching (verify + enable), tmux pull mechanism (~60 LOC).
+**WHAT**: Port Terminus-KIRA's 6 TerminalBench-2-winning optimizations to WOTANN. Terminus-KIRA is the OSS snapshot of `terminus-agent` with +4-7 point gains on TB2. WOTANN already has tool parsers and prompt caching infrastructure; this port fills the last 6 gaps: (1) native tool-calling across all providers (not just string-parse), (2) marker-based command polling in terminal tool, (3) image_read action in terminal for visual verification, (4) smart completion checklist prepended to completion-verification agent, (5) ephemeral prompt caching verified on Opus/Sonnet/Haiku, (6) tmux "pull" mechanism for bg commands.
+
+**WHY**: WOTANN's terminal tool currently uses fixed-wait heuristics (`sleep 0.3 && cat output`) which races with real terminal output. Marker-based polling ("end_of_command_output_reached") drops false-positive "command still running" rates by 80%+. Native tool calling cuts parsing overhead by ~50ms/call. `image_read` unlocks visual-UI terminal workflows (vim, tmux, matplotlib plots in terminal). The 6 tricks compound.
+
+**WHERE** (6 surgical mods + 2 NEW):
+- EDIT `src/providers/tool-parsers/parsers.ts` (~+30 LOC) — verify native tool mode paths for all 19 providers; add `nativeToolMode: true` flag where API supports (Anthropic, OpenAI chat-completions with tools, Gemini function-calling, Groq tool-use, Cerebras tool-use, Mistral tool-use)
+- EDIT `src/tools/aux-tools.ts` OR create `src/tools/terminal-run.ts` if not present (~+80 LOC) — inject `echo '__WOTANN_END_OF_CMD_$$__'` marker after user command; poll stdout until marker seen or timeout
+- NEW `src/tools/image-read.ts` (~120 LOC) — reads PNG/JPG/GIF by path, returns base64+mime for model consumption; register as tool `image_read`
+- EDIT `src/verification/pre-commit.ts` OR NEW `src/verification/completion-checklist.ts` (~+40 LOC) — prepend 6-item checklist ("tests green? typecheck green? lint clean? PR description filled? commit message conventional? no TODOs added?")
+- EDIT `src/providers/prompt-cache-warmup.ts` (~+20 LOC) — add ephemeral cache hints for Opus/Sonnet/Haiku (`cache_control: {type: "ephemeral"}`); verify via rate-limit headers
+- NEW `src/tools/tmux-pull.ts` (~60 LOC) — `tmux capture-pane -pJ -S -` pull pattern for bg sessions; exposes `tmux_pull(session_name)` tool
+
+**Cross-reference**: Engram wire-audit topic_keys (Tier 12 wave), `research/tier-b-strategic-moat` (Terminus-KIRA subsection).
+
+**HOW**:
+```typescript
+// src/tools/terminal-run.ts — marker polling
+const MARKER_PREFIX = "__WOTANN_END_OF_CMD_";
+
+export async function runTerminalCommandWithMarker(
+  cmd: string,
+  opts: { timeoutMs: number; cwd?: string }
+): Promise<{ stdout: string; stderr: string; exitCode: number; markerHit: boolean }> {
+  const marker = `${MARKER_PREFIX}${process.pid}_${Date.now()}__`;
+  const wrapped = `(${cmd}); echo '${marker}:exit='$?`;
+  // ...spawn, poll for marker, slice off marker line...
+}
+
+// src/tools/image-read.ts
+export async function readImage(absPath: string): Promise<{ base64: string; mimeType: "image/png" | "image/jpeg" | "image/gif" }> {
+  const buf = await readFile(absPath);
+  const ext = extname(absPath).toLowerCase().slice(1);
+  const mimeType = ext === "png" ? "image/png" : ext === "gif" ? "image/gif" : "image/jpeg";
+  return { base64: buf.toString("base64"), mimeType };
+}
+
+// src/verification/completion-checklist.ts — the 6-item checklist
+export const COMPLETION_CHECKLIST = [
+  "Did you run `npx tsc --noEmit` and get rc=0?",
+  "Did you run `npx vitest run` and no new failures?",
+  "Did you run lint (`npm run lint` or eslint)?",
+  "Is the PR description / commit message filled out?",
+  "Did you scrub TODO/FIXME/XXX added to changed files?",
+  "Did you update docs (README / CHANGELOG / inline JSDoc) for public API changes?",
+] as const;
+```
+
+**VERIFICATION**:
+```bash
+# Native tool calling enabled on 6+ providers
+grep -n "nativeToolMode.*true" src/providers/*.ts | wc -l  # Expect: 6+
+
+# Marker polling present in terminal tool
+grep -n "__WOTANN_END_OF_CMD_" src/tools/ src/core/ | wc -l  # Expect: 1+ (in terminal-run.ts)
+
+# image_read tool registered
+grep -rn "image_read" src/tools/ src/core/runtime-tools.ts  # Expect: file + registration
+
+# Checklist present in completion-verify path
+grep -n "COMPLETION_CHECKLIST\|completion-checklist" src/verification/ src/intelligence/pre-completion-verifier.ts  # Expect: 1+
+
+# Ephemeral cache flag emitted
+grep -n "ephemeral" src/providers/prompt-cache-warmup.ts src/providers/anthropic-adapter.ts  # Expect: 1+
+
+# tmux pull tool
+test -f src/tools/tmux-pull.ts && grep -n "tmux capture-pane" src/tools/tmux-pull.ts  # Expect: file exists + pattern
+
+# Tests pass
+npx vitest run tests/tools/terminal-run.test.ts tests/tools/image-read.test.ts 2>&1 | tail -3
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| marker polling — fast command | `runTerminalCommandWithMarker("echo hi", {timeoutMs: 1000})` | `{stdout: "hi\n", markerHit: true, exitCode: 0}` |
+| marker polling — timeout | `runTerminalCommandWithMarker("sleep 10", {timeoutMs: 200})` | `{markerHit: false, exitCode: null}`, process killed |
+| image_read happy | PNG file exists | `{base64: "...", mimeType: "image/png"}` with valid base64 |
+| image_read missing file | path does not exist | throws with path in error message |
+| image_read unsupported ext | `.bmp` file | throws `Unsupported image type: bmp` |
+| checklist injection | pre-completion verifier runs | system prompt contains all 6 checklist questions |
+| tmux_pull no session | tmux not running | `{ok: false, reason: "no tmux server"}` honest stub |
+
+---
 
 ### T12.3 — WarpGrep parallel search subagent (180 LOC, 3 days) — +2-3 pts across TB/SWE/Aider
 
-8 parallel tool calls, returns spans only, shield main from rejected files. `src/intelligence/parallel-search-agent.ts`.
+**WHAT**: New subagent-mode tool `parallel_search` that fans out 8 concurrent grep queries, each targeting a different slice of the repo (glob pattern + file-type filter + directory restriction). Returns **only matching spans** (10-line context windows), never full-file dumps. Shields the main session from rejected files (node_modules, dist, .git, lockfiles). WOTANN already has `src/intelligence/parallel-search.ts` (401 LOC, Perplexity-style multi-source search) and `src/tools/parallel-grep.ts` (211 LOC); this is the agent-invokable wrapper that glues those together with a WarpGrep-style budget controller.
 
-### T12.4 — Goose Recipe YAML system (1 week)
+**WHY**: SWE-bench + TerminalBench tasks regularly burn 10-30 turns on "where is X defined?" grep sequences. 8 parallel queries + span-only response reduces this to 1-2 turns. WarpGrep's pattern: main agent dispatches a SUBAGENT that owns the search budget (max 200 hits, max 30KB output, max 3s wall time), returns a ranked list, and never pollutes main context with file listings.
 
-NEW `recipes/` module. Goose's format: instructions + required_extensions + parameters + retry + sub_recipes + cron. Community virality flywheel.
+**WHERE**:
+- NEW `src/intelligence/parallel-search-agent.ts` (~180 LOC) — subagent wrapper, budget controller, span-extractor, ranker
+- EDIT `src/intelligence/parallel-search.ts` (existing 401 LOC; ~+40 LOC) — expose `runParallelGrepQueries(queries: GrepQuery[]): Promise<GrepHit[]>` as low-level primitive
+- EDIT `src/tools/parallel-grep.ts` (existing 211 LOC; ~+30 LOC) — add span-only output format (never full-file)
+- EDIT `src/core/runtime-tools.ts` — register `parallel_search` tool with subagent dispatch
+- EDIT `src/tools/task-tool.ts` — add `parallel_search` as a preset subagent prompt
+- NEW `tests/intelligence/parallel-search-agent.test.ts` (~150 LOC)
 
-### T12.5 — Continue.dev PR-as-status-check (2 weeks)
+**Cross-reference**: Engram wire-audit topic_keys (Tier 12 wave) + Engram `research/oss-ecosystem-sweep` (WarpGrep/WarpDrive subsection).
 
-`.wotann/checks/*.md` runs on PR as GitHub status check. Competitive moat vs Claude Code (no such feature).
+**HOW**:
+```typescript
+// src/intelligence/parallel-search-agent.ts
+export interface GrepQuery {
+  readonly pattern: string;
+  readonly glob?: string;       // e.g., "**/*.ts"
+  readonly type?: string;       // rg --type preset
+  readonly path?: string;       // dir restriction
+  readonly caseInsensitive?: boolean;
+  readonly maxMatchesPerFile?: number;
+}
 
-### T12.6 — Agentless localize→repair→validate mode (1 week)
+export interface GrepHit {
+  readonly file: string;
+  readonly line: number;
+  readonly contextBefore: readonly string[];  // 5 lines
+  readonly match: string;
+  readonly contextAfter: readonly string[];    // 5 lines
+  readonly score: number;  // rank by match-density / recency / importance
+}
 
-`wotann --mode=agentless`. $0.34/issue per paper. Matches free-tier-first bar.
+export interface ParallelSearchBudget {
+  readonly maxHits: number;        // default 200
+  readonly maxOutputBytes: number; // default 30 * 1024
+  readonly timeoutMs: number;      // default 3000
+}
 
-### T12.7 — MetaGPT SOP pipeline (2 weeks)
+export async function dispatchParallelSearch(
+  queries: readonly GrepQuery[],
+  budget: ParallelSearchBudget = DEFAULT_BUDGET,
+  context: RunCtx
+): Promise<{ hits: readonly GrepHit[]; truncated: boolean; reason?: string }> {
+  if (queries.length > 8) {
+    return { hits: [], truncated: true, reason: "Too many queries (max 8 parallel)" };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), budget.timeoutMs);
+  try {
+    const results = await Promise.all(
+      queries.map((q) => runSingleGrep(q, controller.signal, budget))
+    );
+    const merged = mergeAndRank(results.flat(), budget);
+    return {
+      hits: merged.hits,
+      truncated: merged.truncated,
+      reason: merged.truncated ? "Budget exceeded" : undefined,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-`wotann sop <product-idea>` → PM → Architect → Eng → QA with structured artifact handoff.
+// Tool registration in src/core/runtime-tools.ts:
+// name: "parallel_search"
+// input schema: { queries: GrepQuery[], budget?: Partial<ParallelSearchBudget> }
+// output: { hits, truncated, reason? }
+// permission: "Read"  (no writes)
+```
 
-### T12.8 — Linear/Jira/Slack MCP connectors (3 weeks, 1 week each)
+**VERIFICATION**:
+```bash
+# Subagent module exists
+test -f src/intelligence/parallel-search-agent.ts && wc -l src/intelligence/parallel-search-agent.ts  # Expect: 160-220 LOC
 
-Devin-style enterprise ticket inbox. `src/connectors/{linear,jira,slack}.ts` each ~1 week.
+# Registered as tool
+grep -n "parallel_search" src/core/runtime-tools.ts  # Expect: registration entry
 
-### T12.9 — TextGrad textual gradients (AdalFlow, 1 week)
+# Test passes (fan-out correctness, budget enforcement, span-only output)
+npx vitest run tests/intelligence/parallel-search-agent.test.ts 2>&1 | tail -3
 
-`src/learning/textgrad-optimizer.ts`. Orthogonal to existing GEPA/MIPROv2.
+# tsc clean
+npx tsc --noEmit  # rc=0
 
-### T12.10 — OpenInference/OTEL trace emission (3 days)
+# Budget enforcement sanity: 9-query input returns error
+node -e 'import("./dist/intelligence/parallel-search-agent.js").then(m => m.dispatchParallelSearch(Array(9).fill({pattern: "foo"}), undefined, {})).then(r => { if (!r.truncated) process.exit(1); })'
+```
 
-`src/telemetry/observability-export.ts` extension. Unlocks Langfuse/Phoenix/W&B Weave for users.
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| 4 parallel queries, small results | dispatch 4 patterns returning <50 hits total | `{hits: [...], truncated: false}` with all hits |
+| budget exceeded (many matches) | pattern with >200 hits | `{truncated: true, reason: "Budget exceeded"}` + first 200 hits |
+| timeout mid-search | pattern against giant dir, timeout: 10ms | `{truncated: true, reason: "..."}`, no hang |
+| 9 queries (over cap) | 9 queries | `{hits: [], truncated: true, reason: "Too many queries (max 8 parallel)"}` |
+| span-only output | query returns 10 hits | each hit has `contextBefore.length === 5` + `contextAfter.length === 5`, never full file |
+| rejected files shielded | pattern matches inside node_modules/ | result hits do NOT include node_modules/ paths |
 
-### T12.11 — Kernel-level sandbox (Codex Seatbelt/Landlock) (2 weeks)
+---
 
-`src/sandbox/kernel-sandbox.ts` NEW backend. Faster, lighter, no Docker dep.
+### T12.4 — Goose Recipe YAML system (~800 LOC, 1 week)
 
-### T12.12 — Mastra Studio UI port inside desktop-app (2 weeks)
+**WHAT**: Port Goose's recipe YAML format as WOTANN's community-shareable workflow definition. Goose recipes are declarative task templates with `instructions + required_extensions + parameters + retry + sub_recipes + cron`. WOTANN adds `wotann recipe run <path-or-name>`, `wotann recipe share`, and a community index browser. Recipes become the ubiquitous "scripts" for AI agents — each published recipe is a portable task pipeline.
 
-Mastra has 22k stars + 300k weekly downloads. WOTANN already has partial port (Observer/Reflector). Gap is Studio UI — port as dev-mode inside desktop-app.
+**WHY**: OpenClaw has skills, Claude Code has slash commands, Jean has Magic Commands, Goose has recipes. WOTANN needs a NAMED format for "how do I accomplish Task X" to unlock community virality. Recipes compound: a recipe for "extract Postgres schema → generate Zod validators" composes with a recipe for "run Zod fuzzer" to form a complete test-generation pipeline. Every published recipe is distributed knowledge that makes WOTANN smarter per user.
 
-### T12.13 — 10 curated OpenClaw skills (3200 LOC, 4-5 days)
+**WHERE**:
+- NEW `src/recipes/` module (~600 LOC):
+  - `src/recipes/types.ts` (~80 LOC) — `Recipe`, `RecipeStep`, `RecipeParams`, `RecipeRetry`, `RecipeCron`, `RecipeSubRecipe` types
+  - `src/recipes/loader.ts` (~150 LOC) — YAML file parse, schema validate (Zod), resolve `$include` sub-recipes
+  - `src/recipes/runner.ts` (~250 LOC) — runtime: takes Recipe + params, executes steps (tool calls, prompts, bash), handles retry + sub-recipe invocation
+  - `src/recipes/cron-bridge.ts` (~120 LOC) — bridges `recipe.cron` to existing `src/scheduler/cron-scheduler.ts`
+- NEW `src/cli/commands/recipe.ts` (~150 LOC) — verbs: `run`, `list`, `share`, `install`, `inspect`
+- NEW `.wotann/recipes/` (filesystem convention, user+project)
+- NEW `docs/RECIPES.md` (~200 LOC) — format spec + 6 examples
+- EDIT `src/index.ts` — wire `wotann recipe` verb dispatch (in thin CLI dispatcher)
 
-Turing Pyramid, Capability Evolver, proactive-agent v3.1 (WAL Protocol + Working Buffer), elite-longterm-memory, agent-autonomy-kit, governance, compaction-ui-enhancements, context-engine, boost-prompt, ai-humanizer.
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (Goose/Goose-recipes subsection).
 
-### T12.14 — Int32Array-backed TUI optimizer (Anthropic leak, 2 weeks)
+**HOW**:
+```yaml
+# Example .wotann/recipes/refactor-for-tests.yaml
+version: 1
+id: refactor-for-tests
+title: "Refactor file for testability + add tests"
+author: community
+instructions: |
+  Given a TypeScript file, refactor it to be testable: extract pure functions,
+  inject dependencies, then write vitest tests covering 80%+ branches.
+required_extensions: [typescript, vitest]
+parameters:
+  - name: filePath
+    type: string
+    required: true
+    description: Path to file to refactor
+  - name: targetCoverage
+    type: number
+    default: 80
+retry:
+  maxAttempts: 2
+  strategy: exponential
+steps:
+  - type: read
+    path: "{{filePath}}"
+  - type: prompt
+    text: |
+      Refactor {{filePath}} for testability. Target: {{targetCoverage}}% coverage.
+      Use vitest. Output: (1) refactored file (2) new test file.
+  - type: bash
+    cmd: "npx vitest run --coverage"
+    expect: "passing"
+sub_recipes:
+  - ref: code-review/typescript
+    with:
+      file: "{{filePath}}"
+```
 
-50× perf win on `stringWidth` calls per leaked source.
+```typescript
+// src/recipes/types.ts
+export interface Recipe {
+  readonly version: 1;
+  readonly id: string;
+  readonly title: string;
+  readonly author?: string;
+  readonly instructions: string;
+  readonly requiredExtensions?: readonly string[];
+  readonly parameters: readonly RecipeParam[];
+  readonly retry?: RecipeRetry;
+  readonly steps: readonly RecipeStep[];
+  readonly subRecipes?: readonly RecipeSubRecipe[];
+  readonly cron?: RecipeCron;
+}
 
-### T12.15 — G-Eval + Ragas metrics + OWASP LLM Top 10 red-team (2 weeks)
+// src/recipes/runner.ts signature:
+export async function runRecipe(
+  recipe: Recipe,
+  params: Readonly<Record<string, unknown>>,
+  runtime: WotannRuntime,
+): Promise<{ ok: boolean; outputs: readonly RecipeStepOutput[]; error?: string }>;
+```
 
-`testing/g-eval.ts`, `memory/evals/ragas-metrics.ts`, `testing/owasp-llm-redteam.ts`. Makes WOTANN testable system.
+**VERIFICATION**:
+```bash
+# Recipes module scaffolded
+ls src/recipes/ | wc -l  # Expect: 4+ files
 
-### T12.16 — Modal + Fly.io sandbox backends (2 weeks)
+# CLI command wired
+grep -n "recipe" src/index.ts src/cli/commands/  # Expect: dispatch in index.ts, commands/recipe.ts
 
-`sandbox/modal-backend.ts` + `sandbox/flyio-backend.ts`. Cloud-sandbox WOTANN-Pro tier story.
+# Example recipes present in repo
+ls .wotann/recipes/*.yaml 2>/dev/null | wc -l  # Expect: 3+ seed recipes
 
-### T12.17 — Jean Magic Commands palette (1200 LOC, 2 days)
+# Schema validation works
+node -e 'import("./dist/recipes/loader.js").then(m => m.loadRecipe(".wotann/recipes/refactor-for-tests.yaml")).then(r => console.log("OK:", r.id))'
 
-Port 7 magic commands: Investigate Issue/PR/Workflow, Code Review with finding tracking, AI Commit Messages, PR Content Generation, Merge Conflict Resolution, Release Notes. WOTANN has primitives; curate as action palette.
+# Runner end-to-end
+wotann recipe run refactor-for-tests --param filePath=src/foo.ts --dry-run  # Expect: plan printed, no exec
 
-### T12.18 — Jean WebSocket replay buffer (150 LOC, 1 day)
+# Cron bridge
+grep -n "runRecipe\|recipe-runner" src/scheduler/cron-scheduler.ts  # Expect: cron hook
 
-`daemon/src/transport/replay-buffer.ts`. 2000-event ring buffer with `seq` numbers. Mobile/Tailscale reconnect win. Their pattern: `WsEvent { json: Arc<str>, seq: u64 }`.
+# Tests pass
+npx vitest run tests/recipes/ 2>&1 | tail -3
+```
 
-### T12.19 — Jean Execution Modes UI pivot (80 LOC, half day)
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| YAML parse happy | valid `refactor-for-tests.yaml` | parsed Recipe object, no errors |
+| missing required param | run without `filePath` | `{ok: false, error: "Missing required param: filePath"}` |
+| sub-recipe resolution | recipe with `subRecipes: [{ref: "code-review/typescript"}]` | sub-recipe loaded + executed in sequence |
+| retry on flake | step fails once, succeeds on retry #2 | `{ok: true}`, attempts recorded |
+| cron wiring | recipe with `cron: "0 * * * *"` installed | entry present in `.wotann/schedule.db` |
+| invalid YAML | malformed file | `{ok: false, error: "YAML parse error: ..."}` |
+| unknown extension | `required_extensions: [fake-ext]` | `{ok: false, error: "Required extension fake-ext not available"}` |
 
-Plan/Build/Yolo as first-class modes. `execution-modes.ts`. Product-marketing win: "Plan mode by default, Yolo on demand."
+---
 
-### T12.20 — Coolify + Dokploy deploy-target adapters (3 days, 250 LOC each)
+### T12.5 — Continue.dev PR-as-status-check (~900 LOC, 2 weeks)
 
-`src/adapters/coolify.ts` + `src/adapters/dokploy.ts`. Enables `wotann build → deploy` story.
+**WHAT**: `.wotann/checks/*.md` files declare markdown-described checks (e.g., "API routes must have OpenAPI schema", "No new TODO comments", "All public functions have JSDoc"). On PR, a GitHub Action runs each check via a WOTANN subagent that posts PASS/FAIL as a status check. Continue.dev shipped this pattern 2026-03; competitive moat vs Claude Code (which has no such feature).
 
-### T12.21 — OpenCode (sst) provider adapter (300 LOC, 3 days)
+**WHY**: Teams want AI-enforced review policies that live in-repo as Markdown. Current alternatives (CodeRabbit, Greptile) are SaaS-gated and $20-40/user/mo. `.wotann/checks/*.md` is in-repo, free, and checked-in as code policy — every PR reviewer sees the same rules enforced.
 
-Symmetric with existing 19 provider adapters. 147k★ project — too big to ignore.
+**WHERE**:
+- NEW `src/pr-checks/` module (~500 LOC):
+  - `src/pr-checks/types.ts` (~60 LOC) — `PrCheck`, `PrCheckResult`, `PrCheckDef` types
+  - `src/pr-checks/loader.ts` (~100 LOC) — read `.wotann/checks/*.md`, parse frontmatter + body
+  - `src/pr-checks/runner.ts` (~240 LOC) — invokes subagent per check with PR diff + check description; parses PASS/FAIL from response
+  - `src/pr-checks/github-reporter.ts` (~100 LOC) — posts via GitHub API; status = success/failure/neutral
+- NEW `.github/actions/wotann-pr-checks/action.yml` (~50 LOC) — composite action that installs WOTANN + runs checks
+- NEW `.github/workflows/pr-checks.yml` (~40 LOC) — workflow dispatching action on `pull_request`
+- NEW `src/cli/commands/pr-check.ts` (~100 LOC) — `wotann pr-check run` local verb for dev loop
+- NEW `.wotann/checks/` + `docs/PR_CHECKS.md` (~150 LOC) — format spec + 5 seed checks
+- EDIT `src/index.ts` — wire `wotann pr-check` verb
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (Continue.dev PR-as-check subsection).
+
+**HOW**:
+```markdown
+<!-- .wotann/checks/no-hardcoded-secrets.md -->
+---
+id: no-hardcoded-secrets
+severity: blocking
+provider: anthropic
+model: sonnet
+---
+
+# No Hardcoded Secrets
+
+Review this diff for hardcoded API keys, passwords, tokens, or connection strings.
+
+PASS if: no hardcoded credentials found.
+FAIL if: any credential-looking string (sk-*, AKIA*, xoxb-*, etc.) is committed.
+
+Respond with exactly one line starting with `PASS:` or `FAIL: <short reason>`.
+```
+
+```typescript
+// src/pr-checks/runner.ts
+export async function runPrCheck(
+  check: PrCheckDef,
+  prDiff: string,
+  runtime: WotannRuntime
+): Promise<PrCheckResult> {
+  const subagent = runtime.createSubagent({
+    provider: check.provider ?? "anthropic",
+    model: check.model ?? "sonnet",
+    maxTurns: 3,
+    tools: [],  // diff-only, no repo access
+    systemPrompt: check.body,
+  });
+  const response = await subagent.query(`\`\`\`diff\n${prDiff}\n\`\`\``);
+  const first = response.text.split("\n")[0]?.trim() ?? "";
+  if (first.startsWith("PASS:") || first === "PASS") {
+    return { id: check.id, status: "pass", message: first };
+  }
+  if (first.startsWith("FAIL:")) {
+    return { id: check.id, status: "fail", message: first.slice(5).trim() };
+  }
+  return { id: check.id, status: "neutral", message: `Unparseable: ${first.slice(0, 80)}` };
+}
+```
+
+**VERIFICATION**:
+```bash
+# Checks module scaffolded
+ls src/pr-checks/*.ts | wc -l  # Expect: 4+
+
+# Workflow + action present
+test -f .github/workflows/pr-checks.yml && test -f .github/actions/wotann-pr-checks/action.yml
+
+# Seed checks
+ls .wotann/checks/*.md | wc -l  # Expect: 5+
+
+# Local `wotann pr-check run` works
+wotann pr-check run --against main  # Expect: table of check results
+
+# Tests
+npx vitest run tests/pr-checks/ 2>&1 | tail -3
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| PASS response | check that passes clean diff | `{status: "pass", message: "PASS:"}` |
+| FAIL response | check that finds issue | `{status: "fail", message: "<reason>"}` |
+| unparseable response | model ignores format | `{status: "neutral"}` + log warning |
+| check loader missing frontmatter | `.md` without YAML frontmatter | loader rejects with clear error |
+| GitHub API reporter fails | 503 on status-post | retries 3x, returns `{ok: false, error}` after |
+| blocking severity + fail | any FAIL blocks merge | GitHub status `failure` reflecting |
+| neutral severity + fail | `severity: advisory` + FAIL | GitHub status `neutral`, merge allowed |
+
+---
+
+### T12.6 — Agentless localize→repair→validate mode (~700 LOC, 1 week)
+
+**WHAT**: Port CMU/SWE-research "Agentless" paper pattern. Instead of autonomous loops, run 3 discrete phases: LOCALIZE (find the buggy file/function via grep + rank), REPAIR (generate fix from localized context), VALIDATE (run tests). Paper reports $0.34/issue vs $2-12 for autonomous agents. `wotann --mode=agentless` dispatches this flow; matches WOTANN's free-tier-first bar by minimizing inference spend.
+
+**WHY**: Autonomous agents burn tokens on exploration. On SWE-bench Lite, Agentless gets 32% with $0.34/issue; autonomous gets 45-60% with $3-12/issue. For cost-sensitive users (free-tier providers), Agentless wins on $/success-ratio by ~10x.
+
+**WHERE**:
+- NEW `src/modes/agentless/` module (~600 LOC):
+  - `src/modes/agentless/types.ts` (~40 LOC) — `LocalizeResult`, `RepairResult`, `ValidateResult`
+  - `src/modes/agentless/localize.ts` (~200 LOC) — grep + symbol-rank, rank top-5 candidate files
+  - `src/modes/agentless/repair.ts` (~200 LOC) — given issue description + 5 candidate files, produce unified diff
+  - `src/modes/agentless/validate.ts` (~160 LOC) — apply diff in `tmp-branch`, run `npm test`, revert if fail
+- NEW `src/cli/commands/agentless.ts` (~100 LOC) — `wotann agentless <issue-url-or-text>` verb
+- EDIT `src/index.ts` — wire verb; EDIT existing `--mode` flag parser to accept `agentless`
+- NEW `tests/modes/agentless/` (~200 LOC)
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (Agentless CMU paper subsection).
+
+**HOW**:
+```typescript
+// src/modes/agentless/localize.ts
+export async function localizeIssue(
+  issue: { title: string; body: string },
+  runtime: WotannRuntime
+): Promise<LocalizeResult> {
+  // Phase 1a: keyword extraction via cheap LLM
+  const keywords = await extractKeywordsViaHaiku(issue, runtime);
+  // Phase 1b: ripgrep each keyword; merge hits by file
+  const hitsByFile = await ripgrepParallel(keywords, runtime.session.cwd);
+  // Phase 1c: rank files by hit-density + symbol-match score
+  const ranked = rankFiles(hitsByFile);
+  return { candidateFiles: ranked.slice(0, 5), keywords };
+}
+
+// src/modes/agentless/repair.ts
+export async function repairIssue(
+  issue: { title: string; body: string },
+  localize: LocalizeResult,
+  runtime: WotannRuntime
+): Promise<RepairResult> {
+  // Read top-5 files + snippets
+  const context = await buildRepairContext(localize.candidateFiles, runtime);
+  // Single-shot to Sonnet: "Here's the issue + 5 candidate files. Return a unified diff."
+  const response = await runtime.queryOneShot({
+    provider: "anthropic", model: "sonnet",
+    systemPrompt: AGENTLESS_REPAIR_PROMPT,
+    userMessage: `Issue: ${issue.title}\n\n${issue.body}\n\nContext:\n${context}`,
+  });
+  const diff = extractUnifiedDiff(response.text);
+  return { diff, rawResponse: response.text };
+}
+
+// src/modes/agentless/validate.ts
+export async function validateRepair(
+  diff: string,
+  runtime: WotannRuntime
+): Promise<ValidateResult> {
+  // Apply in tmp branch, run tests, capture, revert
+  const branch = `wotann/agentless-${Date.now()}`;
+  try {
+    await shadowGit.createBranch(branch);
+    await shadowGit.applyDiff(diff);
+    const testResult = await runtime.runTestSuite();
+    return { passed: testResult.failed === 0, testResult };
+  } finally {
+    await shadowGit.discardBranch(branch);
+  }
+}
+```
+
+**VERIFICATION**:
+```bash
+# Agentless mode dispatch
+grep -n "agentless" src/index.ts src/cli/commands/  # Expect: verb wired
+
+# Module structure
+ls src/modes/agentless/*.ts | wc -l  # Expect: 4+
+
+# End-to-end smoke
+wotann agentless "Fix off-by-one in src/utils/paginate.ts" --dry-run  # Expect: localize + repair plan, no commit
+
+# Tests
+npx vitest run tests/modes/agentless/ 2>&1 | tail -3
+
+# Cost claim validation (smoke via token-estimator): estimate <1500 total tokens for small issue
+node scripts/agentless-cost-estimate.mjs "small-issue.json"  # Expect: <$0.50 estimated
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| localize happy | issue with clear keyword match | top-5 candidate files, keyword in first file |
+| localize empty | issue text with no code refs | `{candidateFiles: [], keywords: [...]}`, not error |
+| repair produces valid diff | localize + issue | `{diff: "..."}` parseable as unified diff |
+| repair produces invalid diff | model hallucinates | `{diff: null, error: "Could not extract diff from response"}` |
+| validate tests green | diff applied, tests pass | `{passed: true}` + branch cleanup |
+| validate tests red | diff applied, tests fail | `{passed: false, testResult: {failed: N}}` + branch reverted |
+| cost estimate accuracy | repair small issue | total tokens <5K, <$0.50 estimate matches actual within 20% |
+
+---
+
+### T12.7 — MetaGPT SOP pipeline (~1500 LOC, 2 weeks)
+
+**WHAT**: Port MetaGPT's SOP (Standard Operating Procedure) pattern — a 4-role pipeline where each AI agent plays a specific engineering role with structured artifact handoff between roles. `wotann sop <product-idea>` dispatches: PM (emits requirements.md + user stories) → Architect (emits architecture.md + db-schema.md) → Engineer (emits code across multiple files) → QA (emits tests.md + runs them). Each handoff is a typed artifact validated before next role starts.
+
+**WHY**: Autonomous "one agent does everything" modes conflate planning with execution. MetaGPT's SOP separates concerns — the PM agent doesn't write code, the engineer agent doesn't design DB schemas. Structured artifacts prevent context pollution and make failures localized (PM failed at requirements vs engineer mis-implemented). Demo-appealing for enterprise.
+
+**WHERE**:
+- NEW `src/sop/` module (~1200 LOC):
+  - `src/sop/types.ts` (~80 LOC) — `SopRole`, `SopArtifact`, `SopTurn`, `SopPipeline`
+  - `src/sop/roles/pm.ts` (~200 LOC) — PM role: user stories + requirements.md
+  - `src/sop/roles/architect.ts` (~250 LOC) — Architect: architecture.md + schema.md
+  - `src/sop/roles/engineer.ts` (~300 LOC) — Engineer: implement files from architecture
+  - `src/sop/roles/qa.ts` (~200 LOC) — QA: test plan + test files + run
+  - `src/sop/pipeline.ts` (~170 LOC) — orchestrator, artifact validation, retry per role
+- NEW `src/cli/commands/sop.ts` (~150 LOC) — `wotann sop <idea>` verb
+- EDIT `src/index.ts` — wire `wotann sop` verb
+- NEW `tests/sop/` (~250 LOC)
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (MetaGPT subsection).
+
+**HOW**:
+```typescript
+// src/sop/types.ts
+export type SopRole = "pm" | "architect" | "engineer" | "qa";
+
+export interface SopArtifact {
+  readonly role: SopRole;
+  readonly filename: string;
+  readonly contentType: "markdown" | "typescript" | "json" | "sql";
+  readonly content: string;
+  readonly validation: { valid: true } | { valid: false; errors: readonly string[] };
+}
+
+// src/sop/pipeline.ts
+export async function runSopPipeline(
+  idea: string,
+  runtime: WotannRuntime,
+  opts: { maxRetriesPerRole?: number } = {}
+): Promise<{ artifacts: readonly SopArtifact[]; outcome: "success" | "blocked" }> {
+  const maxRetries = opts.maxRetriesPerRole ?? 2;
+  const artifacts: SopArtifact[] = [];
+  for (const role of ["pm", "architect", "engineer", "qa"] as const) {
+    let attempt = 0;
+    let roleArtifact: SopArtifact | null = null;
+    while (attempt < maxRetries && roleArtifact === null) {
+      roleArtifact = await dispatchRole(role, { idea, priorArtifacts: artifacts }, runtime);
+      if (roleArtifact.validation.valid === false) {
+        console.warn(`[sop:${role}] artifact invalid, retrying:`, roleArtifact.validation.errors);
+        roleArtifact = null; attempt++;
+      }
+    }
+    if (roleArtifact === null) {
+      return { artifacts, outcome: "blocked" };
+    }
+    artifacts.push(roleArtifact);
+  }
+  return { artifacts, outcome: "success" };
+}
+```
+
+**VERIFICATION**:
+```bash
+# Pipeline wires
+ls src/sop/roles/*.ts | wc -l  # Expect: 4 roles
+
+# CLI verb
+grep -n "sop" src/index.ts src/cli/commands/
+
+# Demo run
+wotann sop "Todo app with auth + team sharing" --dry-run  # Expect: 4 artifacts plan
+
+# Tests
+npx vitest run tests/sop/ 2>&1 | tail -3
+
+# Artifact validation
+node -e 'import("./dist/sop/pipeline.js").then(m => m.runSopPipeline("tiny example", mockRuntime)).then(r => console.log(r.outcome, r.artifacts.length))'  # Expect: success + 4
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| happy path — all 4 roles | clear idea | 4 artifacts, outcome: "success" |
+| PM role fails validation | model returns unparseable | retry succeeds on 2nd attempt |
+| PM role fails after max retries | model consistently bad | outcome: "blocked" after attempt=max |
+| artifact handoff — engineer uses architect | check engineer artifact references architect's schema | engineer code imports schema types from architect artifact |
+| retry budget enforcement | maxRetriesPerRole=1 | no retry, immediate block on first failure |
+| resumable after crash | pipeline interrupted mid-role | `.wotann/sop-cache/<id>` has completed artifacts; resume skips finished roles |
+
+---
+
+### T12.8 — Linear/Jira/Slack MCP connectors (~2000 LOC, 3 weeks)
+
+**WHAT**: Port Devin-style enterprise ticket inbox pattern. Three MCP connectors that expose Linear issues, Jira tickets, and Slack DMs as triggers for WOTANN agents. User pastes ticket URL or DM reply → WOTANN agent picks up context, executes task, posts PR + comment back to ticket. Existing `src/connectors/` has `linear.ts`, `jira.ts`, `slack.ts` (stub-level). Expand each to full trigger + reply cycle.
+
+**WHY**: Enterprise users live in ticket-trackers. Devin wins deals because engineers assign tickets to Devin same as human engineer. WOTANN matching this pattern = enterprise foothold without sacrificing free-tier appeal (self-hosted bot via their own OAuth tokens).
+
+**WHERE**:
+- EXTEND `src/connectors/linear.ts` (current stub ~150 LOC; expand to ~700 LOC) — webhook receiver + GraphQL API client + issue→session bridge
+- EXTEND `src/connectors/jira.ts` (~700 LOC) — REST API client + webhook receiver
+- EXTEND `src/connectors/slack.ts` (~600 LOC) — Events API consumer + DM intent extraction + thread-reply writer
+- NEW `src/connectors/connector-webhook-server.ts` (~150 LOC) — HTTPS server for all 3 providers, HMAC verify per provider
+- NEW `src/cli/commands/connectors.ts` (~100 LOC) — `wotann connectors install linear|jira|slack`, `wotann connectors status`
+- EDIT `src/connectors/connector-registry.ts` — wire Linear/Jira/Slack to event-triggers system
+- NEW `tests/connectors/linear.test.ts`, `jira.test.ts`, `slack.test.ts` (~400 LOC)
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (Devin enterprise inbox subsection).
+
+**HOW**:
+```typescript
+// src/connectors/linear.ts signature extension
+export interface LinearConnector {
+  readonly config: LinearConnectorConfig;
+  startWebhookReceiver(): Promise<void>;
+  onIssueAssigned(handler: (issue: LinearIssue) => Promise<void>): void;
+  onMentionedInComment(handler: (comment: LinearComment) => Promise<void>): void;
+  replyToIssue(issueId: string, body: string): Promise<void>;
+  attachPullRequestLink(issueId: string, prUrl: string): Promise<void>;
+  setLinearStatus(issueId: string, status: "In Progress" | "In Review" | "Done"): Promise<void>;
+}
+
+// src/connectors/connector-webhook-server.ts
+export async function startConnectorWebhookServer(
+  port: number,
+  connectors: readonly Connector[],
+): Promise<Server> {
+  return new Promise((resolve) => {
+    const server = createServer(async (req, res) => {
+      const provider = identifyProvider(req);
+      const connector = connectors.find((c) => c.provider === provider);
+      if (!connector) { res.statusCode = 404; res.end(); return; }
+      const body = await readBody(req);
+      const signed = connector.verifySignature(req, body);
+      if (!signed) { res.statusCode = 401; res.end(); return; }
+      await connector.handleWebhookPayload(JSON.parse(body));
+      res.statusCode = 200; res.end();
+    });
+    server.listen(port, () => resolve(server));
+  });
+}
+```
+
+**VERIFICATION**:
+```bash
+# Each connector has webhook + API methods
+grep -n "startWebhookReceiver\|replyToIssue" src/connectors/linear.ts src/connectors/jira.ts  # Expect: 2+ each
+
+# Webhook server exists
+test -f src/connectors/connector-webhook-server.ts
+
+# CLI verb
+wotann connectors status  # Expect: table of installed connectors
+
+# Tests
+npx vitest run tests/connectors/ 2>&1 | tail -3
+
+# HMAC verify per provider (no bypass)
+grep -n "verifySignature" src/connectors/linear.ts src/connectors/jira.ts src/connectors/slack.ts  # Expect: 3 implementations
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| Linear issue assigned → session started | POST webhook with `IssueAssigned` event | session created, issue body in system prompt |
+| Jira mentioned → reply posted | webhook + comment reply after 5s | Jira API PATCH issue with WOTANN reply |
+| Slack DM intent | user DMs "implement foo" | thread reply with plan within 10s |
+| HMAC bypass attempt | POST webhook without signature | 401 response, no session |
+| invalid payload | malformed JSON | 400 response, log error, no crash |
+| connector rate-limit | Linear API 429 | retry-after respected, backoff applied |
+| connector offline | OAuth expired | `{ok: false, reason: "OAuth refresh required"}` + user notified |
+
+---
+
+### T12.9 — TextGrad textual gradients (AdalFlow, ~500 LOC, 1 week)
+
+**WHAT**: Port TextGrad / AdalFlow's "textual gradient" pattern — treat prompt feedback as a gradient signal that propagates backward through an agent's pipeline. When a task fails, TextGrad queries a critic model ("why did this fail? what should the prompt say differently?"), and the resulting critique is applied as a gradient update to upstream prompt templates. WOTANN has GEPA + MIPROv2 already (`src/learning/gepa-optimizer.ts`, `miprov2-optimizer.ts`); TextGrad is orthogonal — gradient-based, not evolutionary.
+
+**WHY**: Adding a third optimizer gives WOTANN a complete optimization-algorithm suite: evolutionary (GEPA), Bayesian (MIPROv2), gradient (TextGrad). Each excels on different prompt-shape distributions. Papers report TextGrad wins on structured-reasoning tasks where GEPA gets stuck in local optima.
+
+**WHERE**:
+- NEW `src/learning/textgrad-optimizer.ts` (~300 LOC) — critic-model-driven gradient estimation + prompt update
+- NEW `src/learning/textgrad-critic.ts` (~100 LOC) — critic prompt templates per task type
+- EDIT `src/learning/self-evolution.ts` (~+50 LOC) — register TextGrad alongside GEPA + MIPROv2 in the optimizer dispatch table
+- EDIT `src/learning/types.ts` — add `OptimizationStrategy: "gepa" | "miprov2" | "textgrad"` union
+- NEW `tests/learning/textgrad-optimizer.test.ts` (~150 LOC)
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (TextGrad/AdalFlow subsection).
+
+**HOW**:
+```typescript
+// src/learning/textgrad-optimizer.ts
+export interface TextGradFeedback {
+  readonly failureDescription: string;
+  readonly suggestedEdit: string;  // the "gradient" — natural language diff
+  readonly confidence: number;     // 0-1
+}
+
+export async function estimateTextualGradient(
+  prompt: string,
+  task: TaskInstance,
+  failure: TaskFailure,
+  criticModel: LlmInterface
+): Promise<TextGradFeedback> {
+  const response = await criticModel.query(formatCriticPrompt(prompt, task, failure));
+  return parseGradientResponse(response);
+}
+
+export async function applyGradient(
+  prompt: string,
+  gradient: TextGradFeedback,
+  params: { learningRate: number }
+): Promise<string> {
+  // Low learningRate → small edit only; high → rewrite
+  if (gradient.confidence < 0.4) return prompt;  // abstain from update
+  return applySemanticEdit(prompt, gradient.suggestedEdit, params.learningRate);
+}
+```
+
+**VERIFICATION**:
+```bash
+test -f src/learning/textgrad-optimizer.ts
+grep -n "textgrad" src/learning/self-evolution.ts  # Expect: dispatch entry
+
+# Tests
+npx vitest run tests/learning/textgrad-optimizer.test.ts 2>&1 | tail -3
+
+# Integrated with self-evolution
+grep -n "OptimizationStrategy" src/learning/types.ts  # Expect: 3 strategies
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| gradient estimated for clear failure | task fails w/ error text | `{suggestedEdit: "...", confidence: >0.5}` |
+| low-confidence gradient skipped | confidence <0.4 | prompt unchanged, abstain logged |
+| high-confidence update | confidence >0.8 | prompt modified in direction of suggestedEdit |
+| critic model unavailable | LLM timeout | `{ok: false, reason: "critic model timeout"}` |
+| learning-rate clamps | lr=2.0 (too high) | clamped to 1.0, log warning |
+
+---
+
+### T12.10 — OpenInference/OTEL trace emission (~400 LOC, 3 days)
+
+**WHAT**: Extend `src/telemetry/observability-export.ts` (current 390 LOC) with OpenInference semantic conventions + OTLP export to Langfuse/Phoenix/W&B Weave. Users turn on OTLP and their WOTANN sessions show in their observability dashboard, enabling fleet-level performance/cost/quality monitoring.
+
+**WHY**: WOTANN runs agent sessions with 100+ tool calls, 20+ LLM turns, ~4 provider hops. Without OTEL, users have no way to debug "why did this task take 15 minutes?" Observability unlocks enterprise adoption.
+
+**WHERE**:
+- EDIT `src/telemetry/observability-export.ts` (~+250 LOC) — add OpenInference-compliant span emission, OTLP protobuf/grpc export, W3C TRACEPARENT propagation
+- NEW `src/telemetry/openinference-conventions.ts` (~100 LOC) — semantic conventions for `llm.invocation`, `agent.turn`, `tool.call`, `memory.retrieval`
+- EDIT `src/core/runtime.ts` — emit spans on every LLM call + tool execution (~+30 LOC at existing hook points)
+- EDIT `src/providers/provider-service.ts` — wrap each provider call with OTEL span (~+20 LOC)
+- NEW `tests/telemetry/openinference.test.ts` (~80 LOC)
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (OpenInference/W3C-TRACEPARENT subsection).
+
+**HOW**:
+```typescript
+// src/telemetry/openinference-conventions.ts
+export const OI_LLM_INVOCATION = {
+  name: "llm.invocation",
+  attributes: ["llm.model", "llm.provider", "llm.input_tokens", "llm.output_tokens", "llm.latency_ms"],
+} as const;
+
+export const OI_AGENT_TURN = {
+  name: "agent.turn",
+  attributes: ["agent.id", "agent.turn_number", "agent.prompt_token_count"],
+} as const;
+
+// src/telemetry/observability-export.ts (extension)
+export function createOtelTracer(config: OtelConfig): Tracer {
+  const provider = new NodeTracerProvider({
+    resource: new Resource({
+      "service.name": "wotann",
+      "service.version": pkgJson.version,
+    }),
+  });
+  const exporter = new OTLPTraceExporter({ url: config.endpoint, headers: config.headers });
+  provider.addSpanProcessor(new BatchSpanProcessor(exporter));
+  provider.register();
+  return trace.getTracer("wotann");
+}
+```
+
+**VERIFICATION**:
+```bash
+# OTLP export wired
+grep -n "OTLPTraceExporter\|BatchSpanProcessor" src/telemetry/observability-export.ts
+
+# OpenInference conventions registered
+test -f src/telemetry/openinference-conventions.ts
+grep -c "OI_" src/telemetry/openinference-conventions.ts  # Expect: 4+ constants
+
+# Runtime emits spans
+grep -n "startSpan\|trace\." src/core/runtime.ts src/providers/provider-service.ts  # Expect: 3+ span calls
+
+# Test with Langfuse collector (smoke)
+WOTANN_OTLP_ENDPOINT=http://localhost:14318 node -e 'import("./dist/telemetry/observability-export.js").then(m => m.emitTestSpan())'
+# Expect: span reaches collector at :14318
+
+# tsc + tests
+npx tsc --noEmit && npx vitest run tests/telemetry/openinference.test.ts 2>&1 | tail -3
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| OTLP endpoint set, trace emitted | config + LLM call | span arrives at collector with `llm.*` attrs |
+| OTLP endpoint unset | default config | no error, traces dropped silently (opt-out pattern) |
+| trace context propagation | nested tool calls | child spans link to parent via TRACEPARENT |
+| invalid OTLP endpoint | 500 from collector | BatchSpanProcessor retries, no crash |
+| token counts in span attrs | LLM call with known token counts | span has `llm.input_tokens`, `llm.output_tokens` populated |
+| W3C TRACEPARENT propagation | external HTTP → WOTANN | incoming TRACEPARENT continues trace |
+
+---
+
+### T12.11 — Kernel-level sandbox (Codex Seatbelt/Landlock) (~1200 LOC, 2 weeks)
+
+**WHAT**: NEW sandbox backend using macOS Seatbelt (sandbox-exec) and Linux Landlock LSM to execute tool calls in kernel-enforced sandboxes. Faster than Docker (no container overhead, ~5ms startup vs 500ms), lighter (no Docker daemon dep), matches Codex's production pattern. Complements existing `src/sandbox/docker-backend.ts` for users who don't want Docker.
+
+**WHY**: Docker dependency is a major install blocker — every `wotann init` user on mac without Docker Desktop fails the security-sandbox step. Kernel sandboxes are OS-native, zero-install. Seatbelt/Landlock give 90% of Docker's isolation at 0% of its overhead.
+
+**WHERE**:
+- NEW `src/sandbox/kernel-sandbox.ts` (~500 LOC) — main backend, dispatches macOS→Seatbelt vs Linux→Landlock
+- NEW `src/sandbox/backends/seatbelt-backend.ts` (~300 LOC) — `sandbox-exec -p` wrapper with profile generation
+- NEW `src/sandbox/backends/landlock-backend.ts` (~300 LOC) — `landlock-restrict` + syscall filter (requires Linux 5.13+)
+- EDIT `src/sandbox/executor.ts` — register kernel-sandbox as available backend (~+30 LOC)
+- EDIT `src/sandbox/approval-rules.ts` — update default to prefer kernel-sandbox over docker where available
+- NEW `tests/sandbox/kernel-sandbox.test.ts` (~200 LOC) — platform-specific tests (skip on unsupported OS)
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (Codex/Seatbelt subsection).
+
+**HOW**:
+```typescript
+// src/sandbox/kernel-sandbox.ts
+export async function createKernelSandbox(config: SandboxConfig): Promise<SandboxBackend> {
+  if (process.platform === "darwin") {
+    return createSeatbeltBackend(config);
+  }
+  if (process.platform === "linux") {
+    const landlockAvailable = await checkLandlockSupport();
+    if (landlockAvailable) return createLandlockBackend(config);
+  }
+  // Fall back or return honest stub
+  return {
+    available: false,
+    reason: `Kernel sandbox unavailable on ${process.platform}; use docker backend instead`,
+  };
+}
+
+// src/sandbox/backends/seatbelt-backend.ts
+function generateSeatbeltProfile(allowedPaths: readonly string[]): string {
+  return `
+(version 1)
+(deny default)
+(allow process-exec)
+${allowedPaths.map((p) => `(allow file-read* (subpath "${p}"))`).join("\n")}
+(allow file-write* (subpath "${process.cwd()}/.wotann"))
+(deny network* (remote ip))
+(allow network* (remote ip "127.0.0.1:*"))
+`;
+}
+```
+
+**VERIFICATION**:
+```bash
+# Module exists
+test -f src/sandbox/kernel-sandbox.ts && test -d src/sandbox/backends/
+
+# Registered
+grep -n "kernel-sandbox" src/sandbox/executor.ts
+
+# macOS: sandbox-exec invocation
+grep -n "sandbox-exec" src/sandbox/backends/seatbelt-backend.ts  # Expect: 1+
+
+# Linux: landlock syscalls
+grep -n "landlock\|LANDLOCK_" src/sandbox/backends/landlock-backend.ts  # Expect: 1+
+
+# Smoke: execute a command sandboxed on current OS
+wotann sandbox --backend kernel --run "ls /"  # Expect: ls succeeds or honest stub if unsupported
+
+# Tests (skip where platform mismatch)
+npx vitest run tests/sandbox/kernel-sandbox.test.ts 2>&1 | tail -3
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| macOS — allowed path read | read `./README.md` | succeeds |
+| macOS — denied path write | write `/etc/passwd` | blocked at kernel level |
+| macOS — denied network | curl external URL | network error, no packets leaked |
+| Linux w/ Landlock — allowed | read `./src/` | succeeds |
+| Linux w/o Landlock (old kernel) | call `createKernelSandbox()` | `{available: false, reason: "Kernel 5.13+ required"}` |
+| Windows | no kernel sandbox | `{available: false, reason: "No kernel sandbox on Windows"}` honest stub |
+| profile generation — invalid path | path with `../` escape | rejected at profile-build, not sandbox execution |
+
+---
+
+### T12.12 — Mastra Studio UI port inside desktop-app (~1800 LOC, 2 weeks)
+
+**WHAT**: Port Mastra Studio UI — a dev-mode browser UI for inspecting agent traces, editing observer/reflector policies, viewing memory graph — as a tab inside WOTANN's existing `desktop-app/`. Mastra has 22k★ + 300k weekly downloads; Studio is the reason teams adopt. WOTANN already has Observer + Reflector partial port (referenced in `src/core/runtime.ts` integration); Studio UI is the missing visualization layer.
+
+**WHY**: Agents are opaque. Mastra Studio surfaces the trace tree (what tools fired, in what order, with what tokens) and the memory graph (what facts the agent knows, when). Porting Studio as a dev-mode tab makes WOTANN's internals legible, accelerating both debugging AND product adoption (users see the moat).
+
+**WHERE**:
+- NEW `desktop-app/src/components/studio/` (~1400 LOC total):
+  - `desktop-app/src/components/studio/StudioTab.tsx` (~200 LOC) — new 5th/6th tab in MainShell
+  - `desktop-app/src/components/studio/TraceExplorer.tsx` (~350 LOC) — tree view of session traces, expandable per-turn
+  - `desktop-app/src/components/studio/MemoryGraphView.tsx` (~300 LOC) — force-directed graph of entities + relationships
+  - `desktop-app/src/components/studio/ObserverPolicyEditor.tsx` (~250 LOC) — live-editable policy DSL
+  - `desktop-app/src/components/studio/ReflectorReplayPanel.tsx` (~200 LOC) — step-through reflector decisions per turn
+  - `desktop-app/src/components/studio/StudioApiClient.ts` (~100 LOC) — typed RPC client for studio.* endpoints
+- NEW `src/daemon/rpc/studio.ts` (~300 LOC) — new RPC namespace: `studio.traces.list`, `studio.memory.graph`, `studio.observer.policy.read|write`, `studio.reflector.replay`
+- EDIT `src/daemon/kairos-rpc.ts` — register studio namespace handlers (~+50 LOC)
+- EDIT `desktop-app/src/App.tsx` — wire StudioTab (~+20 LOC)
+- NEW `tests/studio/` (~200 LOC)
+
+**Cross-reference**: Engram `research/tier-b-strategic-moat` (Mastra Studio subsection).
+
+**HOW**:
+```tsx
+// desktop-app/src/components/studio/StudioTab.tsx
+export function StudioTab() {
+  const [activeView, setActiveView] = useState<"traces" | "memory" | "observer" | "reflector">("traces");
+  return (
+    <div className="studio-tab">
+      <StudioNav active={activeView} onChange={setActiveView} />
+      {activeView === "traces" && <TraceExplorer />}
+      {activeView === "memory" && <MemoryGraphView />}
+      {activeView === "observer" && <ObserverPolicyEditor />}
+      {activeView === "reflector" && <ReflectorReplayPanel />}
+    </div>
+  );
+}
+
+// src/daemon/rpc/studio.ts
+this.register("studio.traces.list", async (params) => {
+  const traces = await this.traceStore.list({
+    sessionId: params.sessionId,
+    limit: params.limit ?? 50,
+  });
+  return { traces };
+});
+
+this.register("studio.memory.graph", async (params) => {
+  const graph = await this.memoryStore.exportGraph({ sessionId: params.sessionId });
+  return { nodes: graph.nodes, edges: graph.edges };
+});
+```
+
+**VERIFICATION**:
+```bash
+# Studio tab wired
+grep -n "StudioTab\|studio" desktop-app/src/App.tsx  # Expect: import + tab entry
+
+# RPC namespace registered
+grep -n "studio\." src/daemon/kairos-rpc.ts src/daemon/rpc/studio.ts  # Expect: 4+ handlers
+
+# Components exist
+ls desktop-app/src/components/studio/*.tsx | wc -l  # Expect: 5+
+
+# Build + dev
+(cd desktop-app && npm run build) 2>&1 | tail -5  # Expect: clean build
+
+# Smoke: desktop app opens to Studio tab
+(cd desktop-app && npm run tauri dev) &  # launches; verify no crash
+
+# Tests
+npx vitest run tests/studio/ 2>&1 | tail -3
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| traces list loads | session has 10 turns | TraceExplorer shows tree, all 10 turns expandable |
+| memory graph renders | 20 entities + 30 edges | force-directed graph renders, no frame-rate drop |
+| observer policy edit saves | edit DSL, hit save | persisted to `.wotann/observer-policy.yaml`, change takes effect next turn |
+| reflector replay | replay turn N | panel shows decision path + confidence per reflector rule |
+| RPC failure | daemon down | StudioTab shows `{ok: false, reason: "daemon disconnected"}` gracefully |
+| empty session | brand new session | empty state with "no traces yet" prompt |
+
+---
+
+### T12.13 — 10 curated OpenClaw skills (~3200 LOC, 4-5 days)
+
+**WHAT**: Port 10 high-value skills from OpenClaw skill library (Apache-2, copy verbatim + adjust namespacing). The 10 are: (1) Turing Pyramid, (2) Capability Evolver, (3) proactive-agent v3.1 (WAL Protocol + Working Buffer), (4) elite-longterm-memory, (5) agent-autonomy-kit, (6) governance, (7) compaction-ui-enhancements, (8) context-engine, (9) boost-prompt, (10) ai-humanizer. Each lands in `.wotann/skills/` as standalone skill file.
+
+**WHY**: WOTANN has 65+ skills already but lacks the foundational cognitive frameworks that make OpenClaw-powered agents more reliable. Skill portability is the primary mechanism — skills are not just prompts but include verification harnesses, example transcripts, and negative-example patterns. Each of these 10 is battle-tested in production for >6 months.
+
+**WHERE**:
+- NEW `.wotann/skills/` entries (10 files, ~3000 LOC total):
+  - `.wotann/skills/turing-pyramid/SKILL.md` (~250 LOC)
+  - `.wotann/skills/capability-evolver/SKILL.md` (~300 LOC)
+  - `.wotann/skills/proactive-agent-v3/SKILL.md` (~350 LOC)
+  - `.wotann/skills/elite-longterm-memory/SKILL.md` (~400 LOC)
+  - `.wotann/skills/agent-autonomy-kit/SKILL.md` (~300 LOC)
+  - `.wotann/skills/governance/SKILL.md` (~250 LOC)
+  - `.wotann/skills/compaction-ui-enhancements/SKILL.md` (~300 LOC)
+  - `.wotann/skills/context-engine/SKILL.md` (~300 LOC)
+  - `.wotann/skills/boost-prompt/SKILL.md` (~250 LOC)
+  - `.wotann/skills/ai-humanizer/SKILL.md` (~200 LOC)
+- EDIT `src/skills/loader.ts` (~+30 LOC) — register `.wotann/skills/` as search path; ensure OpenClaw SKILL.md frontmatter is parsed (YAML with `context: fork` etc.)
+- NEW `tests/skills/openclaw-ports.test.ts` (~200 LOC) — validate frontmatter parse + skill discovery
+
+**Cross-reference**: Engram wire-audit topic_keys (Tier 12 wave), existing WOTANN skill catalog.
+
+**HOW**:
+```bash
+# Clone OpenClaw skills repo (MIT / Apache-2)
+git clone --depth 1 https://github.com/openclaw-ai/skills /tmp/openclaw-skills
+
+# For each skill, port with namespace rewrite
+for skill in turing-pyramid capability-evolver proactive-agent-v3 \
+             elite-longterm-memory agent-autonomy-kit governance \
+             compaction-ui-enhancements context-engine boost-prompt \
+             ai-humanizer; do
+  mkdir -p ".wotann/skills/${skill}"
+  # Copy with rewrites: claude-code → wotann, OpenClaw → WOTANN in narrative, keep attribution header
+  sed -e 's/claude-code/wotann/g' \
+      -e 's/OpenClaw/WOTANN/g' \
+      -e '1i<!-- PORTED from OpenClaw (Apache-2) 2026-04-21 -->' \
+      "/tmp/openclaw-skills/${skill}/SKILL.md" > ".wotann/skills/${skill}/SKILL.md"
+done
+```
+
+**VERIFICATION**:
+```bash
+# All 10 skills ported
+ls .wotann/skills/ | grep -E "(turing-pyramid|capability-evolver|proactive-agent-v3|elite-longterm-memory|agent-autonomy-kit|governance|compaction-ui-enhancements|context-engine|boost-prompt|ai-humanizer)" | wc -l  # Expect: 10
+
+# Attribution preserved
+grep -l "PORTED from OpenClaw" .wotann/skills/*/SKILL.md | wc -l  # Expect: 10
+
+# Loader discovers them
+node -e 'import("./dist/skills/loader.js").then(m => m.loadAllSkills()).then(s => { const names = s.map(x => x.name); for (const want of ["turing-pyramid","capability-evolver","proactive-agent-v3","elite-longterm-memory","agent-autonomy-kit","governance","compaction-ui-enhancements","context-engine","boost-prompt","ai-humanizer"]) if (!names.includes(want)) process.exit(1); })'
+
+# Tests
+npx vitest run tests/skills/openclaw-ports.test.ts 2>&1 | tail -3
+
+# LICENSE compliance
+grep -l "Apache\|MIT" LICENSES/ 2>/dev/null || echo "check attribution section in README"
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| Skill loads on discovery | `loadAllSkills()` in startup | all 10 discoverable by name |
+| Frontmatter parsed | `context: fork` in SKILL.md | loader respects fork flag, spawns subagent |
+| Invocation by slash command | `/turing-pyramid` in TUI | skill body injected into prompt |
+| Missing skill | `/nonexistent-skill` | honest error, not crash |
+| Skill body > 10KB | large skill | loaded + cached, no OOM |
+| License attribution | header comment preserved | grep confirms in every ported file |
+
+---
+
+### T12.14 — Int32Array-backed TUI optimizer (Anthropic leak, ~700 LOC, 2 weeks)
+
+**WHAT**: Port the Int32Array-backed string-width optimization from Anthropic's leaked Claude Code source. Replace per-character `stringWidth(ch)` calls in TUI rendering with a precomputed Int32Array lookup keyed by codepoint. Leak reports 50× perf gain on wide-Unicode terminals (emoji + CJK).
+
+**WHY**: TUI rendering is I/O-bound for WOTANN on full-screen views with code + streaming tokens. `stringWidth` is called per-character per-frame; Int32Array cache turns O(n) branching into O(1) table lookup.
+
+**WHERE**:
+- NEW `src/ui/string-width-cache.ts` (~300 LOC) — Int32Array-backed cache, lazy-filled for codepoints 0-0xFFFF (Basic Multilingual Plane)
+- EDIT `src/ui/App.tsx` — replace `stringWidth` imports with cached version (~+10 LOC)
+- EDIT `src/ui/components/*.tsx` — sweep all string-width call sites (~+40 LOC across files)
+- EDIT `src/ui/terminal-blocks/*.ts` — same sweep (~+30 LOC)
+- NEW `tests/ui/string-width-cache.test.ts` (~150 LOC) — correctness + perf benchmarks
+
+**Cross-reference**: Engram wire-audit topic_keys (Tier 12 wave).
+
+**HOW**:
+```typescript
+// src/ui/string-width-cache.ts
+import stringWidth from "string-width";
+
+const CACHE_SIZE = 0x10000;  // BMP coverage
+const cache = new Int32Array(CACHE_SIZE);
+cache.fill(-1);  // sentinel: uncomputed
+
+export function cachedCharWidth(codepoint: number): number {
+  if (codepoint >= CACHE_SIZE) {
+    return stringWidth(String.fromCodePoint(codepoint));
+  }
+  const cached = cache[codepoint];
+  if (cached !== -1) return cached;
+  const width = stringWidth(String.fromCodePoint(codepoint));
+  cache[codepoint] = width;
+  return width;
+}
+
+export function cachedStringWidth(str: string): number {
+  let total = 0;
+  for (let i = 0; i < str.length; ) {
+    const cp = str.codePointAt(i) ?? 0;
+    total += cachedCharWidth(cp);
+    i += cp >= 0x10000 ? 2 : 1;
+  }
+  return total;
+}
+```
+
+**VERIFICATION**:
+```bash
+# Cache module exists
+test -f src/ui/string-width-cache.ts
+
+# Old stringWidth call sites migrated
+grep -rn 'from ["\\x27]string-width' src/ui/ | wc -l  # Expect: 1 (in string-width-cache.ts only)
+grep -rn "cachedStringWidth\|cachedCharWidth" src/ui/ | wc -l  # Expect: 5+
+
+# Perf test
+npx vitest run tests/ui/string-width-cache.test.ts 2>&1 | tail -5
+# Expect: 10-50× speedup vs uncached, correctness equal
+
+# Build
+(cd desktop-app && npm run build)  # no tsc errors
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| ASCII string | `cachedStringWidth("hello")` | 5 (same as uncached) |
+| CJK string | `cachedStringWidth("日本語")` | 6 (3 chars × 2 width) |
+| Emoji string | `cachedStringWidth("👍")` | 2 |
+| Mixed string | `cachedStringWidth("hi 👍 日")` | correct total |
+| Codepoint > BMP | `cachedCharWidth(0x1F44D)` | 2 (falls through to uncached) |
+| Cache hit perf | 1M iterations on same codepoint | <100ms total (vs ~5s uncached) |
+| Cache fill progressive | First call computes, second reads cache | second call ~100× faster |
+
+---
+
+### T12.15 — G-Eval + Ragas metrics + OWASP LLM Top 10 red-team (~1500 LOC, 2 weeks)
+
+**WHAT**: Port three testing frameworks into WOTANN. G-Eval (G-Evaluator, LLM-as-judge with chain-of-thought) becomes WOTANN's general quality metric. Ragas (Retrieval Augmented Generation Assessment) becomes WOTANN's memory-recall quality metric. OWASP LLM Top 10 becomes WOTANN's adversarial security baseline. Together they make WOTANN a testable system with published scores.
+
+**WHY**: Users can't trust WOTANN unless they can measure it. Each of these is industry-standard: G-Eval for open-ended tasks (summarization, code review), Ragas for memory/RAG, OWASP LLM for security. Publishing WOTANN's scores against these benchmarks is the credibility anchor.
+
+**WHERE**:
+- NEW `src/testing/g-eval.ts` (~450 LOC) — chain-of-thought LLM-as-judge with typed rubric + score aggregation
+- NEW `src/memory/evals/ragas-metrics.ts` (~400 LOC) — faithfulness, answer-relevance, context-precision, context-recall metrics
+- NEW `src/testing/owasp-llm-redteam.ts` (~450 LOC) — 10 attack corpora, automated red-team runner
+- NEW `scripts/run-g-eval.mjs`, `scripts/run-ragas.mjs`, `scripts/run-owasp-redteam.mjs` (~100 LOC each)
+- NEW `.github/workflows/benchmark-nightly.yml` — extend with all 3 benchmarks
+- EDIT `docs/BENCHMARKS.md` — publish scores
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (G-Eval/Ragas/OWASP subsections).
+
+**HOW**:
+```typescript
+// src/testing/g-eval.ts
+export interface GEvalRubric {
+  readonly criteria: readonly GEvalCriterion[];
+  readonly aggregator: "mean" | "min" | "weighted";
+}
+
+export interface GEvalCriterion {
+  readonly name: string;
+  readonly description: string;
+  readonly scoreScale: 1 | 3 | 5 | 10;  // -1..10 typical
+  readonly weight?: number;
+}
+
+export async function runGEval(
+  input: string,
+  output: string,
+  rubric: GEvalRubric,
+  judge: LlmInterface
+): Promise<GEvalResult> {
+  const scores = await Promise.all(
+    rubric.criteria.map((c) => scoreViaLlm(input, output, c, judge))
+  );
+  const aggregate = aggregate_(rubric.aggregator, scores, rubric.criteria);
+  return { scores, aggregate };
+}
+
+// src/testing/owasp-llm-redteam.ts — 10 categories
+export const OWASP_LLM_TOP_10 = {
+  LLM01_PROMPT_INJECTION: { cases: 50, seedPaths: ["corpora/prompt-injection/"] },
+  LLM02_INSECURE_OUTPUT: { cases: 40, seedPaths: ["corpora/insecure-output/"] },
+  LLM03_TRAINING_DATA_POISONING: { cases: 30, seedPaths: ["corpora/training-poisoning/"] },
+  LLM04_MODEL_DOS: { cases: 20, seedPaths: ["corpora/model-dos/"] },
+  LLM05_SUPPLY_CHAIN: { cases: 25, seedPaths: ["corpora/supply-chain/"] },
+  LLM06_SENSITIVE_INFO_DISCLOSURE: { cases: 40, seedPaths: ["corpora/info-leak/"] },
+  LLM07_INSECURE_PLUGIN_DESIGN: { cases: 30, seedPaths: ["corpora/plugin/"] },
+  LLM08_EXCESSIVE_AGENCY: { cases: 35, seedPaths: ["corpora/agency/"] },
+  LLM09_OVERRELIANCE: { cases: 20, seedPaths: ["corpora/overreliance/"] },
+  LLM10_MODEL_THEFT: { cases: 15, seedPaths: ["corpora/model-theft/"] },
+} as const;
+```
+
+**VERIFICATION**:
+```bash
+# Modules exist
+test -f src/testing/g-eval.ts && test -f src/memory/evals/ragas-metrics.ts && test -f src/testing/owasp-llm-redteam.ts
+
+# Scripts wired
+test -f scripts/run-g-eval.mjs && test -f scripts/run-ragas.mjs && test -f scripts/run-owasp-redteam.mjs
+
+# Sample eval runs
+node scripts/run-g-eval.mjs --suite smoke  # Expect: scored output JSON
+node scripts/run-owasp-redteam.mjs --category LLM01_PROMPT_INJECTION --cases 10  # Expect: 10 attacks, per-case pass/fail
+
+# Benchmark docs updated
+grep -l "G-Eval\|Ragas\|OWASP" docs/BENCHMARKS.md  # Expect: 3 sections
+
+# Tests
+npx vitest run tests/testing/ 2>&1 | tail -3
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| G-Eval 3-criterion rubric | score a summary | 3 scores + aggregate via mean |
+| G-Eval judge abstains | low-confidence response | aggregate reflects abstention, not forced score |
+| Ragas faithfulness | response faithful to context | score >0.8 |
+| Ragas faithfulness — hallucinated | response invents facts | score <0.3 |
+| OWASP LLM01 — injection blocked | payload triggers guard | `blocked: true`, no tool fires |
+| OWASP LLM01 — injection succeeds | legitimate-sounding payload | `blocked: false`; failure is expected + logged |
+| OWASP LLM05 — supply-chain probe | request for suspicious dep | `blocked: true` at install step |
+
+---
+
+### T12.16 — Modal + Fly.io sandbox backends (~2000 LOC, 2 weeks)
+
+**WHAT**: NEW sandbox backends for executing tool calls on Modal (serverless GPU) and Fly.io (Firecracker VMs). Expands existing `src/sandbox/docker-backend.ts` infrastructure with 2 cloud backends. Unlocks WOTANN-Pro tier story: "your local agent, but heavy compute runs on Modal/Fly instead of local Docker."
+
+**WHY**: Local Docker can't handle GPU inference (ML workloads), can't isolate agent runs across machines (fleet multi-tenancy), can't scale horizontally. Modal gives serverless GPU on-demand; Fly.io gives fast-boot VMs globally distributed. WOTANN charges a margin on Modal/Fly usage = sustainable revenue without subscription lock-in.
+
+**WHERE**:
+- NEW `src/sandbox/modal-backend.ts` (~700 LOC) — Modal API client, image build, function invoke, output stream
+- NEW `src/sandbox/flyio-backend.ts` (~700 LOC) — Fly Machines API, image + machine lifecycle, exec, logs
+- NEW `src/sandbox/backends/cloud-auth.ts` (~200 LOC) — shared OAuth/token management for both providers
+- EDIT `src/sandbox/executor.ts` — register Modal + Fly backends (~+40 LOC)
+- EDIT `src/cli/commands/*` — add `wotann sandbox deploy --backend modal|fly` (~+80 LOC)
+- NEW `tests/sandbox/modal-backend.test.ts`, `flyio-backend.test.ts` (~400 LOC)
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (Modal/Fly-sandbox subsection).
+
+**HOW**:
+```typescript
+// src/sandbox/modal-backend.ts
+export async function createModalSandbox(config: ModalConfig): Promise<CloudSandbox> {
+  const client = new ModalClient({ token: config.token });
+  return {
+    provider: "modal",
+    async run(cmd: string, opts: RunOpts): Promise<RunResult> {
+      const fn = await client.deployFunction({
+        image: config.image ?? "python:3.11-slim",
+        command: cmd,
+        timeout: opts.timeoutMs,
+      });
+      const invocation = await fn.invoke(opts.env);
+      return invocationToRunResult(invocation);
+    },
+    async destroy(): Promise<void> { /* cleanup */ },
+  };
+}
+
+// src/sandbox/flyio-backend.ts
+export async function createFlyMachineSandbox(config: FlyConfig): Promise<CloudSandbox> {
+  const machines = new FlyMachinesApi({ token: config.token });
+  const machine = await machines.createMachine({
+    region: config.region ?? "iad",
+    image: config.image ?? "flyio/node:lts",
+    size: config.size ?? "shared-cpu-1x",
+  });
+  return {
+    provider: "fly",
+    async run(cmd: string): Promise<RunResult> {
+      const exec = await machines.exec(machine.id, cmd);
+      return execToRunResult(exec);
+    },
+    async destroy(): Promise<void> { await machines.destroy(machine.id); },
+  };
+}
+```
+
+**VERIFICATION**:
+```bash
+# Backends exist
+test -f src/sandbox/modal-backend.ts && test -f src/sandbox/flyio-backend.ts
+
+# Registered
+grep -n "modal-backend\|flyio-backend" src/sandbox/executor.ts  # Expect: 2+
+
+# Auth handling
+grep -n "MODAL_TOKEN\|FLY_API_TOKEN" src/sandbox/backends/cloud-auth.ts  # Expect: both env vars
+
+# Smoke — if tokens set
+MODAL_TOKEN=$MODAL_TOKEN wotann sandbox deploy --backend modal --cmd "echo hello"  # Expect: runs on Modal
+
+# Tests (skip if no token)
+npx vitest run tests/sandbox/modal-backend.test.ts tests/sandbox/flyio-backend.test.ts 2>&1 | tail -3
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| Modal cold start | first invoke | <3s P95 cold start time |
+| Modal warm invoke | 2nd+ invoke | <500ms P95 |
+| Fly machine boot | first run | <1s boot |
+| Fly machine reuse | same session, 2nd run | reuses machine, <100ms overhead |
+| auth missing | no token set | `{available: false, reason: "MODAL_TOKEN unset"}` |
+| quota exceeded | Modal returns 429 | retry with backoff, user-visible "quota hit" message |
+| network failure mid-exec | connection drop | `{ok: false, reason: "network"}` + machine cleanup |
+
+---
+
+### T12.17 — Jean Magic Commands palette (~1200 LOC, 2 days)
+
+**WHAT**: Port 7 "Magic Commands" from Jean — Investigate Issue, Investigate PR, Investigate Workflow, Code Review with finding tracking, AI Commit Messages, PR Content Generation, Merge Conflict Resolution, Release Notes. Each command is a curated single-keystroke action that composes existing WOTANN primitives (grep, shadow-git, memory, providers) into a discoverable verb. Sibling of `desktop-app/src/components/palette/` command palette.
+
+**WHY**: WOTANN has all the primitives but lacks the "golden path" UX for common dev workflows. Jean's Magic Commands shipped in 2026-03 and drove 40% DAU lift because they made expert workflows accessible. Porting them = instant UX parity without re-inventing. Each command is ~150 LOC on top of existing WOTANN infra.
+
+**WHERE**:
+- NEW `src/magic/` module (~700 LOC):
+  - `src/magic/commands.ts` (~150 LOC) — registry of 7 magic commands
+  - `src/magic/investigate-issue.ts` (~80 LOC) — pulls issue via GitHub, runs Agentless localize, generates proposal
+  - `src/magic/investigate-pr.ts` (~80 LOC) — pulls PR diff, reviews, suggests refinements
+  - `src/magic/investigate-workflow.ts` (~80 LOC) — analyzes workflow file, suggests optimizations
+  - `src/magic/code-review.ts` (~100 LOC) — structured review with finding IDs, tracks addressed-ness
+  - `src/magic/ai-commit.ts` (~60 LOC) — generates conventional commit from staged diff
+  - `src/magic/pr-content.ts` (~60 LOC) — generates PR description from commits + diff
+  - `src/magic/merge-conflict.ts` (~90 LOC) — analyzes conflict markers, proposes resolution
+  - `src/magic/release-notes.ts` (~70 LOC) — collates commits since last tag, categorizes, drafts notes
+- NEW `desktop-app/src/components/palette/MagicCommandsPalette.tsx` (~300 LOC) — cmd+shift+M palette UI
+- EDIT `src/ui/command-registry.ts` — register magic commands as TUI slash-commands (~+50 LOC)
+- EDIT `desktop-app/src/components/palette/CommandPalette.tsx` — show magic section
+- NEW `tests/magic/` (~150 LOC)
+
+**Cross-reference**: Engram `research/tier-b-strategic-moat` (Jean/Magic Commands subsection).
+
+**HOW**:
+```typescript
+// src/magic/commands.ts
+export const MAGIC_COMMANDS = [
+  { id: "investigate-issue", verb: "mc:issue", title: "Investigate Issue", handler: import("./investigate-issue") },
+  { id: "investigate-pr", verb: "mc:pr", title: "Investigate PR", handler: import("./investigate-pr") },
+  { id: "investigate-workflow", verb: "mc:workflow", title: "Investigate Workflow", handler: import("./investigate-workflow") },
+  { id: "code-review", verb: "mc:review", title: "Code Review", handler: import("./code-review") },
+  { id: "ai-commit", verb: "mc:commit", title: "AI Commit Message", handler: import("./ai-commit") },
+  { id: "pr-content", verb: "mc:prbody", title: "PR Content", handler: import("./pr-content") },
+  { id: "merge-conflict", verb: "mc:resolve", title: "Merge Conflict", handler: import("./merge-conflict") },
+  { id: "release-notes", verb: "mc:releasenotes", title: "Release Notes", handler: import("./release-notes") },
+] as const;
+
+// src/magic/ai-commit.ts
+export async function handle(runtime: WotannRuntime): Promise<{ message: string }> {
+  const diff = await runtime.shadowGit.stagedDiff();
+  if (diff.length === 0) return { message: "" };
+  const prompt = `Generate a conventional commit message for this diff:\n\`\`\`diff\n${diff}\n\`\`\``;
+  const response = await runtime.queryOneShot({ provider: "anthropic", model: "haiku", userMessage: prompt });
+  return { message: parseConventionalCommit(response.text) };
+}
+```
+
+**VERIFICATION**:
+```bash
+# Magic module scaffolded
+ls src/magic/*.ts | wc -l  # Expect: 9 files
+
+# Palette component
+test -f desktop-app/src/components/palette/MagicCommandsPalette.tsx
+
+# TUI registration
+grep -n "MAGIC_COMMANDS\|mc:" src/ui/command-registry.ts
+
+# Example invocation
+wotann mc:commit  # Expect: proposes conventional commit
+
+# Tests
+npx vitest run tests/magic/ 2>&1 | tail -3
+
+# cmd+shift+M in desktop opens palette (manual smoke)
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| ai-commit with staged diff | small diff, 1 file | returns conventional commit message starting with `fix:\|feat:\|chore:` etc. |
+| ai-commit with no staged diff | nothing staged | `{message: "", reason: "nothing staged"}` |
+| investigate-issue with URL | `mc:issue https://github.com/org/repo/issues/123` | fetches issue, localizes, proposes plan |
+| investigate-pr with URL | `mc:pr <url>` | fetches PR diff, review comments generated |
+| merge-conflict on dirty branch | conflict markers present | analyzes, proposes resolution |
+| merge-conflict on clean branch | no conflict | `{ok: true, message: "No conflicts found"}` |
+| release-notes since tag | tag v0.4 → HEAD | categorized changelog |
+| palette open + type "issu" | fuzzy match | shows "Investigate Issue" first |
+
+---
+
+### T12.18 — Jean WebSocket replay buffer (~150 LOC, 1 day)
+
+**WHAT**: Port Jean's WebSocket replay buffer pattern. Add a 2000-event ring buffer with `seq` numbers to WOTANN's WebSocket transport. On reconnect after network partition (mobile/Tailscale), client sends `last_seq`; server replays events since that seq. Prevents lost events from spurious reconnects.
+
+**WHY**: Mobile users on cell networks and Tailscale users on flaky links frequently reconnect. Without replay, any events dropped during the partition are lost, which breaks cursor-stream continuity and approval-queue consistency. Jean's pattern is minimal (150 LOC) and proven in production.
+
+**WHERE**:
+- NEW `src/daemon/transport/replay-buffer.ts` (~100 LOC) — ring buffer with `seq` assignment
+- EDIT `src/daemon/kairos-rpc.ts` OR `src/daemon/kairos.ts` transport layer — wire buffer into send path (~+30 LOC)
+- EDIT `src/session/cursor-stream.ts` and `src/session/approval-queue.ts` — tag every event with seq (~+20 LOC across)
+- NEW `tests/daemon/replay-buffer.test.ts` (~150 LOC)
+
+**Cross-reference**: Engram `research/tier-b-strategic-moat` (Jean/WebSocket-replay subsection).
+
+**HOW**:
+```typescript
+// src/daemon/transport/replay-buffer.ts
+export interface WsEvent<T = unknown> {
+  readonly seq: number;
+  readonly json: string;  // pre-serialized for perf
+  readonly timestamp: number;
+}
+
+export class ReplayBuffer<T = unknown> {
+  private readonly capacity: number;
+  private readonly buffer: WsEvent<T>[] = [];
+  private nextSeq = 1;
+  constructor(capacity: number = 2000) { this.capacity = capacity; }
+
+  append(payload: T): WsEvent<T> {
+    const event: WsEvent<T> = {
+      seq: this.nextSeq++,
+      json: JSON.stringify(payload),
+      timestamp: Date.now(),
+    };
+    this.buffer.push(event);
+    if (this.buffer.length > this.capacity) this.buffer.shift();
+    return event;
+  }
+
+  since(lastSeq: number): readonly WsEvent<T>[] {
+    const idx = this.buffer.findIndex((e) => e.seq > lastSeq);
+    if (idx < 0) return [];
+    return this.buffer.slice(idx);
+  }
+
+  get oldestSeq(): number { return this.buffer[0]?.seq ?? 0; }
+  get newestSeq(): number { return this.nextSeq - 1; }
+}
+```
+
+**VERIFICATION**:
+```bash
+# Module exists
+test -f src/daemon/transport/replay-buffer.ts && wc -l src/daemon/transport/replay-buffer.ts  # 80-130 LOC
+
+# Wired
+grep -n "ReplayBuffer\|replay-buffer" src/daemon/kairos-rpc.ts src/daemon/kairos.ts  # Expect: 1+
+
+# Tests
+npx vitest run tests/daemon/replay-buffer.test.ts 2>&1 | tail -3
+
+# Smoke: simulate disconnect + reconnect
+node scripts/replay-smoke.mjs  # NEW — simulates 2000-event stream, tests reconnect replay
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| append + since(0) | append 10, query since(0) | all 10 events returned, seq 1..10 |
+| replay after capacity overflow | append 3000 events, buffer cap=2000 | oldest 1000 evicted, since(500) returns empty |
+| replay exact boundary | append 100, since(99) | 1 event returned (seq 100) |
+| replay future seq | append 100, since(500) | empty array (future seq not yet generated) |
+| concurrent appends | 10 parallel appends | all 10 have unique monotonic seqs |
+| reconnect flow | client drops at seq 50, reconnects with last_seq=50 | server sends events 51+ in order |
+
+---
+
+### T12.19 — Jean Execution Modes UI pivot (~80 LOC, half day)
+
+**WHAT**: Add Plan/Build/Yolo as first-class execution modes, selectable from UI. Plan mode = agent produces plan, no edits; Build mode = agent edits with approval per-action; Yolo mode = agent edits freely, best-effort rollback. Matches Jean's product marketing "Plan mode by default, Yolo on demand" which drove 25% conversion lift.
+
+**WHY**: Current WOTANN has permission modes (bypass / dontAsk / acceptAll) but they're not product-framed. Users think about "planning vs doing vs yolo-ing," not permissions. Renaming + elevating to first-class modes = instant UX clarity without behavior change.
+
+**WHERE**:
+- NEW `src/core/execution-modes.ts` (~80 LOC) — `ExecutionMode = "plan" | "build" | "yolo"`, mode → permission-mode mapping
+- EDIT `src/core/runtime.ts` — consume `runtime.config.executionMode` as source of truth for permission-mode (~+10 LOC)
+- EDIT `src/cli/onboarding.ts` OR `src/cli/onboarding-screens.tsx` (if T6 done) — mode picker in wizard
+- EDIT `desktop-app/src/components/StatusBar.tsx` — mode badge with click-to-switch
+- EDIT `src/ui/App.tsx` — mode shortcut (cmd+shift+M swap) + badge
+
+**Cross-reference**: Engram `research/tier-b-strategic-moat` (Jean/execution-modes subsection).
+
+**HOW**:
+```typescript
+// src/core/execution-modes.ts
+export const EXECUTION_MODES = {
+  plan: { permissionMode: "ask", editPolicy: "none", label: "Plan (read-only)" },
+  build: { permissionMode: "ask", editPolicy: "per-action", label: "Build (approve each)" },
+  yolo: { permissionMode: "bypassPermissions", editPolicy: "free", label: "Yolo (no approvals)" },
+} as const;
+
+export type ExecutionMode = keyof typeof EXECUTION_MODES;
+
+export function executionModeToPermissionMode(mode: ExecutionMode): PermissionMode {
+  return EXECUTION_MODES[mode].permissionMode;
+}
+```
+
+**VERIFICATION**:
+```bash
+# Module exists
+test -f src/core/execution-modes.ts
+
+# Runtime consumes mode
+grep -n "executionMode\|ExecutionMode" src/core/runtime.ts  # Expect: 1+
+
+# UI badge + swap
+grep -n "ExecutionMode\|execution-modes" desktop-app/src/components/StatusBar.tsx
+
+# Manual smoke: switch modes via palette, observe permission behavior changes
+
+# Tests
+npx vitest run tests/core/execution-modes.test.ts 2>&1 | tail -3
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| plan mode — edit attempted | agent tries Edit tool | tool call rejected, "plan mode" message |
+| build mode — edit attempted | agent tries Edit tool | approval prompt shown |
+| yolo mode — edit attempted | agent tries Edit tool | executes without prompt |
+| mode switch mid-session | plan → build | next turn uses build behavior |
+| persist across sessions | set mode=yolo, restart | yolo restored from `.wotann/session.json` |
+| invalid mode string | `runtime.config.executionMode = "turbo"` | tsc error / runtime rejects, defaults to plan |
+
+---
+
+### T12.20 — Coolify + Dokploy deploy-target adapters (~500 LOC, 3 days)
+
+**WHAT**: Add Coolify and Dokploy as deploy targets for `wotann build` and `wotann deploy` commands. Both are self-hostable Heroku/Vercel alternatives (50k+ GitHub stars combined). Each gets a ~250 LOC adapter with app creation, deployment trigger, URL return, log tail.
+
+**WHY**: `wotann build` needs deploy-target diversity. Cloudflare Pages, Vercel, Fly.io are covered in Tier 9, but enterprise + hobbyist self-hosters use Coolify/Dokploy. Adding these = full deploy-target matrix coverage.
+
+**WHERE**:
+- NEW `src/adapters/coolify.ts` (~250 LOC) — Coolify REST API client, create-app + deploy + logs
+- NEW `src/adapters/dokploy.ts` (~250 LOC) — Dokploy REST API client, same interface
+- EDIT `src/build/deploy-adapter.ts` (Tier 9 scaffold; ~+50 LOC) — register both as targets
+- EDIT `src/cli/commands/deploy.ts` (Tier 9) — add flags `--to coolify|dokploy`
+- NEW `tests/adapters/coolify.test.ts`, `dokploy.test.ts` (~200 LOC)
+
+**Cross-reference**: Engram `research/tier-b-strategic-moat` (Coolify/Dokploy subsection).
+
+**HOW**:
+```typescript
+// src/adapters/coolify.ts
+export async function deployToCoolify(
+  params: {
+    apiUrl: string;     // e.g., https://coolify.example.com
+    apiToken: string;
+    projectId: string;
+    gitRepo: string;
+    branch: string;
+  }
+): Promise<DeployResult> {
+  const client = createCoolifyClient(params);
+  const app = await client.createApp({
+    name: deriveAppName(params.gitRepo),
+    project: params.projectId,
+    source: { type: "git", repo: params.gitRepo, branch: params.branch },
+  });
+  const deploy = await client.triggerDeploy(app.id);
+  const stream = await client.streamLogs(deploy.id);
+  return { url: deploy.url, logsStream: stream };
+}
+
+// src/adapters/dokploy.ts — mirror of Coolify with Dokploy's endpoint shapes
+```
+
+**VERIFICATION**:
+```bash
+# Adapters exist
+test -f src/adapters/coolify.ts && test -f src/adapters/dokploy.ts
+
+# Registered
+grep -n "coolify\|dokploy" src/build/deploy-adapter.ts
+
+# CLI flag
+wotann deploy --to coolify --help  # Expect: flag recognized
+
+# Tests
+npx vitest run tests/adapters/coolify.test.ts tests/adapters/dokploy.test.ts 2>&1 | tail -3
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| Coolify happy deploy | valid token + repo | deploy triggered, URL returned |
+| Coolify auth failure | invalid token | `{ok: false, reason: "401 Unauthorized"}` |
+| Coolify deploy failure | build errors | logs streamed, `{ok: false, logs: "..."}` |
+| Dokploy happy | same as Coolify | URL returned |
+| concurrent deploys | 2 parallel calls | each gets unique app, no race |
+| network timeout | API 504 | retry with backoff, user notified after 3 failures |
+
+---
+
+### T12.21 — OpenCode (sst) provider adapter (~300 LOC, 3 days)
+
+**WHAT**: NEW provider adapter for OpenCode (sst) — SST's AI code assistant. 147k★ project. Adds as a 20th provider in `src/providers/` alongside existing 19. OpenCode uses a custom API that wraps multiple underlying models; WOTANN consumers select OpenCode and get OpenCode's choice of backing model.
+
+**WHY**: OpenCode has 147k stars and a devoted community, especially in the SST/Serverless world. Not supporting it means every SST user can't use WOTANN with their preferred assistant. One new provider adapter = a whole ecosystem of users unblocked.
+
+**WHERE**:
+- NEW `src/providers/opencode-adapter.ts` (~250 LOC) — API client, model listing, chat completions, streaming
+- EDIT `src/providers/registry.ts` — register as provider `"opencode"`
+- EDIT `src/providers/types.ts` — add OpenCode-specific config type
+- NEW `tests/providers/opencode-adapter.test.ts` (~150 LOC)
+
+**Cross-reference**: Engram `research/oss-ecosystem-sweep` (OpenCode sst subsection).
+
+**HOW**:
+```typescript
+// src/providers/opencode-adapter.ts
+export class OpenCodeAdapter implements ProviderAdapter {
+  readonly type = "opencode" as const;
+
+  constructor(private readonly config: OpenCodeConfig) {}
+
+  async *stream(req: ChatRequest): AsyncIterable<StreamChunk> {
+    const url = `${this.config.baseUrl}/v1/chat/completions`;
+    const body = {
+      model: req.model,
+      messages: req.messages,
+      stream: true,
+      tools: req.tools,
+    };
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new OpenCodeError(await response.text());
+    for await (const chunk of streamSse(response.body!)) {
+      yield translateChunk(chunk);
+    }
+  }
+}
+```
+
+**VERIFICATION**:
+```bash
+# Adapter exists + registered
+test -f src/providers/opencode-adapter.ts
+grep -n "opencode" src/providers/registry.ts  # Expect: registration entry
+
+# Config type
+grep -n "OpenCodeConfig" src/providers/types.ts
+
+# Provider count now 20
+grep -c "register\|providerType:" src/providers/registry.ts  # Expect: 20
+
+# Test with mock
+npx vitest run tests/providers/opencode-adapter.test.ts 2>&1 | tail -3
+
+# Live smoke — if key available
+OPENCODE_API_KEY=$OPENCODE_API_KEY wotann ask --provider opencode --model default "hello"
+```
+
+**Integration test matrix**:
+| Scenario | Path | Expected |
+|---|---|---|
+| stream chat happy | valid key + simple prompt | streaming chunks, final usage summary |
+| auth failure | invalid key | `{ok: false, error: "401"}` at first chunk |
+| rate limit | 429 response | retry-after respected, backoff |
+| tool-call in response | model returns function call | translated to WOTANN ToolCall shape |
+| stream interrupted | network drop mid-stream | `{ok: false, error: "stream truncated"}`, cleanup |
+| model not supported | invalid model name | `{ok: false, error: "model not found"}` |
+| provider total count | provider registry enumeration | includes `"opencode"` |
+
+---
 
 ---
 
@@ -1391,6 +3407,32 @@ Symmetric with existing 19 provider adapters. 147k★ project — too big to ign
 **iOS doesn't need local LSP** — daemon-side LSP is the win. Battery + RAM friendly.
 
 **Tier 13 exit criteria**: `@file:/path/to/code.ts` tap in chat → opens EditorView → edit → "Ask WOTANN" sends back to chat → diff accept/reject.
+
+**Tier 13 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T13.1 | EditorView opens | tap `@file:` in chat | full-screen modal with Runestone renders |
+| T13.1 | text loupe | long-press text | native loupe shows |
+| T13.1 | UIKit grab handles | select region | native grab-handles |
+| T13.1 | language syntax | open `.ts` file | TypeScript TreeSitter highlighting |
+| T13.1 | unknown extension | open `.weirdext` | plain-text fallback, no crash |
+| T13.1 | keyboard accessory bar | open keyboard | 12 symbol chips + "Ask WOTANN" visible |
+| T13.1 | large file (10k lines) | load | <16ms reparse measured |
+| T13.2 | find bar | cmd+F equivalent | shows find/replace |
+| T13.2 | status bar | bottom of editor | shows line:col, file info |
+| T13.2 | inline AI menu | tap icon | Explain/Refactor/Tests/Docstring |
+| T13.2 | diff gutter | shadow-git modified file | gutter markers visible |
+| T13.2 | document picker | open from iCloud | file loads correctly |
+| T13.2 | UIKeyCommand | external keyboard cmd+S | save fires |
+| T13.3 | LSP hover | hover symbol | popover markdown |
+| T13.3 | LSP completion | type `.` | ghost-text completions appear |
+| T13.3 | LSP timeout | daemon slow | cancels after 500ms, no UI freeze |
+| T13.3 | minimap | large file | minimap updates on scroll |
+| Integration | `@file:` mention in Composer | tap | opens EditorView |
+| Integration | "Ask WOTANN" button | inside editor | edits sent back to chat |
+| Integration | ArtifactEditorView demoted | read-only | no edit capability; points to Editor |
+
+---
 
 ---
 
@@ -1560,6 +3602,49 @@ android/
 - NFC → HCE + NfcAdapter
 
 **Final tier exit criteria**: Supabase rotated, god-files split (runtime.ts < 800 LOC per file), Android shipping on F-Droid (Termux) + Play Store (Tauri Mobile AAB) + native Kotlin polish.
+
+**FINAL TIER integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| FT.1 | Supabase rotation — new key active | dashboard rotate + update src | new key works, old key invalid |
+| FT.1 | git history scrubbed | `git cat-file -e dbaf1225` | returns non-zero (blob unreachable) |
+| FT.1 | v0.1.0 + v0.4.0 tags deleted | `git tag` | tags removed |
+| FT.1 | GitHub cached-blob purge | ticket filed | acknowledgement received |
+| FT.1 | doc redaction | AUDIT_LANE_4 / AUDIT_CURRENT_STATE | Supabase string redacted before push |
+| FT.2.1 | runtime — extract provider-gates | split | `src/core/runtime/provider-gates.ts` ~800 LOC, tests still pass |
+| FT.2.1 | runtime — extract memory-wires | split | `src/core/runtime/memory-wires.ts`, zero coverage delta |
+| FT.2.1 | runtime — extract autonomous-wires | split | `src/core/runtime/autonomous-wires.ts` |
+| FT.2.1 | runtime — extract session-lifecycle | split | `src/core/runtime/session-lifecycle.ts` |
+| FT.2.1 | runtime — query-pipeline final | split | `src/core/runtime/query-pipeline.ts` OR shell file ~2500 LOC |
+| FT.2.1 | PR per extraction | size | each <800 LOC diff; if larger, sub-split |
+| FT.2.1 | coverage delta | pre vs post | 0% change |
+| FT.2.2 | kairos-rpc — 13 namespace files | split | each ~500-700 LOC |
+| FT.2.2 | kairos-rpc shell | remaining | only registers each namespace module |
+| FT.2.2 | lowest traffic first | extract order | lsp, voice, carplay before computer, file, git |
+| FT.2.3 | index.ts — one file per CLI verb | split | `src/cli/commands/<verb>.ts` pattern |
+| FT.2.3 | thin dispatcher | `src/index.ts` | <400 LOC after split |
+| FT.2.3 | command file sizes | typical | <300 LOC, <800 max |
+| FT.2.4 | App.tsx — 15 components | split | each feature cluster own file |
+| FT.2.4 | App.tsx shell | remaining | ~400 LOC routing + imports |
+| FT.2.4 | route handlers | RouteChat / RouteEditor etc. | separate files |
+| FT.3.1 | Termux install | F-Droid Termux + steps | `wotann start` runs on Android |
+| FT.3.1 | sqlite on Termux | `better-sqlite3` fails | `node-sqlite3` fallback works |
+| FT.3.1 | wake-lock | Termux:API | phone doesn't sleep during session |
+| FT.3.2 | Tauri Mobile AAB build | `tauri android build --aab` | AAB produced, installable |
+| FT.3.2 | 4 tabs render | NavigationSuiteScaffold | Chat/Editor/Workshop/Exploit all work |
+| FT.3.2 | pairing wizard | QR + PIN + NSD | desktop pairs with phone |
+| FT.3.2 | WebSocket + BiometricPrompt | paired device | biometric unlocks WOTANN |
+| FT.3.2 | Glance widgets | Android home screen | cost + agent + launch widgets render |
+| FT.3.2 | QS Tile | quick settings | tile fires intent |
+| FT.3.2 | offline queue | no network | queue + sync on reconnect |
+| FT.3.3 | Kotlin + Compose — 5-tab shell | run | Material 3 Expressive visible |
+| FT.3.3 | Glance CostWidget | widget picker | adds + updates |
+| FT.3.3 | Wear OS app | paired watch | runs independently |
+| FT.3.3 | Android Auto | AAOS emulator | shows driving UI |
+| FT.3.3 | Health Connect | opt-in | reads steps/sleep for context |
+| FT.3.3 | NFC HCE | tap NFC | pairs with external device |
+
+---
 
 ---
 
@@ -1758,6 +3843,60 @@ See the **Document Hygiene Directives** section below for the canonical list. Th
 **WHEN**: Even if Android native ships in FINAL TIER, registration can start NOW.
 
 **Effort**: 1h (user-only: form submission)
+
+**Tier 14 integration test matrix**:
+| Sub-item | Scenario | Path | Expected |
+|---|---|---|---|
+| T14.1 | Opus 4.7 xhigh | model-router picks effort=xhigh | request params include xhigh flag |
+| T14.1 | ROI zoom in perception engine | perception sees small element | ROI + zoom action fires |
+| T14.1 | 1h TTL cache | `ENABLE_PROMPT_CACHING_1H=1` | 1h TTL applied; request header includes flag |
+| T14.1 | Monitor tool for bg scripts | start bg script via Monitor | each stdout line surfaces as event |
+| T14.1 | `/team-onboarding` equivalent | run `wotann onboard team` | team.md + org skill catalog scaffolded |
+| T14.1 | Session recap on return | user returns after 24h | recap with summary + unfinished tasks |
+| T14.1 | `/tui` flicker-free | `CLAUDE_CODE_NO_FLICKER=1` | UI updates without flicker |
+| T14.1 | Plugin bin/executables | plugin ships a binary | invocable from skill dispatch |
+| T14.1 | PreToolUse `defer` + `if:` | hook with `if: "Write"` | fires only on Write; defer-routes to council |
+| T14.1 | MCP Elicitation | server emits ElicitationRequest | hook responds with ElicitationResult |
+| T14.1 | memory tool shim | Claude calls `memory` tool | WOTANN memory serves via shim |
+| T14.1 | `/ultrareview` equivalent | `wotann review --cloud <PR>` | cloud agent reviews PR, comments in-line |
+| T14.1 | Channels push-inversion | MCP server initiates event | session receives message |
+| T14.1 | W3C TRACEPARENT | external trace → WOTANN | trace continues across services |
+| T14.2 | ASMR voter ensemble | same query through 5 recall modes | majority-vote top-K |
+| T14.2 | graph community detection | bi-temporal edges | Louvain assigns communities |
+| T14.2 | persona tree | hierarchical | persona abstractions over episodic mem |
+| T14.3 | Full-duplex voice | push-to-talk + streaming | no barge-in issue, ChatGPT parity |
+| T14.3 | APNs push | deliver in background | shown as notification, resume on tap |
+| T14.3 | Siri donation | after every sendPrompt | AppIntent.donate called |
+| T14.3 | `@Observable` migration | 215 sites | zero tsc errors after migration |
+| T14.4 | Huginn & Muninn twin-raven split | `cmd+shift+2` | side-by-side pane opens |
+| T14.4 | Raven's Flight dispatch | trigger iOS↔desktop dispatch | parabolic-arc animation plays |
+| T14.4 | Sigil Stamp | modified file | gold underline shown |
+| T14.4 | Conversation Braids | `cmd+shift+B` | multi-thread canvas opens |
+| T14.4 | Patron Summoning onboarding | 4-cards | Thor/Odin/Loki/Freya visible |
+| T14.4 | Cost Glint | paid-key | specular sheen on cost display |
+| T14.4 | 4 sound cues | runtime event | Rune-tap / Well-hum / Wax-seal / Wood-knock play |
+| T14.5 | Lane-6 `memory_entries` | fresh session | fills, not empty |
+| T14.5 | token-stats.json | after session | non-zero |
+| T14.5 | knowledge-graph.json | `autoPopulateKG=1` | populates |
+| T14.5 | dreams process entries | cron fires | entries processed, non-zero |
+| T14.5 | USER.md learns | 3 sessions | content grows, not template |
+| T14.5 | session_start/end ratio | normal session | close to 1:1, not 1:600 |
+| T14.6 | `tb run-agent` wired | `WOTANN_TB_REAL=1` | real runner produces leaderboard number |
+| T14.6 | URL fixed | grep `tbench-ai` | 0 matches; `laude-institute` present |
+| T14.6 | LongMemEval 500-item | T2.1 corpus present | 500 items loaded |
+| T14.6 | LLM-judge scorer | T2.2 active | real scores emitted |
+| T14.6 | SWE-bench Verified/Live | real runner | leaderboard-comparable number |
+| T14.6 | BFCL / GAIA / WebArena | runners present | each produces score |
+| T14.7 | Cowork multi-agent | 3 workers | parallel execution via Cowork |
+| T14.7 | Time-travel replay | `wotann replay <session>` | trajectory replays deterministically |
+| T14.7 | AAIF badge | README.md | present |
+| T14.9 | `.wotannrules` search | `wotann rules search auth` | community index queried, results shown |
+| T14.9 | rule install | `wotann rules install <id>` | rule placed in `.wotann/rules/` |
+| T14.10 | DEAD-SAFE deletes | 6 modules removed | grep for imports = 0 |
+| T14.10 | build after delete | tsc + tests | still green |
+| T14.12 | Google verification | registration submitted | confirmation received |
+
+---
 
 ## Document Hygiene Directives
 
