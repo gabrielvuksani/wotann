@@ -1228,7 +1228,7 @@ Per-target ownership map (`user` | `agent:<taskId>`), enforces `maxAgentTabs=3`.
 
 ### T11.2 — Sleep-time compute (400-600 LOC, 2-3 days)
 
-**WHAT**: Letta paper measured 2.5× cost savings / 5× compute / 18% accuracy improvements. WOTANN's `autodream.ts` is 80% of this.
+**WHAT**: Per Letta's research paper "Sleep-time Compute: Beyond Inference Scaling at Test-time" ([arxiv.org/html/2504.13171v1](https://arxiv.org/html/2504.13171v1), corroborated by [letta.com/blog/sleep-time-compute](https://www.letta.com/blog/sleep-time-compute)), sleep-time compute measured 2.5× cost savings / 5× compute / 18% accuracy improvements vs baseline. WOTANN's `autodream.ts` is 80% of this.
 
 **WHERE**:
 - NEW `src/learning/sleep-time-agent.ts` (400 LOC)
@@ -1254,6 +1254,8 @@ Per-target ownership map (`user` | `agent:<taskId>`), enforces `maxAgentTabs=3`.
 ---
 
 ## Tier 12 — Competitor Port Backlog — ongoing / ~8000 LOC
+
+**NOTE on executability**: Tier 12 is explicitly a **BACKLOG**, not a ready-to-execute blueprint. Each T12.x is a 1-4 sentence summary with file path + LOC estimate. Claude Code executing T12 items **MUST** expand the chosen item to full WHAT/WHY/WHERE/HOW/VERIFICATION structure before writing code — use the `[EXPAND-BEFORE-EXEC]` convention from the preamble. Reference Engram `research/oss-ecosystem-sweep` for additional context per item.
 
 Priority-ordered by (leverage × proven-impact / effort):
 
@@ -1416,10 +1418,64 @@ Symmetric with existing 19 provider adapters. 147k★ project — too big to ign
 ### FT.2 — God-File Splits
 
 **Source-verified LOC**:
-- `src/core/runtime.ts` = 6315 LOC — split by strategy (query-pipeline / session-lifecycle / provider-gates / memory-wires / autonomous-wires)
-- `src/daemon/kairos-rpc.ts` = 5513 LOC — split by namespace (computer/creations/approvals/fleet/cursor/live-activity/watch/carplay/voice/handoff/file/git/lsp)
-- `src/index.ts` = 5633 LOC — split by command (one file per CLI verb)
-- `src/ui/App.tsx` = 3081 LOC — split into 15 focused components
+- `src/core/runtime.ts` = **6939 LOC** — split by strategy (query-pipeline / session-lifecycle / provider-gates / memory-wires / autonomous-wires)
+- `src/daemon/kairos-rpc.ts` = **7629 LOC** — split by namespace (computer/creations/approvals/fleet/cursor/live-activity/watch/carplay/voice/handoff/file/git/lsp)
+- `src/index.ts` = **6158 LOC** — split by command (one file per CLI verb)
+- `src/ui/App.tsx` = **3185 LOC** — split into 15 focused components
+
+**God-split strategy extraction per-file** (A+ patch — each split is its own PR, serial within file but parallelizable across files):
+
+### FT.2.1 runtime.ts (6939 LOC → ~5 files of 800-1500 LOC each)
+
+Extraction order (least-coupled first):
+1. **`src/core/runtime/provider-gates.ts`** (~800 LOC) — all `config.enableX / process.env.WOTANN_X` gate logic. Identify via `grep -n "process.env\[\"WOTANN_\|config\.enable" src/core/runtime.ts`. Lowest coupling; extract first. Test: run full provider-adapter tests, expect zero delta.
+2. **`src/core/runtime/memory-wires.ts`** (~1200 LOC) — OMEGA, TEMPR, Observer/Reflector, stable-prefix, session-ingestion, abstention. Identify via `grep -n "memoryStore\.\|observer\.\|reflector\." src/core/runtime.ts`. Test: run `tests/memory/` suite.
+3. **`src/core/runtime/autonomous-wires.ts`** (~800 LOC) — goal-drift, PreCompletionVerifier, ProgressiveBudget, verify-before-done. Test: `tests/core/runtime-wire-invocation.test.ts`.
+4. **`src/core/runtime/session-lifecycle.ts`** (~1500 LOC) — session init, close, resume, handoff, cursor-stream, approval-queue. Highest coupling; extract later.
+5. **`src/core/runtime/query-pipeline.ts`** (remains in `runtime.ts` or ~2500 LOC file) — the core query() loop, tool dispatch, middleware chain. Final extraction; keep the class shell referencing extracted strategies.
+
+Per-extraction PR pattern:
+- Pre-split baseline: `npx vitest run --coverage > /tmp/pre-split-cov.txt`
+- Extract: move methods, update imports, preserve public API
+- Post-split: `npx vitest run --coverage > /tmp/post-split-cov.txt`
+- Diff: `diff /tmp/pre-split-cov.txt /tmp/post-split-cov.txt` — expect zero coverage change
+- PR size: aim <800 LOC diff; if larger, sub-split
+
+### FT.2.2 kairos-rpc.ts (7629 LOC → 13 namespace files)
+
+Split by RPC namespace (each namespace has ~500-700 handlers/LOC):
+- `src/daemon/rpc/computer.ts` — computer.session.* (11 handlers per T1.1)
+- `src/daemon/rpc/creations.ts` — creations.*
+- `src/daemon/rpc/approvals.ts` — approval.queue, approval.decide
+- `src/daemon/rpc/fleet.ts` — fleet.view, fleet.watch
+- `src/daemon/rpc/cursor.ts` — cursor.stream
+- `src/daemon/rpc/live-activity.ts` — liveActivity.*
+- `src/daemon/rpc/watch.ts` — watch.dispatch
+- `src/daemon/rpc/carplay.ts` — carplay.*
+- `src/daemon/rpc/voice.ts` — voice.intent
+- `src/daemon/rpc/handoff.ts` — session.handoff
+- `src/daemon/rpc/file.ts` — file.get, file.delivery, files.search, files.write
+- `src/daemon/rpc/git.ts` — git.status, git.branches, git.log, git.diff
+- `src/daemon/rpc/lsp.ts` — lsp.hover, lsp.definition, lsp.completion
+
+Keep `kairos-rpc.ts` as shell that imports + registers each namespace module. Order: extract lowest-traffic namespaces first (lsp, voice, carplay), highest-traffic last (computer, file, git).
+
+### FT.2.3 index.ts (6158 LOC → one file per CLI verb)
+
+115 commands per prior audit. Split into `src/cli/commands/<verb>.ts` one file per command group:
+- `src/cli/commands/init.ts`, `start.ts`, `chat.ts`, `ask.ts`, `memory.ts`, `relay.ts`, `voice.ts`, `compare.ts`, `review.ts`, `link.ts`, `build.ts`, `autopilot.ts`, `engine.ts`, `enhance.ts`, `skills.ts`, `cost.ts`, `schedule.ts`, `channels.ts`, `doctor.ts`, `grep.ts`, `worktree.ts`, `best-of-n.ts`, `exploit.ts`, `intent.ts`, `design-*.ts`, etc.
+- Keep `src/index.ts` as a thin dispatcher that imports + registers each command file.
+- Each command file: <300 LOC typical, <800 LOC max.
+
+### FT.2.4 App.tsx (3185 LOC → 15 focused components)
+
+Already partially-componentized per `desktop-app/src/components/`. Full split moves command-handler logic out of `App.tsx` into:
+- Route-handlers: `RouteChat.tsx`, `RouteEditor.tsx`, `RouteWorkshop.tsx`, `RouteExploit.tsx`, `RouteBrowse.tsx`
+- Top-level menus: `CommandPalette.tsx` (already exists — deepen), `SettingsShell.tsx`, `KeyboardShortcuts.tsx`
+- Global providers: `ProvidersShell.tsx` (Zustand + SWR + Tauri event bridge)
+- Smaller split files per feature
+
+Target: `App.tsx` becomes ~400 LOC shell with imports + routing.
 
 **Strategy extraction**:
 - Extract cohesive feature clusters into their own files
