@@ -276,7 +276,7 @@ export class ConfigDiscovery {
 
     // Subscription / managed auth — via env hints or local tokens.
     if (env["CLAUDE_CODE_SUBSCRIPTION"] || env["ANTHROPIC_SUBSCRIPTION_TOKEN"]) {
-      push("anthropic-subscription", "env-subscription");
+      push("anthropic-cli", "env-subscription");
     }
     if (env["OPENAI_SESSION_KEY"] || env["CODEX_SESSION"]) {
       push("codex", "env-subscription");

@@ -75,6 +75,47 @@ See [`docs/AUTH.md`](docs/AUTH.md) for the auth convention in detail.
 
 For vulnerabilities affecting upstream projects (Tauri, better-sqlite3, vitest, etc.), we coordinate with their maintainers before public disclosure.
 
+## Subscription Provider Access Policy
+
+WOTANN does not read, store, copy, or replay OAuth tokens issued to
+official third-party CLIs (Claude Code, Codex, Gemini CLI). Subscription
+providers are accessed by spawning the official vendor CLI as a
+subprocess with the user's own authenticated session — WOTANN is a
+launcher + stream-json parser, not an authentication broker.
+
+Specifically:
+
+- **Claude Max/Pro**: WOTANN spawns `claude -p` (the Claude Code CLI)
+  with 38 environment variables scrubbed (see
+  `src/providers/claude-cli-backend.ts` — `CLAUDE_CLI_CLEAR_ENV`). The
+  `claude` binary reads its own credentials from
+  `~/.claude/.credentials.json` or macOS Keychain service
+  `Claude Code-credentials`. WOTANN never sends the user's Claude
+  access token as an Authorization header anywhere.
+- **ChatGPT Plus/Pro/Team (Codex)**: WOTANN reads the token value from
+  `~/.codex/auth.json` (written by `codex login`, which the user runs
+  themselves) and sends it ONLY to `chatgpt.com/backend-api/codex` — the
+  same endpoint the Codex CLI uses. WOTANN does not refresh tokens
+  against `auth.openai.com/oauth/token`; if a request returns 401, the
+  user is asked to run `codex login` again. Masquerading as the Codex
+  CLI by running our own PKCE flow is explicitly forbidden.
+- **GitHub Copilot**: flagged as experimental (see
+  `src/providers/copilot-adapter.ts`). Uses user-supplied `GH_TOKEN` to
+  exchange for a short-lived Copilot API session token — a non-official
+  pattern that will be replaced by `@github/copilot-sdk` when GA.
+- **Gemini**: handled via `GEMINI_API_KEY`; no OAuth.
+
+For paid providers (Anthropic Console, OpenAI, Gemini API, etc.), users
+provide API keys that are stored with 0600 permissions in
+`~/.wotann/secrets.json` and never committed to git.
+
+This policy is implemented via V9 Tier 0 (T0.1 and T0.2). The prior
+`src/providers/anthropic-subscription.ts` — which copied the Claude
+OAuth token into `~/.wotann/anthropic-oauth.json` — and
+`src/providers/codex-oauth.ts` — which ran an independent PKCE flow
+against `auth.openai.com` with Codex CLI's public client_id — have
+been deleted.
+
 ---
 
-Last updated: 2026-04-14
+Last updated: 2026-04-23

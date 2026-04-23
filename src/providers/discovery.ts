@@ -286,34 +286,21 @@ export async function discoverProviders(
 ): Promise<readonly ProviderAuth[]> {
   const providers: ProviderAuth[] = [];
 
-  // ANTHROPIC: Subscription via Claude Code login (claude-agent-sdk)
+  // ANTHROPIC: Subscription via Claude CLI (per V9 T0.1 — WOTANN no
+  // longer holds its own copy of the subscription token; detection is
+  // purely "is `claude` on PATH and logged in").
   // Detected if:
   // 1. CLAUDE_CODE_OAUTH_TOKEN env var is set, OR
-  // 2. The `claude` CLI is installed and authenticated, OR
-  // 3. A saved Anthropic OAuth token exists from `wotann login anthropic`
+  // 2. The `claude` CLI is installed and authenticated.
   const oauthToken = process.env["CLAUDE_CODE_OAUTH_TOKEN"];
   const checkCli = options?.checkClaudeCli ?? isClaudeCliAvailable;
   const claudeCliAvailable = checkCli();
 
-  // Check for saved Anthropic OAuth token from `wotann login anthropic`
-  let savedAnthropicOAuth: string | null = null;
-  const anthropicOAuthPath = join(homedir(), ".wotann", "anthropic-oauth.json");
-  if (!oauthToken && !claudeCliAvailable && existsSync(anthropicOAuthPath)) {
-    try {
-      const saved = JSON.parse(readFileSync(anthropicOAuthPath, "utf-8")) as {
-        access_token?: string;
-      };
-      if (saved.access_token) savedAnthropicOAuth = saved.access_token;
-    } catch {
-      /* ignore corrupt file */
-    }
-  }
-
-  if (oauthToken || claudeCliAvailable || savedAnthropicOAuth) {
+  if (oauthToken || claudeCliAvailable) {
     providers.push({
       provider: "anthropic",
       method: "oauth-token",
-      token: oauthToken ?? savedAnthropicOAuth ?? "claude-cli-session",
+      token: oauthToken ?? "claude-cli-session",
       billing: "subscription",
       label: "Claude Subscription",
       priority: 1,

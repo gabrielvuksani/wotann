@@ -124,7 +124,9 @@ export async function runOAuthBrowserFlow(
 <p style="color:#808090">You can close this tab and return to the terminal.</p>
 </div></body></html>`;
 
-    const errorHtml = (msg: string) => `<!DOCTYPE html><html><body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;background:#0f0f1a;color:#e0e0e0;margin:0">
+    const errorHtml = (
+      msg: string,
+    ) => `<!DOCTYPE html><html><body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;background:#0f0f1a;color:#e0e0e0;margin:0">
 <div style="text-align:center"><h1 style="color:#ff4444">Authentication Failed</h1><p>${msg}</p></div></body></html>`;
 
     function cleanup() {
@@ -298,14 +300,14 @@ function extractAccountIdFromJWT(jwt: string): string | undefined {
   try {
     const parts = jwt.split(".");
     if (parts.length < 2) return undefined;
-    const payload = JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf-8")) as Record<string, unknown>;
+    const payload = JSON.parse(
+      Buffer.from(parts[1] ?? "", "base64url").toString("utf-8"),
+    ) as Record<string, unknown>;
 
-    return (
-      payload["https://api.openai.com/auth.chatgpt_account_id"] ??
+    return (payload["https://api.openai.com/auth.chatgpt_account_id"] ??
       payload["chatgpt_account_id"] ??
       payload["chatgpt_account_user_id"] ??
-      payload["chatgpt_user_id"]
-    ) as string | undefined;
+      payload["chatgpt_user_id"]) as string | undefined;
   } catch {
     return undefined;
   }
@@ -381,7 +383,7 @@ export async function runDeviceCodeFlow(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Accept": "application/json",
+      Accept: "application/json",
     },
     body: JSON.stringify({
       client_id: config.clientId,
@@ -390,7 +392,11 @@ export async function runDeviceCodeFlow(
   });
 
   if (!codeResponse.ok) {
-    return { success: false, error: `Device code request failed: ${codeResponse.status}`, method: "device-code" };
+    return {
+      success: false,
+      error: `Device code request failed: ${codeResponse.status}`,
+      method: "device-code",
+    };
   }
 
   const codeData = (await codeResponse.json()) as Record<string, unknown>;
@@ -415,7 +421,7 @@ export async function runDeviceCodeFlow(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Accept": "application/json",
+        Accept: "application/json",
       },
       body: JSON.stringify({
         client_id: config.clientId,
@@ -442,7 +448,8 @@ export async function runDeviceCodeFlow(
       tokens: {
         accessToken: String(tokenData["access_token"] ?? ""),
         refreshToken: tokenData["refresh_token"] ? String(tokenData["refresh_token"]) : undefined,
-        expiresIn: typeof tokenData["expires_in"] === "number" ? tokenData["expires_in"] : undefined,
+        expiresIn:
+          typeof tokenData["expires_in"] === "number" ? tokenData["expires_in"] : undefined,
         scope: tokenData["scope"] ? String(tokenData["scope"]) : undefined,
       },
     };
@@ -452,25 +459,13 @@ export async function runDeviceCodeFlow(
 }
 
 // ── Provider-Specific Login Configs ────────────────────────
-
-/**
- * Codex/ChatGPT OAuth config.
- * Client ID from the official Codex CLI source (codex-rs/login/src/auth/manager.rs).
- * Scopes from the same source.
- */
-export function getCodexOAuthConfig(): OAuthConfig {
-  return {
-    authorizationUrl: "https://auth.openai.com/oauth/authorize",
-    tokenUrl: "https://auth.openai.com/oauth/token",
-    clientId: "app_EMoamEEZ73f0CkXaXp7hrann",
-    scopes: ["openid", "profile", "email", "offline_access"],
-    usePKCE: true,
-    extraParams: {
-      codex_cli_simplified_flow: "true",
-      originator: "wotann_cli",
-    },
-  };
-}
+//
+// Codex/ChatGPT OAuth config removed per V9 T0.2 — running our own PKCE
+// flow with the official Codex CLI's public client_id against OpenAI's
+// OAuth endpoint masquerades as that CLI. Codex auth is now
+// read-existing-`~/.codex/auth.json`-only (see
+// src/providers/codex-detector.ts). Users authenticate by running
+// `codex login` themselves.
 
 /**
  * GitHub Copilot device code flow config.
@@ -496,12 +491,7 @@ export function getAnthropicOAuthConfig(): OAuthConfig {
     authorizationUrl: "https://claude.ai/oauth/authorize",
     tokenUrl: "https://console.anthropic.com/oauth/token",
     clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-    scopes: [
-      "org:create_api_key",
-      "user:profile",
-      "user:inference",
-      "user:sessions:claude_code",
-    ],
+    scopes: ["org:create_api_key", "user:profile", "user:inference", "user:sessions:claude_code"],
     usePKCE: true,
   };
 }

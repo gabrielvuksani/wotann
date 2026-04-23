@@ -8,12 +8,15 @@
  * Auth: Bearer <access_token> + ChatGPT-Account-Id header.
  * Format: Responses API (input array, instructions field, NOT chat/completions).
  *
- * Token refresh: Uses refresh_token against https://auth.openai.com/oauth/token.
- * If refresh_token is also expired, user must re-authenticate with:
- *   npx @openai/codex --full-auto "hello"
+ * Token refresh: WOTANN does NOT refresh tokens itself (V9 T0.2 —
+ * POSTing to OpenAI's OAuth endpoint with Codex CLI's public client_id
+ * would masquerade as the official CLI). Instead, we re-read
+ * ~/.codex/auth.json — the Codex CLI's own refresh loop keeps that
+ * file fresh. If a request returns 401 and the on-disk token is
+ * unchanged, we surface "session expired — run `codex login`".
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type {
@@ -109,55 +112,17 @@ export function readCodexToken(): string | null {
 }
 
 /**
- * Refresh the tokens using the refresh_token.
- * Saves updated tokens back to auth.json.
+ * Refresh is NOT performed by WOTANN per V9 T0.2 — POSTing to OpenAI's
+ * OAuth endpoint with Codex CLI's public client_id would masquerade as
+ * the official CLI. Instead, we re-read `~/.codex/auth.json`. If the
+ * Codex CLI is running its own refresh loop (as `codex login` leaves
+ * it), the file on disk will already have a fresh token when we
+ * re-read. If not, this returns the same auth it was called with —
+ * the caller then surfaces the 401 and asks the user to run
+ * `codex login` themselves.
  */
-async function refreshTokens(auth: CodexAuthFile): Promise<CodexAuthFile | null> {
-  try {
-    const body = new URLSearchParams({
-      grant_type: "refresh_token",
-      client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
-      refresh_token: auth.tokens.refresh_token,
-    });
-
-    const response = await fetch("https://auth.openai.com/oauth/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-    });
-
-    if (!response.ok) return null;
-
-    const data = (await response.json()) as {
-      access_token?: string;
-      id_token?: string;
-      refresh_token?: string;
-    };
-
-    if (!data.access_token) return null;
-
-    // Update auth file with fresh tokens
-    const updated: CodexAuthFile = {
-      ...auth,
-      tokens: {
-        ...auth.tokens,
-        access_token: data.access_token,
-        id_token: data.id_token ?? auth.tokens.id_token,
-        refresh_token: data.refresh_token ?? auth.tokens.refresh_token,
-      },
-      last_refresh: new Date().toISOString(),
-    };
-
-    try {
-      writeFileSync(getAuthPath(), JSON.stringify(updated, null, 2));
-    } catch {
-      // Non-fatal — we have the tokens in memory
-    }
-
-    return updated;
-  } catch {
-    return null;
-  }
+function rereadAuthFromDisk(): CodexAuthFile | null {
+  return readCodexAuthFile();
 }
 
 // ── Adapter ─────────────────────────────────────────────────
@@ -187,16 +152,13 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
   async function ensureFreshAuth(): Promise<{ token: string; accountId: string } | null> {
     if (!auth) return null;
 
-    // Check if token needs refresh (>8 min since last refresh, matching Codex CLI)
-    const lastRefresh = new Date(auth.last_refresh);
-    const minutesSinceRefresh = (Date.now() - lastRefresh.getTime()) / 60_000;
-
-    if (minutesSinceRefresh > 8) {
-      const refreshed = await refreshTokens(auth);
-      if (refreshed) {
-        auth = refreshed;
-      }
-      // If refresh fails, try with existing token anyway
+    // Re-read the on-disk auth file in case the Codex CLI rotated the
+    // token out-of-band. WOTANN no longer performs OAuth refresh itself
+    // (V9 T0.2) — if the token is stale, the request fails with 401
+    // and the user is prompted to run `codex login` themselves.
+    const fresh = rereadAuthFromDisk();
+    if (fresh?.tokens.access_token) {
+      auth = fresh;
     }
 
     return {
@@ -318,13 +280,18 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
         const errorText = await response.text();
 
         if (response.status === 401) {
-          // Try one more refresh
-          const refreshed = await refreshTokens(auth!);
-          if (refreshed) {
-            auth = refreshed;
+          // Re-read the on-disk auth file — if the Codex CLI rotated
+          // the token out-of-band, we'll see a newer value. WOTANN no
+          // longer performs OAuth refresh itself (V9 T0.2).
+          const fresh = rereadAuthFromDisk();
+          if (
+            fresh?.tokens.access_token &&
+            fresh.tokens.access_token !== auth!.tokens.access_token
+          ) {
+            auth = fresh;
             yield {
               type: "error",
-              content: "Token refreshed — please retry the request.",
+              content: "Token refreshed by Codex CLI — please retry the request.",
               model: inputModel,
               provider: "codex",
             };
@@ -332,7 +299,7 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
             yield {
               type: "error",
               content:
-                'Codex session expired. Re-authenticate with: npx @openai/codex --full-auto "hello"',
+                "Codex session expired. Re-authenticate by running `codex login` in a shell, then retry.",
               model: inputModel,
               provider: "codex",
             };

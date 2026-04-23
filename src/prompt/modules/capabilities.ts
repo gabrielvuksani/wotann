@@ -20,7 +20,7 @@ function getProviderProfile(provider: string, model: string): ProviderProfile {
   const p = provider === "google" ? "gemini" : provider;
 
   // Tier 1: Full native support
-  if (p === "anthropic" || p === "anthropic-subscription") {
+  if (p === "anthropic" || p === "anthropic-cli") {
     native.push("tool calling", "vision", "extended thinking", "computer use");
     if (model.includes("opus")) native.push("1M context window");
     if (model.includes("sonnet")) native.push("200K context window");

@@ -43,7 +43,7 @@ export const PROVIDER_DEFAULTS: Readonly<Record<string, ProviderDefault>> = {
     envKeys: ["ANTHROPIC_API_KEY"],
     label: "Anthropic",
   },
-  "anthropic-subscription": {
+  "anthropic-cli": {
     defaultModel: "claude-sonnet-4-6",
     workerModel: "claude-sonnet-4-6",
     oracleModel: "claude-opus-4-6",

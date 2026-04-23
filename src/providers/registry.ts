@@ -6,7 +6,7 @@
 import type { ProviderName, ProviderAuth } from "../core/types.js";
 import type { ProviderAdapter } from "./types.js";
 import { createAnthropicAdapter } from "./anthropic-adapter.js";
-import { createAnthropicSubscriptionAdapter } from "./anthropic-subscription.js";
+import { createAnthropicCliAdapter } from "./claude-cli-backend.js";
 import { createCodexAdapter } from "./codex-adapter.js";
 import { createCopilotAdapter } from "./copilot-adapter.js";
 import { createOllamaAdapter } from "./ollama-adapter.js";
@@ -50,7 +50,7 @@ export function createProviderInfrastructure(
     switch (auth.provider) {
       case "anthropic":
         if (auth.method === "oauth-token") {
-          adapters.set("anthropic", createAnthropicSubscriptionAdapter());
+          adapters.set("anthropic", createAnthropicCliAdapter());
         } else {
           adapters.set("anthropic", createAnthropicAdapter(auth.token));
         }

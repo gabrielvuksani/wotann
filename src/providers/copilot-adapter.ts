@@ -1,6 +1,21 @@
 /**
  * GitHub Copilot provider adapter with runtime token exchange.
  *
+ * ⚠ EXPERIMENTAL — UNOFFICIAL GITHUB COPILOT USAGE ⚠
+ *
+ * This adapter exchanges a user-supplied `GH_TOKEN` against
+ * `/copilot_internal/v2/token` to obtain a short-lived Copilot API
+ * session token, then hits `api.githubcopilot.com` with it. GitHub
+ * Community Discussion #178117 (and adjacent threads) indicate this
+ * access pattern — non-Microsoft IDE clients driving Copilot via that
+ * endpoint — is not the intended integration path and is TOS-violating
+ * for third-party clients. Not banned as of V9 T0.3 drafting, but
+ * clearly unofficial and subject to change.
+ *
+ * Plan: migrate to `@github/copilot-sdk` when GitHub GAs an official
+ * third-party SDK. Track progress via `/monitor-repos` against
+ * `github/copilot-sdk`.
+ *
  * Copilot auth flow:
  * 1. User has GH_TOKEN / GITHUB_TOKEN with Copilot permission
  * 2. Exchange GH token for a short-lived Copilot API token (~30min)
@@ -14,6 +29,22 @@
  * Dynamic model listing: GET /models from the Copilot API returns the actual
  * model catalog for the user's subscription tier.
  */
+
+/**
+ * First-use flag for the experimental banner — printed once per process
+ * so CLIs and long-running daemons don't spam the warning on every
+ * request. QB #7 per-session state: resets per Node process; no
+ * persistent storage.
+ */
+let _copilotExperimentalBannerShown = false;
+
+function warnCopilotExperimentalOnce(): void {
+  if (_copilotExperimentalBannerShown) return;
+  _copilotExperimentalBannerShown = true;
+  console.warn(
+    "[copilot] experimental — unofficial third-party usage of GitHub Copilot via /copilot_internal/v2/token. Migrate to @github/copilot-sdk when GA.",
+  );
+}
 
 import type {
   ProviderAdapter,
@@ -255,6 +286,7 @@ const FALLBACK_MODELS: readonly string[] = [
 ];
 
 export function createCopilotAdapter(ghToken: string): ProviderAdapter {
+  warnCopilotExperimentalOnce();
   const capabilities: ProviderCapabilities = {
     supportsComputerUse: false,
     supportsToolCalling: true,

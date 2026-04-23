@@ -150,7 +150,7 @@ const COST_TABLE: Record<string, { input: number; output: number }> = {
 // Provider-to-model mapping for cost predictions. Expanded in S2-32.
 const PROVIDER_MODELS: Record<string, readonly string[]> = {
   anthropic: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
-  "anthropic-subscription": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+  "anthropic-cli": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
   openai: ["gpt-5.4", "gpt-5", "gpt-5-mini", "gpt-4.1"],
   codex: ["codexplan", "codexspark", "codexmini"],
   copilot: ["gpt-4.1", "gpt-5", "claude-sonnet-4-6"],

@@ -355,27 +355,10 @@ const anthropicSpec: ProviderSpec = {
         source: "keychain",
         expiresAt: saved.expiresAt,
       };
-    // 4. Anthropic OAuth file written by prior login
-    const oauthFile = join(homedir(), ".wotann", "anthropic-oauth.json");
-    if (existsSync(oauthFile)) {
-      try {
-        const data = JSON.parse(readFileSync(oauthFile, "utf-8")) as {
-          access_token?: string;
-          expires_at?: number;
-        };
-        if (data.access_token)
-          return {
-            method: "oauth",
-            label: "Claude Max",
-            token: data.access_token,
-            source: "oauth-file",
-            expiresAt: data.expires_at,
-          };
-      } catch {
-        /* malformed */
-      }
-    }
-    // 5. Claude CLI detection (last resort — no token, just presence)
+    // Legacy oauth-file path removed per V9 T0.1 (WOTANN no longer writes
+    // its own copy of the Claude subscription token). Detection falls
+    // through to Claude CLI presence.
+    // 4. Claude CLI detection (last resort — no token, just presence)
     try {
       execFileSync("claude", ["--version"], { stdio: "pipe", timeout: 2000 });
       return { method: "cli", label: "Claude CLI", source: "cli" };

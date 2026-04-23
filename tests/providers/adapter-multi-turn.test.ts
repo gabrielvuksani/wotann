@@ -208,8 +208,10 @@ describe("Codex adapter — multi-turn tool-loop shape (8d78efe)", () => {
           refresh_token: "fake_refresh_token",
           account_id: "fake_account_id",
         },
-        // "just refreshed" so the adapter doesn't attempt to call
-        // auth.openai.com/oauth/token on our behalf.
+        // Fixture uses a current timestamp; WOTANN no longer calls
+        // auth.openai.com/oauth/token itself (V9 T0.2 removed that path),
+        // but keeping `last_refresh` current matches the shape of a real
+        // ~/.codex/auth.json file the CLI just rotated.
         last_refresh: new Date().toISOString(),
       }),
     );

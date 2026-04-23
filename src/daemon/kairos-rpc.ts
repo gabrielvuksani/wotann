@@ -1815,7 +1815,7 @@ export class KairosRPCHandler {
     // login_codex Tauri commands so users never have to touch a terminal.
 
     this.handlers.set("auth.anthropic-login", async () => {
-      const { startAnthropicLogin } = await import("../providers/anthropic-subscription.js");
+      const { startAnthropicLogin } = await import("../providers/claude-cli-backend.js");
       try {
         const result = await startAnthropicLogin();
         return result;
@@ -1830,11 +1830,13 @@ export class KairosRPCHandler {
     });
 
     this.handlers.set("auth.codex-login", async () => {
-      const { startCodexLogin, detectExistingCodexCredential, importCodexCliCredential } =
-        await import("../providers/codex-oauth.js");
+      const { detectExistingCodexCredential, importCodexCliCredential } =
+        await import("../providers/codex-detector.js");
       try {
-        // If the user is already signed into Codex CLI, re-use those tokens
-        // instead of forcing another browser round-trip.
+        // Detect-only path. Per V9 T0.2, WOTANN no longer runs its own
+        // PKCE flow against auth.openai.com — the Codex CLI is the
+        // legitimate credential holder. If no existing credential is
+        // found, prompt the user to run `codex login` themselves.
         const existing = detectExistingCodexCredential();
         if (existing.found && existing.path) {
           const imported = importCodexCliCredential(existing.path);
@@ -1847,15 +1849,20 @@ export class KairosRPCHandler {
               reused: true,
             };
           }
-          // Fall through to fresh login if the import failed.
+          return {
+            success: false,
+            provider: "codex" as const,
+            expiresAt: null,
+            error: `Found ~/.codex/auth.json but could not import it: ${imported.error ?? "unknown"}. Run 'codex login' to refresh.`,
+          };
         }
 
-        const tokens = await startCodexLogin();
         return {
-          success: true,
+          success: false,
           provider: "codex" as const,
-          expiresAt: tokens.expiresAt,
-          reused: false,
+          expiresAt: null,
+          error:
+            "No existing Codex CLI session. Run 'codex login' in a shell (install with 'npm i -g @openai/codex'), then retry.",
         };
       } catch (err) {
         return {
@@ -1872,16 +1879,16 @@ export class KairosRPCHandler {
     // "Found existing login — tap to import" banner.
     this.handlers.set("auth.detect-existing", async () => {
       const { detectExistingAnthropicCredential } =
-        await import("../providers/anthropic-subscription.js");
-      const { detectExistingCodexCredential } = await import("../providers/codex-oauth.js");
+        await import("../providers/claude-cli-backend.js");
+      const { detectExistingCodexCredential } = await import("../providers/codex-detector.js");
       return {
-        anthropic: detectExistingAnthropicCredential(),
+        anthropic: await detectExistingAnthropicCredential(),
         codex: detectExistingCodexCredential(),
       };
     });
 
     this.handlers.set("auth.import-codex", async (params) => {
-      const { importCodexCliCredential } = await import("../providers/codex-oauth.js");
+      const { importCodexCliCredential } = await import("../providers/codex-detector.js");
       const path = (params.path as string | undefined) ?? undefined;
       if (!path) {
         return { success: false, error: "path required" };
@@ -2155,20 +2162,12 @@ export class KairosRPCHandler {
           /* claude CLI not installed */
         }
       }
-      // Also check for saved OAuth token from wotann login
-      let hasSavedOAuth = false;
-      if (!anthropicKey && !claudeOauthToken && !hasClaudeCli) {
-        try {
-          const { existsSync } = await import("node:fs");
-          const { homedir } = await import("node:os");
-          const { join } = await import("node:path");
-          hasSavedOAuth = existsSync(join(homedir(), ".wotann", "anthropic-oauth.json"));
-        } catch {
-          /* ignore */
-        }
-      }
+      // Legacy saved-OAuth path removed per V9 T0.1: WOTANN no longer
+      // writes its own copy of the Claude subscription token. The
+      // `claude` binary owns the credential and is detected via
+      // `hasClaudeCli` above.
 
-      if (anthropicKey || claudeOauthToken || hasClaudeCli || hasSavedOAuth) {
+      if (anthropicKey || claudeOauthToken || hasClaudeCli) {
         // If API key is available, try to fetch real model list from Anthropic API
         let anthropicModels: Array<{
           id: string;
@@ -2963,7 +2962,7 @@ export class KairosRPCHandler {
       for (const [providerName, defaults] of Object.entries(PROVIDER_DEFAULTS)) {
         // Skip provider aliases that duplicate another entry (the same
         // model shouldn't appear twice in the result).
-        if (providerName === "anthropic-subscription" || providerName === "openai-compat") {
+        if (providerName === "anthropic-cli" || providerName === "openai-compat") {
           continue;
         }
         const estimatedCost = costTracker.estimateCost(

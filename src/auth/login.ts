@@ -17,14 +17,7 @@ import { existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import chalk from "chalk";
-import {
-  runOAuthBrowserFlow,
-  runDeviceCodeFlow,
-  getCodexOAuthConfig,
-  getGitHubDeviceCodeConfig,
-  getAnthropicOAuthConfig,
-} from "./oauth-server.js";
-import type { OAuthResult } from "./oauth-server.js";
+import { runDeviceCodeFlow, getGitHubDeviceCodeConfig } from "./oauth-server.js";
 
 export type LoginProvider = "anthropic" | "codex" | "copilot" | "openai" | "gemini" | "ollama";
 
@@ -38,7 +31,9 @@ export interface LoginResult {
 // ── Anthropic Login ────────────────────────────────────────
 
 async function loginAnthropic(): Promise<LoginResult> {
-  // First try: delegate to Claude Code CLI (handles subscription auth)
+  // Only path: delegate to Claude Code CLI. Per V9 T0.1, WOTANN must not
+  // hold its own copy of a Claude subscription OAuth token — the `claude`
+  // binary is the credential holder, WOTANN just invokes it.
   try {
     const { execFileSync } = await import("node:child_process");
     try {
@@ -52,56 +47,29 @@ async function loginAnthropic(): Promise<LoginResult> {
         method: "cli-delegation",
       };
     } catch {
-      // Claude CLI not installed — fall through to direct OAuth
+      // Claude CLI not installed — fall through to API-key instructions.
     }
   } catch {
-    // Module import failed — fall through
+    // Module import failed — fall through.
   }
 
-  // Second try: direct Anthropic OAuth flow (for users without Claude Code CLI)
-  console.log(chalk.dim("  Claude Code CLI not found. Trying direct Anthropic OAuth..."));
-  console.log(chalk.dim("  This will open your browser to sign in with your Anthropic account.\n"));
-
-  const config = getAnthropicOAuthConfig();
-  const result: OAuthResult = await runOAuthBrowserFlow(config);
-
-  if (result.success && result.tokens) {
-    // Save the OAuth token for use by the subscription adapter
-    const wotannDir = join(homedir(), ".wotann");
-    if (!existsSync(wotannDir)) mkdirSync(wotannDir, { recursive: true });
-
-    writeFileSync(
-      join(wotannDir, "anthropic-oauth.json"),
-      JSON.stringify({
-        provider: "anthropic",
-        access_token: result.tokens.accessToken,
-        refresh_token: result.tokens.refreshToken,
-        id_token: result.tokens.idToken,
-        expires_in: result.tokens.expiresIn,
-        saved_at: new Date().toISOString(),
-      }, null, 2),
-    );
-
-    // Also set the env var hint for the discovery module
-    process.env["CLAUDE_CODE_OAUTH_TOKEN"] = result.tokens.accessToken;
-
-    return {
-      provider: "anthropic",
-      success: true,
-      message: "Authenticated with Anthropic OAuth. Token saved to ~/.wotann/anthropic-oauth.json",
-      method: "direct-oauth",
-    };
-  }
-
-  // Third try: manual API key entry
-  console.log(chalk.dim("\n  OAuth flow unavailable. Set your API key manually:"));
-  console.log(chalk.dim("  export ANTHROPIC_API_KEY=sk-ant-..."));
-  console.log(chalk.dim("  Get a key at: https://console.anthropic.com/settings/keys\n"));
+  // CLI unavailable: print actionable instructions. Subscription auth
+  // requires the Claude CLI (WOTANN cannot legally hold a Claude Pro/Max
+  // OAuth token itself); pay-per-token auth uses ANTHROPIC_API_KEY.
+  console.log(chalk.dim("\n  Claude Code CLI not found."));
+  console.log(chalk.dim("  For your Claude Max/Pro subscription, install the CLI:"));
+  console.log(chalk.dim("    npm i -g @anthropic-ai/claude-code"));
+  console.log(chalk.dim("    claude login"));
+  console.log(chalk.dim("    wotann login anthropic   # re-run after install\n"));
+  console.log(chalk.dim("  For pay-per-token access, set your API key manually:"));
+  console.log(chalk.dim("    export ANTHROPIC_API_KEY=sk-ant-..."));
+  console.log(chalk.dim("    (get a key at https://console.anthropic.com/settings/keys)\n"));
 
   return {
     provider: "anthropic",
     success: false,
-    message: result.error ?? "Install Claude Code CLI: npm i -g @anthropic-ai/claude-code, or set ANTHROPIC_API_KEY",
+    message:
+      "Install Claude Code CLI (npm i -g @anthropic-ai/claude-code) for subscription access, or set ANTHROPIC_API_KEY for pay-per-token.",
     method: "manual",
   };
 }
@@ -109,61 +77,43 @@ async function loginAnthropic(): Promise<LoginResult> {
 // ── Codex/ChatGPT Login ────────────────────────────────────
 
 async function loginCodex(): Promise<LoginResult> {
-  console.log(chalk.dim("  Starting ChatGPT OAuth flow...\n"));
+  // Only path: delegate to Codex CLI. Per V9 T0.2, WOTANN no longer runs
+  // its own PKCE flow against auth.openai.com with Codex CLI's public
+  // client_id — that would masquerade as the official CLI. The Codex
+  // CLI is the legitimate credential holder.
+  console.log(chalk.dim("  Delegating to Codex CLI...\n"));
   console.log(chalk.dim("  This uses your ChatGPT Plus/Pro/Team subscription."));
-  console.log(chalk.dim("  Codex models (codexplan, codexspark) require a ChatGPT subscription.\n"));
+  console.log(
+    chalk.dim("  Codex models (codexplan, codexspark) require a ChatGPT subscription.\n"),
+  );
 
-  const config = getCodexOAuthConfig();
-  const result: OAuthResult = await runOAuthBrowserFlow(config);
+  try {
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("npx", ["@openai/codex", "login"], {
+      stdio: "inherit",
+      timeout: 180_000,
+    });
+    return {
+      provider: "codex",
+      success: true,
+      message: "Authenticated via Codex CLI. Tokens saved by the CLI to ~/.codex/auth.json.",
+      method: "cli-delegation",
+    };
+  } catch {
+    console.log(chalk.dim("\n  Codex CLI delegation failed."));
+    console.log(chalk.dim("  Install and run the Codex CLI directly:"));
+    console.log(chalk.dim("    npm i -g @openai/codex"));
+    console.log(chalk.dim("    codex login"));
+    console.log(chalk.dim("    wotann login codex   # re-run after login\n"));
 
-  if (!result.success || !result.tokens) {
-    // Fallback: try delegating to the Codex CLI
-    console.log(chalk.yellow("  Browser flow failed. Trying Codex CLI fallback..."));
-    try {
-      const { execFileSync } = await import("node:child_process");
-      execFileSync("npx", ["@openai/codex", "--full-auto", "echo hello"], {
-        stdio: "inherit", timeout: 120_000,
-      });
-      return {
-        provider: "codex",
-        success: true,
-        message: "Authenticated via Codex CLI. Tokens saved to ~/.codex/auth.json",
-        method: "cli-fallback",
-      };
-    } catch {
-      return {
-        provider: "codex",
-        success: false,
-        message: result.error ?? "OAuth flow failed. Try: npx @openai/codex --full-auto \"hello\"",
-        method: "browser",
-      };
-    }
+    return {
+      provider: "codex",
+      success: false,
+      message:
+        "Install and run: npm i -g @openai/codex && codex login. WOTANN detects existing ~/.codex/auth.json.",
+      method: "manual",
+    };
   }
-
-  // Save tokens to ~/.codex/auth.json (compatible with Codex CLI)
-  const codexHome = join(homedir(), ".codex");
-  if (!existsSync(codexHome)) mkdirSync(codexHome, { recursive: true });
-
-  const authData = {
-    auth_mode: "chatgpt",
-    OPENAI_API_KEY: null,
-    tokens: {
-      access_token: result.tokens.accessToken,
-      id_token: result.tokens.idToken ?? "",
-      refresh_token: result.tokens.refreshToken ?? "",
-      account_id: result.tokens.accountId ?? "",
-    },
-    last_refresh: new Date().toISOString(),
-  };
-
-  writeFileSync(join(codexHome, "auth.json"), JSON.stringify(authData, null, 2));
-
-  return {
-    provider: "codex",
-    success: true,
-    message: "Authenticated with ChatGPT. Tokens saved to ~/.codex/auth.json",
-    method: "browser",
-  };
 }
 
 // ── GitHub Copilot Login ───────────────────────────────────
@@ -177,17 +127,14 @@ async function loginCopilot(): Promise<LoginResult> {
 
   const config = getGitHubDeviceCodeConfig();
 
-  const result = await runDeviceCodeFlow(
-    config,
-    (response) => {
-      console.log();
-      console.log(chalk.bold("  Enter this code at GitHub:"));
-      console.log(chalk.cyan(`  ${response.userCode}`));
-      console.log(chalk.dim(`  URL: ${response.verificationUri}`));
-      console.log(chalk.dim("  Waiting for authorization..."));
-      console.log();
-    },
-  );
+  const result = await runDeviceCodeFlow(config, (response) => {
+    console.log();
+    console.log(chalk.bold("  Enter this code at GitHub:"));
+    console.log(chalk.cyan(`  ${response.userCode}`));
+    console.log(chalk.dim(`  URL: ${response.verificationUri}`));
+    console.log(chalk.dim("  Waiting for authorization..."));
+    console.log();
+  });
 
   if (!result.success || !result.tokens) {
     return {
@@ -211,10 +158,7 @@ async function loginCopilot(): Promise<LoginResult> {
     saved_at: new Date().toISOString(),
   };
 
-  writeFileSync(
-    join(wotannConfigDir, "copilot-token.json"),
-    JSON.stringify(tokenData, null, 2),
-  );
+  writeFileSync(join(wotannConfigDir, "copilot-token.json"), JSON.stringify(tokenData, null, 2));
 
   return {
     provider: "copilot",
@@ -274,7 +218,9 @@ async function loginOllama(): Promise<LoginResult> {
     clearTimeout(timeout);
 
     if (response.ok) {
-      const data = (await response.json()) as { models?: readonly { name: string; size: number }[] };
+      const data = (await response.json()) as {
+        models?: readonly { name: string; size: number }[];
+      };
       const models = data.models ?? [];
       const modelCount = models.length;
 
@@ -286,8 +232,12 @@ async function loginOllama(): Promise<LoginResult> {
 
       if (modelCount === 0) {
         console.log(chalk.yellow("\n  No models installed. Recommended for coding:"));
-        console.log(chalk.dim("    ollama pull qwen3-coder-next    # 80B MoE, best coding (18GB VRAM)"));
-        console.log(chalk.dim("    ollama pull qwen3.5:27b         # multimodal, 256K context (20GB)"));
+        console.log(
+          chalk.dim("    ollama pull qwen3-coder-next    # 80B MoE, best coding (18GB VRAM)"),
+        );
+        console.log(
+          chalk.dim("    ollama pull qwen3.5:27b         # multimodal, 256K context (20GB)"),
+        );
         console.log(chalk.dim("    ollama pull devstral:24b         # fast coding agent (16GB)"));
         console.log(chalk.dim("    ollama pull qwen3-coder:7b       # entry level (5GB)"));
       }
@@ -312,7 +262,8 @@ async function loginOllama(): Promise<LoginResult> {
   return {
     provider: "ollama",
     success: false,
-    message: "Ollama is not running. Install from https://ollama.ai, then: ollama serve && ollama pull qwen3-coder-next",
+    message:
+      "Ollama is not running. Install from https://ollama.ai, then: ollama serve && ollama pull qwen3-coder-next",
     method: "local-check",
   };
 }
@@ -356,7 +307,11 @@ export async function runLogin(provider?: string): Promise<void> {
 
   // Interactive: show all providers with status
   const providers: readonly { name: LoginProvider; label: string; cost: string }[] = [
-    { name: "anthropic", label: "Anthropic Claude (subscription or API key)", cost: "subscription / pay-per-use" },
+    {
+      name: "anthropic",
+      label: "Anthropic Claude (subscription or API key)",
+      cost: "subscription / pay-per-use",
+    },
     { name: "codex", label: "OpenAI Codex (ChatGPT subscription)", cost: "ChatGPT Plus $20/mo" },
     { name: "copilot", label: "GitHub Copilot (free tier available)", cost: "Free / $10 / $39/mo" },
     { name: "gemini", label: "Google Gemini (generous free tier)", cost: "free" },
@@ -380,12 +335,18 @@ export async function runLogin(provider?: string): Promise<void> {
 
 async function loginSingleProvider(provider: LoginProvider): Promise<LoginResult> {
   switch (provider) {
-    case "anthropic": return loginAnthropic();
-    case "codex": return loginCodex();
-    case "copilot": return loginCopilot();
-    case "gemini": return loginGemini();
-    case "ollama": return loginOllama();
-    case "openai": return loginOpenAI();
+    case "anthropic":
+      return loginAnthropic();
+    case "codex":
+      return loginCodex();
+    case "copilot":
+      return loginCopilot();
+    case "gemini":
+      return loginGemini();
+    case "ollama":
+      return loginOllama();
+    case "openai":
+      return loginOpenAI();
     default:
       return {
         provider,

@@ -38,7 +38,7 @@ export interface UsageProfile {
 // ── Provider Classification ─────────────────────────────
 
 const SUBSCRIPTION_PROVIDERS = new Set([
-  "anthropic-subscription",  // Claude Pro/Max via claude-agent-sdk
+  "anthropic-cli",  // Claude Pro/Max via claude-agent-sdk
   "codex",                   // ChatGPT Plus via Codex backend
   "copilot",                 // GitHub Copilot (subscription)
 ]);

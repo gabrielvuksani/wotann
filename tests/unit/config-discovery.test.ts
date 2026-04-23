@@ -316,7 +316,7 @@ describe("ConfigDiscovery", () => {
       expect(result.hasSubscription).toBe(true);
       expect(result.maxPowerMode).toBe(true);
       expect(result.showCostWarnings).toBe(false);
-      expect(result.hints[0]?.providerId).toBe("anthropic-subscription");
+      expect(result.hints[0]?.providerId).toBe("anthropic-cli");
       expect(result.hints[0]?.billingModel).toBe("subscription");
     });
 

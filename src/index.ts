@@ -28,6 +28,7 @@ import { homedir } from "node:os";
 import chalk from "chalk";
 
 import { readFileSync } from "node:fs";
+import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 
 const VERSION: string = (() => {
   try {
@@ -590,33 +591,6 @@ program
   });
 
 // ── wotann autofix-pr (C21) ──────────────────────────────────
-
-/**
- * execFile promise that resolves with stdout/stderr/exitCode instead of
- * throwing — callers decide whether a non-zero exit is fatal. Used by
- * `--create-pr` so we can surface `gh` errors honestly (no silent success).
- */
-async function execFileNoThrow(
-  file: string,
-  args: readonly string[],
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const { execFile } = await import("node:child_process");
-  return await new Promise((resolve) => {
-    execFile(file, args as string[], (error, stdout, stderr) => {
-      const exitCode =
-        error && typeof (error as NodeJS.ErrnoException).code === "number"
-          ? Number((error as NodeJS.ErrnoException).code)
-          : error
-            ? 1
-            : 0;
-      resolve({
-        exitCode,
-        stdout: stdout?.toString() ?? "",
-        stderr: stderr?.toString() ?? (error instanceof Error ? error.message : ""),
-      });
-    });
-  });
-}
 
 program
   .command("autofix-pr")

@@ -10,7 +10,7 @@
  *   1. `ANTHROPIC_API_KEY` environment variable
  *   2. Claude CLI config at `~/.claude.json` (reads `anthropicApiKey`)
  *
- * Separate from `anthropic-subscription.ts` which handles the Claude
+ * Separate from `claude-cli-backend.ts` which handles the Claude
  * Code CLI OAuth / Max/Pro subscription flow. BYOA is the **raw API
  * key** path — the user's console.anthropic.com API key lives outside
  * the CLI's OAuth store, so we need a dedicated detector.

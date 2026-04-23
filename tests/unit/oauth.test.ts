@@ -1,26 +1,13 @@
 import { describe, it, expect } from "vitest";
-import {
-  getCodexOAuthConfig,
-  getGitHubDeviceCodeConfig,
-} from "../../src/auth/oauth-server.js";
+import { getGitHubDeviceCodeConfig } from "../../src/auth/oauth-server.js";
+
+// getCodexOAuthConfig tests removed per V9 T0.2 — the Codex PKCE flow
+// that used Codex CLI's public client_id against auth.openai.com has
+// been deleted (it masqueraded as the official CLI). Codex auth is
+// now read-existing-~/.codex/auth.json-only; there's no WOTANN-owned
+// OAuth config left to test.
 
 describe("OAuth Server", () => {
-  describe("getCodexOAuthConfig", () => {
-    it("returns correct Codex OAuth configuration", () => {
-      const config = getCodexOAuthConfig();
-      expect(config.clientId).toBe("app_EMoamEEZ73f0CkXaXp7hrann");
-      expect(config.authorizationUrl).toContain("auth.openai.com");
-      expect(config.tokenUrl).toContain("auth.openai.com");
-      expect(config.usePKCE).toBe(true);
-      expect(config.scopes).toContain("openid");
-    });
-
-    it("uses PKCE by default", () => {
-      const config = getCodexOAuthConfig();
-      expect(config.usePKCE).toBe(true);
-    });
-  });
-
   describe("getGitHubDeviceCodeConfig", () => {
     it("returns correct GitHub device code configuration", () => {
       const config = getGitHubDeviceCodeConfig();
