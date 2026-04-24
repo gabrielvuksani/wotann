@@ -186,34 +186,63 @@ export function statusChrome(status: BrowseSessionStatusView): {
 
 // ═══ Styles (shared) ═════════════════════════════════════════════════════
 
+const MONO = "var(--font-mono, ui-monospace, Menlo, monospace)";
+const C_MUTED = "var(--color-text-muted, #a7a7a7)";
+const C_PRIMARY = "var(--color-text-primary, #eaeaea)";
+const C_ERROR = "var(--color-error, #ef4444)";
+const C_SUCCESS = "var(--color-success, #22c55e)";
+const BORDER_SUBTLE = "1px solid var(--border-subtle, rgba(255,255,255,0.06))";
+const FS_XS = "var(--font-size-xs, 11px)";
+const FS_2XS = "var(--font-size-2xs, 10px)";
+const FS_SM = "var(--font-size-sm, 13px)";
+const RADIUS_MD = "var(--radius-md, 8px)";
+const SURFACE_1 = "var(--surface-1, rgba(0,0,0,0.25))";
+const SURFACE_2 = "var(--surface-2, rgba(255,255,255,0.03))";
+
 const COL_BASE: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "var(--space-sm, 8px)",
   overflow: "hidden",
-  background: "var(--surface-2, rgba(255,255,255,0.03))",
+  background: SURFACE_2,
   boxShadow: "var(--shadow-ring, 0 0 0 1px rgba(255,255,255,0.06))",
   borderRadius: "var(--radius-lg, 12px)",
   padding: "var(--space-md, 12px)",
 };
 
 const SECTION_LABEL: CSSProperties = {
-  fontSize: "var(--font-size-xs, 11px)",
+  fontSize: FS_XS,
   fontWeight: 600,
-  color: "var(--color-text-muted, #a7a7a7)",
+  color: C_MUTED,
   textTransform: "uppercase",
   letterSpacing: "0.5px",
 };
 
 const TRUST_NOTE: CSSProperties = {
-  fontSize: "var(--font-size-2xs, 10px)",
-  color: "var(--color-text-muted, #a7a7a7)",
+  fontSize: FS_2XS,
+  color: C_MUTED,
   fontStyle: "italic",
   marginTop: 2,
   letterSpacing: "0.3px",
 };
 
-const MONO: string = "var(--font-mono, ui-monospace, Menlo, monospace)";
+const BTN_BASE: CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: RADIUS_MD,
+  fontSize: FS_XS,
+  fontWeight: 700,
+  cursor: "pointer",
+  flex: 1,
+  border: "none",
+};
+
+const EMPTY_CENTER: CSSProperties = {
+  padding: "8px 0",
+  color: C_MUTED,
+  fontSize: FS_XS,
+  textAlign: "center",
+  fontStyle: "italic",
+};
 
 // ═══ Subcomponents ═══════════════════════════════════════════════════════
 
@@ -227,7 +256,7 @@ function StatusBadge({ status }: { readonly status: BrowseSessionStatusView }): 
         borderRadius: "var(--radius-sm, 4px)",
         background: chrome.bg,
         color: chrome.color,
-        fontSize: "var(--font-size-2xs, 10px)",
+        fontSize: FS_2XS,
         fontWeight: 700,
         letterSpacing: "0.5px",
         textTransform: "uppercase",
@@ -301,11 +330,11 @@ function TaskInput({
         style={{
           width: "100%",
           padding: "8px 10px",
-          background: "var(--surface-1, rgba(0,0,0,0.25))",
+          background: SURFACE_1,
           border: "1px solid var(--border-default, rgba(255,255,255,0.08))",
-          borderRadius: "var(--radius-md, 8px)",
-          color: "var(--color-text-primary, #eaeaea)",
-          fontSize: "var(--font-size-sm, 13px)",
+          borderRadius: RADIUS_MD,
+          color: C_PRIMARY,
+          fontSize: FS_SM,
           resize: "vertical",
           opacity: disabled ? 0.55 : 1,
         }}
@@ -317,11 +346,11 @@ function TaskInput({
         className="btn-press"
         style={{
           padding: "8px 14px",
-          borderRadius: "var(--radius-md, 8px)",
+          borderRadius: RADIUS_MD,
           background: "var(--accent, #7c5cff)",
           color: "#fff",
           border: "none",
-          fontSize: "var(--font-size-sm, 13px)",
+          fontSize: FS_SM,
           fontWeight: 600,
           cursor: canSubmit ? "pointer" : "not-allowed",
           opacity: canSubmit ? 1 : 0.5,
@@ -353,10 +382,10 @@ function ApprovalCard({
     <div
       style={{
         padding: "var(--space-sm, 8px)",
-        background: "var(--surface-1, rgba(0,0,0,0.25))",
+        background: SURFACE_1,
         boxShadow: "var(--shadow-ring, 0 0 0 1px rgba(255,255,255,0.06))",
         borderLeft: `3px solid ${color}`,
-        borderRadius: "var(--radius-md, 8px)",
+        borderRadius: RADIUS_MD,
         display: "flex",
         flexDirection: "column",
         gap: 4,
@@ -369,7 +398,7 @@ function ApprovalCard({
             borderRadius: "var(--radius-sm, 4px)",
             background: `color-mix(in srgb, ${color} 16%, transparent)`,
             color,
-            fontSize: "var(--font-size-2xs, 10px)",
+            fontSize: FS_2XS,
             fontWeight: 700,
             letterSpacing: "0.5px",
             textTransform: "uppercase",
@@ -377,24 +406,11 @@ function ApprovalCard({
         >
           {approval.kind}
         </span>
-        <span
-          style={{
-            fontSize: "var(--font-size-2xs, 10px)",
-            color,
-            fontWeight: 600,
-            textTransform: "uppercase",
-          }}
-        >
+        <span style={{ fontSize: FS_2XS, color, fontWeight: 600, textTransform: "uppercase" }}>
           {approval.risk} risk
         </span>
       </div>
-      <p
-        style={{
-          fontSize: "var(--font-size-sm, 13px)",
-          color: "var(--color-text-primary, #eaeaea)",
-          lineHeight: 1.35,
-        }}
-      >
+      <p style={{ fontSize: FS_SM, color: C_PRIMARY, lineHeight: 1.35 }}>
         {approval.description}
       </p>
       <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
@@ -402,17 +418,7 @@ function ApprovalCard({
           type="button"
           onClick={() => onApprove(approval.id)}
           className="btn-press"
-          style={{
-            flex: 1,
-            padding: "6px 10px",
-            borderRadius: "var(--radius-md, 8px)",
-            background: "var(--color-success, #22c55e)",
-            color: "#fff",
-            border: "none",
-            fontSize: "var(--font-size-xs, 11px)",
-            fontWeight: 700,
-            cursor: "pointer",
-          }}
+          style={{ ...BTN_BASE, background: C_SUCCESS, color: "#fff" }}
           aria-label={`Approve ${approval.kind} in WOTANN (not in the page)`}
         >
           Approve
@@ -422,15 +428,10 @@ function ApprovalCard({
           onClick={() => onDeny(approval.id)}
           className="btn-press"
           style={{
-            flex: 1,
-            padding: "6px 10px",
-            borderRadius: "var(--radius-md, 8px)",
-            background: "var(--surface-2, rgba(255,255,255,0.03))",
-            color: "var(--color-error, #ef4444)",
-            border: "1px solid var(--color-error, #ef4444)",
-            fontSize: "var(--font-size-xs, 11px)",
-            fontWeight: 700,
-            cursor: "pointer",
+            ...BTN_BASE,
+            background: SURFACE_2,
+            color: C_ERROR,
+            border: `1px solid ${C_ERROR}`,
           }}
           aria-label={`Deny ${approval.kind} in WOTANN (not in the page)`}
         >
@@ -450,11 +451,7 @@ function PlanStepRow({
   readonly turn: BrowseTurnView | undefined;
 }): JSX.Element {
   const hasHalt = turn?.haltReason !== undefined;
-  const color = hasHalt
-    ? "var(--color-error, #ef4444)"
-    : turn !== undefined
-      ? "var(--color-success, #22c55e)"
-      : "var(--color-text-muted, #a7a7a7)";
+  const color = hasHalt ? C_ERROR : turn !== undefined ? C_SUCCESS : C_MUTED;
   const truncated =
     step.target !== undefined && step.target.length > 48
       ? `${step.target.slice(0, 48)}…`
@@ -466,26 +463,20 @@ function PlanStepRow({
         alignItems: "flex-start",
         gap: 8,
         padding: "6px 0",
-        borderBottom: "1px solid var(--border-subtle, rgba(255,255,255,0.06))",
+        borderBottom: BORDER_SUBTLE,
       }}
     >
       <span style={{ fontSize: 16, lineHeight: 1.2 }}>{stepIcon(step.kind)}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: "var(--font-size-sm, 13px)",
-            fontWeight: 600,
-            color: "var(--color-text-primary, #eaeaea)",
-          }}
-        >
+        <div style={{ fontSize: FS_SM, fontWeight: 600, color: C_PRIMARY }}>
           {step.kind}
           {truncated !== undefined ? (
             <span
               style={{
                 fontFamily: MONO,
-                color: "var(--color-text-muted, #a7a7a7)",
+                color: C_MUTED,
                 marginLeft: 6,
-                fontSize: "var(--font-size-xs, 11px)",
+                fontSize: FS_XS,
                 fontWeight: 500,
               }}
             >
@@ -493,24 +484,9 @@ function PlanStepRow({
             </span>
           ) : null}
         </div>
-        <div
-          style={{
-            fontSize: "var(--font-size-xs, 11px)",
-            color: "var(--color-text-muted, #a7a7a7)",
-            marginTop: 2,
-          }}
-        >
-          {step.rationale}
-        </div>
+        <div style={{ fontSize: FS_XS, color: C_MUTED, marginTop: 2 }}>{step.rationale}</div>
         {hasHalt ? (
-          <div
-            style={{
-              fontSize: "var(--font-size-2xs, 10px)",
-              color,
-              marginTop: 2,
-              fontFamily: MONO,
-            }}
-          >
+          <div style={{ fontSize: FS_2XS, color, marginTop: 2, fontFamily: MONO }}>
             {turn?.haltReason ?? ""}
           </div>
         ) : null}
@@ -583,8 +559,8 @@ export function BrowseTab(props: BrowseTabProps): JSX.Element {
             style={{
               width: 32,
               height: 32,
-              borderRadius: "var(--radius-md, 8px)",
-              background: "var(--surface-2, rgba(255,255,255,0.04))",
+              borderRadius: RADIUS_MD,
+              background: SURFACE_2,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -598,21 +574,13 @@ export function BrowseTab(props: BrowseTabProps): JSX.Element {
               style={{
                 fontSize: "var(--font-size-lg, 16px)",
                 fontWeight: 700,
-                color: "var(--color-text-primary, #eaeaea)",
+                color: C_PRIMARY,
                 margin: 0,
               }}
             >
               Browse
             </h1>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: "var(--font-size-xs, 11px)",
-                color: "var(--color-text-muted, #a7a7a7)",
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: FS_XS, color: C_MUTED }}>
               {session !== null ? (
                 <>
                   <span style={{ fontFamily: MONO }}>{session.id}</span>
@@ -632,13 +600,11 @@ export function BrowseTab(props: BrowseTabProps): JSX.Element {
           className="btn-press"
           style={{
             padding: "8px 14px",
-            borderRadius: "var(--radius-md, 8px)",
-            background: active
-              ? "var(--color-error, #ef4444)"
-              : "var(--surface-2, rgba(255,255,255,0.04))",
-            color: active ? "#fff" : "var(--color-text-muted, #a7a7a7)",
+            borderRadius: RADIUS_MD,
+            background: active ? C_ERROR : SURFACE_2,
+            color: active ? "#fff" : C_MUTED,
             border: "none",
-            fontSize: "var(--font-size-sm, 13px)",
+            fontSize: FS_SM,
             fontWeight: 600,
             cursor: active ? "pointer" : "not-allowed",
             opacity: active ? 1 : 0.55,
@@ -672,15 +638,7 @@ export function BrowseTab(props: BrowseTabProps): JSX.Element {
               <PlanStepRow key={step.id} step={step} turn={historyByStep.get(step.id)} />
             ))}
             {steps.length === 0 ? (
-              <li
-                style={{
-                  padding: "12px 0",
-                  color: "var(--color-text-muted, #a7a7a7)",
-                  fontSize: "var(--font-size-sm, 13px)",
-                  textAlign: "center",
-                  fontStyle: "italic",
-                }}
-              >
+              <li style={{ ...EMPTY_CENTER, padding: "12px 0", fontSize: FS_SM }}>
                 Submit a task to generate a plan.
               </li>
             ) : null}
@@ -695,8 +653,8 @@ export function BrowseTab(props: BrowseTabProps): JSX.Element {
               position: "relative",
               flex: 1,
               overflow: "hidden",
-              borderRadius: "var(--radius-md, 8px)",
-              background: "var(--surface-1, rgba(0,0,0,0.25))",
+              borderRadius: RADIUS_MD,
+              background: SURFACE_1,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -707,23 +665,12 @@ export function BrowseTab(props: BrowseTabProps): JSX.Element {
                 <img
                   src={session.latestScreenshot}
                   alt="Live browser screenshot"
-                  style={{
-                    maxWidth: "100%",
-                    maxHeight: "100%",
-                    objectFit: "contain",
-                    display: "block",
-                  }}
+                  style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }}
                 />
                 <DomOverlay elements={session.domElements} />
               </>
             ) : (
-              <div
-                style={{
-                  color: "var(--color-text-muted, #a7a7a7)",
-                  fontSize: "var(--font-size-sm, 13px)",
-                  fontStyle: "italic",
-                }}
-              >
+              <div style={{ color: C_MUTED, fontSize: FS_SM, fontStyle: "italic" }}>
                 No screenshot yet.
               </div>
             )}
@@ -746,17 +693,7 @@ export function BrowseTab(props: BrowseTabProps): JSX.Element {
             }}
           >
             {pendingApprovals.length === 0 ? (
-              <div
-                style={{
-                  padding: "8px 0",
-                  color: "var(--color-text-muted, #a7a7a7)",
-                  fontSize: "var(--font-size-xs, 11px)",
-                  textAlign: "center",
-                  fontStyle: "italic",
-                }}
-              >
-                No pending approvals.
-              </div>
+              <div style={EMPTY_CENTER}>No pending approvals.</div>
             ) : (
               pendingApprovals.map((a) => (
                 <ApprovalCard key={a.id} approval={a} onApprove={onApprove} onDeny={onDeny} />
@@ -778,14 +715,11 @@ export function BrowseTab(props: BrowseTabProps): JSX.Element {
               <div
                 key={`${turn.stepId}-${idx}`}
                 style={{
-                  fontSize: "var(--font-size-2xs, 10px)",
+                  fontSize: FS_2XS,
                   fontFamily: MONO,
-                  color:
-                    turn.haltReason !== undefined
-                      ? "var(--color-error, #ef4444)"
-                      : "var(--color-text-muted, #a7a7a7)",
+                  color: turn.haltReason !== undefined ? C_ERROR : C_MUTED,
                   padding: "3px 0",
-                  borderBottom: "1px solid var(--border-subtle, rgba(255,255,255,0.04))",
+                  borderBottom: BORDER_SUBTLE,
                 }}
                 title={turn.haltReason ?? turn.url ?? turn.stepId}
               >
@@ -794,17 +728,7 @@ export function BrowseTab(props: BrowseTabProps): JSX.Element {
               </div>
             ))}
             {history.length === 0 ? (
-              <div
-                style={{
-                  padding: "8px 0",
-                  color: "var(--color-text-muted, #a7a7a7)",
-                  fontSize: "var(--font-size-xs, 11px)",
-                  textAlign: "center",
-                  fontStyle: "italic",
-                }}
-              >
-                No turns yet.
-              </div>
+              <div style={EMPTY_CENTER}>No turns yet.</div>
             ) : null}
           </div>
         </div>
