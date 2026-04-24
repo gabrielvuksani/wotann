@@ -29,6 +29,17 @@ import { ActiveMemoryEngine } from "../memory/active-memory.js";
 import { Observer } from "../memory/observer.js";
 import { Reflector, type ReflectorJudge } from "../memory/reflector.js";
 import { buildStablePrefix } from "../memory/stable-prefix.js";
+// V9 T1.5 — warmupCache fires a fire-and-forget call to the active
+// provider right after the stable-prefix system prompt is assembled,
+// so the server-side prompt cache is primed before the first real
+// user query. Mastra paper: 4-10× cache savings when warmup lands
+// before production traffic. Gated on `RuntimeConfig.enablePromptCacheWarmup`
+// (default off) + `WOTANN_PROMPT_CACHE_WARMUP` env var.
+import {
+  warmupCache,
+  type CachePrefix,
+  type CacheWarmupSendFn,
+} from "../providers/prompt-cache-warmup.js";
 import { DoomLoopDetector } from "../hooks/doom-loop-detector.js";
 import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pipeline.js";
 import { assembleSystemPromptParts, wrapPromptWithThinkInCode } from "../prompt/engine.js";
@@ -528,6 +539,21 @@ export interface RuntimeConfig {
    * NullTodoProvider that always says "no drift".
    */
   readonly enableGoalDrift?: boolean;
+  /**
+   * V9 T1.5 — Prompt-cache warmup. When enabled, after `buildStablePrefix`
+   * rebuilds `this.systemPrompt`, the runtime fires a fire-and-forget
+   * call to `warmupCache()` (src/providers/prompt-cache-warmup.ts) so
+   * the active provider's server-side prompt cache is primed before
+   * the first real user query hits it. Mastra paper reports 4-10×
+   * cache savings when warmup lands before production traffic.
+   *
+   * Defaults: `enablePromptCacheWarmup === false` → off. Otherwise
+   * the env var `WOTANN_PROMPT_CACHE_WARMUP` controls: `"0"` disables,
+   * any other value (including unset) enables. This matches the
+   * "opt-in via env until proven safe" convention used by useTempr
+   * and enableGoalDrift.
+   */
+  readonly enablePromptCacheWarmup?: boolean;
   /**
    * P1-B7: optional provider the runtime hands back from
    * `getTodoProvider()` when a caller wants a session-level default.
@@ -1157,10 +1183,23 @@ export class WotannRuntime {
     this.episodicMemory = new EpisodicMemory(join(config.workingDir, ".wotann", "episodes"));
 
     // Autonomous executor: fire-and-forget with 8-strategy escalation
+    // Self-healing pipeline singleton constructed just below (line 1177);
+    // forward-declare a local ref here so AutonomousExecutor gets the
+    // same instance + accumulated errorHistory as everything else that
+    // reads runtime.selfHealingPipeline (hooks, slash commands, RPC).
+    // Construction ordering requires creating the pipeline BEFORE the
+    // executor — move the field assignment forward.
+    this.selfHealingPipeline = new SelfHealingPipeline();
+
     this.autonomousExecutor = new AutonomousExecutor({
       enableShadowGit: true,
       enableCheckpoints: true,
       checkpointDir: join(config.workingDir, ".wotann", "autonomous-checkpoints"),
+      // V9 T1.8 — inject the runtime's SelfHealingPipeline singleton so
+      // cycle failures route through graduated recovery (prompt-fix →
+      // code-rollback → strategy-change → human-escalation) rather than
+      // being recorded + ignored.
+      selfHealingPipeline: this.selfHealingPipeline,
     });
 
     // Notification manager: surface task-complete / error / budget-alert
@@ -1173,8 +1212,10 @@ export class WotannRuntime {
     // Persona manager: 8-file bootstrap, dynamic persona stacking
     this.personaManager = new PersonaManager(join(config.workingDir, ".wotann", "identity"));
 
-    // Self-healing pipeline: graduated error recovery (prompt-fix → rollback → strategy-change → escalation)
-    this.selfHealingPipeline = new SelfHealingPipeline();
+    // Self-healing pipeline singleton: assigned above (pre-AutonomousExecutor
+    // construction) so the executor can share the instance. This anchor
+    // comment preserves the prior "graduated error recovery" docs site.
+    // Graduated error recovery: prompt-fix → rollback → strategy-change → escalation.
 
     // LSP manager: language-aware server lifecycle (pyright, rust-analyzer, etc.)
     this.lspManager = new LSPManager();
@@ -4339,6 +4380,66 @@ export class WotannRuntime {
     ]
       .filter(Boolean)
       .join("\n\n");
+
+    // V9 T1.5 — Prompt-cache warmup. Fire-and-forget so it never
+    // blocks mode switching; failures are logged but non-fatal. The
+    // warmup fires only when the gate is enabled AND we have a live
+    // provider bridge AND the resulting prompt is big enough to be
+    // worth caching (warmupCache itself filters by minTokens).
+    this.maybeWarmupPromptCache();
+  }
+
+  /**
+   * V9 T1.5 wire — fires the warmupCache() call against the active
+   * provider so the first real query lands on a warm server-side
+   * cache. Kept as a separate method so the hot `updateSystemPromptForMode`
+   * path stays readable and the warmup gate + sendFn construction live
+   * next to each other.
+   *
+   * Gate (opt-in): `RuntimeConfig.enablePromptCacheWarmup === true`
+   *   OR `process.env.WOTANN_PROMPT_CACHE_WARMUP` ∈ {"1", "true"}.
+   * A value of `"0"` or `"false"` always disables even if config says true.
+   *
+   * Non-fatal: returns immediately on any error. warmupCache() already
+   * has internal try/catch per-prefix; this wrapper adds a second layer
+   * so a missing provider bridge or transient network issue never
+   * surfaces as a mode-switch failure.
+   */
+  private maybeWarmupPromptCache(): void {
+    const envFlag = process.env["WOTANN_PROMPT_CACHE_WARMUP"];
+    if (envFlag === "0" || envFlag === "false") return;
+    const configFlag = this.config.enablePromptCacheWarmup === true;
+    const envEnabled = envFlag === "1" || envFlag === "true";
+    if (!configFlag && !envEnabled) return;
+    if (!this.infra || !this.systemPrompt || this.systemPrompt.length === 0) return;
+
+    const bridge = this.infra.bridge;
+    const prefix: CachePrefix = {
+      id: `session-${this.session.id}-systemprompt`,
+      content: this.systemPrompt,
+      expectedUses: 20,
+    };
+
+    // sendFn: dispatches a single-shot query with an empty user prompt
+    // plus the full systemPrompt so the provider writes it to its
+    // server-side cache. We ignore the response content — only the
+    // side effect of the cache write matters. Using an empty prompt
+    // produces a minimal response (cheapest possible warmup ping).
+    const sendFn: CacheWarmupSendFn = async (p) => {
+      try {
+        await bridge.querySync({ prompt: " ", systemPrompt: p.content });
+      } catch {
+        // Non-fatal: warmupCache() will record the prefix as failed
+        // in its WarmupResult. The mode-switch path does not await.
+      }
+    };
+
+    // Fire-and-forget. No await — mode switching must not block on
+    // a potentially slow provider round-trip.
+    warmupCache([prefix], sendFn, { concurrency: 1 }).catch(() => {
+      /* warmupCache swallows per-prefix failures; this catches the
+         outer-call failure (e.g. plan construction) for symmetry. */
+    });
   }
 
   private applySafetyOverrides(): void {

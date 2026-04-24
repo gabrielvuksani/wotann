@@ -25,7 +25,13 @@
  */
 
 import type { Middleware, MiddlewareContext } from "./types.js";
-import type { AgentMessage } from "../core/types.js";
+import type { AgentMessage, PermissionMode, PermissionDecision } from "../core/types.js";
+// V9 T1.7: canonical permission resolver from the sandbox security
+// module. Previously orphaned (zero external callers); routing tool-use
+// audit through it unifies the permission-decision surface so the
+// matrix lives in ONE place (src/sandbox/security.ts) instead of being
+// duplicated across middleware/hooks/runtime.
+import { classifyRisk, resolvePermission } from "../sandbox/security.js";
 
 // -- Risk classification --------------------------------------------------
 
@@ -189,6 +195,48 @@ export class SandboxAuditMiddleware {
       toolCallId: entry.toolCallId,
       toolName: entry.toolName,
     };
+  }
+
+  /**
+   * V9 T1.7 — Wire resolvePermission() into the middleware.
+   *
+   * Given a tool-use message and the session's PermissionMode, return
+   * the canonical `PermissionDecision` produced by
+   * `sandbox/security.ts::resolvePermission(mode, risk)`. The risk
+   * level is derived via `classifyRisk(toolName, toolInput)` — the
+   * same helper the rest of the sandbox stack uses — so the permission
+   * matrix is NOT duplicated inside this middleware. Callers that
+   * already hold a PermissionMode (hooks, RPC handlers, the runtime
+   * dispatch loop) can invoke this to get an allow/deny/always-allow
+   * decision without reaching into the sandbox module themselves.
+   *
+   * The original `audit()` method and its pass/warn/block verdict flow
+   * are UNCHANGED — this adds a second, orthogonal permission surface
+   * rather than refactoring the classification pipeline. Mixing the two
+   * lets existing callers keep their current contract while new callers
+   * opt into the graduated permission semantics.
+   */
+  resolveToolPermission(msg: AgentMessage, mode: PermissionMode): PermissionDecision {
+    const toolName = msg.toolName ?? "";
+    // Best-effort parse of tool input — mirrors extractCommand()'s
+    // tolerance: prefer JSON, fall back to the raw content string
+    // wrapped as a single-field record so classifyRisk can still see
+    // the payload shape it cares about.
+    let input: Record<string, unknown> = {};
+    if (typeof msg.content === "string" && msg.content.length > 0) {
+      try {
+        const parsed = JSON.parse(msg.content);
+        if (parsed && typeof parsed === "object") {
+          input = parsed as Record<string, unknown>;
+        } else {
+          input = { command: msg.content };
+        }
+      } catch {
+        input = { command: msg.content };
+      }
+    }
+    const risk = classifyRisk(toolName, input);
+    return resolvePermission(mode, risk);
   }
 
   getStats(): SandboxAuditStats {

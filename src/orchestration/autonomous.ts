@@ -68,6 +68,11 @@ import {
 import { PhasedExecutor, type PhasedExecutorState } from "./phased-executor.js";
 import { GoalDriftDetector, type AgentAction, type DriftAssessment } from "./goal-drift.js";
 import type { TodoProvider } from "./todo-provider.js";
+// V9 T1.8: wire the previously-orphan SelfHealingPipeline into the
+// cycle-failure path. Runtime owns the singleton (src/core/runtime.ts);
+// AutonomousExecutor accepts it via config so error history accumulates
+// across executions and graduated-recovery strategies fire on failure.
+import { SelfHealingPipeline, type RecoveryResult } from "./self-healing-pipeline.js";
 
 export interface AutonomousConfig {
   readonly maxCycles: number;
@@ -120,6 +125,17 @@ export interface AutonomousConfig {
    * disabling — default sessions pay zero drift cost.
    */
   readonly goalDriftCheckEveryNCycles?: number;
+  /**
+   * V9 T1.8 — Optional SelfHealingPipeline injected by the runtime so
+   * the graduated-recovery strategies (prompt-fix → code-rollback →
+   * strategy-change → human-escalation) fire on cycle failures. When
+   * absent, cycle errors fall back to the legacy selfTroubleshoot path
+   * only. The pipeline accumulates error history across executions —
+   * runtime passes its singleton instance so the history is coherent
+   * across AutonomousExecutor calls, hooks, and slash commands that
+   * share the same runtime.
+   */
+  readonly selfHealingPipeline?: SelfHealingPipeline;
 }
 
 export interface AutonomousCycleResult {
@@ -654,6 +670,14 @@ export class AutonomousExecutor {
       oracleModel: policyModels.oracleModel,
     });
     let oracleGuidance: string | null = null;
+    // V9 T1.8 — SelfHealingPipeline recovery guidance for the NEXT cycle.
+    // On cycle failure the pipeline's executeRecovery() returns a
+    // RecoveryResult whose `output` is a human-readable recovery
+    // recommendation (e.g. "Fix type mismatch: expected X but got Y…").
+    // We prepend it to the next cycle's strategyPrompt so the worker
+    // sees the guidance before retrying. Consumed once per cycle,
+    // matching the oracleGuidance lifecycle.
+    let selfHealingGuidance: string | null = null;
 
     for (let cycle = 0; cycle < this.config.maxCycles; cycle++) {
       // ── Cancellation check ──
@@ -825,6 +849,16 @@ export class AutonomousExecutor {
         : strategyPromptBase;
       oracleGuidance = null;
 
+      // V9 T1.8 — prepend self-healing recovery guidance when the prior
+      // cycle failed AND the pipeline produced a concrete recommendation.
+      // Ordering: self-healing goes OUTSIDE oracle guidance so the oracle
+      // sees the recovery context too (the oracle's job is strategic
+      // routing, self-healing's job is concrete error-to-fix mapping).
+      if (selfHealingGuidance) {
+        strategyPrompt = `[Self-healing recovery guidance]\n${selfHealingGuidance}\n\n${strategyPrompt}`;
+        selfHealingGuidance = null;
+      }
+
       // P1-B7: prepend drift nudge when the last check flagged drift.
       // Consumed once — next cycle starts without the nudge unless
       // another drift check fires. Format mirrors the oracle-guidance
@@ -896,6 +930,33 @@ export class AutonomousExecutor {
             } catch {
               /* fix attempt failed, continue normally */
             }
+          }
+        }
+
+        // V9 T1.8 — SelfHealingPipeline graduated recovery. When the
+        // runtime injected its pipeline singleton (config.selfHealingPipeline),
+        // route this error through executeRecovery() so the pipeline's
+        // strategy selector can choose prompt-fix / code-rollback /
+        // strategy-change / human-escalation based on error history +
+        // repetition. The RecoveryResult.output is captured as guidance
+        // for the NEXT cycle's strategyPrompt. Failure of the recovery
+        // call itself is swallowed — we don't want self-healing errors
+        // to mask the original cycle error.
+        const pipeline = this.config.selfHealingPipeline;
+        if (pipeline) {
+          try {
+            const recovery: RecoveryResult = await pipeline.executeRecovery(errorMsg, {
+              taskId: this.modeState?.task ?? `autonomous-cycle-${cycle}`,
+              taskDescription: task,
+              workingDir: process.cwd(),
+              provider: (this.config.oracleProvider ?? "anthropic") as never,
+              model: policyModels.workerModel,
+            });
+            if (recovery.output && recovery.output.length > 0) {
+              selfHealingGuidance = `[strategy: ${recovery.strategy}]\n${recovery.output}`;
+            }
+          } catch {
+            /* pipeline failure is non-fatal — preserve original error */
           }
         }
       }
