@@ -2564,6 +2564,36 @@ export class KairosRPCHandler {
       }
     });
 
+    // V9 T1.9 — Expose the previously-orphaned
+    // `Runtime.searchUnifiedKnowledge()` over RPC. Fabric-level fan-out
+    // retrieval (MemoryStore FTS5 + ContextTreeManager markdown +
+    // whatever else registers retrievers) with dedup, confidence
+    // filtering, and provenance-tagged results. Different from
+    // `memory.search` above which only hits FTS5 hybrid search.
+    this.handlers.set("memory.searchUnified", async (params) => {
+      const query = params.query as string;
+      if (!query) return [];
+      if (!this.runtime) return [];
+      const maxResults =
+        typeof params["maxResults"] === "number" ? (params["maxResults"] as number) : 20;
+      const minConfidence =
+        typeof params["minConfidence"] === "number" ? (params["minConfidence"] as number) : 0;
+      try {
+        const results = await this.runtime.searchUnifiedKnowledge(query, maxResults, minConfidence);
+        // KnowledgeResult is already a POJO shape (id, content, score,
+        // source, metadata) — safe to ship over RPC without re-serialization.
+        return results;
+      } catch (err) {
+        // Knowledge fabric may be uninitialized (no retrievers
+        // registered). Surface as empty rather than throwing — matches
+        // memory.search fallback shape above.
+        console.warn(
+          `[kairos-rpc] memory.searchUnified failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return [];
+      }
+    });
+
     // Enhance — uses the real PromptEnhancer from the runtime
     this.handlers.set("enhance", async (params) => {
       const prompt = params.prompt as string;

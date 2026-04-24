@@ -10,6 +10,7 @@ import {
   readFileSync,
   mkdirSync,
   readdirSync,
+  statSync,
   unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -2344,17 +2345,27 @@ export class KairosDaemon {
         entries.filter((name) => name.endsWith(".db")).map((name) => name),
       );
 
+      // V9 T1.10 age gate: only treat .tmp.<pid>.<ts> files older than 1
+      // hour as orphans. Anything newer could belong to an in-progress
+      // atomic-write from this very boot (pre-handler-install race), and
+      // unlinking it would corrupt in-flight data.
+      const TMP_AGE_MIN_MS = 60 * 60 * 1000;
+      const now = Date.now();
+
       for (const name of entries) {
         const full = join(dir, name);
 
         // Pass 1: remove stale atomic-write temps. Pattern is
         // `<base>.tmp.<pid>.<ts>` (e.g. `knowledge-graph.json.tmp.12345.67890`).
         // Match `.tmp.` followed by a digit to avoid false positives like
-        // `.tmpl` or `.tmp` (with no suffix).
+        // `.tmpl` or `.tmp` (with no suffix). Age-gated per V9 T1.10.
         if (/\.tmp\.\d+/.test(name)) {
           try {
-            unlinkSync(full);
-            tmpRemoved++;
+            const st = statSync(full);
+            if (now - st.mtimeMs >= TMP_AGE_MIN_MS) {
+              unlinkSync(full);
+              tmpRemoved++;
+            }
           } catch {
             /* may have been deleted by a race — ignore */
           }
