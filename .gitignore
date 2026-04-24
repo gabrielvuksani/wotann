@@ -31,6 +31,15 @@ coverage/
 .parcel-cache/
 .vite/
 
+# Allow our source `src/build/` (V9 Tier 9 wotann-build subsystem) and
+# the `tests/build/` test suite to be tracked. The `build/` ignore above
+# is for compiled artifacts at the repo root, not source directories
+# named "build" inside src/ or tests/.
+!src/build/
+!src/build/**
+!tests/build/
+!tests/build/**
+
 # SEA (Single Executable Application) build artifacts
 dist/release/
 dist/release/*.blob

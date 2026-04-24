@@ -6108,6 +6108,143 @@ intentByoaCmd
   registerGrepCommand(program);
 }
 
+// ── wotann build — V9 Tier 9 full-stack scaffold builder ─────
+//
+// Plan-only by default — pass --emit to actually write files. Picks a
+// scaffold (Next.js / Hono / Astro / Expo), DB provider (sqlite / Turso /
+// Supabase), auth provider (Lucia default + skill-loaded Clerk/etc),
+// and a deploy target (Cloudflare Pages default), then synthesizes the
+// emission plan. Variants > 1 produces best-of-N candidates.
+program
+  .command("build [spec...]")
+  .description("Scaffold a full-stack app from a free-form spec (V9 Tier 9)")
+  .option("--variants <n>", "Emit N candidate trees (default 1)", (v) => Number(v))
+  .option("--design-system <path>", "Path to a Claude Design handoff bundle to seed tokens")
+  .option("--scaffold <id>", "Force a specific scaffold (bypass selector)")
+  .option("--db <id>", "Force a DB provider: local-sqlite | turso | supabase")
+  .option("--auth <id>", "Force an auth provider: lucia | clerk | supabase-auth | auth-js | workos")
+  .option("--deploy <id>", "Force a deploy target: cloudflare-pages | vercel | fly | self-host")
+  .option("--project-name <name>", "Slug for manifests (default derived from spec)")
+  .option("--out <dir>", "Output directory; required when --emit is passed")
+  .option("--emit", "Actually write files; default is plan-only", false)
+  .option("--force", "Overwrite existing files at --out", false)
+  .action(
+    async (
+      specWords: string[],
+      opts: {
+        variants?: number;
+        designSystem?: string;
+        scaffold?: string;
+        db?: string;
+        auth?: string;
+        deploy?: string;
+        projectName?: string;
+        out?: string;
+        emit?: boolean;
+        force?: boolean;
+      },
+    ) => {
+      const spec = (specWords ?? []).join(" ").trim();
+      if (spec.length === 0) {
+        process.stderr.write(
+          chalk.red(
+            'error: a free-form spec is required (e.g. wotann build "todo app with auth")\n',
+          ),
+        );
+        process.exit(2);
+      }
+      const { runBuildCommand } = await import("./cli/commands/build.js");
+      type BuildOpts = Parameters<typeof runBuildCommand>[0];
+      const cmdOpts: Record<string, unknown> = { spec };
+      if (opts.variants !== undefined && !Number.isNaN(opts.variants))
+        cmdOpts["variants"] = opts.variants;
+      if (opts.designSystem !== undefined) cmdOpts["designSystemPath"] = opts.designSystem;
+      if (opts.scaffold !== undefined) cmdOpts["scaffoldPick"] = opts.scaffold;
+      if (opts.db !== undefined) cmdOpts["dbPick"] = opts.db;
+      if (opts.auth !== undefined) cmdOpts["authPick"] = opts.auth;
+      if (opts.deploy !== undefined) cmdOpts["deployPick"] = opts.deploy;
+      if (opts.projectName !== undefined) cmdOpts["projectName"] = opts.projectName;
+      if (opts.out !== undefined) cmdOpts["outDir"] = opts.out;
+      cmdOpts["emit"] = opts.emit === true;
+      if (opts.force === true) cmdOpts["force"] = true;
+      const result = await runBuildCommand(cmdOpts as unknown as BuildOpts);
+      if (!result.ok) {
+        process.stderr.write(chalk.red(`build failed: ${result.error}\n`));
+        process.exit(2);
+      }
+      const summary = result.variants[0];
+      if (summary) {
+        const scaffoldId = summary.scaffold.ok ? summary.scaffold.scaffold.id : "(none)";
+        process.stderr.write(
+          chalk.green("✓") +
+            ` scaffold=${scaffoldId} db=${summary.db.provider} auth=${summary.auth.provider} deploy=${summary.deploy.target}\n`,
+        );
+        process.stderr.write(chalk.dim(`  ${summary.files.length} files in plan\n`));
+        const emitMode = opts.emit === true;
+        if (emitMode && result.emitted.length > 0) {
+          process.stderr.write(
+            chalk.green(`✓ wrote ${result.emitted.length} files to ${opts.out}\n`),
+          );
+        } else if (!emitMode) {
+          process.stderr.write(chalk.yellow(`(plan-only — pass --emit --out=<dir> to write)\n`));
+        }
+        for (const cmd of result.nextSteps.slice(0, 5)) {
+          process.stderr.write(chalk.dim(`  $ ${cmd}\n`));
+        }
+      }
+    },
+  );
+
+// ── wotann deploy — V9 Tier 9 deploy adapter ─────────────────
+//
+// Emits manifests for a deploy target (Cloudflare Pages / Vercel / Fly /
+// self-host Caddy+systemd). Plan-only by default; --emit writes the
+// manifest files. Never shells out — the user runs `wrangler pages
+// deploy` etc. themselves so deploys are deterministic and CI-safe.
+program
+  .command("deploy")
+  .description("Emit deploy manifests for a target (V9 Tier 9)")
+  .requiredOption("--to <target>", "Target: cloudflare-pages | vercel | fly | self-host")
+  .option("--project-dir <dir>", "Project directory (default: cwd)")
+  .option("--project-name <name>", "Override project slug in manifests")
+  .option("--custom-domain <fqdn>", "Custom domain to route (Vercel/self-host)")
+  .option("--emit", "Write manifest files; default is plan-only", false)
+  .option("--force", "Overwrite existing manifests", false)
+  .action(
+    async (opts: {
+      to: string;
+      projectDir?: string;
+      projectName?: string;
+      customDomain?: string;
+      emit?: boolean;
+      force?: boolean;
+    }) => {
+      const { runDeployCommand } = await import("./cli/commands/deploy.js");
+      type DeployOpts = Parameters<typeof runDeployCommand>[0];
+      const cmdOpts: Record<string, unknown> = { to: opts.to };
+      if (opts.projectDir !== undefined) cmdOpts["projectDir"] = opts.projectDir;
+      if (opts.projectName !== undefined) cmdOpts["projectName"] = opts.projectName;
+      if (opts.customDomain !== undefined) cmdOpts["customDomain"] = opts.customDomain;
+      cmdOpts["emit"] = opts.emit === true;
+      if (opts.force === true) cmdOpts["force"] = true;
+      const result = await runDeployCommand(cmdOpts as unknown as DeployOpts);
+      if (!result.ok) {
+        process.stderr.write(chalk.red(`deploy failed: ${result.error}\n`));
+        process.exit(2);
+      }
+      process.stderr.write(chalk.green(`✓ deploy plan ready for ${result.plan.target}\n`));
+      const emitMode = opts.emit === true;
+      if (emitMode && result.emitted.length > 0) {
+        process.stderr.write(chalk.green(`✓ wrote ${result.emitted.length} manifest files\n`));
+      } else if (!emitMode) {
+        process.stderr.write(chalk.yellow("(plan-only — pass --emit to write manifests)\n"));
+      }
+      for (const cmd of result.commands.slice(0, 5)) {
+        process.stdout.write(chalk.dim(`$ ${cmd}\n`));
+      }
+    },
+  );
+
 // ── Parse ───────────────────────────────────────────────────
 
 // Deep-link fast path — if the first positional arg is a `wotann://` URL,
