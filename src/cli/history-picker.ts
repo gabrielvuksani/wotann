@@ -5,6 +5,20 @@
  * in a JSON file on disk. Provides fuzzy search for the TUI's Ctrl+R binding
  * and ordered retrieval by recency.
  *
+ * ⚠ Status: ORPHAN SCAFFOLD — kept for resurrection.
+ * ─────────────────────────────────────────────────────────────────────
+ * This module implements a cross-session persistent history database
+ * (JSON-on-disk). The live Ctrl+R overlay (`ui/components/HistoryPicker.tsx`)
+ * currently derives its list from the CURRENT session's messages
+ * (App.tsx:108) — it does NOT consume this module. Nothing imports
+ * from here today.
+ *
+ * Keep this file if you plan to wire cross-session prompt recall
+ * (e.g. "recall prompts from last week's session"). The fuzzy-score
+ * function + HistoryEntry shape are the contract the TSX overlay
+ * would adopt. If that feature never ships, this file can safely go
+ * to `git log` — no consumers to break.
+ *
  * Design:
  * - Immutable HistoryEntry objects (readonly fields)
  * - Load/save cycle keeps file as source of truth
@@ -136,9 +150,7 @@ export class HistoryPicker {
 
     // Prepend new entry (most recent first), cap at max
     const updated = [newEntry, ...this.entries];
-    this.entries = updated.length > MAX_ENTRIES
-      ? updated.slice(0, MAX_ENTRIES)
-      : updated;
+    this.entries = updated.length > MAX_ENTRIES ? updated.slice(0, MAX_ENTRIES) : updated;
   }
 
   /**
@@ -161,9 +173,7 @@ export class HistoryPicker {
       }
 
       // Validate and filter entries
-      this.entries = parsed
-        .filter(isValidHistoryEntry)
-        .slice(0, MAX_ENTRIES);
+      this.entries = parsed.filter(isValidHistoryEntry).slice(0, MAX_ENTRIES);
     } catch {
       // Corrupted file — start fresh
       this.entries = [];

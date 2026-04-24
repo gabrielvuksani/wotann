@@ -5,6 +5,15 @@
  * request through the runtime, and writes the response to stdout.
  * Designed for composability with Unix pipes and CI scripts.
  *
+ * ⚠ Status: ORPHAN SCAFFOLD — kept for resurrection.
+ * ─────────────────────────────────────────────────────────────────────
+ * Fully-specced stdin reader + runner. Not yet wired into the CLI
+ * entry (`src/index.ts`) — the detection + dispatch is missing.
+ * To activate: check `isPipedInput()` in `src/index.ts` before the
+ * interactive-TUI branch and dispatch to `runPipelineMode()`. No
+ * consumers today — safe to delete if the feature is permanently
+ * descoped.
+ *
  * Exit codes:
  *   0 — success
  *   1 — runtime error (model returned error or no output)
@@ -78,13 +87,7 @@ export function buildPipelinePrompt(prompt: string, stdin: string): string {
     return prompt;
   }
 
-  return [
-    prompt,
-    "",
-    "--- stdin ---",
-    trimmedStdin,
-    "--- end stdin ---",
-  ].join("\n");
+  return [prompt, "", "--- stdin ---", trimmedStdin, "--- end stdin ---"].join("\n");
 }
 
 // ── Format Wrapper ───────────────────────────────────────
@@ -113,7 +116,12 @@ export function getFormatInstruction(format: PipelineOptions["format"]): string 
  */
 export async function runPipeline(
   options: PipelineOptions,
-  queryFn: (prompt: string, systemPrompt: string, provider?: string, model?: string) => Promise<string>,
+  queryFn: (
+    prompt: string,
+    systemPrompt: string,
+    provider?: string,
+    model?: string,
+  ) => Promise<string>,
 ): Promise<PipelineResult> {
   // 1. Read stdin
   let stdin: string;
