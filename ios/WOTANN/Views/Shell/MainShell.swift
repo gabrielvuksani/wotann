@@ -53,6 +53,13 @@ struct MainShell: View {
                     .tag(3)
             }
             .tint(WTheme.Colors.primary)
+            // T7.3 — Tab bar background stays `.ultraThinMaterial` on iOS 18
+            // for fidelity with every other OS-level bar. iOS 26 applies
+            // Liquid Glass automatically through the `.visible` token +
+            // system glass token, so no extra wrapper is needed at the
+            // `.toolbarBackground` layer. The `wLiquidGlass` sweep instead
+            // treats custom in-app bars (ChatInputBar, promptBar, ribbons,
+            // RemoteDesktop toolbars).
             .toolbarBackground(.ultraThinMaterial, for: .tabBar)
             .toolbarBackground(.visible, for: .tabBar)
             // Floating Ask button, pinned 24pt above the tab bar area.

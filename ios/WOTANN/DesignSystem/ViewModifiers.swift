@@ -1,5 +1,106 @@
 import SwiftUI
 
+// MARK: - Liquid Glass (T7.3)
+//
+// `wLiquidGlass` is a forward-compatible wrapper for Apple's iOS 26 "Liquid
+// Glass" surface while giving iOS 18 the correct `.ultraThinMaterial` + subtle
+// white border treatment the app has used since Phase C.
+//
+// iOS 26 introduced `.glassEffect(in:)` on `View` which applies a translucent
+// liquid-glass material that respects motion, tint, and depth. iOS 18 has no
+// equivalent so we fall back to `.ultraThinMaterial` inside the caller-chosen
+// shape plus a 0.5-point border at `.white.opacity(0.12)` — matching the
+// pre-existing `WGlassCardModifier` look while letting each call site pick
+// the shape (capsule, rounded rect, etc).
+//
+// Where NOT to use: message bubbles, cost charts, code blocks (legibility
+// cost). OLED-intent black canvases (Home background) stay pure black.
+
+extension View {
+
+    /// Apply WOTANN's Liquid Glass treatment inside a caller-specified shape.
+    ///
+    /// iOS 26 ships `.glassEffect(in:)` for native Liquid Glass but the iOS
+    /// 18 SDK that WOTANN builds against does not expose that symbol, so the
+    /// iOS 26 branch has to live behind an SDK-availability compile guard.
+    /// When built with the iOS 26 SDK, the preprocessor flag
+    /// `WOTANN_HAS_LIQUID_GLASS` should be set in the xcconfig to enable the
+    /// native path; without it the helper falls back to `.ultraThinMaterial`
+    /// plus the 0.5pt `white.opacity(0.12)` border that matches the Phase C
+    /// glass treatment used across the app.
+    ///
+    /// - Parameters:
+    ///   - shape: The clipping + fill shape. Defaults to a 16pt rounded rect.
+    ///   - interactive: Whether the glass reacts to pointer / gesture (iOS 26+).
+    ///   - tint: Optional tint colour layered under the glass (iOS 26+).
+    @ViewBuilder
+    func wLiquidGlass<S: Shape>(
+        in shape: S,
+        interactive: Bool = false,
+        tint: Color? = nil
+    ) -> some View {
+        #if WOTANN_HAS_LIQUID_GLASS
+        if #available(iOS 26.0, *) {
+            // `.glassEffect(_:in:)` is the iOS 26 native Liquid Glass API.
+            // Only compiled when the xcconfig flag is set (i.e. building with
+            // the iOS 26 SDK) so the iOS 18 builds below do not see the
+            // unresolved symbol.
+            self.glassEffect(
+                .regular
+                    .tint(tint)
+                    .interactive(interactive),
+                in: shape
+            )
+        } else {
+            self
+                .background(shape.fill(.ultraThinMaterial))
+                .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 0.5))
+        }
+        #else
+        // iOS 18 SDK path — `.glassEffect` is not available. Suppress unused
+        // warnings on the iOS 26-only parameters by binding them to `_`.
+        let _ = (interactive, tint)
+        self
+            .background(shape.fill(.ultraThinMaterial))
+            .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 0.5))
+        #endif
+    }
+
+    /// Convenience overload — defaults the shape to a 16pt continuous rounded
+    /// rectangle, matching `WTheme.Radius.lg`.
+    func wLiquidGlass(
+        interactive: Bool = false,
+        tint: Color? = nil
+    ) -> some View {
+        self.wLiquidGlass(
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous),
+            interactive: interactive,
+            tint: tint
+        )
+    }
+}
+
+// MARK: - Writing Tools (T7.2)
+//
+// `.writingToolsBehavior(.complete)` is iOS 18's opt-in for the full Apple
+// Intelligence Writing Tools surface (Rewrite / Proofread / Summarize /
+// Compose) on a text control. The modifier only exists on iOS 18+ so we wrap
+// it in an availability check — earlier iOS simply gets the unmodified view.
+
+extension View {
+
+    /// Opt this text control into Apple Intelligence Writing Tools with the
+    /// complete behaviour (Rewrite / Proofread / Summarize). No-op on iOS 17.
+    @ViewBuilder
+    func wotannWritingToolsComplete() -> some View {
+        if #available(iOS 18.0, *) {
+            self.writingToolsBehavior(.complete)
+        } else {
+            self
+        }
+    }
+}
+
 // MARK: - Card Modifier (Enhanced with subtle shadow)
 
 struct WCardModifier: ViewModifier {

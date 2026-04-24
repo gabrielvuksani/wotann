@@ -23,6 +23,11 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift-examples.git", from: "2.21.0"),
         // Swift transformers — tokenizers + HuggingFace hub client for MLX.
         .package(url: "https://github.com/huggingface/swift-transformers.git", from: "0.1.17"),
+        // Runestone — TreeSitter-based code editor for iOS (V9 Tier 13).
+        // Powers ios/WOTANN/Views/Editor/RunestoneEditorView.swift. NOT
+        // Monaco — Microsoft's tracker has open mobile issues since 2019;
+        // Runestone is native, MIT, 36 languages, v0.5.2 (2026-03).
+        .package(url: "https://github.com/simonbs/Runestone.git", from: "0.5.0"),
     ],
     targets: [
         .target(
@@ -34,6 +39,7 @@ let package = Package(
                 .product(name: "MLXLLM", package: "mlx-swift-examples"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
                 .product(name: "Transformers", package: "swift-transformers"),
+                .product(name: "Runestone", package: "Runestone"),
             ],
             path: ".",
             exclude: [

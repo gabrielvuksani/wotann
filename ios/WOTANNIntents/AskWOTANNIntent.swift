@@ -35,6 +35,12 @@ struct AskWOTANNIntent: AppIntent {
 }
 
 // MARK: - AskWOTANN Shortcuts Provider
+//
+// T7.5 — iOS only allows a single `AppShortcutsProvider` per app target.
+// This provider aggregates every user-facing shortcut WOTANN exposes:
+// the original Ask shortcut plus the three Writing Tools intents
+// (Rewrite / Summarize / Expand) that surface in the Apple Intelligence
+// Writing Tools menu on any text selection.
 
 struct AskWOTANNShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
@@ -47,6 +53,36 @@ struct AskWOTANNShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Ask WOTANN",
             systemImageName: "w.circle.fill"
+        )
+        AppShortcut(
+            intent: RewriteWithWOTANNIntent(),
+            phrases: [
+                "Rewrite with \(.applicationName)",
+                "Rewrite this with \(.applicationName)",
+                "Have \(.applicationName) rewrite this",
+            ],
+            shortTitle: "Rewrite with WOTANN",
+            systemImageName: "pencil.and.outline"
+        )
+        AppShortcut(
+            intent: SummarizeWithWOTANNIntent(),
+            phrases: [
+                "Summarize with \(.applicationName)",
+                "Summarize this with \(.applicationName)",
+                "Have \(.applicationName) summarize this",
+            ],
+            shortTitle: "Summarize with WOTANN",
+            systemImageName: "text.redaction"
+        )
+        AppShortcut(
+            intent: ExpandWithWOTANNIntent(),
+            phrases: [
+                "Expand with \(.applicationName)",
+                "Expand this with \(.applicationName)",
+                "Have \(.applicationName) expand this",
+            ],
+            shortTitle: "Expand with WOTANN",
+            systemImageName: "text.append"
         )
     }
 }

@@ -1,0 +1,53 @@
+WOTANN SIGNATURE AUDIO STING — ASSET SLOT PLACEHOLDER
+======================================================
+
+This file documents a pending asset slot. The real audio asset is
+hand-crafted by the user (not generatable from code).
+
+Asset name:      wotann_sting.caf
+Expected format: Core Audio Format (.caf), 44.1 kHz, 16-bit PCM
+                 (Apple's recommended format for short system stings)
+Duration budget: <= 400 ms (hard ceiling — per V9 spec)
+Structure:       Six-note "Wotann signature mark" — see the Obsidian
+                 Precision motif brief. Short, distinctive, cyan-toned.
+Playback cue:    Once per session, on first app unlock. Subsequent
+                 unlocks within the same session do NOT re-play.
+
+Placement in bundle
+-------------------
+An empty `wotann_sting.dataset/Contents.json` sits beside this placeholder
+so Xcode reserves the slot. When the .caf lands, drop it into
+`wotann_sting.dataset/` and edit its Contents.json to add the filename:
+
+    {
+      "info" : { "author" : "xcode", "version" : 1 },
+      "data" : [
+        { "idiom" : "universal", "filename" : "wotann_sting.caf" }
+      ]
+    }
+
+then access it at runtime via:
+
+    NSDataAsset(name: "wotann_sting")?.data
+
+Playback wiring
+---------------
+Playback is NOT wired yet. The signature sting is produced by the
+audio designer separately. When the asset lands, the minimal wire-up is:
+
+    import AVFoundation
+    var stingPlayer: AVAudioPlayer?
+    if let data = NSDataAsset(name: "wotann_sting")?.data {
+        stingPlayer = try? AVAudioPlayer(data: data)
+        stingPlayer?.play()
+    }
+
+gated by a session-level `hasPlayedSting` flag so it only fires once.
+
+Why this placeholder exists
+---------------------------
+Tier 7 T7.6 calls out the sting as a required signature motif. The
+code changes in this sprint ship the rune-flash overlay (`SignatureMotif`)
+and the `WHaptics.rune()` verb so the motif is *functionally* complete
+without audio. The audio is a post-asset integration, tracked here so
+build verification does not fail on a missing binary.

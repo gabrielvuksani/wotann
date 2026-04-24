@@ -413,7 +413,8 @@ private struct RemoteDesktopContent: View {
         }
         .padding(.horizontal, WTheme.Spacing.md)
         .padding(.vertical, WTheme.Spacing.sm)
-        .background(WTheme.Colors.surface)
+        // T7.3 — Status bar Liquid Glass surface.
+        .wLiquidGlass(in: Rectangle())
     }
 
     private var latencyText: String {
@@ -468,7 +469,8 @@ private struct RemoteDesktopContent: View {
         }
         .padding(.horizontal, WTheme.Spacing.md)
         .padding(.vertical, WTheme.Spacing.sm)
-        .background(WTheme.Colors.surface)
+        // T7.3 — Keyboard input bar Liquid Glass surface.
+        .wLiquidGlass(in: Rectangle())
     }
 
     private var specialKeysRow: some View {
@@ -608,7 +610,8 @@ private extension RemoteDesktopContent {
         }
         .padding(.horizontal, WTheme.Spacing.md)
         .padding(.vertical, WTheme.Spacing.xs)
-        .background(WTheme.Colors.surface)
+        // T7.3 — Zoom toolbar Liquid Glass surface.
+        .wLiquidGlass(in: Rectangle())
     }
 
     var zoomPresets: [(label: String, scale: CGFloat)] {
@@ -655,7 +658,8 @@ private extension RemoteDesktopContent {
             .padding(.horizontal, WTheme.Spacing.md)
         }
         .padding(.vertical, WTheme.Spacing.xs)
-        .background(WTheme.Colors.surface)
+        // T7.3 — Quick shortcuts bar Liquid Glass surface.
+        .wLiquidGlass(in: Rectangle())
     }
 }
 

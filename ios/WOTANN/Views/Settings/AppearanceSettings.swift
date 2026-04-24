@@ -43,11 +43,14 @@ struct AppearanceSettings: View {
                         .foregroundColor(WTheme.Colors.textTertiary)
 
                     Text("The quick brown fox jumps over the lazy dog.")
-                        .font(.system(size: fontSize))
+                        // T7.6 — Dynamic Type cleanup. `wotannScaled` preserves
+                        // the slider's chosen base size while honouring the
+                        // user's accessibility content-size category.
+                        .font(.wotannScaled(size: fontSize))
                         .foregroundColor(WTheme.Colors.textPrimary)
 
                     Text("func greet() { print(\"Hello\") }")
-                        .font(.system(size: fontSize - 1, design: .monospaced))
+                        .font(.wotannScaled(size: fontSize - 1, design: .monospaced))
                         .foregroundColor(WTheme.Colors.primary)
                 }
                 .listRowBackground(WTheme.Colors.surface)

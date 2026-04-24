@@ -64,10 +64,12 @@ struct FloatingAsk: View {
                 .frame(width: 56, height: 56)
                 .shadow(color: WTheme.Colors.primary.opacity(0.5), radius: 16, x: 0, y: 4)
 
-            // Material backdrop ring under the gradient for subtle depth.
-            Circle()
-                .stroke(Color.white.opacity(0.18), lineWidth: 0.75)
+            // T7.3 — Liquid Glass backdrop beneath the gradient. On iOS 18 the
+            // `.ultraThinMaterial` keeps the stroked ring the visual motif;
+            // on iOS 26 the ring is layered over real Liquid Glass.
+            Color.clear
                 .frame(width: 56, height: 56)
+                .wLiquidGlass(in: Circle())
 
             // Apple blue gradient overlay.
             Circle()

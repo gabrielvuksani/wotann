@@ -24,7 +24,14 @@ struct StatusRibbon: View {
             }
             .frame(height: 64)
             .padding(.horizontal, WTheme.Spacing.md)
+            // T7.3 — Liquid Glass ribbon under the gradient. On iOS 18 the
+            // layered `ultraThinMaterial` is invisible beneath the opaque
+            // gradient but preserves the shape for clipping; on iOS 26 the
+            // gradient sits on top of true Liquid Glass.
             .background(ribbonBackground)
+            .wLiquidGlass(
+                in: RoundedRectangle(cornerRadius: WTheme.Radius.lg, style: .continuous)
+            )
             .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.lg, style: .continuous))
         }
         .buttonStyle(.plain)

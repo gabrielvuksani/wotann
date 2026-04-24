@@ -171,6 +171,10 @@ struct Composer: View {
                 .onSubmit {
                     if hasText && !isStreaming { onSend() }
                 }
+                // T7.2 — Opt into Apple Intelligence Writing Tools with full
+                // behaviour (Rewrite / Proofread / Summarize). Wrapped in a
+                // helper so iOS 17 compiles cleanly.
+                .wotannWritingToolsComplete()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 6)
 

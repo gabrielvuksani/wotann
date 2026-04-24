@@ -38,7 +38,10 @@ struct CostLabel: View {
         switch style {
         case .default: return WTheme.Typography.caption
         case .compact: return WTheme.Typography.caption2
-        case .large:   return .system(size: 32, weight: .bold, design: .rounded)
+        // T7.6 — Dynamic Type cleanup. `Font.wotannScaled(size:)` respects
+        // the user's preferred content size category while keeping 32pt as
+        // the design-intended default size.
+        case .large:   return .wotannScaled(size: 32, weight: .bold, design: .rounded)
         }
     }
 

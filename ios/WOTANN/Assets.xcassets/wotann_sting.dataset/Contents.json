@@ -1,0 +1,12 @@
+{
+  "info" : {
+    "author" : "xcode",
+    "version" : 1,
+    "comment" : "Placeholder slot for the WOTANN signature audio sting (wotann_sting.caf, <=400ms). Drop the .caf file into this folder and update data[].filename when the asset ships."
+  },
+  "data" : [
+    {
+      "idiom" : "universal"
+    }
+  ]
+}

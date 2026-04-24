@@ -202,6 +202,10 @@ struct ArenaView: View {
 
     private var promptBar: some View {
         VStack(spacing: 0) {
+            // T7.3 — The divider + prompt bar together form the Compare
+            // composer surface. Wrapping the prompt bar in `.wLiquidGlass`
+            // keeps the iOS 18 `.ultraThinMaterial` look and gracefully
+            // upgrades to Liquid Glass on iOS 26.
             Divider().background(WTheme.Colors.border)
 
             HStack(alignment: .bottom, spacing: WTheme.Spacing.sm) {
@@ -213,6 +217,8 @@ struct ArenaView: View {
                     .focused($isPromptFocused)
                     .submitLabel(.send)
                     .onSubmit(runComparison)
+                    // T7.2 — Writing Tools on the Compare composer.
+                    .wotannWritingToolsComplete()
                     .padding(.horizontal, WTheme.Spacing.sm)
                     .padding(.vertical, WTheme.Spacing.sm)
                     .background(WTheme.Colors.surface)
@@ -240,7 +246,7 @@ struct ArenaView: View {
             }
             .padding(.horizontal, WTheme.Spacing.md)
             .padding(.vertical, WTheme.Spacing.sm)
-            .background(.ultraThinMaterial)
+            .wLiquidGlass(in: Rectangle())
         }
     }
 

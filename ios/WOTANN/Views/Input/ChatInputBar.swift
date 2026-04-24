@@ -40,6 +40,10 @@ struct ChatInputBar: View {
                             onSend()
                         }
                     }
+                    // T7.2 — Apple Intelligence Writing Tools. `.complete`
+                    // lets iOS 18 offer Rewrite / Proofread / Summarize on
+                    // the selected text. On iOS 17 the modifier is a no-op.
+                    .wotannWritingToolsComplete()
                     .padding(.horizontal, WTheme.Spacing.sm)
                     .padding(.vertical, WTheme.Spacing.sm)
                     .background(WTheme.Colors.surface)
@@ -102,7 +106,10 @@ struct ChatInputBar: View {
             }
             .padding(.horizontal, WTheme.Spacing.md)
             .padding(.vertical, WTheme.Spacing.sm)
-            .background(.ultraThinMaterial)
+            // T7.3 — Liquid Glass surface under the input bar. iOS 18 keeps
+            // the existing `.ultraThinMaterial`; iOS 26 upgrades to the
+            // native glass effect.
+            .wLiquidGlass(in: Rectangle())
         }
     }
 }

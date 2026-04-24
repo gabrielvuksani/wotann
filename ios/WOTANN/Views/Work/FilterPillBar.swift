@@ -93,7 +93,10 @@ struct FilterPillBar: View {
             VStack(spacing: 6) {
                 HStack(spacing: 6) {
                     Text(filter.title)
-                        .font(.system(size: 14, weight: isActive ? .semibold : .medium))
+                        // T7.6 — Dynamic Type cleanup. Scaled variant keeps
+                        // the 14pt pill label readable under Accessibility
+                        // Sizes without breaking the pill layout.
+                        .font(.wotannScaled(size: 14, weight: isActive ? .semibold : .medium))
                         .foregroundColor(isActive ? WTheme.Colors.textPrimary : WTheme.Colors.textSecondary)
 
                     Text("\(count)")
