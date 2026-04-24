@@ -28,7 +28,7 @@ export interface DiffPanelEntry {
 }
 
 const PANEL_ORDER: readonly UIPanel[] = ["diff", "agents", "tasks"];
-const THINKING_ORDER: readonly ThinkingEffort[] = ["low", "medium", "high", "max"];
+const THINKING_ORDER: readonly ThinkingEffort[] = ["low", "medium", "high", "xhigh", "max"];
 
 export function cyclePanel(current: UIPanel): UIPanel {
   const index = PANEL_ORDER.indexOf(current);
@@ -56,7 +56,9 @@ export function resolveFileAttachments(
   workingDir: string,
   maxChars: number = 4000,
 ): AttachmentResolution {
-  const matches = [...input.matchAll(/(^|\s)@([./A-Za-z0-9_-]+(?:\/[./A-Za-z0-9_-]+)*\.[A-Za-z0-9_-]+)/g)];
+  const matches = [
+    ...input.matchAll(/(^|\s)@([./A-Za-z0-9_-]+(?:\/[./A-Za-z0-9_-]+)*\.[A-Za-z0-9_-]+)/g),
+  ];
   if (matches.length === 0) {
     return { prompt: input, attachments: [], errors: [] };
   }
@@ -84,17 +86,10 @@ export function resolveFileAttachments(
       path: absolutePath,
       truncated,
     });
-    blocks.push([
-      `Attached file: ${absolutePath}`,
-      "```text",
-      excerpt,
-      "```",
-    ].join("\n"));
+    blocks.push([`Attached file: ${absolutePath}`, "```text", excerpt, "```"].join("\n"));
   }
 
-  const prompt = blocks.length > 0
-    ? [input, "", ...blocks].join("\n")
-    : input;
+  const prompt = blocks.length > 0 ? [input, "", ...blocks].join("\n") : input;
 
   return { prompt, attachments, errors };
 }
@@ -110,12 +105,14 @@ export function readWorkspaceDiff(workingDir: string): readonly DiffPanelEntry[]
     if (!diff.trim()) return [];
 
     const fileSections = diff.split(/^diff --git /m).filter(Boolean);
-    return fileSections.map((section) => {
-      const fileMatch = section.match(/\ba\/(.+?)\s+b\/(.+?)\n/);
-      const filePath = fileMatch?.[2] ?? fileMatch?.[1] ?? "unknown";
-      const hunks = parseUnifiedDiff(section);
-      return { filePath, hunks };
-    }).filter((entry) => entry.hunks.length > 0);
+    return fileSections
+      .map((section) => {
+        const fileMatch = section.match(/\ba\/(.+?)\s+b\/(.+?)\n/);
+        const filePath = fileMatch?.[2] ?? fileMatch?.[1] ?? "unknown";
+        const hunks = parseUnifiedDiff(section);
+        return { filePath, hunks };
+      })
+      .filter((entry) => entry.hunks.length > 0);
   } catch {
     return [];
   }

@@ -493,3 +493,54 @@ function rollingAverage(previous: number, nextValue: number, runCount: number): 
   if (runCount <= 1) return nextValue;
   return (previous * (runCount - 1) + nextValue) / runCount;
 }
+
+// ── Opus 4.7 xhigh effort — V9 T14.1a ───────────────────────────────────────
+//
+// Claude Code v2.1.111 introduced the `xhigh` reasoning-effort tier
+// specifically for Opus 4.7 extended thinking. Other models (Sonnet,
+// Haiku, GPT-4/5, Gemini) don't have a distinct xhigh level — they
+// either don't support extended thinking at all, or their top tier
+// maps to what WOTANN already calls `max`.
+//
+// Consumers that want to dial in extended thinking should gate on
+// `supportsXhighEffort(model)` before passing xhigh down to the
+// provider adapter. When the model doesn't support xhigh, the caller
+// should clamp to `high` (not `max`) so the user's bill doesn't
+// double unexpectedly — `max` opts into 4x reasoning budget, which is
+// a separate deliberate choice.
+
+/**
+ * Canonical Opus 4.7 model IDs (current + versioned + bracket-shorthand).
+ * Kept private to keep the check in one place; add new aliases here as
+ * Anthropic publishes them.
+ */
+const OPUS_47_MODEL_IDS: ReadonlySet<string> = new Set([
+  "claude-opus-4-7",
+  "claude-opus-4-7[1m]",
+  "opus-4-7",
+  "opus4-7",
+]);
+
+/**
+ * True when the given model supports the xhigh reasoning-effort tier.
+ * Today this is Opus 4.7 only; expand when future Claude models ship
+ * extended thinking under the same flag.
+ */
+export function supportsXhighEffort(model: string): boolean {
+  if (OPUS_47_MODEL_IDS.has(model)) return true;
+  // Allow pinned-revision variants like `claude-opus-4-7-2026-04-12`.
+  return /^claude-opus-4-7([-[].*)?$/.test(model);
+}
+
+/**
+ * Clamp an effort level to what the target model actually supports.
+ * Models without xhigh support fall back to `high` (the safer default
+ * that doesn't double the reasoning-budget multiplier).
+ */
+export function clampEffortForModel(
+  effort: "low" | "medium" | "high" | "xhigh" | "max",
+  model: string,
+): "low" | "medium" | "high" | "xhigh" | "max" {
+  if (effort === "xhigh" && !supportsXhighEffort(model)) return "high";
+  return effort;
+}

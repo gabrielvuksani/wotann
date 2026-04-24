@@ -18,9 +18,12 @@ describe("ui helpers", () => {
   });
 
   it("cycles thinking effort in a stable order", () => {
+    // V9 T14.1a — xhigh sits between `high` and `max` (Opus 4.7 tier,
+    // matches Claude Code v2.1.111 parity).
     expect(cycleThinkingEffort("low")).toBe("medium");
     expect(cycleThinkingEffort("medium")).toBe("high");
-    expect(cycleThinkingEffort("high")).toBe("max");
+    expect(cycleThinkingEffort("high")).toBe("xhigh");
+    expect(cycleThinkingEffort("xhigh")).toBe("max");
     expect(cycleThinkingEffort("max")).toBe("low");
   });
 

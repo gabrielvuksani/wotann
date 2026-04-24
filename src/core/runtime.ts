@@ -399,7 +399,15 @@ import {
 
 // ── Types ──────────────────────────────────────────────────
 
-export type ThinkingEffort = "low" | "medium" | "high" | "max";
+/**
+ * Thinking effort tiers passed to the reasoning sandwich / extended
+ * thinking layer. `xhigh` was added in V9 T14.1a (parity with Claude
+ * Code v2.1.111) as a finer granularity between `high` and `max` —
+ * Opus 4.7's extended-thinking sweet spot. Models that don't support
+ * extended thinking treat `xhigh` and `max` the same via
+ * `model-router.supportsXhighEffort`.
+ */
+export type ThinkingEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface RuntimeConfig {
   readonly workingDir: string;
@@ -5120,6 +5128,7 @@ export class WotannRuntime {
       low: 0.3,
       medium: 1.0,
       high: 2.0,
+      xhigh: 3.0,
       max: 4.0,
     };
     this.amplifier = new IntelligenceAmplifier({
