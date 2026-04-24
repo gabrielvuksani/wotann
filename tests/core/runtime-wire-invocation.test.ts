@@ -449,7 +449,11 @@ describe("WotannRuntime wire invocations", () => {
       runtime.close();
     });
 
-    it("routes to preprocessAsync when config.recallMode is set", async () => {
+    it("routes to preprocessAsync when config.recallMode is set (with useTempr: false)", async () => {
+      // V9 T2.3 flipped useTempr default-ON, which masks recallMode
+      // (TEMPR takes precedence when both would be set). To exercise
+      // the recallMode-only path, this test now explicitly sets
+      // `useTempr: false` so recallMode fires through async recall.
       const dir = makeTempDir();
       vi.stubEnv("WOTANN_SKIP_CLI_CHECK", "1");
       vi.stubEnv("CODEX_AUTH_JSON_PATH", "/nonexistent");
@@ -457,6 +461,7 @@ describe("WotannRuntime wire invocations", () => {
         workingDir: dir,
         enableMemory: false,
         hookProfile: "standard",
+        useTempr: false, // explicitly disable the V9 T2.3 default so recallMode wins
         recallMode: "time-decay",
       });
       await runtime.initialize();
@@ -484,7 +489,11 @@ describe("WotannRuntime wire invocations", () => {
       runtime.close();
     });
 
-    it("uses sync preprocess when no recall flags are set (default)", async () => {
+    it("uses async preprocess by default (V9 T2.3 TEMPR default-ON)", async () => {
+      // V9 T2.3 — default-on flip. Previously this test asserted the
+      // sync path when no flags were set; now useTempr defaults to
+      // TRUE unless explicitly disabled via `useTempr: false` or
+      // `WOTANN_USE_TEMPR=0`. Async recall is the new default.
       const dir = makeTempDir();
       vi.stubEnv("WOTANN_SKIP_CLI_CHECK", "1");
       vi.stubEnv("CODEX_AUTH_JSON_PATH", "/nonexistent");
@@ -509,7 +518,40 @@ describe("WotannRuntime wire invocations", () => {
 
       await drain(runtime.query({ prompt: "which provider?" }));
 
-      // Default path = sync.
+      // V9 T2.3 default path = async (TEMPR on).
+      expect(asyncSpy).toHaveBeenCalled();
+      expect(syncSpy).not.toHaveBeenCalled();
+
+      runtime.close();
+    });
+
+    it("sync preprocess fires when useTempr: false disables the V9 T2.3 default", async () => {
+      // Explicit opt-out path — preserves the old sync behavior for
+      // callers that set `useTempr: false` or `WOTANN_USE_TEMPR=0`.
+      const dir = makeTempDir();
+      vi.stubEnv("WOTANN_SKIP_CLI_CHECK", "1");
+      vi.stubEnv("CODEX_AUTH_JSON_PATH", "/nonexistent");
+      vi.stubEnv("WOTANN_USE_TEMPR", "0");
+      vi.stubEnv("WOTANN_RECALL_MODE", "");
+      const runtime = new WotannRuntime({
+        workingDir: dir,
+        enableMemory: false,
+        hookProfile: "standard",
+      });
+      await runtime.initialize();
+      stubBridge(runtime, "answer.");
+
+      const activeMemory = (runtime as unknown as {
+        activeMemory: {
+          preprocess: (msg: string, sid?: string) => unknown;
+          preprocessAsync: (msg: string, sid?: string, opts?: unknown) => Promise<unknown>;
+        };
+      }).activeMemory;
+      const syncSpy = vi.spyOn(activeMemory, "preprocess");
+      const asyncSpy = vi.spyOn(activeMemory, "preprocessAsync");
+
+      await drain(runtime.query({ prompt: "which provider?" }));
+
       expect(syncSpy).toHaveBeenCalled();
       expect(asyncSpy).not.toHaveBeenCalled();
 
