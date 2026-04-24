@@ -16,7 +16,8 @@
  *   - tools/list
  *   - tools/call
  *   - prompts/list (minimal; returns [])
- *   - resources/list (minimal; returns [])
+ *   - resources/list (V9 T4.1 — returns WOTANN's MCP Apps UI resources)
+ *   - resources/read (V9 T4.1 — returns rendered HTML for ui://wotann/* URIs)
  *   - shutdown
  *
  * Callers provide a ToolHostAdapter with the actual WOTANN tool
@@ -30,6 +31,8 @@
 import { createInterface, type Interface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { loadToolsWithOptions, resolveTier, type McpTier, type TieredTool } from "./tool-loader.js";
+// V9 T4.1 — WOTANN MCP Apps UI resource registry (SEP-1865).
+import { listUiResources, readUiResource } from "./ui-resources.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -298,7 +301,29 @@ export class WotannMcpServer {
       case "prompts/list":
         return { prompts: [] };
       case "resources/list":
-        return { resources: [] };
+        // V9 T4.1 — expose WOTANN's native UI resources (memory
+        // browser, cost preview, editor diff) per MCP Apps spec
+        // SEP-1865. Each descriptor carries the MCP Apps MIME
+        // `text/html;profile=mcp-app` so hosts that support the
+        // protocol (Claude, ChatGPT, VS Code, Goose, Postman, MCPJam)
+        // render the UIs inline.
+        return { resources: listUiResources() };
+      case "resources/read": {
+        // V9 T4.1 — Return the rendered HTML for a single
+        // `ui://wotann/<slug>` URI. Unknown URIs return a
+        // JSON-RPC-compatible error so the host sees a 404-equivalent
+        // (per the Tier 4 integration-test matrix "resources/read
+        // invalid → 404-equivalent error" row).
+        const p = params as { uri?: unknown };
+        if (typeof p.uri !== "string") {
+          throw new Error("resources/read: params.uri (string) required");
+        }
+        const content = readUiResource(p.uri);
+        if (!content) {
+          throw new Error(`resources/read: unknown uri: ${p.uri}`);
+        }
+        return { contents: [content] };
+      }
       case "shutdown":
         this.closed = true;
         this.rl?.close();
