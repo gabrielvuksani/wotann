@@ -43,12 +43,26 @@ describe("Tier-D1 OMEGA wire", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns null when config flag + env are both disabled", () => {
+  it("returns non-null when config omitted (V9 T2.3 default-ON semantic)", () => {
+    // V9 T2.3 flipped OMEGA from opt-in (`=== true || env === "1"`) to
+    // opt-out (`!== false && env !== "0"`). Previously this test
+    // asserted null — now the default is ON unless explicitly disabled.
     const runtime = new WotannRuntime({
       workingDir: tempDir,
       enableMemory: true,
       hookProfile: "standard",
-      // enableOmegaLayers omitted → defaults to env, which is blank
+      // enableOmegaLayers omitted → default-ON per V9 T2.3
+    });
+    expect(runtime.getOmegaLayers()).not.toBeNull();
+    runtime.close();
+  });
+
+  it("returns null when env=0 explicitly disables the gate", () => {
+    vi.stubEnv("WOTANN_OMEGA_LAYERS", "0");
+    const runtime = new WotannRuntime({
+      workingDir: tempDir,
+      enableMemory: true,
+      hookProfile: "standard",
     });
     expect(runtime.getOmegaLayers()).toBeNull();
     runtime.close();

@@ -4886,8 +4886,12 @@ export class WotannRuntime {
    */
   getOmegaLayers(): OmegaLayers | null {
     const enabled =
-      this.config.enableOmegaLayers === true ||
-      (this.config.enableOmegaLayers === undefined && process.env["WOTANN_OMEGA_LAYERS"] === "1");
+      // V9 T2.3 — Default-ON semantic. OMEGA was opt-in (`=== true || env === "1"`);
+      // now on by default unless explicitly disabled via `config.enableOmegaLayers = false`
+      // OR `WOTANN_OMEGA_LAYERS=0` env. Heuristic fallback when sqlite-vec/ONNX
+      // extensions aren't installed (T1.3/T1.4 attach APIs) — so default-on doesn't
+      // break runtimes without the extensions.
+      this.config.enableOmegaLayers !== false && process.env["WOTANN_OMEGA_LAYERS"] !== "0";
     if (!enabled) return null;
     if (!this.memoryStore) return null;
     if (!this.omegaLayers) {
@@ -4966,9 +4970,12 @@ export class WotannRuntime {
    * intent signal is stronger than a single retrieval mode).
    */
   private resolveRecallOptions(): { useTempr: boolean; recallMode: string | undefined } {
-    const useTempr =
-      this.config.useTempr === true ||
-      (this.config.useTempr === undefined && process.env["WOTANN_USE_TEMPR"] === "1");
+    // V9 T2.3 — Default-ON semantic for TEMPR recall. Previously opt-in
+    // (`=== true || env === "1"`); now on by default unless explicitly
+    // disabled via `config.useTempr = false` OR `WOTANN_USE_TEMPR=0` env.
+    // Honest FTS5 fallback when no embedder is provided — TEMPR's vector
+    // channel falls through to FTS+cosine — so default-on is safe.
+    const useTempr = this.config.useTempr !== false && process.env["WOTANN_USE_TEMPR"] !== "0";
     // Mode resolution: explicit config beats env var.
     const modeFromEnv = process.env["WOTANN_RECALL_MODE"];
     const recallMode =
