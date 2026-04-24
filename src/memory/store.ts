@@ -118,6 +118,25 @@ import {
   type TEMPRCandidate,
 } from "./tempr.js";
 import { createHeuristicCrossEncoder, type CrossEncoder } from "./cross-encoder.js";
+// V9 T1.3 — sqlite-vec backend (FATAL orphan). Loaded opt-in via
+// `WOTANN_SQLITE_VEC=1` env var because the native `sqlite-vec`
+// extension isn't bundled by default; loading is synchronous when
+// the extension is available.
+import {
+  createSqliteVecBackend,
+  isSqliteVecAvailable,
+  type SqliteVecBackend,
+} from "./sqlite-vec-backend.js";
+// V9 T1.4 — ONNX cross-encoder (FATAL orphan). Session loading is
+// async (`loadMiniLmSession`) so the member field is populated post-
+// construction via `attachOnnxCrossEncoder()`. Baseline remains
+// the heuristic encoder for sync callers.
+import {
+  createOnnxCrossEncoder,
+  isMiniLmModelAvailable,
+  isOnnxRuntimeAvailable,
+  loadMiniLmSession,
+} from "./onnx-cross-encoder.js";
 import {
   createDefaultRetrievalRegistry,
   type RetrievalRegistry,
@@ -323,6 +342,27 @@ export class MemoryStore implements MemoryProvider {
     this.contextGenerator = gen;
   }
 
+  /**
+   * V9 T1.3 — Optional sqlite-vec backend for native dense-vector
+   * retrieval in TEMPR's vector channel. Null until `attachVectorBackend()`
+   * lazy-initializes it (or if the native extension isn't loadable).
+   * When non-null, `temprSearch()` uses it as the default `opts.vectorBackend`
+   * instead of the FTS5+cosine fallback.
+   *
+   * Population is the caller's responsibility — use `upsertEmbedding()`
+   * below as new entries arrive with their embeddings. See V9 T1.3 for
+   * the full persistent-index design.
+   */
+  private vectorBackend: SqliteVecBackend | null = null;
+
+  /**
+   * V9 T1.4 — Optional ONNX-backed cross-encoder for TEMPR rerank.
+   * Upgraded from the heuristic baseline via `attachOnnxCrossEncoder()`
+   * (async — session load is async). `temprSearch()` uses this as the
+   * default `opts.crossEncoder` when caller doesn't override.
+   */
+  private defaultCrossEncoder: CrossEncoder = createHeuristicCrossEncoder();
+
   constructor(dbPath: string) {
     this.dbPath = dbPath;
     const dir = join(dbPath, "..");
@@ -345,6 +385,92 @@ export class MemoryStore implements MemoryProvider {
   initialize(): void {
     // Schema already created in constructor. Re-running is safe
     // (all DDL is IF NOT EXISTS) but unnecessary.
+  }
+
+  /**
+   * V9 T1.3 — Attach the sqlite-vec backend. Call once post-construction
+   * when the caller knows their embedding dimension. Safe to call
+   * multiple times — idempotent (attaches once). When sqlite-vec isn't
+   * available, silently keeps `vectorBackend: null` so `temprSearch`
+   * falls back to the FTS5+cosine path.
+   *
+   * @param dimensions Embedding dimension (384 for MiniLM-L-6, 768 for L-12).
+   * @param tableName Optional vec0 table name override.
+   * @returns true when the backend was attached; false on unavailability.
+   */
+  attachVectorBackend(dimensions: number, tableName?: string): boolean {
+    if (this.vectorBackend !== null) return true; // idempotent
+    if (!isSqliteVecAvailable()) return false;
+    try {
+      this.vectorBackend = createSqliteVecBackend({
+        db: this.db,
+        dimensions,
+        ...(tableName ? { tableName } : {}),
+      });
+      return true;
+    } catch {
+      // Extension loaded but table creation failed (e.g. dimension
+      // mismatch against an existing vec0 table). Honest null.
+      this.vectorBackend = null;
+      return false;
+    }
+  }
+
+  /**
+   * V9 T1.4 — Upgrade the default cross-encoder from heuristic to
+   * ONNX-backed MiniLM rerank. Async because `loadMiniLmSession`
+   * loads the native `onnxruntime-node` session asynchronously.
+   * Safe to call at any time — `temprSearch` reads `this.defaultCrossEncoder`
+   * per-call so the swap takes effect on the next invocation.
+   *
+   * @param modelPath Optional override for the MiniLM .onnx file.
+   * @returns true when ONNX was attached; false when runtime/model absent.
+   */
+  async attachOnnxCrossEncoder(modelPath?: string): Promise<boolean> {
+    if (!isOnnxRuntimeAvailable() || !isMiniLmModelAvailable(modelPath)) {
+      return false;
+    }
+    try {
+      const session = await loadMiniLmSession(modelPath);
+      if (!session) return false;
+      this.defaultCrossEncoder = createOnnxCrossEncoder({ session });
+      return true;
+    } catch {
+      // Keep the heuristic baseline on any ONNX failure.
+      return false;
+    }
+  }
+
+  /**
+   * V9 T1.3 companion — push an embedding into the vec0 index for a
+   * given memory entry. No-op when the backend isn't attached. Caller
+   * generates the embedding using its chosen embedder so the store
+   * doesn't pull an embedder dependency. Idempotent on duplicate id.
+   */
+  upsertEmbedding(id: string, vector: readonly number[]): boolean {
+    if (!this.vectorBackend) return false;
+    try {
+      this.vectorBackend.upsert(id, vector);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Accessor for the attached vectorBackend (null when not attached).
+   * Used by TEMPR-aware callers to pass `opts.vectorBackend` explicitly
+   * OR to confirm availability before generating an embedding. See
+   * `temprSearch()` for default-injection behavior.
+   */
+  getVectorBackend(): SqliteVecBackend | null {
+    return this.vectorBackend;
+  }
+
+  /** Accessor for the default cross-encoder. Callers can override via
+   * `temprSearch`'s `opts.crossEncoder`. */
+  getDefaultCrossEncoder(): CrossEncoder {
+    return this.defaultCrossEncoder;
   }
 
   private initializeSchema(): void {
@@ -2366,11 +2492,16 @@ export class MemoryStore implements MemoryProvider {
         // Phase 2 P1-M2 (OMEGA): native sqlite-vec knn path.
         // When a vectorBackend is provided, route through it rather
         // than doing per-row cosine. The backend is populated by the
-        // caller (typically MemoryStore.rebuildSqliteVecIndex).
-        if (opts.vectorBackend) {
+        // caller (typically via MemoryStore.upsertEmbedding).
+        // V9 T1.3: when `opts.vectorBackend` is omitted, fall back to
+        // the store's attached `this.vectorBackend` so callers that
+        // called `attachVectorBackend()` at setup time get sqlite-vec
+        // routing automatically.
+        const resolvedBackend = opts.vectorBackend ?? this.vectorBackend;
+        if (resolvedBackend) {
           try {
             const queryVec = await opts.embed(args.query);
-            const hits = opts.vectorBackend.knn(queryVec, pool);
+            const hits = resolvedBackend.knn(queryVec, pool);
             if (hits.length === 0) return { candidates: [] };
             // Rehydrate content from the store. Missing ids (stale
             // index) are dropped silently — honest fail.
@@ -2528,8 +2659,12 @@ export class MemoryStore implements MemoryProvider {
       },
     };
 
+    // V9 T1.4: when `opts.crossEncoder` is omitted, default to the
+    // store's attached `this.defaultCrossEncoder` (ONNX when attached
+    // via `attachOnnxCrossEncoder`, heuristic otherwise). Passing
+    // `null` still explicitly disables reranking.
     const crossEncoder =
-      opts.crossEncoder === null ? undefined : (opts.crossEncoder ?? createHeuristicCrossEncoder());
+      opts.crossEncoder === null ? undefined : (opts.crossEncoder ?? this.defaultCrossEncoder);
 
     const tempr: TEMPR = createTEMPR({
       channels: [vectorChannel, bm25Channel, entityChannel, temporalChannel],

@@ -17,8 +17,16 @@ import { execFileSync } from "node:child_process";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { CamoufoxBrowser } from "../browser/camoufox-backend.js";
-import type { PageResult } from "../browser/camoufox-backend.js";
+// V9 T1.1 follow-up: keep CamoufoxBrowser as a type-only top-level
+// import + lazy runtime-value import inside launchStealthBrowser().
+// Previously the value was imported statically, which pulled the
+// browser backend (and its `tmpdir()` module-load call) into every
+// consumer of platform-bindings.ts — including kairos-rpc.ts via
+// the new T1.1 wire. Tests that mock `node:os` without `tmpdir`
+// (e.g. tests/daemon/kairos-ipc.test.ts) broke as a side effect.
+// Lazy import keeps the browser stack out of the module-load graph
+// for 99% of consumers that only use click/type/execute-action.
+import type { CamoufoxBrowser, PageResult } from "../browser/camoufox-backend.js";
 import { convertToUTF8 } from "../tools/encoding-detector.js";
 
 export type PlatformType = "darwin" | "linux" | "win32" | "unknown";
@@ -833,7 +841,11 @@ export async function fetchWebContent(
  * @returns The page result with title and success status
  */
 export async function launchStealthBrowser(url: string): Promise<PageResult> {
-  const browser = new CamoufoxBrowser({ headless: true, humanize: true });
+  // Lazy value-import keeps the camoufox module out of the platform-
+  // bindings module-load graph. Callers that never hit stealth-browse
+  // never load the browser stack.
+  const { CamoufoxBrowser: CamoufoxBrowserCtor } = await import("../browser/camoufox-backend.js");
+  const browser: CamoufoxBrowser = new CamoufoxBrowserCtor({ headless: true, humanize: true });
 
   const launched = await browser.launch();
   if (!launched) {
