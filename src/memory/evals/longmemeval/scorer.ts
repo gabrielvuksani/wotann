@@ -371,3 +371,201 @@ function toBreakdown(raw: { total: number; passed: number }): AbilityBreakdown {
     accuracy: raw.total > 0 ? raw.passed / raw.total : 0,
   };
 }
+
+// ── V9 T2.2 — LLM-judge scorer ────────────────────────
+
+/**
+ * LlmQuery callback — sends a prompt to a judge model and returns the
+ * raw response text. Caller owns the HTTP + auth (anthropic/openai SDK,
+ * provider bridge, etc.) so the scorer stays transport-agnostic.
+ */
+export type LlmQuery = (prompt: string) => Promise<string>;
+
+/**
+ * Per-instance judge decision. `passed` is the single binary verdict
+ * the report aggregates; `verdict` carries the raw model output for
+ * audit.
+ */
+export interface JudgeDecision {
+  readonly passed: boolean;
+  readonly verdict: string;
+}
+
+/**
+ * Build the judge prompt for a single (question, expected, hypothesis)
+ * tuple. Based on the LongMemEval paper's §4.2 ability-specific judge
+ * prompts (research/__new_clones/longmemeval/src/evaluation/evaluate_qa.py),
+ * condensed into one prompt that asks the judge for a strict binary
+ * pass/fail with short reasoning. The prompt instructs the judge to
+ * accept semantically-equivalent phrasings (the whole point of using
+ * an LLM judge over substring matching) but to reject assertions that
+ * add unsupported details or contradict the expected answer.
+ */
+export function buildJudgePrompt(
+  question: string,
+  expectedAnswer: string,
+  hypothesis: string,
+  ability: LongMemEvalAbility,
+): string {
+  const abilityGuidance: Record<LongMemEvalAbility, string> = {
+    "information-extraction":
+      "The answer is factual. Accept any phrasing that conveys the same fact; reject paraphrases that introduce new facts or omit the answer.",
+    "multi-session-reasoning":
+      "The answer requires combining facts from multiple sessions. Accept responses that arrive at the same conclusion even if the chain-of-thought differs; reject responses that match only part of the answer.",
+    temporal:
+      "The answer has a time/date/duration dimension. Tolerate off-by-one errors on numeric quantities but reject responses that get the order of events wrong.",
+    "knowledge-update":
+      "The answer reflects a FACT UPDATE — what the user knows NOW, not what they said earlier. Reject responses that regurgitate stale facts even if those facts appeared in the transcript.",
+    abstention:
+      "The question is UNANSWERABLE from the transcript. Accept responses that honestly decline; reject responses that fabricate a specific answer.",
+  };
+  return [
+    "You are judging a memory-retrieval system's answer against a reference answer.",
+    "",
+    `QUESTION: ${question}`,
+    `EXPECTED ANSWER: ${expectedAnswer}`,
+    `SYSTEM'S ANSWER: ${hypothesis}`,
+    "",
+    `ABILITY TYPE: ${ability}`,
+    `GUIDANCE: ${abilityGuidance[ability]}`,
+    "",
+    "Respond with EXACTLY one line of the form:",
+    "VERDICT: PASS | reason here",
+    "or",
+    "VERDICT: FAIL | reason here",
+    "",
+    "Do not output anything except that single VERDICT line.",
+  ].join("\n");
+}
+
+/**
+ * Parse the judge's one-line VERDICT response. Tolerates surrounding
+ * whitespace, mixed case, and extra detail text after the pass/fail
+ * token. Falls back to FAIL when the judge produced malformed output —
+ * the rule-based score at least catches the clean-substring case, so
+ * a malformed judge defaulting to fail matches "couldn't confirm" rather
+ * than silently claiming pass.
+ */
+export function parseJudgeVerdict(raw: string): JudgeDecision {
+  const line =
+    raw
+      .trim()
+      .split("\n")
+      .find((l) => /VERDICT\s*:/i.test(l)) ?? raw.trim();
+  const m = line.match(/VERDICT\s*:\s*(PASS|FAIL)\b/i);
+  if (!m) {
+    return { passed: false, verdict: `malformed: ${raw.slice(0, 120)}` };
+  }
+  const passed = m[1]!.toUpperCase() === "PASS";
+  return { passed, verdict: line.trim() };
+}
+
+/**
+ * Score hypotheses using an LLM judge model. For each instance, builds
+ * the ability-specific prompt, calls the supplied `llm` callback, and
+ * parses the verdict.
+ *
+ * Comparison guarantees versus `scoreLongMemEval` (rule-based):
+ * - The ScoreReport shape is IDENTICAL — callers can swap judges
+ *   without changing downstream aggregation.
+ * - `strictPass` and `lenientPass` still report the rule-based
+ *   substring/content-word hits, so consumers can see the spread
+ *   between the judge and the deterministic baseline.
+ * - `passed` now reflects the judge's verdict, which is the score
+ *   WOTANN publishes when a key is configured.
+ *
+ * Concurrency is bounded by `opts.concurrency` (default 4) so large
+ * instance sets don't fan out 500 parallel API calls. Errors from the
+ * judge (timeout, non-200, parse failure) are recorded as `passed:
+ * false` with a descriptive reason — never silently promoted to pass.
+ *
+ * Caller responsibility:
+ * - Keep `llm` stateless (no session cache); the scorer sends prompts
+ *   in an arbitrary order for concurrency batching.
+ * - Wrap `llm` with any retry/budget/timeout policy the caller needs —
+ *   the scorer treats every call as a single-shot best-effort.
+ */
+export async function scoreWithLlmJudge(
+  instances: readonly LongMemEvalInstance[],
+  hypotheses: readonly Hypothesis[],
+  llm: LlmQuery,
+  opts: { readonly concurrency?: number } = {},
+): Promise<ScoreReport> {
+  const concurrency = Math.max(1, opts.concurrency ?? 4);
+  const byId = new Map<string, Hypothesis>();
+  for (const h of hypotheses) byId.set(h.question_id, h);
+
+  // Produce the rule-based baseline up front so strictPass/lenientPass
+  // fields on the judge's report still reflect the deterministic score.
+  const baseline = scoreLongMemEval(instances, hypotheses);
+  const baselineById = new Map<string, ScoreResult>();
+  for (const r of baseline.results) baselineById.set(r.question_id, r);
+
+  // Worker queue — bounded concurrency over per-instance judge calls.
+  const results: ScoreResult[] = new Array<ScoreResult>(instances.length);
+  let nextIdx = 0;
+  const workers: Promise<void>[] = [];
+
+  async function judgeOne(idx: number): Promise<void> {
+    const instance = instances[idx]!;
+    const ability = abilityFor(instance);
+    const hyp = byId.get(instance.question_id);
+    const base = baselineById.get(instance.question_id);
+    const strictPass = base?.strictPass ?? false;
+    const lenientPass = base?.lenientPass ?? false;
+
+    if (!hyp) {
+      results[idx] = {
+        question_id: instance.question_id,
+        ability,
+        passed: false,
+        strictPass,
+        lenientPass,
+        expected: instance.answer,
+        hypothesis: "",
+        reason: "no hypothesis",
+      };
+      return;
+    }
+
+    const prompt = buildJudgePrompt(instance.question, instance.answer, hyp.hypothesis, ability);
+    try {
+      const raw = await llm(prompt);
+      const decision = parseJudgeVerdict(raw);
+      results[idx] = {
+        question_id: instance.question_id,
+        ability,
+        passed: decision.passed,
+        strictPass,
+        lenientPass,
+        expected: instance.answer,
+        hypothesis: hyp.hypothesis,
+        reason: decision.verdict,
+      };
+    } catch (err) {
+      results[idx] = {
+        question_id: instance.question_id,
+        ability,
+        passed: false,
+        strictPass,
+        lenientPass,
+        expected: instance.answer,
+        hypothesis: hyp.hypothesis,
+        reason: `judge-error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const idx = nextIdx++;
+      if (idx >= instances.length) return;
+      await judgeOne(idx);
+    }
+  }
+
+  for (let i = 0; i < concurrency; i++) workers.push(worker());
+  await Promise.all(workers);
+
+  return buildReport(results);
+}
