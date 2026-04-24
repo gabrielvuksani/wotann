@@ -1,0 +1,235 @@
+name: WOTANN Design Verify
+description: >
+  Compare a DTCG v6.3 handoff bundle against the repository's current
+  design system. When drift is detected, post a structured comment on
+  the triggering pull request and fail the job. Zero-UX adoption —
+  add the step once in your CI workflow and PRs get automatic drift
+  flagging.
+
+# Composite action — runs inside any workflow that has `permissions:
+# pull-requests: write` set at the job level. The surrounding workflow
+# owns checkout and node setup; this action is just the verify +
+# comment step so it composes cleanly with existing pipelines.
+
+inputs:
+  bundle-path:
+    description: >
+      Absolute or repo-relative path to the DTCG handoff bundle the
+      design system should be verified against. Typically the bundle
+      committed alongside the repo under `design-system/bundle.zip`
+      or similar.
+    required: true
+
+  workspace-dir:
+    description: >
+      Directory to scan for the local design system. Defaults to the
+      repository root.
+    required: false
+    default: "."
+
+  comment-mode:
+    description: >
+      Either `pr` (post a PR comment when drift is detected; default)
+      or `summary-only` (write to GITHUB_STEP_SUMMARY and skip the
+      PR comment). `pr` requires `permissions: pull-requests: write`
+      at the job level.
+    required: false
+    default: "pr"
+
+  fail-on-drift:
+    description: >
+      When "true" (default), the action exits 1 if drift is detected so
+      the job is marked failed. Set to "false" to post a comment but
+      never fail the job (advisory mode).
+    required: false
+    default: "true"
+
+  wotann-version:
+    description: >
+      Version of the `wotann` npm package to install. Defaults to the
+      version pinned in the consuming workspace's `package.json`; when
+      WOTANN is not already a dependency, falls back to the latest
+      published version.
+    required: false
+    default: ""
+
+outputs:
+  has-drift:
+    description: "true when the bundle differs from the workspace design system"
+    value: ${{ steps.verify.outputs.has-drift }}
+
+  diff-summary:
+    description: "Plain-text summary from `wotann design verify` (multi-line)"
+    value: ${{ steps.verify.outputs.diff-summary }}
+
+runs:
+  using: composite
+  steps:
+    # ── Validate untrusted inputs ────────────────────────────────────
+    # Surface every input through `env:` so `run:` blocks see
+    # `"$VARIABLE"` (shell-quoted) rather than expanding raw template
+    # text. This is the pattern GitHub recommends to neutralize
+    # workflow-injection attacks, and it matches what
+    # .github/workflows/benchmark-nightly.yml uses for its
+    # `workflow_dispatch` input.
+    - name: Validate inputs
+      id: validate
+      shell: bash
+      env:
+        BUNDLE_PATH: ${{ inputs.bundle-path }}
+        WORKSPACE_DIR: ${{ inputs.workspace-dir }}
+        COMMENT_MODE: ${{ inputs.comment-mode }}
+        FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
+      run: |
+        set -euo pipefail
+        # Bundle path: must not be empty; null-byte defense.
+        if [ -z "${BUNDLE_PATH}" ]; then
+          echo "::error::bundle-path input is required"
+          exit 2
+        fi
+        # comment-mode: allowlist — anything else rejects.
+        case "${COMMENT_MODE}" in
+          pr|summary-only) ;;
+          *)
+            echo "::error::comment-mode must be 'pr' or 'summary-only' (got: ${COMMENT_MODE})"
+            exit 2
+            ;;
+        esac
+        # fail-on-drift: strict boolean.
+        case "${FAIL_ON_DRIFT}" in
+          true|false) ;;
+          *)
+            echo "::error::fail-on-drift must be 'true' or 'false' (got: ${FAIL_ON_DRIFT})"
+            exit 2
+            ;;
+        esac
+        # workspace-dir: reject absolute paths with '..' traversal
+        # tokens to keep the scan inside the checked-out tree.
+        case "${WORKSPACE_DIR}" in
+          *..*)
+            echo "::error::workspace-dir must not contain '..'"
+            exit 2
+            ;;
+        esac
+        echo "bundle-path=${BUNDLE_PATH}" >> "$GITHUB_OUTPUT"
+        echo "workspace-dir=${WORKSPACE_DIR}" >> "$GITHUB_OUTPUT"
+        echo "comment-mode=${COMMENT_MODE}" >> "$GITHUB_OUTPUT"
+        echo "fail-on-drift=${FAIL_ON_DRIFT}" >> "$GITHUB_OUTPUT"
+
+    # ── Install WOTANN ────────────────────────────────────────────────
+    # If the repo already has WOTANN as a dev-dependency we use the
+    # local install (respects lockfile). Otherwise fall back to a
+    # clean npm exec with the version pinned by the caller or latest.
+    - name: Resolve WOTANN CLI
+      id: resolve
+      shell: bash
+      env:
+        WOTANN_VERSION: ${{ inputs.wotann-version }}
+      run: |
+        set -euo pipefail
+        if [ -f "node_modules/.bin/wotann" ]; then
+          echo "cli=node_modules/.bin/wotann" >> "$GITHUB_OUTPUT"
+          echo "Using local wotann install from node_modules"
+        else
+          if [ -n "${WOTANN_VERSION}" ]; then
+            echo "cli=npx -y -p wotann@${WOTANN_VERSION} wotann" >> "$GITHUB_OUTPUT"
+            echo "Using pinned wotann@${WOTANN_VERSION}"
+          else
+            echo "cli=npx -y wotann" >> "$GITHUB_OUTPUT"
+            echo "Using latest published wotann"
+          fi
+        fi
+
+    # ── Run verify ────────────────────────────────────────────────────
+    # The CLI (shipped by V9 T8.4 as `wotann design verify`) returns a
+    # structured summary on stdout and sets its own exit code by drift
+    # presence. We capture both so downstream steps can act on them.
+    - name: Verify design drift
+      id: verify
+      shell: bash
+      env:
+        BUNDLE_PATH: ${{ steps.validate.outputs.bundle-path }}
+        WORKSPACE_DIR: ${{ steps.validate.outputs.workspace-dir }}
+        WOTANN_CLI: ${{ steps.resolve.outputs.cli }}
+      run: |
+        set -euo pipefail
+        summary_file="$(mktemp)"
+        # `wotann design verify` prints a plain-text diff summary on
+        # stdout. Exit code 0 means no drift; 1 means drift detected.
+        set +e
+        # shellcheck disable=SC2086
+        $WOTANN_CLI design verify \
+          --bundle "${BUNDLE_PATH}" \
+          --workspace "${WORKSPACE_DIR}" \
+          > "$summary_file"
+        rc=$?
+        set -e
+        if [ "$rc" -eq 0 ]; then
+          has_drift="false"
+        elif [ "$rc" -eq 1 ]; then
+          has_drift="true"
+        else
+          echo "::error::wotann design verify exited ${rc} (unexpected)"
+          cat "$summary_file" || true
+          exit "$rc"
+        fi
+        echo "has-drift=${has_drift}" >> "$GITHUB_OUTPUT"
+        # Multi-line output via GITHUB_OUTPUT's heredoc syntax so the
+        # diff survives being an action output.
+        {
+          echo "diff-summary<<__WOTANN_EOF__"
+          cat "$summary_file"
+          echo
+          echo "__WOTANN_EOF__"
+        } >> "$GITHUB_OUTPUT"
+        # Also write to job summary for zero-config visibility.
+        {
+          echo "## WOTANN Design Drift"
+          echo
+          echo "\`\`\`"
+          cat "$summary_file"
+          echo "\`\`\`"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    # ── Comment on the PR (when drift + mode=pr + PR context) ────────
+    - name: Comment on PR
+      if: >-
+        steps.verify.outputs.has-drift == 'true'
+        && steps.validate.outputs.comment-mode == 'pr'
+        && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      env:
+        DIFF_SUMMARY: ${{ steps.verify.outputs.diff-summary }}
+      with:
+        script: |
+          const summary = process.env.DIFF_SUMMARY || '(no summary)';
+          const body = [
+            '### Design System Drift Detected',
+            '',
+            '`wotann design verify` produced the following diff between',
+            'the committed handoff bundle and the branch\'s design system:',
+            '',
+            '```',
+            summary,
+            '```',
+            '',
+            '> Run `wotann design apply <bundle>` locally to resolve, then',
+            '> push the result. To dismiss this check set',
+            '> `fail-on-drift: false` in the workflow.',
+          ].join('\n');
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body,
+          });
+
+    # ── Exit with drift status ───────────────────────────────────────
+    - name: Fail the job when drift is detected (if configured)
+      if: >-
+        steps.verify.outputs.has-drift == 'true'
+        && steps.validate.outputs.fail-on-drift == 'true'
+      shell: bash
+      run: |
+        echo "::error::design drift detected — failing job per fail-on-drift=true"
+        exit 1
