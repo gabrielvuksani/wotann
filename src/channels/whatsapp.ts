@@ -17,6 +17,8 @@
  */
 
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage, ChannelType } from "./adapter.js";
+// V9 T1.6 — crypto for verifySignature().
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 export class WhatsAppAdapter implements ChannelAdapter {
   readonly type: ChannelType = "whatsapp";
@@ -36,6 +38,37 @@ export class WhatsAppAdapter implements ChannelAdapter {
       process.env["WHATSAPP_SESSION"] ??
       process.env["WHATSAPP_SESSION_DIR"] ??
       ".wotann/whatsapp-auth";
+  }
+
+  /**
+   * V9 T1.6 — Verify a WhatsApp Business Cloud API webhook signature.
+   *
+   * Meta signs outgoing webhook payloads with SHA256 HMAC using the
+   * app secret. The digest is sent in the `X-Hub-Signature-256` header
+   * with format `sha256=<hex>`. The signature MUST be computed over
+   * the exact raw body bytes (not a re-serialized JSON).
+   *
+   * This method is for the Cloud API path (REST webhooks via Meta).
+   * The Baileys-based path in this adapter connects directly to
+   * WhatsApp servers via WebSocket — no webhook signing involved
+   * there; this verify helper is available for deployments that
+   * front Baileys with a webhook-bridge.
+   *
+   * @param rawBody Raw request body (as received, unmodified).
+   * @param signature Value of the X-Hub-Signature-256 header
+   *                  (format: `sha256=<hex>`).
+   * @param appSecret Meta App Secret (from Meta App dashboard).
+   * @returns true when the HMAC matches; false on any mismatch.
+   */
+  verifySignature(rawBody: string, signature: string, appSecret: string): boolean {
+    if (!appSecret || !signature) return false;
+    const expected = `sha256=${createHmac("sha256", appSecret).update(rawBody, "utf8").digest("hex")}`;
+    if (expected.length !== signature.length) return false;
+    try {
+      return timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(signature, "utf8"));
+    } catch {
+      return false;
+    }
   }
 
   async start(): Promise<void> {
@@ -64,7 +97,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     ev.on("creds.update", saveCreds);
 
     // Handle connection updates
-     
+
     ev.on("connection.update", ((update: any) => {
       if (update.connection === "close") {
         const statusCode = update.lastDisconnect?.error?.output?.statusCode;
@@ -85,7 +118,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }) as (...args: unknown[]) => void);
 
     // Handle incoming messages
-     
+
     ev.on("messages.upsert", ((event: any) => {
       for (const msg of event.messages ?? []) {
         if (msg.key?.fromMe) continue;

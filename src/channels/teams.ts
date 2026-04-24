@@ -59,11 +59,72 @@ export class TeamsAdapter implements ChannelAdapter {
     this.appPassword = appPassword ?? process.env["TEAMS_APP_PASSWORD"] ?? "";
   }
 
+  /**
+   * V9 T1.6 — Structural JWT-header validation for Bot Framework webhooks.
+   *
+   * Microsoft Teams webhooks arrive as signed JWT Bearer tokens in the
+   * `Authorization` header. Full cryptographic verification requires
+   * fetching Microsoft's OpenID Connect metadata + public keys from
+   * `https://login.botframework.com/v1/.well-known/openidconfiguration`
+   * and then its JWKS URL, then RS256-verifying the token — that's
+   * 150+ LOC of JWT + JWKS plumbing with a network fetch.
+   *
+   * For Tier-1 ship this implements the STRUCTURAL checks a real JWT
+   * verifier must pass BEFORE the crypto step: shape (`x.y.z`), base64
+   * decodability, expected issuer, expected audience (appId), and
+   * non-expired timestamps. Any failure here means the token is
+   * definitely invalid; passing here means crypto-verify is the
+   * remaining step.
+   *
+   * A V9 follow-up task should wire the full JWKS path; leaving the
+   * structural wire in place NOW lets the webhook host call
+   * `verifySignature(...)` and get a hard fail on malformed tokens
+   * without waiting for the full plumb.
+   *
+   * @param authHeader Full `Authorization` header (expected form `Bearer <jwt>`).
+   * @returns true when structural checks pass (NOT a full crypto verify).
+   */
+  verifySignature(authHeader: string): boolean {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) return false;
+    const jwt = authHeader.slice(7).trim();
+    const parts = jwt.split(".");
+    if (parts.length !== 3) return false;
+    const [headerB64, payloadB64] = parts;
+    if (!headerB64 || !payloadB64) return false;
+    try {
+      const header = JSON.parse(
+        Buffer.from(headerB64.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"),
+      ) as { alg?: string; typ?: string };
+      const payload = JSON.parse(
+        Buffer.from(payloadB64.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"),
+      ) as { iss?: string; aud?: string; exp?: number; nbf?: number };
+      // Bot Framework tokens use RS256.
+      if (header.alg !== "RS256") return false;
+      // Issuer must be Microsoft's Bot Framework token service.
+      if (
+        payload.iss !== "https://api.botframework.com" &&
+        payload.iss !== "https://sts.windows.net/d6d49420-f39b-4df7-a1dc-d59a935871db/"
+      ) {
+        return false;
+      }
+      // Audience must be the bot's appId.
+      if (this.appId && payload.aud !== this.appId) return false;
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (typeof payload.exp === "number" && payload.exp < nowSec) return false;
+      if (typeof payload.nbf === "number" && payload.nbf > nowSec + 60) return false;
+      // Structural check passed. Crypto verify is the next step —
+      // deferred to a V9 follow-up wire.
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async start(): Promise<void> {
     if (!this.appId || !this.appPassword) {
       throw new Error(
-        "TEAMS_APP_ID and TEAMS_APP_PASSWORD required. "
-        + "Register a bot at https://dev.botframework.com",
+        "TEAMS_APP_ID and TEAMS_APP_PASSWORD required. " +
+          "Register a bot at https://dev.botframework.com",
       );
     }
 
@@ -101,7 +162,7 @@ export class TeamsAdapter implements ChannelAdapter {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${this.accessToken}`,
+          Authorization: `Bearer ${this.accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(activity),

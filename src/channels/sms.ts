@@ -15,6 +15,8 @@
  */
 
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage, ChannelType } from "./adapter.js";
+// V9 T1.6 — crypto for verifySignature().
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -53,18 +55,57 @@ export class SMSAdapter implements ChannelAdapter {
     this.apiBase = `https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}`;
   }
 
+  /**
+   * V9 T1.6 — Verify a Twilio webhook signature.
+   *
+   * Twilio's scheme: concatenate the full request URL (exactly as
+   * Twilio called it, including query string) with the POST form
+   * parameters sorted by key and concatenated as `key+value` pairs,
+   * then HMAC-SHA1 with the Auth Token. The base64-encoded digest is
+   * sent in the `X-Twilio-Signature` header.
+   *
+   * Source: twilio.com/docs/usage/webhooks/webhooks-security
+   *
+   * @param fullUrl The full request URL (scheme + host + path + ?query).
+   * @param postParams The POST form fields as parsed into a plain object.
+   * @param signature Value of X-Twilio-Signature header.
+   * @param authToken Twilio Auth Token (from twilio.com/console).
+   * @returns true when the signature matches; false otherwise.
+   */
+  verifySignature(
+    fullUrl: string,
+    postParams: Readonly<Record<string, string>>,
+    signature: string,
+    authToken: string,
+  ): boolean {
+    if (!authToken || !signature || !fullUrl) return false;
+    // Build the signing base: URL followed by sorted key+value pairs.
+    const sortedKeys = Object.keys(postParams).sort();
+    let base = fullUrl;
+    for (const k of sortedKeys) {
+      base += k + postParams[k];
+    }
+    const expected = createHmac("sha1", authToken).update(base, "utf8").digest("base64");
+    if (expected.length !== signature.length) return false;
+    try {
+      return timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(signature, "utf8"));
+    } catch {
+      return false;
+    }
+  }
+
   async start(): Promise<void> {
     if (!this.accountSid || !this.authToken || !this.phoneNumber) {
       throw new Error(
-        "TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER required. "
-        + "Sign up at https://www.twilio.com",
+        "TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER required. " +
+          "Sign up at https://www.twilio.com",
       );
     }
 
     // Verify credentials by fetching account info
     const response = await fetch(`${this.apiBase}.json`, {
       headers: {
-        "Authorization": `Basic ${btoa(`${this.accountSid}:${this.authToken}`)}`,
+        Authorization: `Basic ${btoa(`${this.accountSid}:${this.authToken}`)}`,
       },
     });
 
@@ -88,7 +129,7 @@ export class SMSAdapter implements ChannelAdapter {
       const response = await fetch(`${this.apiBase}/Messages.json`, {
         method: "POST",
         headers: {
-          "Authorization": `Basic ${btoa(`${this.accountSid}:${this.authToken}`)}`,
+          Authorization: `Basic ${btoa(`${this.accountSid}:${this.authToken}`)}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: encodeFormData({

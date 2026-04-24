@@ -13,6 +13,8 @@
  */
 
 import type { ChannelAdapter, IncomingMessage, OutgoingMessage, ChannelType } from "./adapter.js";
+// V9 T1.6 — HMAC verification imports for verifySignature().
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 interface SlackMessage {
   readonly type: string;
@@ -55,16 +57,58 @@ export class SlackAdapter implements ChannelAdapter {
     this.appToken = appToken ?? process.env["SLACK_APP_TOKEN"] ?? "";
   }
 
+  /**
+   * V9 T1.6 — Verify a Slack webhook signature.
+   *
+   * Slack's scheme: compute `v0=hex(HMAC-SHA256(v0:<timestamp>:<body>, signing_secret))`
+   * and compare to the `X-Slack-Signature` header. The `X-Slack-Request-Timestamp`
+   * header is part of the signature base so old captured requests can't be
+   * replayed with a stale signature. Implementations should additionally reject
+   * timestamps older than 5 minutes (per Slack's guidance).
+   *
+   * @param rawBody Unmodified request body as received (must be the raw bytes,
+   *                not a re-serialized JSON — Slack signs the exact bytes).
+   * @param timestamp Value of `X-Slack-Request-Timestamp` header.
+   * @param signature Value of `X-Slack-Signature` header (format: `v0=…`).
+   * @param signingSecret The app's signing secret (from api.slack.com/apps →
+   *                     Basic Information → Signing Secret).
+   * @returns true when the signature is valid AND the timestamp is within 5min.
+   */
+  verifySignature(
+    rawBody: string,
+    timestamp: string,
+    signature: string,
+    signingSecret: string,
+  ): boolean {
+    if (!signingSecret || !signature || !timestamp) return false;
+    // Replay protection: reject timestamps more than 5 minutes old.
+    const ts = Number(timestamp);
+    if (!Number.isFinite(ts)) return false;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSec - ts) > 300) return false;
+
+    const base = `v0:${timestamp}:${rawBody}`;
+    const expected = `v0=${createHmac("sha256", signingSecret).update(base, "utf8").digest("hex")}`;
+    if (expected.length !== signature.length) return false;
+    try {
+      return timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(signature, "utf8"));
+    } catch {
+      return false;
+    }
+  }
+
   async start(): Promise<void> {
     if (!this.botToken || !this.appToken) {
-      throw new Error("SLACK_BOT_TOKEN and SLACK_APP_TOKEN required. Create a Slack App at https://api.slack.com/apps");
+      throw new Error(
+        "SLACK_BOT_TOKEN and SLACK_APP_TOKEN required. Create a Slack App at https://api.slack.com/apps",
+      );
     }
 
     // Get WebSocket URL via Socket Mode
     const response = await fetch("https://slack.com/api/apps.connections.open", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${this.appToken}`,
+        Authorization: `Bearer ${this.appToken}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
     });
@@ -106,7 +150,7 @@ export class SlackAdapter implements ChannelAdapter {
       const response = await fetch("https://slack.com/api/chat.postMessage", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${this.botToken}`,
+          Authorization: `Bearer ${this.botToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -184,10 +228,9 @@ export class SlackAdapter implements ChannelAdapter {
     if (cached) return cached;
 
     try {
-      const response = await fetch(
-        `https://slack.com/api/users.info?user=${userId}`,
-        { headers: { "Authorization": `Bearer ${this.botToken}` } },
-      );
+      const response = await fetch(`https://slack.com/api/users.info?user=${userId}`, {
+        headers: { Authorization: `Bearer ${this.botToken}` },
+      });
       const data = (await response.json()) as SlackUserInfo;
       const name = data.user?.real_name ?? data.user?.name ?? userId;
       this.userCache.set(userId, name);

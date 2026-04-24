@@ -57,6 +57,45 @@ export class TelegramAdapter implements ChannelAdapter {
     this.apiBase = `https://api.telegram.org/bot${this.token}`;
   }
 
+  /**
+   * V9 T1.6 — Verify that a Telegram webhook request came from the
+   * official Telegram IP space.
+   *
+   * Telegram does NOT sign webhook requests with HMAC (unlike Slack
+   * or WhatsApp). Their guidance: bind your webhook to an IP allowlist
+   * and/or use a `secret_token` query parameter. Here we implement the
+   * allowlist check; callers wanting defense-in-depth should ALSO
+   * verify the `secret_token` they configured via `setWebhook`.
+   *
+   * Official IP ranges (source: core.telegram.org/bots/webhooks):
+   *   149.154.160.0/20, 91.108.4.0/22.
+   *
+   * @param remoteIp The `req.socket.remoteAddress` (or x-forwarded-for
+   *                 trusted first hop) of the webhook request.
+   * @returns true when remoteIp is inside a Telegram-published range.
+   */
+  verifySignature(remoteIp: string): boolean {
+    if (!remoteIp) return false;
+    // Strip optional IPv6-mapped prefix: "::ffff:149.154.167.197" → "149.154.167.197".
+    const ip = remoteIp.startsWith("::ffff:") ? remoteIp.slice(7) : remoteIp;
+    const parts = ip.split(".").map((p) => Number(p));
+    if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+      return false;
+    }
+    const [a, b, c, d] = parts as [number, number, number, number];
+    const ipNum = (a << 24) | (b << 16) | (c << 8) | d;
+    // 149.154.160.0/20 → 149.154.160.0 .. 149.154.175.255
+    const range1Lo = (149 << 24) | (154 << 16) | (160 << 8);
+    const range1Hi = (149 << 24) | (154 << 16) | (175 << 8) | 255;
+    // 91.108.4.0/22 → 91.108.4.0 .. 91.108.7.255
+    const range2Lo = (91 << 24) | (108 << 16) | (4 << 8);
+    const range2Hi = (91 << 24) | (108 << 16) | (7 << 8) | 255;
+    const u = ipNum >>> 0; // treat as unsigned
+    return (
+      (u >= range1Lo >>> 0 && u <= range1Hi >>> 0) || (u >= range2Lo >>> 0 && u <= range2Hi >>> 0)
+    );
+  }
+
   async start(): Promise<void> {
     if (!this.token) {
       throw new Error("TELEGRAM_BOT_TOKEN not set. Create a bot via @BotFather.");
