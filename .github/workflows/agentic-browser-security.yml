@@ -1,0 +1,161 @@
+name: Agentic Browser Security - Adversarial Eval Gate
+
+# V9 Tier 10 T10.5 - adversarial prompt-injection eval gate.
+#
+# Fires on every PR that touches the 4 P0 guards, the browser stack,
+# the eval harness, or the gate itself. Runs the full case corpus
+# in strict mode and fails the job when:
+#   - attack-success rate >= 2%   (V9 exit criterion)
+#   - any single case flips from block -> no-block vs the baseline
+#
+# Spec: docs/MASTER_PLAN_V9.md lines 1472-1510.
+#
+# Security note: no untrusted github.event.* inputs are interpolated
+# into any run: block. The only dynamic data consumed is eval-report.json
+# (produced by this same workflow, read via fs inside actions/github-script)
+# and the event name (github.event_name in a conditional, not a shell).
+# This follows the benchmark-nightly.yml pattern and GitHub's workflow-
+# injection guidance.
+
+on:
+  pull_request:
+    paths:
+      - "src/browser/**"
+      - "src/security/prompt-injection-*.ts"
+      - "src/security/hidden-text-detector.ts"
+      - "src/security/url-instruction-guard.ts"
+      - "src/middleware/trifecta-guard.ts"
+      - "scripts/run-prompt-injection-eval.mjs"
+      - "scripts/capture-prompt-injection-baseline.mjs"
+      - "tests/security/prompt-injection-eval/**"
+      - ".github/workflows/agentic-browser-security.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/browser/**"
+      - "src/security/prompt-injection-*.ts"
+      - "src/security/hidden-text-detector.ts"
+      - "src/security/url-instruction-guard.ts"
+      - "src/middleware/trifecta-guard.ts"
+      - "scripts/run-prompt-injection-eval.mjs"
+      - "scripts/capture-prompt-injection-baseline.mjs"
+      - "tests/security/prompt-injection-eval/**"
+      - ".github/workflows/agentic-browser-security.yml"
+  workflow_dispatch:
+
+# Cancel earlier in-progress runs for the same PR so a rapid rebase
+# does not stack builds. Main-branch runs do not cancel in-progress.
+concurrency:
+  group: agentic-browser-security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least-privilege defaults. pull-requests: write is only needed so
+# the failure-comment step can post back to the PR.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    name: Adversarial prompt-injection eval (strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Rebuild native modules (better-sqlite3)
+        run: npm rebuild better-sqlite3
+
+      - name: Validate case corpus
+        # Defense-in-depth: the harness also checks this, but failing
+        # fast here makes the root cause obvious in the UI when the
+        # corpus has been accidentally gutted.
+        run: |
+          CASE_COUNT=$(find tests/security/prompt-injection-eval/cases -maxdepth 1 -name "*.json" -type f | wc -l | tr -d ' ')
+          echo "case count: $CASE_COUNT"
+          if [ "$CASE_COUNT" -lt 15 ]; then
+            echo "::error::case corpus has $CASE_COUNT cases; expected >= 15"
+            exit 1
+          fi
+
+      - name: Run adversarial eval (strict mode)
+        id: eval
+        env:
+          WOTANN_EVAL_STRICT: "1"
+        run: |
+          set +e
+          node scripts/run-prompt-injection-eval.mjs --json > eval-report.json
+          EXIT=$?
+          set -e
+          echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
+          echo "::group::Eval summary"
+          node -e "const r=require('./eval-report.json'); console.log('total:',r.total,'| missed:',r.missedAttacks,'| attack-success:',(r.attackSuccessRate*100).toFixed(2)+'%','| regressions:',r.regressions.length);"
+          echo "::endgroup::"
+          exit "$EXIT"
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-injection-eval-report
+          path: eval-report.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Comment on PR (failure only)
+        # Only runs on PR events, only when the eval job failed, and
+        # only when the report artifact exists. Uses github-script so
+        # no shell interpolation of event data is needed.
+        if: failure() && github.event_name == 'pull_request' && hashFiles('eval-report.json') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let report;
+            try {
+              report = JSON.parse(fs.readFileSync('eval-report.json', 'utf-8'));
+            } catch (err) {
+              core.warning('could not parse eval-report.json: ' + err.message);
+              return;
+            }
+            const pct = (report.attackSuccessRate * 100).toFixed(2);
+            const thresholdPct = (report.threshold * 100).toFixed(2);
+            const regressions = Array.isArray(report.regressions) ? report.regressions : [];
+            const lines = [
+              '### Agentic Browser Security - Eval Gate Failed',
+              '',
+              '| Metric | Value |',
+              '|---|---|',
+              '| Total cases | ' + report.total + ' |',
+              '| Missed attacks | ' + report.missedAttacks + ' |',
+              '| Attack-success rate | ' + pct + '% (threshold ' + thresholdPct + '%) |',
+              '| Regressions (block -> no-block) | ' + regressions.length + ' |',
+              '',
+            ];
+            if (regressions.length > 0) {
+              lines.push('**Regressions:**');
+              lines.push('');
+              for (const id of regressions) {
+                lines.push('- `' + id + '`');
+              }
+              lines.push('');
+            }
+            lines.push('Download the full `prompt-injection-eval-report` artifact for per-case details.');
+            lines.push('');
+            lines.push('Spec: docs/MASTER_PLAN_V9.md lines 1472-1510. Gate: `.github/workflows/agentic-browser-security.yml`.');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: lines.join('\n'),
+            });
