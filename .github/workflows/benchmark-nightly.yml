@@ -1,0 +1,141 @@
+name: Benchmark — Nightly
+
+# V9 T2.4 — nightly LongMemEval run that publishes results to
+# docs/BENCHMARKS.md. The workflow intentionally short-circuits when
+# prerequisites aren't present (corpus + judge model API key) so a
+# fresh fork doesn't produce empty commits.
+#
+# Schedule: 04:17 UTC every day (off-peak, unambiguous minute for
+# debugging runs). Can also be triggered manually via workflow_dispatch.
+#
+# Security note: workflow_dispatch inputs are untrusted user input
+# (same threat class as issue/PR bodies). Per GitHub's workflow-
+# injection guidance, inputs MUST be surfaced via `env:` variables
+# (quoted with "$VAR") rather than expanded directly into `run:`
+# shell strings. This workflow follows that pattern for `variant`.
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "Dataset variant (s | m | oracle)"
+        required: false
+        default: "s"
+
+# Only ever one nightly run — a long run shouldn't race with the next cron.
+concurrency:
+  group: benchmark-nightly
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write  # publish docs/BENCHMARKS.md commits back
+    env:
+      # Surface the untrusted workflow_dispatch input as an env var so
+      # every `run:` step uses "$VARIANT" (shell-quoted) instead of
+      # expanding the raw expression into the command string. Also
+      # constrains `variant` to an allowlist via validation below.
+      VARIANT: ${{ github.event.inputs.variant || 's' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate variant
+        # Defense-in-depth: even though the UI constrains inputs to a
+        # dropdown, a direct API call can pass anything. Reject values
+        # outside the known set before they reach any shell-exec.
+        run: |
+          case "$VARIANT" in
+            s|m|oracle) echo "variant ok: $VARIANT" ;;
+            *) echo "::error::invalid variant"; exit 1 ;;
+          esac
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      # Pre-flight: we only proceed when (a) a judge API key is
+      # available as a repo secret. This lets the workflow live on
+      # main even before the secret + licensing are set up — it just
+      # skips on unconfigured forks.
+      - name: Check prerequisites
+        id: prereq
+        env:
+          JUDGE_KEY: ${{ secrets.LONGMEMEVAL_JUDGE_KEY }}
+        run: |
+          if [ -z "$JUDGE_KEY" ]; then
+            echo "reason=missing LONGMEMEVAL_JUDGE_KEY secret" >> "$GITHUB_OUTPUT"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Skip (prereqs missing)
+        if: steps.prereq.outputs.ready != 'true'
+        env:
+          SKIP_REASON: ${{ steps.prereq.outputs.reason }}
+        run: |
+          echo "::notice::Skipping nightly benchmark — $SKIP_REASON"
+          exit 0
+
+      - name: Download corpus
+        if: steps.prereq.outputs.ready == 'true'
+        run: |
+          node scripts/download-longmemeval.mjs --yes \
+            --variant="$VARIANT"
+
+      - name: Build
+        if: steps.prereq.outputs.ready == 'true'
+        run: npm run build
+
+      - name: Run benchmark
+        if: steps.prereq.outputs.ready == 'true'
+        env:
+          LONGMEMEVAL_JUDGE_KEY: ${{ secrets.LONGMEMEVAL_JUDGE_KEY }}
+          WOTANN_OMEGA_LAYERS: "1"
+          WOTANN_USE_TEMPR: "1"
+        run: |
+          STAMP="$(date +%Y-%m-%d)"
+          node scripts/benchmark-longmemeval.mjs \
+            --variant="$VARIANT" \
+            --out=".wotann/benchmarks/results/${STAMP}.json"
+
+      - name: Update BENCHMARKS.md
+        if: steps.prereq.outputs.ready == 'true'
+        run: |
+          STAMP="$(date +%Y-%m-%d)"
+          node scripts/update-benchmarks-md.mjs \
+            --in=".wotann/benchmarks/results/${STAMP}.json" \
+            --doc="docs/BENCHMARKS.md"
+
+      - name: Regression gate
+        if: steps.prereq.outputs.ready == 'true'
+        run: |
+          # Fail the run when the latest score drops >5% vs the rolling median.
+          # The gate script reads BENCHMARKS.md history and exits 1 on regression.
+          node scripts/benchmark-regression-gate.mjs \
+            --doc="docs/BENCHMARKS.md" --threshold-pct=5
+
+      - name: Commit results
+        if: steps.prereq.outputs.ready == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/BENCHMARKS.md .wotann/benchmarks/results/*.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          STAMP="$(date -u +%Y-%m-%d)"
+          git commit -m "bench: nightly LongMemEval run ${STAMP}"
+          git push
