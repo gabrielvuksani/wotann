@@ -25,6 +25,18 @@ import type { QueryExecutor } from "../desktop/prompt-enhancer.js";
 import type { EnhancementStyle } from "../desktop/types.js";
 import { SymbolOperations } from "../lsp/symbol-operations.js";
 import { AuditTrail, type AuditQuery } from "../telemetry/audit-trail.js";
+// V9 T1.1 KEYSTONE — wire `computer.session.step` through the real
+// Layer-4 action execution surface. V9's HOW block referenced
+// `ComputerUseAgent.dispatch()` but that method is Layer 1-2 perception
+// routing, not action execution. The real execution happens here, in
+// the route-table-driven `executeDesktopAction(action)` from
+// platform-bindings. Wiring this unblocks the entire F-series RPC
+// surface (iOS → daemon → action → UI feedback).
+import {
+  executeDesktopAction,
+  type DesktopAction,
+  type RouteResult,
+} from "../computer-use/platform-bindings.js";
 import type { DispatchRoutePolicy } from "../channels/dispatch.js";
 import type { BackgroundTaskConfig } from "../agents/background-agent.js";
 import type { BenchmarkType } from "../intelligence/benchmark-harness.js";
@@ -5423,12 +5435,64 @@ export class KairosRPCHandler {
       if (typeof deviceId !== "string") throw new Error("deviceId required");
       if (!step || typeof step !== "object") throw new Error("step (object) required");
       try {
+        // Layer 1: advance the session state machine (claimed → running).
         const session = this.computerSessionStore.step({
           sessionId,
           deviceId,
           step: step as Readonly<Record<string, unknown>>,
         });
-        return serializeSession(session);
+
+        // V9 T1.1 KEYSTONE — Layer 4: actually EXECUTE the step's
+        // desktop action. The route table in platform-bindings.ts
+        // handles the canonical actions (open-url, open-app, click,
+        // type, screenshot, etc.); `executeDesktopAction` returns
+        // `{success, output}` or `null` when the action isn't routed.
+        //
+        // Session was previously a "dead endpoint" — F-series RPCs
+        // could transition the state machine but never actually
+        // performed the requested desktop action. This wire closes
+        // that gap. Agents sending a step with `action: "open-url"` +
+        // `params: {url: "..."}` will now see the URL actually open.
+        //
+        // Execution failures are surfaced via the return envelope
+        // rather than throwing — the session state machine already
+        // advanced to "running" and the caller needs both the session
+        // and the action-result to drive its UI. Throwing would lose
+        // the state transition.
+        const stepObj = step as Readonly<Record<string, unknown>>;
+        const rawAction = stepObj["action"];
+        const rawParams = stepObj["params"];
+        let execution: RouteResult | null = null;
+        let actionError: string | null = null;
+        if (typeof rawAction === "string" && session.status === "running") {
+          const params: Record<string, string> = {};
+          if (rawParams && typeof rawParams === "object" && !Array.isArray(rawParams)) {
+            for (const [k, v] of Object.entries(rawParams as Record<string, unknown>)) {
+              if (typeof v === "string") params[k] = v;
+              else if (typeof v === "number" || typeof v === "boolean") params[k] = String(v);
+            }
+          }
+          const action: DesktopAction = { action: rawAction, params };
+          try {
+            execution = executeDesktopAction(action);
+          } catch (execErr) {
+            actionError = execErr instanceof Error ? execErr.message : "executeDesktopAction threw";
+          }
+        }
+
+        // Return shape preserves backward-compat with existing callers
+        // (tests + any future clients): all session fields remain at the
+        // top level (spread from serializeSession) so consumers can keep
+        // reading `result.status`, `result.eventCount`, etc. The new
+        // V9 T1.1 fields — `execution` (RouteResult | null) and
+        // `actionError` — are additive. Callers that want the
+        // execution outcome read `result.execution`; callers that
+        // don't care see no behavioral change.
+        return {
+          ...serializeSession(session),
+          execution: execution ?? null,
+          ...(actionError ? { actionError } : {}),
+        };
       } catch (err) {
         throw toRpcError(err);
       }
