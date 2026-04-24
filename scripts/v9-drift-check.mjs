@@ -129,7 +129,22 @@ function auditFilePaths(v9) {
       lower.includes("(new") ||
       lower.startsWith("- new");
 
-    if (isNewContext) continue; // skip any line describing NEW files
+    // Session-8 addition: skip lines whose whole point is to prescribe
+    // file removal. A file-citation inside a "DELETE X" prose paragraph
+    // is a *plan-to-delete*, not an assertion that X should exist post-
+    // execution. Without this, T0.1 ships → `anthropic-subscription.ts`
+    // deletion → drift-check reports spurious drift because V9 still
+    // cites the pre-delete file:line forensic location.
+    const isDeleteContext =
+      /\bdelete\b/.test(lower) ||
+      /\bremove\b/.test(lower) ||
+      /\bdeleted\b/.test(lower) ||
+      /\bremoved\b/.test(lower) ||
+      /\bdeprecate\b/.test(lower) ||
+      lower.startsWith("- delete") ||
+      lower.startsWith("- remove");
+
+    if (isNewContext || isDeleteContext) continue; // skip NEW/DELETE-prescriptive lines
 
     let m;
     while ((m = lineCiteRe.exec(line)) !== null) {
