@@ -15,7 +15,9 @@ import { getModelContextConfig } from "../context/limits.js";
 import {
   annotatePromptForCaching,
   CacheHitTracker,
+  resolveCacheTtl,
   type CacheStrategy,
+  type CacheTtl,
 } from "./prompt-cache-warmup.js";
 import { toAnthropicTools } from "./tool-serializer.js";
 
@@ -51,11 +53,23 @@ const MAX_CACHE_BREAKPOINTS = 4;
 function buildSystemBlocks(
   systemPrompt: string | undefined,
   strategy: CacheStrategy = "auto",
+  ttl: CacheTtl = "5m",
 ): string | Anthropic.Messages.TextBlockParam[] | undefined {
   if (!systemPrompt) return undefined;
 
   // If the prompt is too short to benefit from caching, send as-is
   if (systemPrompt.length < CACHE_MIN_CHARS) return systemPrompt;
+
+  // V9 T14.1b — explicit 1h markers include `ttl`; 5m (default) omits
+  // the field entirely to preserve the pre-T14.1b wire format.
+  const markerFor = (
+    shouldCache: boolean,
+  ): { cache_control: { type: "ephemeral"; ttl?: "1h" } } | Record<string, never> => {
+    if (!shouldCache) return {};
+    return ttl === "1h"
+      ? { cache_control: { type: "ephemeral" as const, ttl: "1h" as const } }
+      : { cache_control: { type: "ephemeral" as const } };
+  };
 
   // Split on double-newline boundaries that often separate logical sections
   // (identity, tool definitions, rules, context). Fall back to a single block.
@@ -64,12 +78,12 @@ function buildSystemBlocks(
   if (sections.length <= 1) {
     // Single-section path — delegate to the shared annotation policy so
     // there is exactly one authority on how caching markers are placed.
-    const annotated = annotatePromptForCaching(systemPrompt, strategy);
+    const annotated = annotatePromptForCaching(systemPrompt, strategy, ttl);
     return annotated.blocks.map((b) => ({
       type: "text" as const,
       text: b.text,
-      ...(b.cache_control ? { cache_control: { type: "ephemeral" as const } } : {}),
-    }));
+      ...markerFor(!!b.cache_control),
+    })) as Anthropic.Messages.TextBlockParam[];
   }
 
   // Multiple sections — mark the first N large blocks for caching.
@@ -81,9 +95,9 @@ function buildSystemBlocks(
     return {
       type: "text" as const,
       text,
-      ...(shouldCache ? { cache_control: { type: "ephemeral" as const } } : {}),
+      ...markerFor(shouldCache),
     };
-  });
+  }) as Anthropic.Messages.TextBlockParam[];
 }
 
 /**
@@ -157,7 +171,20 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
     // Build system prompt blocks with cache control breakpoints.
     // The system prompt (identity, tools, rules) is large and stable across turns,
     // so we mark it for Anthropic's prompt caching to avoid re-processing.
-    const systemParam = buildSystemBlocks(options.systemPrompt);
+    //
+    // V9 T14.1b — resolve the active cache TTL from the process env snapshot.
+    // When `ENABLE_PROMPT_CACHING_1H=1`, we tag blocks with the 1h tier
+    // AND attach the required `extended-cache-ttl-2025-04-11` beta header
+    // below. The env snapshot is passed explicitly so this file stays
+    // env-guard clean (QB #13) — tests inject a fixture via options.envOverride.
+    const envSnapshot =
+      (
+        options as UnifiedQueryOptions & {
+          readonly envOverride?: Readonly<Record<string, string | undefined>>;
+        }
+      ).envOverride ?? process.env;
+    const cacheTtl = resolveCacheTtl(envSnapshot);
+    const systemParam = buildSystemBlocks(options.systemPrompt, "auto", cacheTtl);
 
     // S1-3 + P0-4: Forward tool definitions into the request body via the
     // shared tool-serializer (Hermes `convert_tools_to_anthropic` pattern).
@@ -176,6 +203,12 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
         messages,
         temperature: options.temperature,
         ...(anthropicTools ? { tools: anthropicTools as unknown as never } : {}),
+        // V9 T14.1b — opt into the 1h cache TTL by surfacing the Anthropic
+        // beta flag. Harmless to include when ttl=5m too, but we only emit
+        // it on the 1h path so the request stays minimal otherwise.
+        ...(cacheTtl === "1h"
+          ? { betas: ["extended-cache-ttl-2025-04-11"] as unknown as never }
+          : {}),
       });
 
       // S1-21: Parse the full content-block lifecycle.

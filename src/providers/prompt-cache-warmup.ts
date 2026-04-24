@@ -29,13 +29,29 @@ export interface CachePrefix {
   readonly expectedUses?: number;
 }
 
+/**
+ * Anthropic cache TTL tier. The default ephemeral cache lives ~5 minutes;
+ * the `1h` tier (V9 T14.1b, CC v2.1.108 parity) is opt-in and requires
+ * the `extended-cache-ttl-2025-04-11` beta header on the request — that
+ * header is added by the Anthropic adapter layer, not here. Pricing also
+ * differs: cache writes in the 1h tier cost ~2x the 5m tier, so the
+ * longer window is only worth it for prefixes reused across minutes.
+ */
+export type CacheTtl = "5m" | "1h";
+
+export interface CacheControlMarker {
+  readonly type: "ephemeral";
+  /** Absent = default 5m; explicit "1h" enables the longer tier. */
+  readonly ttl?: CacheTtl;
+}
+
 export interface AnnotatedPrompt {
   readonly content: string;
   /** Blocks with cache_control markers, ready for provider API. */
   readonly blocks: ReadonlyArray<{
     readonly type: "text";
     readonly text: string;
-    readonly cache_control?: { readonly type: "ephemeral" };
+    readonly cache_control?: CacheControlMarker;
   }>;
 }
 
@@ -43,6 +59,29 @@ export type CacheStrategy =
   | "auto" // split by heuristic: cache the stable part, don't cache the per-request tail
   | "whole" // cache the entire prompt (good for fixed system prompts)
   | "no-cache"; // don't cache (baseline)
+
+/**
+ * Resolve the active cache TTL from an env snapshot. When
+ * `ENABLE_PROMPT_CACHING_1H` is set to "1" / "true" (case-insensitive),
+ * callers use the 1h tier. Any other value falls back to the default
+ * 5m. Passes the env explicitly so the module stays env-guard clean
+ * (QB #13) and tests don't leak through process.env.
+ */
+export function resolveCacheTtl(env: Readonly<Record<string, string | undefined>>): CacheTtl {
+  const raw = env["ENABLE_PROMPT_CACHING_1H"];
+  if (!raw) return "5m";
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" ? "1h" : "5m";
+}
+
+/**
+ * Build a cache_control marker for the given TTL. The default 5m tier
+ * omits `ttl` entirely (matches the existing wire format pre-T14.1b);
+ * only explicit "1h" emits the field to avoid unexpected API noise.
+ */
+function buildCacheMarker(ttl: CacheTtl): CacheControlMarker {
+  return ttl === "1h" ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" };
+}
 
 export interface WarmupOptions {
   /** Min tokens for a prefix to be worth caching. Default 1024 (Anthropic's min). */
@@ -82,11 +121,15 @@ export function estimateTokens(text: string): number {
 
 /**
  * Annotate a prompt for Anthropic caching. Returns blocks that can be
- * sent as system[].text + cache_control markers per block.
+ * sent as system[].text + cache_control markers per block. The
+ * optional `ttl` argument (V9 T14.1b) picks between 5m (default) and
+ * 1h cache tiers; callers typically resolve it via `resolveCacheTtl`
+ * so the env gate stays centralized.
  */
 export function annotatePromptForCaching(
   systemPrompt: string,
   strategy: CacheStrategy = "auto",
+  ttl: CacheTtl = "5m",
 ): AnnotatedPrompt {
   if (strategy === "no-cache") {
     return {
@@ -95,6 +138,8 @@ export function annotatePromptForCaching(
     };
   }
 
+  const marker = buildCacheMarker(ttl);
+
   if (strategy === "whole") {
     return {
       content: systemPrompt,
@@ -102,7 +147,7 @@ export function annotatePromptForCaching(
         {
           type: "text",
           text: systemPrompt,
-          cache_control: { type: "ephemeral" },
+          cache_control: marker,
         },
       ],
     };
@@ -126,7 +171,7 @@ export function annotatePromptForCaching(
           {
             type: "text",
             text: stable,
-            cache_control: { type: "ephemeral" },
+            cache_control: marker,
           },
           { type: "text", text: volatile },
         ],
@@ -141,7 +186,7 @@ export function annotatePromptForCaching(
       {
         type: "text",
         text: systemPrompt,
-        cache_control: { type: "ephemeral" },
+        cache_control: marker,
       },
     ],
   };
