@@ -18,7 +18,7 @@ class Wotann < Formula
   desc "Unified AI agent harness — multi-provider, portable, benchmark-first"
   homepage "https://wotann.com"
   license "MIT"
-  version "0.4.0"
+  version "0.5.0"
 
   # Platform-specific binaries. Homebrew resolves the right bottle per
   # OS + arch at install time. If no SEA binary exists for a platform,

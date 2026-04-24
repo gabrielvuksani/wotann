@@ -6,6 +6,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-23
+
+The V9 execution release. Ships Tier 0 legal hygiene, the top-10
+wire-audit closures (Tier 1), memory SOTA activation (Tier 2),
+MCP Apps server (Tier 4.1), the hardware-aware onboarding wizard
+stack (Tier 6), Opus 4.7 + 1h-cache parity with Claude Code v2.1.x
+(Tier 14.1), the Design Bridge emit/write/diff primitives (Tier 8.1-8.3),
+and the dead-code cleanup (Tier 14.10). 21+ commits across Sessions
+7–9 pushed to `origin/main`. Test suite: 7680+ passing.
+
+### Added — Onboarding v2 (Tier 6)
+
+- **Hardware detector** (`src/core/hardware-detect.ts`) — classifies
+  the running machine into `cloud-only | low | medium | high | extreme`
+  with Apple Silicon + NVIDIA detection and a reason string per tier.
+- **Provider ladder** (`src/providers/provider-ladder.ts`) — canonical
+  12-rung priority ordering (subscription → free-tier → BYOK → local →
+  advanced) with `selectFirstAvailable` / `filterLadder` / `groupByCategory`.
+- **LM Studio adapter** (`src/providers/lm-studio-adapter.ts`) — probe
+  + adapter wrapper over the OpenAI-compat transport.
+- **Config migration** (`src/core/config-migration.ts`) — detects
+  pre-0.2 config signatures + legacy credential files, archives to
+  `~/.wotann/.legacy/<stamp>/` without in-place rewrites.
+- **First-run success driver** (`src/cli/first-run-success.ts`) —
+  structured event generator (banner / roundtrip-started / chunks /
+  done / failed) the Ink TUI streams.
+- **Ink TUI wizard** (`src/cli/onboarding-screens.tsx`, 832 LOC) —
+  5 screens: Welcome → Strategy → Pick → Confirm → FirstRun. Exposes
+  pure reducer + helpers for headless testing; 28 reducer/logic tests.
+
+### Added — Memory SOTA (Tier 2)
+
+- **LongMemEval 500-item corpus download** with SHA-verified fetch +
+  cache.
+- **LLM-judge scorer** (`src/memory/evals/longmemeval/scorer.ts`) —
+  ability-specific judge prompts + bounded-concurrency evaluation,
+  preserves rule-based strict/lenient pass flags alongside verdict.
+- **OMEGA + TEMPR default-on** — recall flags flip from explicit-opt-in
+  to explicit-opt-out (`WOTANN_USE_TEMPR=0` to disable).
+- **Nightly benchmark workflow** (`.github/workflows/benchmark-nightly.yml`)
+  — cron + workflow_dispatch, env-var pattern for input allowlist,
+  secret prereq check.
+
+### Added — MCP Apps (Tier 4.1)
+
+- **Server-side UI resources** (`src/mcp/ui-resources.ts`) — 3 prebuilt
+  resources (memory-browser, cost-preview, editor-diff) registered with
+  stable `ui://wotann/*` URIs; MCP server exposes `resources/list` +
+  `resources/read`; iframe-safe HTML shell with `window.mcp.postMessage`
+  bridge stub.
+
+### Added — Top-10 Wire-Audit Closures (Tier 1)
+
+- **T1.1 KEYSTONE** — `computer.session.step` RPC now actually invokes
+  `executeDesktopAction`. Unblocks the entire F-series cross-surface
+  flow.
+- **T1.3** — `sqlite-vec` backend attached to MemoryStore (idempotent,
+  opt-in via `attachVectorBackend`).
+- **T1.4** — ONNX cross-encoder attached via `attachOnnxCrossEncoder`
+  for memory reranking.
+- **T1.5** — `warmupCache` fires after `buildStablePrefix` on
+  `updateSystemPromptForMode`.
+- **T1.6** — HMAC signature verification on Slack, Telegram, Discord,
+  WhatsApp, Teams, and Twilio SMS channel adapters (scheme-specific:
+  HMAC-SHA256, IP allowlist, Ed25519, HMAC-SHA1, JWT-structural).
+- **T1.7** — `resolvePermission` wired into sandbox-audit middleware's
+  `resolveToolPermission(msg, mode)`.
+- **T1.8** — `SelfHealingPipeline` now fires from `AutonomousExecutor`'s
+  failure branch with `executeRecovery` (corrects V9's wrong method
+  name `heal`).
+- **T1.9** — `searchUnifiedKnowledge` exposed via `memory.searchUnified`
+  RPC handler.
+- **T1.10** — 1h age gate on `.wotann` orphan-file sweep prevents
+  false-positive deletions on fresh files.
+
+### Added — Claude Code parity (Tier 14.1)
+
+- **Opus 4.7 xhigh effort** tier (`ThinkingEffort = "low" | "medium" |
+  "high" | "xhigh" | "max"`) with `supportsXhighEffort(model)` +
+  `clampEffortForModel` helpers. Matches CC v2.1.111.
+- **1h prompt cache TTL** (`ENABLE_PROMPT_CACHING_1H=1`) — opt-in
+  longer cache tier with the `extended-cache-ttl-2025-04-11` beta
+  header attached only on the 1h path. 5m wire format byte-identical
+  pre/post T14.1b on the default path. Matches CC v2.1.108.
+
+### Added — Design Bridge (Tier 8.1-8.3)
+
+- **DTCG emitter** (`src/design/dtcg-emitter.ts`) — structural
+  `DesignSystem` → W3C DTCG v6.3 tree with `$type`/`$value`/
+  `$description` + alias helpers + deterministic serializer.
+- **Bundle writer** (`src/design/bundle-writer.ts`) — mirror of
+  `handoff-receiver.ts`. Produces manifest.json (snake_case) +
+  design-system.json + optional components / figma / code-scaffold /
+  assets. Overwrite-safe with `_wotann-partial` sentinel.
+- **Bundle diff** (`src/design/bundle-diff.ts`) — tree-diff two
+  bundles with added / removed / changed entries + dotted source
+  paths. Field-prioritized (`$type > $value > $description > shape`),
+  lexicographically sorted, plain-text formatter.
+
+### Removed — DEAD-SAFE cleanup (Tier 14.10)
+
+- Deleted 4 unreferenced duplicates (526 LOC): `src/utils/logger.ts`
+  (telemetry/ covers audit logging), `src/utils/platform.ts` (direct
+  duplicate of `computer-use/platform-bindings.ts::detectPlatform`),
+  `src/cli/incognito.ts` (factory never called; session uses boolean
+  flag), `src/desktop/desktop-store.ts` (Zustand types that belong in
+  the separate desktop-app codebase).
+- Kept `src/cli/history-picker.ts` + `src/cli/pipeline-mode.ts` as
+  orphan scaffolds with inline status comments (resurrection-plausible
+  for cross-session history + Unix-pipe composability).
+
+### Changed — Legal hygiene (Tier 0)
+
+- Renamed `anthropic-subscription.ts` → `claude-cli-backend.ts`
+  (delegates to the Claude Code CLI instead of managing OAuth
+  directly — follows pattern OpenClaw documents as sanctioned).
+- Renamed `codex-oauth.ts` → `codex-detector.ts` (read-only, reads
+  tokens written by `codex login`, never mints).
+- Copilot adapter banner flags experimental status.
+- `SECURITY.md` appended with the Subscription Provider Access Policy.
+
 ## [0.4.0] - 2026-04-20
 
 The second major public release. **434 commits since v0.1.0.** This release lands every sprint from Phase 1–5, the full daemon RPC surface, the 8-layer memory, capability augmentation across 19 providers, the Ralph + self-healing autopilot, Tauri desktop, iOS companion, and the single-executable (SEA) release binary.
