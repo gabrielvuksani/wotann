@@ -9,6 +9,11 @@ import { join } from "node:path";
 import type { Middleware, MiddlewareContext, AgentResult } from "./types.js";
 import type { RiskLevel } from "../core/types.js";
 import { runSandboxedCommandSync } from "../sandbox/executor.js";
+import {
+  createTrifectaGuard,
+  type ApprovalHandler,
+  type TrifectaContext,
+} from "./trifecta-guard.js";
 
 interface PackageJson {
   readonly scripts?: Record<string, string>;
@@ -505,3 +510,53 @@ export const selfReflectionMiddleware: Middleware = {
     return { ...result, followUp: `${existingFollowUp}${notice}` };
   },
 };
+
+// ── Layer 5.7: Trifecta Guard — Simon Willison's lethal-trifecta gate ────
+//
+// T10.4 registration. The underlying factory + classifier live in
+// `./trifecta-guard.ts`; this file simply EXPOSES the middleware adapter so
+// the pipeline can slot it in next to the other layers. Position is AFTER
+// approval-queue (layer 5.5 GuardrailProvider) so the guard runs BEFORE the
+// tool executes but can itself invoke the approval queue when the lethal
+// trifecta fires. Keeping the adapter here preserves the single-file
+// registry convention established by the other 30 layers.
+//
+// Wiring: production callers supply an `ApprovalHandler` (typically the
+// ApprovalQueue's enqueue+await pattern). Tests pass a stub handler so they
+// can assert on classification/evaluation without spinning up the queue.
+
+export const TRIFECTA_GUARD_NAME = "TrifectaGuard" as const;
+
+/**
+ * Adapt the trifecta-guard into the standard Middleware interface. Callers
+ * inject an `ApprovalHandler` (the production queue; tests pass a stub) and
+ * optional `contextProvider` that turns the in-flight `MiddlewareContext`
+ * into a `TrifectaContext`. When no toolName is resolvable, the layer is a
+ * no-op — that preserves QB #6 (honest failures: don't invent tool-call
+ * signals from thin air).
+ */
+export function createTrifectaGuardMiddleware(options: {
+  readonly approvalHandler: ApprovalHandler;
+  readonly strictMode?: boolean;
+  readonly contextProvider?: (ctx: MiddlewareContext) => TrifectaContext | null;
+}): Middleware {
+  const guard = createTrifectaGuard({
+    approvalHandler: options.approvalHandler,
+    ...(options.strictMode !== undefined ? { strictMode: options.strictMode } : {}),
+  });
+  return {
+    name: TRIFECTA_GUARD_NAME,
+    order: 5.7,
+    async before(ctx: MiddlewareContext): Promise<MiddlewareContext> {
+      const trifectaCtx = options.contextProvider?.(ctx);
+      if (!trifectaCtx) return ctx;
+      const verdict = await guard.inspect(trifectaCtx);
+      // Attach the verdict to the ctx via a typed extension so downstream
+      // layers + the runtime can surface the decision in audit logs.
+      return {
+        ...ctx,
+        trifectaVerdict: verdict,
+      };
+    },
+  };
+}

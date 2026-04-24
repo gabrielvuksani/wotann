@@ -17,6 +17,8 @@ import type { ToolDefinition } from "../core/types.js";
 import { ChromeBridge } from "./chrome-bridge.js";
 import { CamoufoxBrowser } from "./camoufox-backend.js";
 import { isSafeUrl } from "../security/ssrf-guard.js";
+import type { BrowsePlan, BrowsePlanStep } from "./agentic-browser.js";
+import type { TabRegistry, TabOwner } from "./tab-registry.js";
 
 // ── Envelope ────────────────────────────────────────────────
 
@@ -41,6 +43,9 @@ export const BROWSER_TOOL_NAMES = [
   "browser.type",
   "browser.screenshot",
   "browser.read_page",
+  "browser.plan",
+  "browser.spawn_tab",
+  "browser.approve_action",
 ] as const;
 
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number];
@@ -103,14 +108,89 @@ export function buildBrowserToolDefinitions(): readonly ToolDefinition[] {
         "since the DOM is converted to a structured text tree.",
       inputSchema: { type: "object", properties: {} },
     },
+    {
+      name: "browser.plan",
+      description:
+        "Return the agentic-browser orchestrator's current plan for `task` as an ordered list " +
+        "of step rationales. Inspection-only — execution stays with browser.goto/click/type.",
+      inputSchema: {
+        type: "object",
+        properties: { task: stringProp("Natural-language task the agent should plan for") },
+        required: ["task"],
+      },
+    },
+    {
+      name: "browser.spawn_tab",
+      description:
+        'Spawn a new browser tab and register it in the tab-registry. `ownership` is "user" ' +
+        '(user-driven) or "agent" (agent-driven, counted against maxAgentTabs). Returns the ' +
+        "new tabId, or `{rejected}` with a reason when the agent cap is exceeded.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ownership: { type: "string", description: '"user" or "agent"' },
+          url: stringProp("Optional initial URL for the new tab"),
+          taskId: stringProp("Optional taskId when ownership=agent (groups tabs by task)"),
+        },
+        required: ["ownership"],
+      },
+    },
+    {
+      name: "browser.approve_action",
+      description:
+        "Dispatch an allow/deny decision for a pending approval raised by the agentic browser. " +
+        "Returns `{ok:false}` when the approvalId is unknown or already decided (honest failure).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          actionId: stringProp("The approvalId (or queued actionId) returned at request time"),
+          decision: { type: "string", description: '"allow" or "deny"' },
+        },
+        required: ["actionId", "decision"],
+      },
+    },
   ];
 }
 
 // ── Deps ────────────────────────────────────────────────────
 
+/**
+ * Injected orchestrator hooks for the agentic trio
+ * (browser.plan / browser.spawn_tab / browser.approve_action).
+ *
+ * All three fields are optional: when an orchestrator callback is
+ * absent the corresponding tool returns an honest empty/failed
+ * envelope rather than silently succeeding (QB #6).
+ */
+export interface BrowserAgenticDep {
+  /**
+   * Returns the current plan for `task`. When missing or throwing,
+   * browser.plan responds with `{plan:[]}` so callers can distinguish
+   * "no planner available" from "planner produced 0 steps".
+   */
+  readonly plan?: (task: string) => Promise<BrowsePlan> | BrowsePlan;
+  /** Per-session tab registry (see src/browser/tab-registry.ts). */
+  readonly tabRegistry?: TabRegistry;
+  /**
+   * Factory for new CDP target IDs. Tests inject a deterministic
+   * counter; prod wires this to the CDP `Target.createTarget` result.
+   */
+  readonly spawnTabId?: (url?: string) => string;
+  /**
+   * Delegate the allow/deny decision to the approval queue. Returns
+   * `true` iff the queue accepted the decision. A throw or a `false`
+   * return collapses to `{ok:false}` on the tool result.
+   */
+  readonly decideApproval?: (
+    actionId: string,
+    decision: "allow" | "deny",
+  ) => Promise<boolean> | boolean;
+}
+
 export interface BrowserDep {
   chrome?: ChromeBridge | null;
   camoufox?: CamoufoxBrowser | null;
+  agentic?: BrowserAgenticDep;
 }
 
 async function pickBackend(dep: BrowserDep): Promise<"chrome" | "camoufox" | null> {
@@ -143,6 +223,16 @@ export async function dispatchBrowserTool(
   input: Record<string, unknown>,
   dep: BrowserDep,
 ): Promise<BrowserToolResult<unknown>> {
+  // Agentic trio — these don't need a page-bound backend; they
+  // delegate to the orchestrator / tab-registry / approval queue.
+  if (
+    toolName === "browser.plan" ||
+    toolName === "browser.spawn_tab" ||
+    toolName === "browser.approve_action"
+  ) {
+    return dispatchAgenticTool(toolName, input, dep.agentic);
+  }
+
   const backend = await pickBackend(dep);
   if (!backend) {
     return errEnv("not_configured", "no browser backend available (need Chromium CDP or Camoufox)");
@@ -238,6 +328,105 @@ export async function dispatchBrowserTool(
     default: {
       const _exhaustive: never = toolName;
       return errEnv("bad_input", `unknown tool: ${String(_exhaustive)}`);
+    }
+  }
+}
+
+// ── Agentic dispatcher ──────────────────────────────────────
+
+/**
+ * Plan-step summary returned by browser.plan. Slimmed vs. the full
+ * `BrowsePlanStep` so the LLM sees only what it needs to reason about
+ * next actions (id / kind / rationale / optional target).
+ */
+export interface BrowserPlanStepSummary {
+  readonly id: string;
+  readonly kind: BrowsePlanStep["kind"];
+  readonly rationale: string;
+  readonly target?: string;
+}
+
+export type BrowserSpawnTabResult =
+  | { readonly tabId: string; readonly ownership: "user" | "agent" }
+  | { readonly rejected: string };
+
+async function dispatchAgenticTool(
+  toolName: "browser.plan" | "browser.spawn_tab" | "browser.approve_action",
+  input: Record<string, unknown>,
+  agentic: BrowserAgenticDep | undefined,
+): Promise<BrowserToolResult<unknown>> {
+  switch (toolName) {
+    case "browser.plan": {
+      const task = input["task"];
+      if (typeof task !== "string" || task.trim().length === 0)
+        return errEnv("bad_input", "task required");
+      // Honest failure: with no planner we return an empty plan rather
+      // than fabricate steps (QB #6).
+      if (!agentic || !agentic.plan) {
+        return { ok: true, data: { plan: [] as readonly BrowserPlanStepSummary[] } };
+      }
+      try {
+        const plan = await agentic.plan(task);
+        const summary: readonly BrowserPlanStepSummary[] = plan.steps.map((s) => ({
+          id: s.id,
+          kind: s.kind,
+          rationale: s.rationale,
+          ...(s.target !== undefined ? { target: s.target } : {}),
+        }));
+        return { ok: true, data: { plan: summary } };
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        return errEnv("upstream_error", `planner: ${detail.slice(0, 200)}`);
+      }
+    }
+    case "browser.spawn_tab": {
+      const ownership = input["ownership"];
+      if (ownership !== "user" && ownership !== "agent")
+        return errEnv("bad_input", 'ownership must be "user" or "agent"');
+      const urlRaw = input["url"];
+      const url = typeof urlRaw === "string" && urlRaw.length > 0 ? urlRaw : undefined;
+      if (url !== undefined && !isSafeUrl(url)) return errEnv("ssrf_blocked", url);
+      const taskIdRaw = input["taskId"];
+      const taskId = typeof taskIdRaw === "string" && taskIdRaw.length > 0 ? taskIdRaw : "default";
+      if (!agentic || !agentic.tabRegistry)
+        return errEnv("not_configured", "tab-registry not wired");
+      const tabId =
+        agentic.spawnTabId?.(url) ?? `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const owner: TabOwner = ownership === "user" ? { kind: "user" } : { kind: "agent", taskId };
+      const result = agentic.tabRegistry.register(
+        url !== undefined ? { tabId, owner, url } : { tabId, owner },
+      );
+      if (!result.ok) {
+        const data: BrowserSpawnTabResult = {
+          rejected:
+            result.error === "max-agent-tabs-exceeded" ? "max agent tabs exceeded" : result.error,
+        };
+        return { ok: true, data };
+      }
+      const data: BrowserSpawnTabResult = { tabId: result.tab.tabId, ownership };
+      return { ok: true, data };
+    }
+    case "browser.approve_action": {
+      const actionId = input["actionId"];
+      const decision = input["decision"];
+      if (typeof actionId !== "string" || actionId.trim().length === 0)
+        return errEnv("bad_input", "actionId required");
+      if (decision !== "allow" && decision !== "deny")
+        return errEnv("bad_input", 'decision must be "allow" or "deny"');
+      if (!agentic || !agentic.decideApproval) {
+        return { ok: true, data: { ok: false, detail: "approval-queue not wired" } };
+      }
+      try {
+        const accepted = await agentic.decideApproval(actionId, decision);
+        return { ok: true, data: { ok: accepted === true } };
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        return { ok: true, data: { ok: false, detail: detail.slice(0, 200) } };
+      }
+    }
+    default: {
+      const _exhaustive: never = toolName;
+      return errEnv("bad_input", `unknown agentic tool: ${String(_exhaustive)}`);
     }
   }
 }

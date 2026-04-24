@@ -44,7 +44,48 @@ export type SessionEventType =
   | "handoff_accepted"
   | "handoff_expired"
   | "done"
-  | "error";
+  | "error"
+  // T10.4 — agentic-browser events. The store records every tab creation +
+  // each trifecta-approval outcome as a typed session event so cross-surface
+  // subscribers (phone/watch/TUI) can render a browse timeline without
+  // subscribing to the orchestrator's internal bus. Payload shapes are
+  // declared below as typed discriminated-union members.
+  | "browser.tab.opened"
+  | "browser.action.approved"
+  | "browser.action.denied";
+
+/**
+ * T10.4 — Typed payload shapes for the three `browser.*` event types. The
+ * store's own `SessionEvent` uses `Readonly<Record<string, unknown>>` so it
+ * stays agnostic of new event kinds, but callers that know they're reading
+ * a browser event can narrow using these shapes.
+ */
+export interface BrowserTabOpenedEventPayload {
+  readonly type: "browser.tab.opened";
+  readonly sessionId: string;
+  readonly tabId: string;
+  readonly url: string;
+  readonly timestamp: number;
+}
+
+export interface BrowserActionApprovedEventPayload {
+  readonly type: "browser.action.approved";
+  readonly sessionId: string;
+  readonly actionId: string;
+  readonly timestamp: number;
+}
+
+export interface BrowserActionDeniedEventPayload {
+  readonly type: "browser.action.denied";
+  readonly sessionId: string;
+  readonly actionId: string;
+  readonly timestamp: number;
+}
+
+export type BrowserSessionEventPayload =
+  | BrowserTabOpenedEventPayload
+  | BrowserActionApprovedEventPayload
+  | BrowserActionDeniedEventPayload;
 
 export type HandoffState = "pending" | "accepted" | "expired";
 

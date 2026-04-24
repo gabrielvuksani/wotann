@@ -56,6 +56,13 @@ export interface MiddlewareContext {
   frustrationDetected?: boolean;
   frustrationPatterns?: readonly string[];
 
+  // Layer 5.7: TrifectaGuard (T10.4)
+  trifectaVerdict?: {
+    readonly verdict: "ALLOW" | "REQUIRE_APPROVAL" | "BLOCK";
+    readonly approved?: boolean;
+    readonly reason: string;
+  };
+
   // Generic extension point
   cachedResponse?: string;
 }

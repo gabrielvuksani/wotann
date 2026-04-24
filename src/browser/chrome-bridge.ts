@@ -76,6 +76,58 @@ export interface BrowserActionResult {
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
+// ── Tab Event Subscription (T10.4) ─────────────────────────
+
+/**
+ * Tab lifecycle event derived from CDP `Target.*` messages. This is
+ * the bridge-level abstraction consumed by `src/browser/tab-registry.ts`
+ * (`register` on "attached", `unregister` on "destroyed", and
+ * `touchLastSeen` on "info-changed").
+ *
+ * `timestamp` is the receive time on this process (not a CDP field)
+ * so downstream consumers get a monotonic ordering without relying on
+ * wall-clock parity with the browser.
+ */
+export interface TabEvent {
+  readonly type: "attached" | "destroyed" | "info-changed";
+  readonly targetId: string;
+  readonly url?: string;
+  readonly title?: string;
+  readonly timestamp: number;
+}
+
+/**
+ * Minimal WebSocket shape the subscriber relies on. Production wires
+ * this to `globalThis.WebSocket`; tests inject a fake that records
+ * sends and pushes messages via `onmessage` so we can assert on
+ * event translation without a live browser.
+ */
+export interface TabSubscribeSocket {
+  onopen?: (() => void) | null;
+  onmessage?: ((event: { data: string }) => void) | null;
+  onerror?: ((err: unknown) => void) | null;
+  onclose?: (() => void) | null;
+  send: (data: string) => void;
+  close: () => void;
+}
+
+export interface SubscribeTabEventsOptions {
+  /**
+   * Override for the WebSocket constructor. Useful in tests where we
+   * don't want to talk to a real CDP. Defaults to `globalThis.WebSocket`
+   * — when that's missing the whole subscription collapses to a no-op
+   * (QB #6 honest failure).
+   */
+  readonly wsFactory?: (url: string) => TabSubscribeSocket;
+  /**
+   * Override for the discovery fetch that resolves the browser-level
+   * CDP endpoint. Defaults to `fetch(http://localhost:<port>/json/version)`.
+   */
+  readonly fetchBrowserEndpoint?: () => Promise<string | null>;
+  /** Injected clock for deterministic tests. Defaults to `Date.now`. */
+  readonly now?: () => number;
+}
+
 // ── Chrome Bridge ──────────────────────────────────────────
 
 export class ChromeBridge {
@@ -239,6 +291,148 @@ export class ChromeBridge {
     }
 
     return parts.join("\n");
+  }
+
+  // ── Target Event Subscription (T10.4) ──
+
+  /**
+   * Subscribe to browser-wide tab lifecycle events. Opens a single
+   * long-lived CDP WebSocket against the browser endpoint (not a
+   * per-page one), enables target discovery, and translates the
+   * relevant `Target.*` methods into `TabEvent`s delivered to
+   * `callback`.
+   *
+   * Returns an unsubscribe closure. When the underlying CDP connection
+   * can't be established (no browser WS, no global WebSocket, bad JSON
+   * response), subscribe is an honest no-op: the callback is never
+   * invoked and the returned unsubscribe is a harmless function. This
+   * preserves QB #6 — we never silently "subscribe" and then lie about
+   * having heard events.
+   */
+  subscribeTabEvents(
+    callback: (event: TabEvent) => void,
+    options?: SubscribeTabEventsOptions,
+  ): () => void {
+    const now = options?.now ?? Date.now;
+    const fetchBrowserEndpoint = options?.fetchBrowserEndpoint ?? (() => this.fetchBrowserWsUrl());
+    const globalWs = (globalThis as unknown as { WebSocket?: unknown }).WebSocket;
+    const wsFactory =
+      options?.wsFactory ??
+      (typeof globalWs === "function"
+        ? (url: string) =>
+            new (globalWs as new (u: string) => TabSubscribeSocket)(
+              url,
+            ) as unknown as TabSubscribeSocket
+        : null);
+
+    if (!wsFactory) {
+      // QB #6 honest failure — no WebSocket available, admit defeat.
+      return () => {
+        /* noop */
+      };
+    }
+
+    let closed = false;
+    let socket: TabSubscribeSocket | null = null;
+
+    const emit = (
+      type: TabEvent["type"],
+      targetId: string,
+      info?: { url?: string; title?: string },
+    ): void => {
+      if (closed) return;
+      const base = { type, targetId, timestamp: now() };
+      const withUrl = info?.url !== undefined ? { ...base, url: info.url } : base;
+      const full = info?.title !== undefined ? { ...withUrl, title: info.title } : withUrl;
+      callback(full);
+    };
+
+    void (async () => {
+      const wsUrl = await fetchBrowserEndpoint();
+      if (closed || wsUrl === null) return;
+      let ws: TabSubscribeSocket;
+      try {
+        ws = wsFactory(wsUrl);
+      } catch {
+        return;
+      }
+      if (closed) {
+        ws.close();
+        return;
+      }
+      socket = ws;
+      ws.onopen = () => {
+        try {
+          ws.send(
+            JSON.stringify({
+              id: 1,
+              method: "Target.setDiscoverTargets",
+              params: { discover: true },
+            }),
+          );
+        } catch {
+          /* ignore */
+        }
+      };
+      ws.onmessage = (event: { data: string }) => {
+        if (closed) return;
+        try {
+          const msg = JSON.parse(event.data) as {
+            method?: string;
+            params?: {
+              targetInfo?: { targetId?: string; url?: string; title?: string; type?: string };
+              targetId?: string;
+            };
+          };
+          const method = msg.method;
+          const info = msg.params?.targetInfo;
+          const targetId = info?.targetId ?? msg.params?.targetId;
+          if (typeof targetId !== "string" || targetId.length === 0) return;
+          // We only surface "page" targets — filter out workers/iframes.
+          if (info && info.type !== undefined && info.type !== "page") return;
+          if (method === "Target.attachedToTarget") {
+            emit("attached", targetId, { url: info?.url, title: info?.title });
+          } else if (method === "Target.targetDestroyed") {
+            emit("destroyed", targetId);
+          } else if (method === "Target.targetInfoChanged") {
+            emit("info-changed", targetId, { url: info?.url, title: info?.title });
+          }
+        } catch {
+          /* bad frame — ignore */
+        }
+      };
+      ws.onerror = () => {
+        /* error path — tests see the callback never fire; prod just stops. */
+      };
+    })();
+
+    return () => {
+      closed = true;
+      if (socket !== null) {
+        try {
+          socket.close();
+        } catch {
+          /* ignore */
+        }
+        socket = null;
+      }
+    };
+  }
+
+  /**
+   * Resolve the browser-level CDP WebSocket URL via /json/version.
+   * Returns null on failure so `subscribeTabEvents` can degrade to a
+   * no-op without throwing.
+   */
+  private async fetchBrowserWsUrl(): Promise<string | null> {
+    try {
+      const response = await fetch(`http://localhost:${this.cdpPort}/json/version`);
+      if (!response.ok) return null;
+      const data = (await response.json()) as { webSocketDebuggerUrl?: string };
+      return typeof data.webSocketDebuggerUrl === "string" ? data.webSocketDebuggerUrl : null;
+    } catch {
+      return null;
+    }
   }
 
   // ── CDP Communication Layer ──

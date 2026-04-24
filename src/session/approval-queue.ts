@@ -99,15 +99,64 @@ export interface CustomPayload {
   readonly data: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * T10.4 — Browser-action approval. Raised by the agentic-browser orchestrator
+ * when the trifecta guard asks for human review on a browse step
+ * (navigate/click/type/extract) before executing. Surfaces render the URL +
+ * `description` and apply risk-level styling; `actionId` is the browse step
+ * id so downstream events can cross-reference without rehydrating the plan.
+ *
+ * `type: "browser.action"` uses dot-notation (as opposed to the kebab-case
+ * used for the four earlier variants) to match the T10.4 event convention
+ * (`browser.tab.opened`, `browser.action.approved`) emitted by
+ * `computer-session-store.ts`. Keeping the vocabulary aligned across queue
+ * and event store lets cross-surface UIs key off a single prefix.
+ */
+export interface BrowserActionPayload {
+  readonly kind: "browser-action";
+  readonly type: "browser.action";
+  readonly actionId: string;
+  readonly url: string;
+  readonly description: string;
+  readonly riskLevel: RiskLevel;
+  readonly createdAt: number;
+}
+
 export type ApprovalPayload =
   | ShellExecPayload
   | FileWritePayload
   | DestructivePayload
-  | CustomPayload;
+  | CustomPayload
+  | BrowserActionPayload;
 
 export type ApprovalState = "pending" | "decided" | "expired";
 export type ApprovalDecision = "allow" | "deny";
 export type RiskLevel = "low" | "medium" | "high";
+
+/**
+ * T10.4 — Constructor for a `BrowserActionPayload`. Fills in the discriminator
+ * fields + caller-supplied `createdAt` (or `Date.now()` fallback) so
+ * orchestrators don't have to thread the literals manually at every call
+ * site. Returns a frozen-shape plain object (readonly is enforced by the
+ * TS type, not Object.freeze — consistent with the other three variants).
+ */
+export function createBrowserActionPayload(args: {
+  readonly actionId: string;
+  readonly url: string;
+  readonly description: string;
+  readonly riskLevel: RiskLevel;
+  readonly createdAt?: number;
+}): BrowserActionPayload {
+  return {
+    kind: "browser-action",
+    type: "browser.action",
+    actionId: args.actionId,
+    url: args.url,
+    description: args.description,
+    riskLevel: args.riskLevel,
+    createdAt: args.createdAt ?? Date.now(),
+  };
+}
 
 /**
  * In-memory record of an approval. Immutable from the outside — `decide`
@@ -510,6 +559,21 @@ export class ApprovalQueue {
         }
         if (!payload.data || typeof payload.data !== "object") {
           throw new ErrorInvalidPayload("custom requires data object");
+        }
+        return payload;
+      }
+      case "browser-action": {
+        if (typeof payload.actionId !== "string" || payload.actionId.trim() === "") {
+          throw new ErrorInvalidPayload("browser-action requires non-empty actionId");
+        }
+        if (typeof payload.url !== "string" || payload.url.trim() === "") {
+          throw new ErrorInvalidPayload("browser-action requires non-empty url");
+        }
+        if (typeof payload.description !== "string") {
+          throw new ErrorInvalidPayload("browser-action requires description string");
+        }
+        if (payload.type !== "browser.action") {
+          throw new ErrorInvalidPayload("browser-action requires type='browser.action'");
         }
         return payload;
       }

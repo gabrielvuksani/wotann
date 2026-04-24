@@ -7,6 +7,26 @@ import { CommandRegistry, type Command } from "../../src/ui/command-registry.js"
 // ink-testing-library state updates from stdin.write are async.
 const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+// Escape-sequence parsing in ink uses a ~10-50ms buffering window on ``
+// before deciding whether the byte is a standalone Escape or the prefix of an
+// arrow/function key. Under full-suite CPU contention this window can outlive
+// a single `tick(10)` call, leading to flaky arrow-key tests. waitForFrame
+// polls for a visible state change up to `timeoutMs` so we don't proceed with
+// an Enter keystroke until the selection has actually moved.
+const waitForFrame = async (
+  lastFrame: () => string | undefined,
+  predicate: (frame: string) => boolean,
+  timeoutMs = 500,
+  stepMs = 10,
+): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const frame = lastFrame() ?? "";
+    if (predicate(frame)) return;
+    await tick(stepMs);
+  }
+};
+
 function makeCmd(partial: Partial<Command> & { id: string }): Command {
   return {
     id: partial.id,
@@ -115,11 +135,15 @@ describe("CommandPalette", () => {
       }),
     );
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <CommandPalette registry={registry} onClose={() => {}} />,
     );
     stdin.write("\u001B[B"); // Down arrow
-    await tick();
+    // Wait for the selection marker to land on "Second" before pressing Enter.
+    // ink's escape-sequence parser has variable latency under parallel test
+    // load; a fixed tick() is not enough. The "> Second" prefix signals the
+    // component has re-rendered with selectedIndex === 1.
+    await waitForFrame(lastFrame, (f) => />\s+Second/.test(f));
     stdin.write("\r"); // Enter
     await tick(20);
     expect(firedId).toBe("second");
@@ -128,22 +152,34 @@ describe("CommandPalette", () => {
   it("Arrow up moves selection back toward the top", async () => {
     let firedId = "";
     registry.register(
-      makeCmd({ id: "a", label: "A", handler: () => (firedId = "a") }),
+      makeCmd({
+        id: "a",
+        label: "A",
+        handler: () => {
+          firedId = "a";
+        },
+      }),
     );
     registry.register(
-      makeCmd({ id: "b", label: "B", handler: () => (firedId = "b") }),
+      makeCmd({
+        id: "b",
+        label: "B",
+        handler: () => {
+          firedId = "b";
+        },
+      }),
     );
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <CommandPalette registry={registry} onClose={() => {}} />,
     );
     // Down twice (past the end, clamps), then up once — selects index 0.
     stdin.write("\u001B[B");
-    await tick();
+    await waitForFrame(lastFrame, (f) => />\s+B/.test(f));
     stdin.write("\u001B[B");
     await tick();
     stdin.write("\u001B[A"); // Up arrow
-    await tick();
+    await waitForFrame(lastFrame, (f) => />\s+A/.test(f));
     stdin.write("\r");
     await tick(20);
     expect(firedId).toBe("a");

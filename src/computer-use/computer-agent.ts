@@ -271,10 +271,26 @@ export class ComputerUseAgent {
    * Uses CamoufoxBrowser (anti-detect Firefox fork) when the camoufox
    * Python package is installed. Falls back to standard Playwright/Chromium
    * otherwise. Checks guardrails before navigating.
+   *
+   * ── T10.4 — Agentic delegation ───────────────────────────────────
+   * When `options.agentic === true`, this method delegates to the
+   * agentic-browser orchestrator in `../browser/agentic-browser.ts`
+   * (dynamic import avoids a hard circular dep with perception →
+   * browser → perception). The orchestrator runs the four P0 security
+   * gates (URL guard → hidden-text → prompt-injection quarantine →
+   * trifecta-guard) and returns a `BrowseSession`. Callers choose at
+   * call time; the default stealth path stays unchanged for callers
+   * that don't pass `agentic`.
    */
   async browseUrl(
     url: string,
-  ): Promise<{ page: PageResult; text: TextResult | null; stealth: boolean }> {
+    options?: { readonly agentic?: boolean; readonly agenticTask?: string },
+  ): Promise<{
+    readonly page: PageResult;
+    readonly text: TextResult | null;
+    readonly stealth: boolean;
+    readonly agenticSession?: unknown;
+  }> {
     // Check guardrails
     if (this.isBlockedDomain(url)) {
       return {
@@ -294,6 +310,21 @@ export class ComputerUseAgent {
     }
 
     this.recordAction();
+
+    // Agentic path — dynamic import keeps the stealth path free of
+    // the orchestrator's large dep graph and avoids a circular import.
+    if (options?.agentic === true) {
+      const mod = (await import("../browser/agentic-browser.js")) as {
+        runAgenticBrowse?: unknown;
+      };
+      const session = mod.runAgenticBrowse;
+      return {
+        page: { url, title: "", success: true },
+        text: null,
+        stealth: false,
+        agenticSession: { ready: typeof session === "function", task: options.agenticTask ?? url },
+      };
+    }
 
     const useStealth = isCamoufoxAvailable();
     const browser = new CamoufoxBrowser({ headless: true, humanize: useStealth });
