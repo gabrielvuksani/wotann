@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  V9 FT.3.3 strings.xml — string resources.
+
+  WHAT: Localisable strings referenced from AndroidManifest.xml and
+    from Composable Text() calls. Kept minimal in the scaffold; the
+    full impl phase fills in every user-visible string.
+
+  WHY: Android requires manifest-referenced strings to live in
+    strings.xml so the play store / device translation overlays can
+    swap them. Hardcoding in the manifest is technically allowed
+    but breaks the localisation flow.
+-->
+<resources>
+    <string name="app_name">WOTANN</string>
+
+    <!-- Foreground service descriptions (Android 14+ requirement). -->
+    <string name="agent_service_description">WOTANN agent task running</string>
+    <string name="voice_service_description">WOTANN voice mode active</string>
+
+    <!-- Quick Settings tile. -->
+    <string name="tile_label">WOTANN</string>
+
+    <!-- Glance widgets. -->
+    <string name="widget_cost_label">WOTANN — Cost</string>
+    <string name="widget_status_label">WOTANN — Agent</string>
+    <string name="widget_quicklaunch_label">WOTANN — Quick Launch</string>
+</resources>

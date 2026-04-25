@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  V9 FT.3.3 cost-widget metadata.
+
+  WHAT: AppWidget metadata for the Cost Glance widget. Declares the
+    widget's allowed sizes, update frequency, and initial layout.
+
+  WHY: Android requires a `<appwidget-provider>` xml resource for
+    every AppWidget receiver. Without it, the widget is invisible to
+    the system widget picker.
+
+  WHERE: Referenced from AndroidManifest.xml under the
+    CostWidgetReceiver's <meta-data android:name="android.appwidget.provider">.
+
+  HOW: Glance uses a stub initial layout. The actual rendering
+    happens in CostWidget.Content() via Compose.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:minWidth="180dp"
+    android:minHeight="60dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_cost_label" />

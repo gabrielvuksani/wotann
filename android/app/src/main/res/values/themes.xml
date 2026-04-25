@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  V9 FT.3.3 themes.xml — Android themes.
+
+  WHAT: Defines the splash-screen theme referenced from the
+    AndroidManifest.xml. Compose owns the in-app theme via Theme.kt;
+    the splash theme is the only one Android needs at the XML layer.
+
+  WHY: The new SplashScreen API (Android 12+) requires a theme that
+    extends Theme.SplashScreen and points at the icon + background.
+
+  WHERE: Referenced as `@style/Theme.Wotann.Splash` from the
+    manifest. AGP merges this with the framework default themes.
+-->
+<resources>
+    <style name="Theme.Wotann.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@android:color/black</item>
+        <item name="windowSplashScreenAnimatedIcon">@android:drawable/sym_def_app_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.Wotann</item>
+    </style>
+
+    <style name="Theme.Wotann" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

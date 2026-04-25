@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  V9 FT.3.3 legacy auto-backup rules.
+
+  WHAT: Pre-Android-12 fallback for android:fullBackupContent.
+    Android 12+ uses data_extraction_rules.xml; older versions use
+    this file. We exclude everything.
+
+  WHY: Same reason — pairing tokens and chat history are sensitive.
+-->
+<full-backup-content>
+    <exclude domain="root" />
+    <exclude domain="file" />
+    <exclude domain="database" />
+    <exclude domain="sharedpref" />
+</full-backup-content>
