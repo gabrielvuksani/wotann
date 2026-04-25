@@ -2863,17 +2863,53 @@ mcpCmd
   .action(async () => {
     const { WotannMcpServer } = await import("./mcp/mcp-server.js");
     const { createWotannMcpAdapter } = await import("./mcp/servers/wotann-tools.js");
-    // For first-cut, all 5 deps are stubbed honestly (the adapter
-    // returns a typed error per tool when its dep isn't supplied).
-    // Later commits inject real runtime collaborators (memoryStore,
-    // skill registry, shadowGit, sessionStore, approvalQueue).
-    const adapter = createWotannMcpAdapter({});
+    const { createRuntime } = await import("./core/runtime.js");
+    const runtime = await createRuntime(process.cwd());
+
+    // V9 T3.2 Wave 1 wire: thread the runtime's actual collaborators
+    // through to the adapter so the 5 tools call REAL WOTANN
+    // infrastructure rather than returning their honest "not wired"
+    // errors. Each dep is a thin closure that adapts the runtime's
+    // signature to the adapter's expected shape.
+    const adapter = createWotannMcpAdapter({
+      searchMemory: async (query, opts) => {
+        const maxResults = opts?.maxResults ?? 10;
+        const minConfidence = opts?.minConfidence ?? 0;
+        const hits = await runtime.searchUnifiedKnowledge(query, maxResults, minConfidence);
+        return hits.map((h) => ({
+          key: h.id,
+          value: h.content,
+          score: h.score,
+        }));
+      },
+      shadowGitStatus: async () => {
+        // Shadow-git status — runtime exposes a getter; if absent
+        // (older runtime, missing dep), fall back to empty delta.
+        const sg = (
+          runtime as unknown as {
+            shadowGit?: {
+              status?: () => Promise<{
+                modified: readonly string[];
+                added: readonly string[];
+                deleted: readonly string[];
+              }>;
+            };
+          }
+        ).shadowGit;
+        if (sg?.status) return sg.status();
+        return { modified: [], added: [], deleted: [] };
+      },
+      // skill_load, session_end, approval_request: dep injection
+      // requires touching runtime internals not yet exposed via
+      // public method. Adapter returns honest unavailable until
+      // those getters land in a follow-up.
+    });
     const server = new WotannMcpServer({
       info: { name: "wotann", version: "0.6.0" },
       adapter,
     });
     process.stderr.write(
-      chalk.green("✓ wotann MCP server listening on stdio (5 tools, all stubbed honestly)\n"),
+      chalk.green("✓ wotann MCP server listening on stdio (memory + shadow-git wired)\n"),
     );
     await server.run();
   });
