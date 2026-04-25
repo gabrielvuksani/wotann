@@ -206,6 +206,129 @@ function buildMonitorTool(): ToolDefinition {
 }
 
 /**
+ * Build the terminal_run tool definition (T12.2 — Terminus-KIRA port).
+ * Wraps `runTerminal` from `src/cli/tricks/terminal-run.ts` so the agent
+ * can shell out via execFile (no shell, no injection surface) and receive
+ * a structured `{ok, exitCode, stdout, stderr, durationMs}` envelope.
+ *
+ * Why surface this when `monitor` already exists? `monitor` is for
+ * long-running streaming processes; `terminal_run` is for one-shot
+ * commands where the agent wants the full captured stdout/stderr in a
+ * single envelope — e.g., `git status`, `npm run typecheck`, `which python3`.
+ * The argv form is enforced by the schema so the model can't accidentally
+ * shell-interpolate user input.
+ */
+function buildTerminalRunTool(): ToolDefinition {
+  return {
+    name: "terminal_run",
+    description:
+      "Execute a one-shot terminal command via execFile (no shell). Returns " +
+      "a structured `{ok, exitCode, stdout, stderr, durationMs}` envelope; never throws. " +
+      "Pass argv as an array (first element is the executable, rest are arguments) — " +
+      "shell interpolation is structurally impossible. Use for short commands like " +
+      "`git status`, `npm run typecheck`, `which python3`. For long-running streaming " +
+      "processes (tail logs, watch tests), prefer the `monitor` tool instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        argv: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Subprocess argv. First element is the executable, rest are arguments. " +
+            "Each element is passed verbatim — never re-parsed by a shell.",
+        },
+        timeoutMs: {
+          type: "number",
+          description:
+            "Optional wall-clock cap in milliseconds. Reserved for future enhancement; " +
+            "currently advisory.",
+        },
+      },
+      required: ["argv"],
+    },
+  };
+}
+
+/**
+ * Build the image_read tool definition (T12.2 — Terminus-KIRA port).
+ * Wraps `readImage` from `src/cli/tricks/image-read.ts` so the agent can
+ * load a PNG/JPEG/GIF/WEBP from disk and receive a base64 + mimeType
+ * envelope ready for vision-model consumption. Unlocks visual UI
+ * workflows (vim screenshots, matplotlib plots, tmux pane captures).
+ */
+function buildImageReadTool(): ToolDefinition {
+  return {
+    name: "image_read",
+    description:
+      "Read an image file from disk and return base64 + mimeType for vision-model " +
+      "consumption. Supports PNG, JPEG, GIF, WEBP. Returns " +
+      "`{ok:true, base64, mimeType, byteLength}` on success or `{ok:false, error}` " +
+      "on missing file, unsupported extension, or read failure. Use to feed " +
+      "screenshots, plots, or terminal captures into the next vision turn.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Absolute path to the image file on disk.",
+        },
+      },
+      required: ["path"],
+    },
+  };
+}
+
+/**
+ * Build the tmux_pull tool definition (T12.2 — Terminus-KIRA port).
+ * Wraps `tmuxPull` from `src/cli/tricks/tmux-pull.ts` so the agent can
+ * inspect a long-running tmux session's recent pane content via
+ * `tmux capture-pane -pJ -S -<lines>`. Honest-failure posture: when
+ * tmux is missing, no server is running, or the named session doesn't
+ * exist, returns `{ok:false, reason:...}` — never silent success.
+ */
+function buildTmuxPullTool(): ToolDefinition {
+  return {
+    name: "tmux_pull",
+    description:
+      "Pull recent pane content from a named tmux session via `tmux capture-pane`. " +
+      "Used to inspect long-running background sessions (builds, daemons, REPLs) " +
+      "kept alive across turns. Returns `{ok:true, content, lines, session}` on " +
+      "success or `{ok:false, reason}` when tmux is missing, no server is running, " +
+      "or the session doesn't exist. Defaults to 200 lines from the bottom of the " +
+      "scrollback; cap is 100,000.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        session: {
+          type: "string",
+          description: "Target tmux session name (must exist).",
+        },
+        lines: {
+          type: "number",
+          description:
+            "Number of lines from the bottom of the scrollback to capture. " +
+            "Default 200, capped at 100000.",
+        },
+        pane: {
+          type: "string",
+          description:
+            "Optional pane id (e.g. `0.0`, `myssn:0.1`). When omitted, tmux uses " +
+            "the active pane of the session.",
+        },
+        tmuxBin: {
+          type: "string",
+          description:
+            "Optional override for the tmux binary path. Defaults to `tmux` " +
+            "resolved via $PATH in the child process.",
+        },
+      },
+      required: ["session"],
+    },
+  };
+}
+
+/**
  * Build the find_symbol tool definition (Serena port).
  * Exposes workspace-wide symbol search as a first-class agent tool so
  * the model can target by name rather than reading whole files.
@@ -290,6 +413,9 @@ export const RUNTIME_TOOL_NAMES = [
   "find_references",
   "rename_symbol",
   "monitor",
+  "terminal_run",
+  "image_read",
+  "tmux_pull",
 ] as const;
 
 export type RuntimeToolName = (typeof RUNTIME_TOOL_NAMES)[number];
@@ -362,6 +488,13 @@ export function buildEffectiveTools(
   // sandbox permission layer at dispatch time — registration here only
   // advertises the tool to the model.
   tools.push(buildMonitorTool());
+
+  // T12.2 Terminus-KIRA tricks: terminal_run / image_read / tmux_pull.
+  // Always registered — the underlying modules are pure I/O wrappers
+  // (`runTerminal` shells via execFile, `readImage` reads a file, `tmuxPull`
+  // shells via execFile). Each returns an honest envelope; a missing tmux
+  // binary surfaces as `{ok:false, reason:...}` rather than a runtime throw.
+  tools.push(buildTerminalRunTool(), buildImageReadTool(), buildTmuxPullTool());
 
   // plan tools: only when PlanStore is available
   if (deps.planStoreAvailable) {

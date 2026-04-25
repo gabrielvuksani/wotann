@@ -28,7 +28,13 @@
 
 // ═══ Types ═════════════════════════════════════════════════════════════
 
-export type DeployTarget = "cloudflare-pages" | "vercel" | "fly" | "self-host";
+export type DeployTarget =
+  | "cloudflare-pages"
+  | "vercel"
+  | "fly"
+  | "self-host"
+  | "coolify"
+  | "dokploy";
 
 export type ScaffoldRuntime = "node" | "edge" | "rn";
 
@@ -75,6 +81,8 @@ const TARGET_IDS: readonly DeployTarget[] = [
   "vercel",
   "fly",
   "self-host",
+  "coolify",
+  "dokploy",
 ];
 
 function slugify(name: string): string {
@@ -238,10 +246,7 @@ function commandsFor(target: DeployTarget, projectName: string): readonly string
   const name = slugify(projectName);
   switch (target) {
     case "cloudflare-pages":
-      return [
-        "pnpm run build",
-        `npx wrangler pages deploy ./dist --project-name=${name}`,
-      ];
+      return ["pnpm run build", `npx wrangler pages deploy ./dist --project-name=${name}`];
     case "vercel":
       return ["pnpm run build", "npx vercel --prod"];
     case "fly":
@@ -250,6 +255,21 @@ function commandsFor(target: DeployTarget, projectName: string): readonly string
       return [
         `rsync -az ./dist/ deploy@${name}.local:/opt/${name}/dist/`,
         `ssh deploy@${name}.local 'sudo systemctl restart ${name}'`,
+      ];
+    case "coolify":
+      // Coolify deploys are driven through its REST API by createCoolifyAdapter
+      // (src/build/deploy-targets/coolify.ts). The CLI surface we suggest is
+      // the prerequisite git push + a pointer at the API trigger.
+      return [
+        "git push origin main",
+        `# Trigger via Coolify REST API: POST {COOLIFY_URL}/api/v1/deploy { uuid: '${name}' }`,
+      ];
+    case "dokploy":
+      // Dokploy is driven through its REST API by createDokployAdapter
+      // (src/build/deploy-targets/dokploy.ts). Same shape as Coolify.
+      return [
+        "git push origin main",
+        `# Trigger via Dokploy REST API: POST {DOKPLOY_URL}/api/application.deploy { applicationId: '${name}' }`,
       ];
   }
 }
@@ -264,6 +284,13 @@ function envVarsFor(target: DeployTarget): readonly string[] {
       return ["FLY_API_TOKEN"];
     case "self-host":
       return [];
+    case "coolify":
+      // Names match what createCoolifyAdapter / CoolifyConfig consume
+      // (apiUrl + apiToken, optional defaultProjectId).
+      return ["COOLIFY_API_URL", "COOLIFY_API_TOKEN", "COOLIFY_PROJECT_ID"];
+    case "dokploy":
+      // Dokploy uses an x-api-key header plus a default projectId.
+      return ["DOKPLOY_API_URL", "DOKPLOY_API_KEY", "DOKPLOY_PROJECT_ID"];
   }
 }
 
@@ -288,6 +315,18 @@ function notesFor(target: DeployTarget): readonly string[] {
       return [
         "Install Caddy: https://caddyserver.com/docs/install",
         "Copy the unit file into /etc/systemd/system and run `systemctl daemon-reload`.",
+      ];
+    case "coolify":
+      return [
+        "Coolify is a self-hosted Heroku/Vercel alternative (40k+ stars).",
+        "Point WOTANN at your instance via COOLIFY_API_URL + COOLIFY_API_TOKEN; create a project and pass its UUID as COOLIFY_PROJECT_ID.",
+        "The deploy flow uses POST /api/v1/applications/public + POST /api/v1/deploy via createCoolifyAdapter().",
+      ];
+    case "dokploy":
+      return [
+        "Dokploy is a self-hosted Coolify-competitor PaaS (~12k stars).",
+        "Point WOTANN at your instance via DOKPLOY_API_URL + DOKPLOY_API_KEY; pass the project id as DOKPLOY_PROJECT_ID.",
+        "The deploy flow uses POST /api/application.create + POST /api/application.deploy via createDokployAdapter().",
       ];
   }
 }
@@ -318,6 +357,16 @@ export function adaptDeploy(input: DeployAdapterInput): DeployAdapterResult {
       break;
     case "self-host":
       files = selfHostFiles(input.projectName, input.customDomain);
+      break;
+    case "coolify":
+    case "dokploy":
+      // Coolify and Dokploy are API-driven self-hosted PaaS targets — there
+      // are no static manifests to write into the project tree. The actual
+      // deploy is owned by createCoolifyAdapter / createDokployAdapter at
+      // runtime; we surface commands/envVars/notes via the regular plan
+      // shape so `wotann deploy --to=coolify` is accepted instead of
+      // rejected with "unknown deploy target".
+      files = [];
       break;
   }
 

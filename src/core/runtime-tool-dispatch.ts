@@ -22,6 +22,9 @@ import {
   type ConnectorToolName,
   type ConnectorToolResult,
 } from "../connectors/connector-tools.js";
+import { runTerminal } from "../cli/tricks/terminal-run.js";
+import { readImage } from "../cli/tricks/image-read.js";
+import { tmuxPull } from "../cli/tricks/tmux-pull.js";
 
 // ── Tool Timing Tracker ─────────────────────────────────────
 
@@ -473,6 +476,178 @@ export function dispatchPlanAdvance(
   }
 }
 
+// ── T12.2 Terminus-KIRA dispatchers ─────────────────────────
+
+/**
+ * Execute the terminal_run tool.
+ * Validates argv, invokes runTerminal (execFile, no shell), and serialises
+ * the structured envelope as JSON for the transcript. Honest-stub posture:
+ * a missing or malformed argv returns ok:false with a reason — never throws.
+ */
+export async function dispatchTerminalRun(
+  input: Record<string, unknown>,
+  ctx: ToolDispatchContext,
+): Promise<ToolDispatchResult> {
+  const rawArgv = input["argv"];
+  if (!Array.isArray(rawArgv) || rawArgv.length === 0) {
+    return {
+      type: "text",
+      content: `\n[terminal_run] ${JSON.stringify({
+        ok: false,
+        exitCode: -1,
+        stdout: "",
+        stderr: "",
+        durationMs: 0,
+        error: "terminal_run: argv must be a non-empty array of strings",
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+  if (!rawArgv.every((a): a is string => typeof a === "string")) {
+    return {
+      type: "text",
+      content: `\n[terminal_run] ${JSON.stringify({
+        ok: false,
+        exitCode: -1,
+        stdout: "",
+        stderr: "",
+        durationMs: 0,
+        error: "terminal_run: every argv element must be a string",
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+  const timeoutMs =
+    typeof input["timeoutMs"] === "number" ? (input["timeoutMs"] as number) : undefined;
+  try {
+    const result = await runTerminal({
+      argv: rawArgv,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    });
+    return {
+      type: "text",
+      content: `\n[terminal_run] ${JSON.stringify(result)}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  } catch (err) {
+    // runTerminal is documented as never-throws but we keep an honest
+    // outer guard so an upstream misbehaviour is still surfaced cleanly.
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      type: "text",
+      content: `\n[terminal_run] ${JSON.stringify({
+        ok: false,
+        exitCode: -1,
+        stdout: "",
+        stderr: "",
+        durationMs: 0,
+        error: `terminal_run: unexpected throw — ${reason}`,
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+}
+
+/**
+ * Execute the image_read tool.
+ * Validates the path, invokes readImage, and serialises the envelope.
+ * Honest-stub: missing path / unsupported extension / read failure all
+ * return ok:false with a human-readable error.
+ */
+export async function dispatchImageRead(
+  input: Record<string, unknown>,
+  ctx: ToolDispatchContext,
+): Promise<ToolDispatchResult> {
+  const path = typeof input["path"] === "string" ? (input["path"] as string) : "";
+  if (!path) {
+    return {
+      type: "text",
+      content: `\n[image_read] ${JSON.stringify({
+        ok: false,
+        error: "image_read: missing required `path` argument",
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+  try {
+    const result = await readImage(path);
+    return {
+      type: "text",
+      content: `\n[image_read] ${JSON.stringify(result)}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      type: "text",
+      content: `\n[image_read] ${JSON.stringify({
+        ok: false,
+        error: `image_read: unexpected throw — ${reason}`,
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+}
+
+/**
+ * Execute the tmux_pull tool.
+ * Validates the session, invokes tmuxPull, and serialises the envelope.
+ * Honest-stub: missing session / no tmux server / unknown session all
+ * return ok:false with a categorised reason string.
+ */
+export async function dispatchTmuxPull(
+  input: Record<string, unknown>,
+  ctx: ToolDispatchContext,
+): Promise<ToolDispatchResult> {
+  const session = typeof input["session"] === "string" ? (input["session"] as string) : "";
+  if (!session) {
+    return {
+      type: "text",
+      content: `\n[tmux_pull] ${JSON.stringify({
+        ok: false,
+        reason: "tmux_pull: missing required `session` argument",
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+  const lines = typeof input["lines"] === "number" ? (input["lines"] as number) : undefined;
+  const pane = typeof input["pane"] === "string" ? (input["pane"] as string) : undefined;
+  const tmuxBin = typeof input["tmuxBin"] === "string" ? (input["tmuxBin"] as string) : undefined;
+  try {
+    const result = await tmuxPull({
+      session,
+      ...(lines !== undefined ? { lines } : {}),
+      ...(pane !== undefined ? { pane } : {}),
+      ...(tmuxBin !== undefined ? { tmuxBin } : {}),
+    });
+    return {
+      type: "text",
+      content: `\n[tmux_pull] ${JSON.stringify(result)}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      type: "text",
+      content: `\n[tmux_pull] ${JSON.stringify({
+        ok: false,
+        reason: `tmux_pull: unexpected throw — ${reason}`,
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+}
+
 // ── Unified Dispatcher ──────────────────────────────────────
 
 /**
@@ -592,6 +767,15 @@ export async function dispatchRuntimeTool(
       case "monitor":
         if (!deps.monitor) return null;
         return () => dispatchMonitor(input, deps.monitor!, ctx);
+
+      case "terminal_run":
+        return () => dispatchTerminalRun(input, ctx);
+
+      case "image_read":
+        return () => dispatchImageRead(input, ctx);
+
+      case "tmux_pull":
+        return () => dispatchTmuxPull(input, ctx);
 
       default:
         // Wave-4C: if the tool name matches one of the 34 connector tools,

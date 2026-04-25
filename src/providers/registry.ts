@@ -14,6 +14,7 @@ import { createOpenAIAdapter, createOpenAICompatAdapter } from "./openai-compat-
 import { createGeminiNativeAdapter } from "./gemini-native-adapter.js";
 import { createBedrockAdapter } from "./bedrock-signer.js";
 import { createVertexAdapter } from "./vertex-oauth.js";
+import { createOpenCodeSstAdapter } from "./opencode-sst-adapter.js";
 import { ModelRouter } from "./model-router.js";
 import { RateLimitManager } from "./rate-limiter.js";
 import { AgentBridge } from "../core/agent-bridge.js";
@@ -390,6 +391,93 @@ export function createProviderInfrastructure(
           }),
         );
         break;
+    }
+
+    // Audit gap (T12.21): src/providers/opencode-sst-adapter.ts (sst/opencode
+    // port) was written + tested but never registered, so `wotann login
+    // opencode` could not produce an adapter. The OpenCode SST adapter
+    // exposes its own surface (id "opencode-sst", an AsyncGenerator query,
+    // listModels, isAvailable) — we wrap it inline into the canonical
+    // ProviderAdapter shape so it slots into the rest of the registry's
+    // Map<ProviderName, ProviderAdapter>. The cast to ProviderName is the
+    // narrow, file-scoped concession needed to register a provider whose
+    // name isn't yet in the central ProviderName union (extending that
+    // union touches dozens of files; doing it here keeps the wiring
+    // local until the union is expanded).
+    if ((auth.provider as string) === "opencode" && !adapters.has(auth.provider)) {
+      const inner = createOpenCodeSstAdapter({
+        apiKey: auth.token,
+      });
+      const wrapped: ProviderAdapter = {
+        id: inner.id,
+        // Reuse the auth.provider string so downstream lookups (router,
+        // rate-limiter) match the same key.
+        name: auth.provider,
+        transport: "chat_completions",
+        capabilities: {
+          supportsComputerUse: false,
+          supportsToolCalling: true,
+          supportsVision: false,
+          supportsStreaming: true,
+          supportsThinking: true,
+          // OpenCode SST proxies to backing models; default to a generous
+          // window since the actual ceiling depends on the chosen model.
+          maxContextWindow: 131_072,
+        },
+        async *query(options) {
+          const queryOptions: Parameters<typeof inner.query>[0] = {
+            prompt: options.prompt,
+            ...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
+            ...(options.messages !== undefined
+              ? {
+                  messages: options.messages.map((msg) => ({
+                    role: msg.role as "user" | "assistant" | "system" | "tool",
+                    content: msg.content,
+                    ...(msg.toolCallId !== undefined ? { toolCallId: msg.toolCallId } : {}),
+                    ...(msg.toolName !== undefined ? { toolName: msg.toolName } : {}),
+                  })),
+                }
+              : {}),
+            ...(options.model !== undefined ? { model: options.model } : {}),
+            ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+            ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+            ...(options.stream !== undefined ? { stream: options.stream } : {}),
+            ...(options.tools !== undefined
+              ? {
+                  tools: options.tools.map((t) => ({
+                    name: t.name,
+                    description: t.description,
+                    inputSchema: t.inputSchema,
+                  })),
+                }
+              : {}),
+          };
+          for await (const chunk of inner.query(queryOptions)) {
+            yield {
+              type: chunk.type,
+              content: chunk.content,
+              ...(chunk.model !== undefined ? { model: chunk.model } : {}),
+              provider: auth.provider,
+              ...(chunk.tokensUsed !== undefined ? { tokensUsed: chunk.tokensUsed } : {}),
+              ...(chunk.toolName !== undefined ? { toolName: chunk.toolName } : {}),
+              ...(chunk.toolInput !== undefined ? { toolInput: chunk.toolInput } : {}),
+              ...(chunk.toolCallId !== undefined ? { toolCallId: chunk.toolCallId } : {}),
+              ...(chunk.stopReason !== undefined ? { stopReason: chunk.stopReason } : {}),
+              ...(chunk.usage !== undefined
+                ? {
+                    usage: {
+                      inputTokens: chunk.usage.inputTokens,
+                      outputTokens: chunk.usage.outputTokens,
+                    },
+                  }
+                : {}),
+            };
+          }
+        },
+        listModels: () => inner.listModels(),
+        isAvailable: () => inner.isAvailable(),
+      };
+      adapters.set(auth.provider, wrapped);
     }
   }
 

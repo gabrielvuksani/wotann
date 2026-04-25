@@ -6601,19 +6601,81 @@ program
             (startOpts as { maxDurationMs?: number }).maxDurationMs = opts.maxDuration;
           session = await adapter.start(startOpts);
         } else if (provider === "cloudflare-agents") {
-          process.stderr.write(
-            chalk.yellow(
-              "cloudflare-agents adapter requires accountId + namespaceId; pass via env or future flags\n",
-            ),
-          );
-          process.exit(2);
+          // V9 T11.3 closure (audit gap 2026-04-25): CLI now actually
+          // constructs + starts the cloudflare-agents adapter. accountId
+          // + namespaceId come from env first, then provider URL.
+          const accountId = process.env["CLOUDFLARE_ACCOUNT_ID"];
+          const namespaceId = process.env["CLOUDFLARE_AGENTS_NAMESPACE_ID"];
+          if (!accountId || !namespaceId) {
+            process.stderr.write(
+              chalk.red(
+                "error: cloudflare-agents requires CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_AGENTS_NAMESPACE_ID env vars\n",
+              ),
+            );
+            process.exit(2);
+          }
+          const mod = await import("./providers/cloud-offload/cloudflare-agents.js");
+          const adapter = mod.createCloudflareAgentsCloudOffloadAdapter({
+            apiToken: apiKey,
+            accountId,
+            namespaceId,
+            ...(opts.baseUrl !== undefined ? { baseUrl: opts.baseUrl } : {}),
+          });
+          const startOpts: Parameters<typeof adapter.start>[0] = {
+            task,
+            snapshot,
+            onFrame: (frame: { kind: string; data?: unknown }) => {
+              process.stderr.write(chalk.dim(`[${frame.kind}] `));
+              if (frame.data !== undefined) {
+                process.stderr.write(JSON.stringify(frame.data) + "\n");
+              } else {
+                process.stderr.write("\n");
+              }
+            },
+          };
+          if (opts.budget !== undefined && Number.isFinite(opts.budget))
+            (startOpts as { budgetUsd?: number }).budgetUsd = opts.budget;
+          if (opts.maxDuration !== undefined && Number.isFinite(opts.maxDuration))
+            (startOpts as { maxDurationMs?: number }).maxDurationMs = opts.maxDuration;
+          session = await adapter.start(startOpts);
         } else {
-          process.stderr.write(
-            chalk.yellow(
-              "fly-sprites adapter requires app + machine config; pass via env or future flags\n",
-            ),
-          );
-          process.exit(2);
+          // fly-sprites
+          // FlyConfig uses orgSlug as the app name (per docstring at
+          // src/providers/cloud-offload/fly-sprites.ts:91-92). Region
+          // defaults to iad (us-east) when unset.
+          const orgSlug = process.env["FLY_ORG_SLUG"];
+          const region = process.env["FLY_REGION"] ?? "iad";
+          if (!orgSlug) {
+            process.stderr.write(
+              chalk.red(
+                "error: fly-sprites requires FLY_ORG_SLUG env var (FLY_REGION optional, defaults to iad)\n",
+              ),
+            );
+            process.exit(2);
+          }
+          const mod = await import("./providers/cloud-offload/fly-sprites.js");
+          const adapter = mod.createFlyCloudOffloadAdapter({
+            apiToken: apiKey,
+            orgSlug,
+            region,
+          });
+          const startOpts: Parameters<typeof adapter.start>[0] = {
+            task,
+            snapshot,
+            onFrame: (frame: { kind: string; data?: unknown }) => {
+              process.stderr.write(chalk.dim(`[${frame.kind}] `));
+              if (frame.data !== undefined) {
+                process.stderr.write(JSON.stringify(frame.data) + "\n");
+              } else {
+                process.stderr.write("\n");
+              }
+            },
+          };
+          if (opts.budget !== undefined && Number.isFinite(opts.budget))
+            (startOpts as { budgetUsd?: number }).budgetUsd = opts.budget;
+          if (opts.maxDuration !== undefined && Number.isFinite(opts.maxDuration))
+            (startOpts as { maxDurationMs?: number }).maxDurationMs = opts.maxDuration;
+          session = await adapter.start(startOpts);
         }
         if (session) {
           process.stderr.write(
@@ -6623,6 +6685,389 @@ program
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(chalk.red(`offload failed: ${msg}\n`));
+        process.exit(2);
+      }
+    },
+  );
+
+// ── wotann browse — V9 T10.1 agentic browser CLI ────────────
+//
+// Closes audit-identified ship-blocker: agentic-browser orchestrator
+// (~860 LOC) + 4 P0 security guards + 100 adversarial eval cases existed
+// without any user-facing surface. This verb runs `runAgenticBrowse`
+// through the full security pipeline (URL guard, content quarantine,
+// hidden-text detector, trifecta guard) on a heuristic single-step plan.
+//
+// Default: dry-run (no real browser). --enable-driver wires a real
+// browser driver (production wires chrome-bridge.ts at the call site).
+program
+  .command("browse <task...>")
+  .description("Agentic browser session with mandatory P0 security gates (V9 T10.1)")
+  .option("--max-steps <n>", "Cap steps the orchestrator may execute", (v) => Number(v))
+  .option("--start-url <url>", "Initial navigation URL (default: derived from task)")
+  .option("--always-ask", "Require human approval for every action", false)
+  .option(
+    "--enable-driver",
+    "Use a real browser driver (default dry-run with synthetic page)",
+    false,
+  )
+  .option("--trace", "Pretty-print cursor frames to stderr", false)
+  .action(
+    async (
+      taskWords: string[],
+      opts: {
+        maxSteps?: number;
+        startUrl?: string;
+        alwaysAsk?: boolean;
+        enableDriver?: boolean;
+        trace?: boolean;
+      },
+    ) => {
+      const task = (taskWords ?? []).join(" ").trim();
+      if (task.length === 0) {
+        process.stderr.write(chalk.red("error: a task description is required\n"));
+        process.exit(2);
+      }
+      const { runBrowseCommand } = await import("./cli/commands/browse.js");
+      const cmdOpts: Parameters<typeof runBrowseCommand>[0] = { task };
+      if (opts.maxSteps !== undefined && Number.isFinite(opts.maxSteps))
+        (cmdOpts as { maxSteps?: number }).maxSteps = opts.maxSteps;
+      if (opts.startUrl !== undefined) (cmdOpts as { startUrl?: string }).startUrl = opts.startUrl;
+      if (opts.alwaysAsk === true) (cmdOpts as { alwaysAsk?: boolean }).alwaysAsk = true;
+      if (opts.enableDriver === true) (cmdOpts as { enableDriver?: boolean }).enableDriver = true;
+      if (opts.trace === true) (cmdOpts as { trace?: boolean }).trace = true;
+
+      const result = await runBrowseCommand(cmdOpts);
+      if (!result.ok) {
+        process.stderr.write(chalk.red(`browse failed: ${result.error ?? result.status}\n`));
+        process.exit(2);
+      }
+      const summary = `${result.status} (${result.stepsExecuted}/${result.plan.steps.length} steps)${result.dryRun ? " [dry-run]" : ""}`;
+      process.stderr.write(chalk.green(`✓ ${summary}\n`));
+    },
+  );
+
+// ── wotann sop — V9 T12.7 MetaGPT SOP pipeline CLI ──────────
+//
+// Runs the PRD → Design → Code → QA pipeline. Plan-only by default;
+// pass --emit + --out to materialize artifacts. Audit-identified gap:
+// the pipeline + 4 stages + types + tests all existed but the verb was
+// not registered in commander.
+program
+  .command("sop <idea...>")
+  .description("MetaGPT SOP pipeline: PRD → Design → Code → QA (V9 T12.7)")
+  .option("--out <dir>", "Output directory; required when --emit is passed")
+  .option("--emit", "Materialize artifacts to disk; default plan-only", false)
+  .option("--max-retries <n>", "Per-stage retry budget", (v) => Number(v))
+  .option("--stages <csv>", "Override stages (default prd,design,code,qa)")
+  .option("--force", "Overwrite existing artifact files at --out", false)
+  .option("--model <id>", "Model id used by every stage (default haiku)", "haiku")
+  .action(
+    async (
+      ideaWords: string[],
+      opts: {
+        out?: string;
+        emit?: boolean;
+        maxRetries?: number;
+        stages?: string;
+        force?: boolean;
+        model?: string;
+      },
+    ) => {
+      const idea = (ideaWords ?? []).join(" ").trim();
+      if (idea.length === 0) {
+        process.stderr.write(
+          chalk.red('error: an idea is required (e.g. wotann sop "Todo app with auth")\n'),
+        );
+        process.exit(2);
+      }
+      const { runSopCommand, parseStagesFlag } = await import("./cli/commands/sop.js");
+      type SopOpts = Parameters<typeof runSopCommand>[0];
+      const stages = parseStagesFlag(opts.stages);
+      const sopOpts: Record<string, unknown> = { idea, model: opts.model ?? "haiku" };
+      if (opts.out !== undefined) sopOpts["outDir"] = opts.out;
+      if (opts.emit === true) sopOpts["emit"] = true;
+      if (opts.force === true) sopOpts["force"] = true;
+      if (opts.maxRetries !== undefined && Number.isFinite(opts.maxRetries))
+        sopOpts["maxRetries"] = opts.maxRetries;
+      if (stages !== null) sopOpts["stages"] = stages;
+      const result = await runSopCommand(sopOpts as unknown as SopOpts);
+      if (!result.ok) {
+        process.stderr.write(chalk.red(`sop failed: ${result.error}\n`));
+        process.exit(2);
+      }
+      process.stdout.write(result.summary + "\n");
+      if (result.emitted.length > 0) {
+        process.stderr.write(chalk.green(`✓ wrote ${result.emitted.length} artifacts\n`));
+      }
+    },
+  );
+
+// ── wotann recipe — V9 T12.4 Goose-style recipe runner ───────
+//
+// Loads + runs YAML recipes from .wotann/recipes/. Audit gap: 1063 LOC
+// of recipe runtime existed but no CLI surface.
+const recipeCmd = program.command("recipe").description("Goose-style recipe management (V9 T12.4)");
+
+// Helper: enumerate recipe filenames in .wotann/recipes/. CLI-local helper
+// since other callers don't need a directory walker.
+async function listRecipeFiles(): Promise<readonly string[]> {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const dir = path.resolve(".wotann/recipes");
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isFile() && /\.(ya?ml|json)$/i.test(e.name))
+      .map((e) => path.join(dir, e.name));
+  } catch {
+    return [];
+  }
+}
+
+recipeCmd
+  .command("list")
+  .description("List available recipes in .wotann/recipes/")
+  .action(async () => {
+    const { loadRecipeFromFile } = await import("./recipes/recipe-loader.js");
+    const files = await listRecipeFiles();
+    if (files.length === 0) {
+      process.stderr.write(chalk.yellow("no recipes found in .wotann/recipes/\n"));
+      return;
+    }
+    for (const f of files) {
+      const result = await loadRecipeFromFile(f);
+      if (result.ok) {
+        process.stdout.write(
+          `  ${chalk.cyan(result.recipe.id)}  ${result.recipe.title ?? "(no title)"}\n`,
+        );
+      } else {
+        process.stdout.write(`  ${chalk.red("✗")} ${f}: ${result.error}\n`);
+      }
+    }
+  });
+
+recipeCmd
+  .command("inspect <id>")
+  .description("Inspect a recipe's schema + steps")
+  .action(async (id: string) => {
+    const { loadRecipeFromFile } = await import("./recipes/recipe-loader.js");
+    const files = await listRecipeFiles();
+    for (const f of files) {
+      const result = await loadRecipeFromFile(f);
+      if (result.ok && result.recipe.id === id) {
+        process.stdout.write(JSON.stringify(result.recipe, null, 2) + "\n");
+        return;
+      }
+    }
+    process.stderr.write(
+      chalk.red(`recipe inspect failed: id "${id}" not found in .wotann/recipes/\n`),
+    );
+    process.exit(2);
+  });
+
+recipeCmd
+  .command("run <id> [args...]")
+  .description("Run a recipe by id (positional args become recipe params)")
+  .option("--param <kv...>", "Param key=value pairs (repeatable)")
+  .option("--dry-run", "Print the resolved plan without executing", false)
+  .action(async (id: string, _args: string[], opts: { param?: string[]; dryRun?: boolean }) => {
+    const { loadRecipeFromFile } = await import("./recipes/recipe-loader.js");
+    const { runRecipe } = await import("./recipes/recipe-runtime.js");
+    const params: Record<string, unknown> = {};
+    for (const kv of opts.param ?? []) {
+      const eq = kv.indexOf("=");
+      if (eq <= 0) continue;
+      params[kv.slice(0, eq)] = kv.slice(eq + 1);
+    }
+    const files = await listRecipeFiles();
+    let recipe: import("./recipes/recipe-types.js").Recipe | null = null;
+    for (const f of files) {
+      const result = await loadRecipeFromFile(f);
+      if (result.ok && result.recipe.id === id) {
+        recipe = result.recipe;
+        break;
+      }
+    }
+    if (recipe === null) {
+      process.stderr.write(chalk.red(`recipe "${id}" not found in .wotann/recipes/\n`));
+      process.exit(2);
+    }
+    if (opts.dryRun === true) {
+      process.stdout.write(
+        chalk.dim(`[dry-run] would execute ${recipe.steps.length} steps with params:\n`),
+      );
+      process.stdout.write(JSON.stringify(params, null, 2) + "\n");
+      return;
+    }
+    const fs = await import("node:fs/promises");
+    const child = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execAsync = promisify(child.exec);
+    const runtimeOpts: import("./recipes/recipe-types.js").RunRecipeOptions = {
+      availableExtensions: ["builtin.echo", "builtin.bash"],
+      executor: {
+        async read(path: string) {
+          try {
+            return { ok: true, content: await fs.readFile(path, "utf-8") };
+          } catch (e) {
+            return { ok: false, error: e instanceof Error ? e.message : String(e) };
+          }
+        },
+        async write(path: string, content: string) {
+          try {
+            await fs.writeFile(path, content, "utf-8");
+            return { ok: true };
+          } catch (e) {
+            return { ok: false, error: e instanceof Error ? e.message : String(e) };
+          }
+        },
+        async bash(cmd: string) {
+          try {
+            const r = await execAsync(cmd);
+            return { ok: true, exitCode: 0, stdout: r.stdout, stderr: r.stderr };
+          } catch (e) {
+            const err = e as { code?: number; stdout?: string; stderr?: string; message?: string };
+            return {
+              ok: false,
+              exitCode: err.code ?? 1,
+              stdout: err.stdout ?? "",
+              stderr: err.stderr ?? "",
+              error: err.message,
+            };
+          }
+        },
+        async prompt(_text: string) {
+          // Honest stub — CLI mode lacks an LLM bridge. Daemon callers
+          // inject a real prompt resolver via `wotann recipe run` from
+          // inside a session.
+          return {
+            ok: false,
+            error: "prompt steps require runtime context (run via daemon, not CLI)",
+          };
+        },
+      },
+    };
+    const result = await runRecipe(recipe, params, runtimeOpts);
+    if (result.ok) {
+      process.stderr.write(chalk.green(`✓ recipe ${id} completed\n`));
+    } else {
+      process.stderr.write(chalk.red(`✗ recipe failed: ${result.error}\n`));
+      process.exit(2);
+    }
+  });
+
+// ── wotann pr-check — V9 T12.5 Continue.dev PR-as-status-check ─
+//
+// Runs .wotann/checks/*.md against current diff. Audit gap: pr-runner +
+// 4 modules + GHA workflow existed; CLI verb was missing.
+program
+  .command("pr-check")
+  .description("Run .wotann/checks/*.md against current diff (V9 T12.5)")
+  .option("--against <ref>", "Diff base ref (default origin/main)", "origin/main")
+  .option("--checks-dir <dir>", "Override checks dir", ".wotann/checks")
+  .action(async (opts: { against?: string; checksDir?: string }) => {
+    const { runPrChecks, runCheckEcho } = await import("./pr-checks/pr-runner.js");
+    const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+    try {
+      // Capture local diff against the chosen ref via git directly. The
+      // pr-runner expects a unified-diff string regardless of source.
+      const ref = opts.against ?? "origin/main";
+      const diffRun = await execFileNoThrow("git", ["diff", "--no-color", `${ref}...HEAD`]);
+      if (diffRun.exitCode !== 0) {
+        process.stderr.write(
+          chalk.red(`pr-check: failed to compute diff against ${ref}: ${diffRun.stderr}\n`),
+        );
+        process.exit(2);
+      }
+      const result = await runPrChecks({
+        prDiff: diffRun.stdout ?? "",
+        runCheck: runCheckEcho,
+        ...(opts.checksDir !== undefined ? { checksDir: opts.checksDir } : {}),
+      });
+      const failed = result.results.filter((r) => r.status === "fail").length;
+      const passed = result.results.filter((r) => r.status === "pass").length;
+      const neutral = result.results.filter((r) => r.status === "neutral").length;
+      for (const r of result.results) {
+        const symbol =
+          r.status === "pass"
+            ? chalk.green("✓")
+            : r.status === "fail"
+              ? chalk.red("✗")
+              : chalk.yellow("◯");
+        process.stdout.write(`  ${symbol} ${r.id}: ${r.message}\n`);
+      }
+      process.stdout.write(`\n${passed} passed, ${failed} failed, ${neutral} neutral\n`);
+      if (failed > 0) process.exit(1);
+    } catch (err) {
+      process.stderr.write(
+        chalk.red(`pr-check failed: ${err instanceof Error ? err.message : String(err)}\n`),
+      );
+      process.exit(2);
+    }
+  });
+
+// ── wotann agentless — V9 T12.6 LOCALIZE → REPAIR → VALIDATE ─
+//
+// Runs the Agentless paper's 3-phase pipeline. Audit gap: orchestrator
+// + 4 phase modules existed; CLI verb was missing.
+program
+  .command("agentless <issue...>")
+  .description("Agentless localize → repair → validate (V9 T12.6)")
+  .option("--skip-validate", "Skip the test-run phase (dry-run repair)", false)
+  .option("--cwd <dir>", "Repository root (default cwd)")
+  .option("--max-candidates <n>", "Top-K files to localize", (v) => Number(v))
+  .action(
+    async (
+      issueWords: string[],
+      opts: { skipValidate?: boolean; cwd?: string; maxCandidates?: number },
+    ) => {
+      const issueText = (issueWords ?? []).join(" ").trim();
+      if (issueText.length === 0) {
+        process.stderr.write(chalk.red("error: an issue description is required\n"));
+        process.exit(2);
+      }
+      const { runAgentless } = await import("./modes/agentless/orchestrator.js");
+      // Heuristic stub model — for full LLM-backed agentless, callers
+      // wire a real AgentlessModel via the SDK. CLI variant uses heuristic
+      // keyword extraction + an empty-diff repair to surface the LOCALIZE
+      // phase output (still useful for "find the buggy file" workflows).
+      const stubModel: import("./modes/agentless/types.js").AgentlessModel = {
+        name: "wotann-cli-stub",
+        async query() {
+          return { text: "", tokensIn: 0, tokensOut: 0 };
+        },
+      };
+      const root = opts.cwd ?? process.cwd();
+      try {
+        const result = await runAgentless(
+          { title: issueText.slice(0, 96), body: issueText },
+          {
+            localize: {
+              root,
+              ...(opts.maxCandidates !== undefined && Number.isFinite(opts.maxCandidates)
+                ? { topK: opts.maxCandidates }
+                : {}),
+            },
+            repair: {
+              root,
+              model: stubModel,
+            },
+            ...(opts.skipValidate === true ? { skipValidate: true } : {}),
+            onProgress: (e) => {
+              process.stderr.write(
+                chalk.dim(`[${e.phase}:${e.status}]${e.detail ? " " + e.detail : ""}\n`),
+              );
+            },
+          },
+        );
+        const symbol = result.outcome === "success" ? chalk.green("✓") : chalk.red("✗");
+        process.stderr.write(`${symbol} ${result.outcome} (${result.totalDurationMs}ms)\n`);
+        if (result.outcome !== "success") process.exit(1);
+      } catch (err) {
+        process.stderr.write(
+          chalk.red(`agentless failed: ${err instanceof Error ? err.message : String(err)}\n`),
+        );
         process.exit(2);
       }
     },
