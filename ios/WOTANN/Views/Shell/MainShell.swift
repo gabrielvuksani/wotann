@@ -25,6 +25,18 @@ struct MainShell: View {
     @State private var showVoiceSheet: Bool = false
 
     var body: some View {
+        // V9 T5 — three nested layers, in z-order from back to front:
+        //   1. The 4-tab `TabView` (Home / Chat / Work / You).
+        //   2. `HandoffView` banner — top-pinned overlay that listens to
+        //      `session.handoff.subscribe`. Only renders when a candidate
+        //      is advertised by the desktop.
+        //   3. `ApprovalSheetView` overlay — listens to
+        //      `approval.queue.subscribe` and slides up a modal whenever
+        //      the desktop requests approval for a destructive tool call.
+        //
+        // The two overlays must live above the TabView so a request can
+        // appear regardless of which tab is selected. They're not tabs —
+        // they're cross-cutting modals.
         ZStack(alignment: .bottom) {
             TabView(selection: tabBinding) {
                 HomeView()
@@ -85,6 +97,40 @@ struct MainShell: View {
                 VoiceInputView(onSend: handleVoiceInput)
                     .environmentObject(appState)
             }
+
+            // V9 T5.11 (F14) — Handoff banner. Top-pinned, only visible
+            // when the desktop advertises a candidate. The HandoffView's
+            // own ZStack with a Spacer keeps it at the top of the screen
+            // regardless of which tab is active.
+            HandoffView(onAccept: handleHandoffAccept)
+                .environmentObject(connectionManager)
+                .allowsHitTesting(true)
+                .accessibilityIdentifier("MainShell.HandoffBanner")
+
+            // V9 T5.5 (F6) — Approval sheet. Always-on listener; it only
+            // renders content when a request is in its queue. Sits above
+            // every tab so the user gets the modal even mid-Chat / mid-Work.
+            ApprovalSheetView()
+                .environmentObject(connectionManager)
+                .accessibilityIdentifier("MainShell.ApprovalSheet")
+        }
+    }
+
+    // MARK: - Handoff acceptance
+
+    /// Called when the user taps the Handoff banner. Routes to the tab
+    /// that matches the candidate's surface ("chat" → 1, "workshop"/
+    /// "exploit" → 2, anything else → leave on current tab). The actual
+    /// `session.handoff.adopt` RPC fires inside the `HandoffViewModel`'s
+    /// own task that runs alongside this callback.
+    private func handleHandoffAccept(_ candidate: HandoffCandidate) {
+        switch candidate.surface {
+        case "chat":
+            appState.activeTab = 1
+        case "workshop", "exploit":
+            appState.activeTab = 2
+        default:
+            break
         }
     }
 

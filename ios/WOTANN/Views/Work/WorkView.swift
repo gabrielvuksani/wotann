@@ -81,6 +81,33 @@ struct WorkView: View {
                             )
                     }
                 }
+                // V9 T5 — surface the three "Workshop-adjacent" views from
+                // a single Workshop menu in the toolbar instead of adding
+                // three separate tabs (the tab bar is already at its
+                // 4-item iOS limit). Council / Exploit / Creations each
+                // push onto the Work navigation stack.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        NavigationLink(destination: CouncilView()
+                            .environmentObject(connectionManager)
+                        ) {
+                            Label("Council", systemImage: "person.3.fill")
+                        }
+                        NavigationLink(destination: ExploitView()
+                            .environmentObject(connectionManager)
+                        ) {
+                            Label("Exploit", systemImage: "shield.lefthalf.filled")
+                        }
+                        NavigationLink(destination: CreationsView()
+                            .environmentObject(connectionManager)
+                        ) {
+                            Label("Creations", systemImage: "sparkles.rectangle.stack.fill")
+                        }
+                    } label: {
+                        Image(systemName: "square.grid.2x2.fill")
+                            .accessibilityLabel("Workshop menu")
+                    }
+                }
             }
             .refreshable {
                 await refresh()
