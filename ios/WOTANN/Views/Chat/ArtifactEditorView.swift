@@ -1,6 +1,14 @@
 import SwiftUI
 
-// MARK: - ArtifactEditorView
+// MARK: - ArtifactEditorView (read-only viewer — DEMOTED in V9 T13)
+//
+// V9 T13 demoted this view to a strict read-only artifact viewer. The
+// editable surface is now `ios/WOTANN/Views/Editor/EditorView.swift`
+// (Runestone-backed) which hosts find/replace, LSP, diff gutter, etc.
+//
+// Historic note: the name retains "Editor" only to keep call sites
+// compiling; behaviour is intentionally view-only. Do NOT add editing
+// affordances here — open the new EditorView instead.
 
 /// Full-screen sheet that opens an artifact in a Monaco-like code viewer.
 /// SwiftUI does not yet host Monaco natively — we render line-numbered
@@ -9,6 +17,10 @@ import SwiftUI
 ///
 /// This keeps the editor lightweight: no WebView roundtrips, no external
 /// dependencies, and it renders instantly even inside a chat sheet.
+///
+/// READ-ONLY (V9 T13): editing has moved to `EditorView`. This view only
+/// renders content + offers Copy. Any future edit affordances belong in
+/// `Views/Editor/EditorView.swift`, not here.
 struct ArtifactEditorView: View {
     let artifact: Artifact
     @Environment(\.dismiss) private var dismiss

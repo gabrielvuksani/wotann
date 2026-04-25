@@ -53,6 +53,10 @@ struct ChatViewContent: View {
     @State private var showGitPanel = false
     @State private var autopilotOn = false
     @State private var quotedReply: String?
+    /// Path of the file to open in the WOTANN editor sheet. nil = sheet hidden.
+    /// Bound to `Composer.onMentionFile` so a `@file:<path>` mention pushes
+    /// EditorView fullscreen with the file pre-loaded.
+    @State private var editorFilePath: String?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -107,6 +111,28 @@ struct ChatViewContent: View {
         .sheet(isPresented: $showGitPanel) { GitPanelView() }
         .sheet(isPresented: $showCameraInput) {
             CameraInputSheet(connectionManager: connectionManager)
+        }
+        .fullScreenCover(item: Binding(
+            get: { editorFilePath.map(EditorPath.init) },
+            set: { editorFilePath = $0?.path }
+        )) { wrapper in
+            EditorView(
+                connectionManager: connectionManager,
+                initialSource: .remote(path: wrapper.path),
+                onSendToChat: { prompt in
+                    // The editor's "Ask WOTANN" / inline AI menu funnels
+                    // its prompt back into the composer here. We append a
+                    // newline-separated chunk so the user can review and
+                    // edit before sending.
+                    if viewModel.inputText.isEmpty {
+                        viewModel.inputText = prompt
+                    } else {
+                        viewModel.inputText += "\n\n" + prompt
+                    }
+                    editorFilePath = nil
+                }
+            )
+            .environmentObject(connectionManager)
         }
     }
 
@@ -364,6 +390,11 @@ struct ChatViewContent: View {
             onSlashCommand: nil,
             onMention: nil,
             onSkill: nil,
+            onMentionFile: { path in
+                // Pop the editor full-screen with the resolved file. Composer
+                // already substituted `@file:<path>` into the input text.
+                editorFilePath = path
+            },
             quotedReply: quotedReply,
             onClearQuote: { quotedReply = nil }
         )
@@ -400,6 +431,17 @@ struct ChatViewContent: View {
         Haptics.shared.pullToRefresh()
         await appState.syncFromDesktop(using: connectionManager.rpcClient)
     }
+}
+
+// MARK: - EditorPath
+//
+// Identifiable wrapper around a file path so SwiftUI's `.fullScreenCover(item:)`
+// can drive the EditorView. Plain `String` doesn't conform to Identifiable
+// because two equal paths must collapse to a single sheet.
+
+private struct EditorPath: Identifiable, Hashable {
+    let path: String
+    var id: String { path }
 }
 
 // MARK: - CameraInputSheet

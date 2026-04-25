@@ -29,11 +29,17 @@ struct Composer: View {
     var onSlashCommand: (() -> Void)? = nil
     var onMention: (() -> Void)? = nil
     var onSkill: (() -> Void)? = nil
+    /// Fired when a `@file:<path>` token is tapped on a previously-sent
+    /// message OR when the user resolves the mention picker with a path.
+    /// ChatView wires this to `EditorView` to open the file full-screen.
+    var onMentionFile: ((String) -> Void)? = nil
     var quotedReply: String?
     var onClearQuote: (() -> Void)? = nil
 
     @FocusState private var isFocused: Bool
     @State private var isPressingMic = false
+    @State private var showFilePathSheet = false
+    @State private var draftFilePath: String = ""
 
     private var hasText: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -53,6 +59,67 @@ struct Composer: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(Color.black)
+        .sheet(isPresented: $showFilePathSheet) {
+            mentionPathSheet
+        }
+    }
+
+    // MARK: - Mention path sheet
+
+    /// Lightweight sheet to capture a desktop-relative path. Tapping "Open"
+    /// fires `onMentionFile` so ChatView can push EditorView. We also
+    /// substitute a `@file:<path>` token into the composer text so the
+    /// sent message references the file.
+    private var mentionPathSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("path/to/file.swift", text: $draftFilePath)
+                        .font(.system(size: 14, weight: .regular, design: .monospaced))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .onSubmit { resolveMentionPath() }
+                } header: {
+                    Text("File path")
+                } footer: {
+                    Text("Opens the file in the editor. Use a path relative to the desktop workspace, e.g. src/foo.ts.")
+                        .font(.caption)
+                }
+            }
+            .navigationTitle("Open file")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        showFilePathSheet = false
+                        draftFilePath = ""
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Open") {
+                        resolveMentionPath()
+                    }
+                    .disabled(draftFilePath.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func resolveMentionPath() {
+        let trimmed = draftFilePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Prepend the @file: token in the composer so the eventual message
+        // references the file. This matches the desktop's `@file:` reference
+        // grammar (see src/ui/context-references.ts).
+        let token = "@file:\(trimmed) "
+        if !text.contains(token) {
+            text += (text.isEmpty ? "" : " ") + token
+        }
+        onMentionFile?(trimmed)
+        showFilePathSheet = false
+        draftFilePath = ""
     }
 
     // MARK: - Status Row (model chip + cost + autopilot)
@@ -279,7 +346,13 @@ struct Composer: View {
                 onSlashCommand?()
             }
             accessoryButton(title: "@", systemIcon: "at") {
-                onMention?()
+                // Prefer the explicit handler when supplied; otherwise pop
+                // the path sheet so the user can mention a file inline.
+                if let onMention {
+                    onMention()
+                } else {
+                    showFilePathSheet = true
+                }
             }
             accessoryButton(title: "#", systemIcon: "number") {
                 onSkill?()
