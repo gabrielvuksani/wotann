@@ -116,6 +116,11 @@ const FleetDashboard = lazy(() => import("../fleet/FleetDashboard").then((m) => 
 // Was ZERO callers per the 2026-04-25 desktop-app gap audit; the daemon
 // owns a CreationsStore + RPC surface but desktop had no UI mount.
 const CreationsBrowser = lazy(() => import("../creations/CreationsBrowser").then((m) => ({ default: m.CreationsBrowser })));
+// V9 T12.12 — Mastra Studio parent (trace, memory graph, observer policy,
+// reflector replay). Per the 2026-04-25 desktop-app audit StudioTab.tsx
+// shipped but was not routed in the WorkspaceContent switch, so users
+// could not reach it. Lazy-loaded to keep the entry chunk small.
+const StudioTab = lazy(() => import("../studio/StudioTab").then((m) => ({ default: m.StudioTab })));
 
 // ── Resizable Panel Hook ───────────────────────────────────────────
 
@@ -284,6 +289,13 @@ function WorkspaceContent({
       // and deletes them. Reachable via setView("creations") from the
       // command palette or any future sidebar entry.
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><CreationsBrowser /></Suspense></ErrorBoundary>;
+    case "studio":
+      // V9 T12.12 — Mastra Studio parent. StudioTab composes
+      // TraceExplorer, MemoryGraphView, ObserverPolicyEditor, and
+      // ReflectorReplayPanel. Backend wiring (trace store, observer
+      // engine, reflector replay) is owned by the daemon; this route
+      // mounts the UI so users can reach the surface.
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><StudioTab /></Suspense></ErrorBoundary>;
     default:
       return <ErrorBoundary><ChatView /></ErrorBoundary>;
   }

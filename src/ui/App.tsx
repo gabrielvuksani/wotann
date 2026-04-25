@@ -190,18 +190,21 @@ const MainScene = memo(
         <Box
           width={44}
           marginLeft={1}
-          borderStyle="single"
+          borderStyle="round"
           borderColor={currentThemeBorder}
           flexDirection="column"
           paddingX={1}
         >
-          <Text bold color={currentThemePrimary}>
-            {activePanel === "diff"
-              ? "Diff Panel"
-              : activePanel === "agents"
-                ? "Agent Tree"
-                : "Task View"}
-          </Text>
+          <Box justifyContent="space-between" marginBottom={1}>
+            <Text bold color={currentThemePrimary}>
+              {activePanel === "diff"
+                ? "◆ Diff"
+                : activePanel === "agents"
+                  ? "◆ Agents"
+                  : "◆ Tasks"}
+            </Text>
+            <Text color={currentThemeInfo}>tab to cycle</Text>
+          </Box>
           {activePanel === "diff" && diffPanel && (
             <DiffViewer
               filePath={diffPanel.filePath}
@@ -211,22 +214,41 @@ const MainScene = memo(
             />
           )}
           {activePanel === "diff" && !diffPanel && (
-            <Text dimColor>No workspace diff available yet.</Text>
+            <Box flexDirection="column" gap={1}>
+              <Text dimColor>No workspace diff yet.</Text>
+              <Text dimColor>Edits will appear here as they happen.</Text>
+            </Box>
           )}
           {activePanel === "agents" && <AgentStatusPanel agents={agentStatuses} />}
           {activePanel === "tasks" && (
             <Box flexDirection="column" gap={1}>
-              <Text color={currentThemeInfo}>Thinking: {thinkingEffort}</Text>
-              <Text color={currentThemeInfo}>Panel: {activePanel}</Text>
-              <Text dimColor>Recent prompts:</Text>
+              <Box gap={1}>
+                <Text color={currentThemeInfo} bold>
+                  Thinking
+                </Text>
+                <Text dimColor>{thinkingEffort}</Text>
+              </Box>
+              <Box gap={1}>
+                <Text color={currentThemeInfo} bold>
+                  Panel
+                </Text>
+                <Text dimColor>{activePanel}</Text>
+              </Box>
+              <Text bold dimColor>
+                Recent prompts
+              </Text>
+              {history.length === 0 && <Text dimColor>(none yet — type to begin)</Text>}
               {history.slice(0, 5).map((entry, index) => (
                 // Stable key (entry index) keeps Ink's reconciler from
                 // tearing rows down on every render — required for
                 // flicker-free updates on the diff side.
-                <Text key={`task-${index}`} dimColor>
-                  {index + 1}. {entry.slice(0, 36)}
-                  {entry.length > 36 ? "..." : ""}
-                </Text>
+                <Box key={`task-${index}`} gap={1}>
+                  <Text color={currentThemePrimary}>{index + 1}.</Text>
+                  <Text dimColor>
+                    {entry.slice(0, 36)}
+                    {entry.length > 36 ? "..." : ""}
+                  </Text>
+                </Box>
               ))}
             </Box>
           )}
@@ -3290,11 +3312,13 @@ export function WotannApp({
         })()}
 
       {isIncognito && (
-        <Box paddingX={1}>
-          <Text color="yellow" bold>
-            INCOGNITO
+        <Box paddingX={1} gap={1}>
+          <Text color={currentTheme.colors.warning} bold>
+            ◐ INCOGNITO
           </Text>
-          <Text dimColor> — memory capture paused</Text>
+          <Text color={currentTheme.colors.muted}>
+            · memory capture paused · all messages local
+          </Text>
         </Box>
       )}
 

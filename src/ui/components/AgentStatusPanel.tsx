@@ -1,9 +1,17 @@
 /**
  * Agent status panel: tree view of active subagents with elapsed time.
+ *
+ * V9 design polish:
+ *   - StatusBadge primitive replaces literal glyph + color pairs.
+ *   - Card primitive provides consistent header + border styling.
+ *   - Counts in the header are colored when non-zero so glanceable.
  */
 
 import React from "react";
 import { Box, Text } from "ink";
+import { PALETTES } from "../themes.js";
+import { buildTone } from "../theme/tokens.js";
+import { Card, StatusBadge, type StatusVariant } from "./primitives/index.js";
 
 export interface SubagentStatus {
   readonly id: string;
@@ -27,12 +35,16 @@ function formatElapsed(startMs: number): string {
   return min > 0 ? `${min}m${sec}s` : `${sec}s`;
 }
 
-function statusIcon(status: SubagentStatus["status"]): { icon: string; color: string } {
+function statusVariant(status: SubagentStatus["status"]): StatusVariant {
   switch (status) {
-    case "running": return { icon: "●", color: "green" };
-    case "completed": return { icon: "✓", color: "green" };
-    case "failed": return { icon: "✗", color: "red" };
-    case "queued": return { icon: "○", color: "gray" };
+    case "running":
+      return "running";
+    case "completed":
+      return "ok";
+    case "failed":
+      return "fail";
+    case "queued":
+      return "idle";
   }
 }
 
@@ -40,37 +52,32 @@ export function AgentStatusPanel({
   agents,
   showCompleted = false,
 }: AgentStatusPanelProps): React.ReactElement {
-  const displayed = showCompleted
-    ? agents
-    : agents.filter((a) => a.status !== "completed");
+  const tone = buildTone(PALETTES.dark);
+  const displayed = showCompleted ? agents : agents.filter((a) => a.status !== "completed");
+  const activeCount = agents.filter((a) => a.status === "running").length;
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
-      <Text bold>Agents ({agents.filter((a) => a.status === "running").length} active)</Text>
-
-      {displayed.length === 0 && (
-        <Text dimColor>No active agents</Text>
-      )}
+    <Card tone={tone} title="Agents" meta={`${activeCount} active`} accent="primary">
+      {displayed.length === 0 && <Text color={tone.muted}>No active agents</Text>}
 
       {displayed.map((agent) => {
-        const { icon, color } = statusIcon(agent.status);
         return (
           <Box key={agent.id} gap={1}>
-            <Text color={color}>{icon}</Text>
-            <Text bold>{agent.name}</Text>
-            <Text dimColor>({agent.model})</Text>
+            <StatusBadge tone={tone} variant={statusVariant(agent.status)} />
+            <Text color={tone.text} bold>
+              {agent.name}
+            </Text>
+            <Text color={tone.muted}>({agent.model})</Text>
             {agent.status === "running" && (
               <>
-                <Text dimColor>{formatElapsed(agent.startedAt)}</Text>
-                {agent.currentTool && (
-                  <Text color="yellow">[{agent.currentTool}]</Text>
-                )}
-                <Text dimColor>T:{agent.toolCalls}</Text>
+                <Text color={tone.muted}>{formatElapsed(agent.startedAt)}</Text>
+                {agent.currentTool && <Text color={tone.warning}>[{agent.currentTool}]</Text>}
+                <Text color={tone.muted}>T:{agent.toolCalls}</Text>
               </>
             )}
           </Box>
         );
       })}
-    </Box>
+    </Card>
   );
 }

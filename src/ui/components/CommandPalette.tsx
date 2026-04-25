@@ -6,12 +6,21 @@
  *   - Text input filters the registry via fuzzy match.
  *   - Up / Down navigates, Enter executes, Esc cancels.
  *   - Handler errors surface via `onError` (App shows a system message).
+ *
+ * V9 design polish:
+ *   - Wrapped in the Card primitive for a consistent rounded panel.
+ *   - Footer rendered with KeyHintBar so the keys + descriptions
+ *     match the rest of the surface (history picker, message actions).
+ *   - Pointer glyph + cursor pulled from design tokens.
  */
 
 import React, { useState, useMemo, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import type { CommandRegistry, Command } from "../command-registry.js";
 import { CommandExecutionError } from "../command-registry.js";
+import { PALETTES } from "../themes.js";
+import { buildTone, glyph } from "../theme/tokens.js";
+import { Card, KeyHintBar } from "./primitives/index.js";
 
 interface CommandPaletteProps {
   readonly registry: CommandRegistry;
@@ -22,12 +31,19 @@ interface CommandPaletteProps {
 
 const DEFAULT_MAX_VISIBLE = 8;
 
+const FOOTER_HINTS = [
+  { keys: "Enter", description: "run" },
+  { keys: "Esc", description: "close" },
+  { keys: "Arrows", description: "navigate" },
+];
+
 export function CommandPalette({
   registry,
   onClose,
   onError,
   maxVisible = DEFAULT_MAX_VISIBLE,
 }: CommandPaletteProps): React.ReactElement {
+  const tone = buildTone(PALETTES.dark);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -90,49 +106,43 @@ export function CommandPalette({
   const visibleEntries = results.slice(visibleStart, visibleStart + maxVisible);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
-      <Box gap={1} marginBottom={1}>
-        <Text color="magenta" bold>
-          Command Palette
-        </Text>
-        <Text dimColor>
-          ({results.length}/{registry.size})
-        </Text>
-      </Box>
-
+    <Card
+      tone={tone}
+      title="Command Palette"
+      meta={`${results.length}/${registry.size}`}
+      accent="primary"
+    >
       <Box gap={1}>
-        <Text color="magenta">{">"}</Text>
-        <Text>{query}</Text>
-        <Text color="magenta">|</Text>
+        <Text color={tone.primary}>{">"}</Text>
+        <Text color={tone.text}>{query}</Text>
+        <Text color={tone.primary}>{glyph.cursorBlock}</Text>
       </Box>
 
       <Box flexDirection="column" marginTop={1}>
-        {visibleEntries.length === 0 && <Text dimColor>No matching commands</Text>}
+        {visibleEntries.length === 0 && <Text color={tone.muted}>No matching commands</Text>}
         {visibleEntries.map((entry, displayIdx) => {
           const absoluteIdx = visibleStart + displayIdx;
           const isSelected = absoluteIdx === clampedIndex;
           return (
             <Box key={`cmd-${entry.command.id}`} gap={1}>
-              <Text color={isSelected ? "magenta" : "gray"}>{isSelected ? ">" : " "}</Text>
-              <Text bold={isSelected} color={isSelected ? "white" : undefined}>
+              <Text color={isSelected ? tone.primary : tone.border}>
+                {isSelected ? glyph.pointer : " "}
+              </Text>
+              <Text bold={isSelected} color={isSelected ? tone.text : tone.text}>
                 {entry.command.label}
               </Text>
               {entry.command.description !== undefined && (
-                <Text dimColor>— {entry.command.description}</Text>
+                <Text color={tone.muted}>— {entry.command.description}</Text>
               )}
             </Box>
           );
         })}
       </Box>
 
-      <Box marginTop={1} gap={1}>
-        <Text dimColor>Enter: run</Text>
-        <Text dimColor>|</Text>
-        <Text dimColor>Esc: close</Text>
-        <Text dimColor>|</Text>
-        <Text dimColor>Arrows: navigate</Text>
+      <Box marginTop={1}>
+        <KeyHintBar bindings={FOOTER_HINTS} tone={tone} />
       </Box>
-    </Box>
+    </Card>
   );
 }
 

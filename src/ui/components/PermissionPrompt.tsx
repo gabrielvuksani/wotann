@@ -1,11 +1,21 @@
 /**
  * Permission prompt: approve/deny/always-allow tool execution.
  * Shown for MEDIUM and HIGH risk tool calls.
+ *
+ * V9 design polish:
+ *   - Border + risk badge come from semantic tones.
+ *   - Heavy border style for HIGH risk so the visual weight matches
+ *     the consequence — mirrors how warning vs danger should read
+ *     differently on the Norse-themed surface.
+ *   - Pointer + action keys pulled from design tokens.
  */
 
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { PermissionDecision, RiskLevel } from "../../core/types.js";
+import { PALETTES } from "../themes.js";
+import { buildTone, glyph } from "../theme/tokens.js";
+import { Pill, type StatusVariant } from "./primitives/index.js";
 
 interface PermissionPromptProps {
   readonly toolName: string;
@@ -14,17 +24,32 @@ interface PermissionPromptProps {
   readonly onDecision: (decision: PermissionDecision) => void;
 }
 
-const RISK_COLORS: Record<RiskLevel, string> = {
-  low: "green",
-  medium: "yellow",
-  high: "red",
-};
-
-const OPTIONS: readonly { readonly key: string; readonly label: string; readonly decision: PermissionDecision }[] = [
+const OPTIONS: readonly {
+  readonly key: string;
+  readonly label: string;
+  readonly decision: PermissionDecision;
+}[] = [
   { key: "y", label: "Yes (allow)", decision: "allow" },
   { key: "n", label: "No (deny)", decision: "deny" },
   { key: "a", label: "Always allow", decision: "always-allow" },
 ];
+
+function riskVariant(level: RiskLevel): StatusVariant {
+  switch (level) {
+    case "low":
+      return "ok";
+    case "medium":
+      return "warn";
+    case "high":
+      return "fail";
+  }
+}
+
+function riskBorderStyle(level: RiskLevel): "round" | "double" {
+  // Heavy border for high risk — the visual weight should match the
+  // consequence so the user can't misread a destructive prompt.
+  return level === "high" ? "double" : "round";
+}
 
 export function PermissionPrompt({
   toolName,
@@ -32,6 +57,7 @@ export function PermissionPrompt({
   riskLevel,
   onDecision,
 }: PermissionPromptProps): React.ReactElement {
+  const tone = buildTone(PALETTES.dark);
   const [selected, setSelected] = useState(0);
 
   useInput((input, key) => {
@@ -53,26 +79,36 @@ export function PermissionPrompt({
     }
   });
 
+  const variant = riskVariant(riskLevel);
+  const borderColor =
+    riskLevel === "high" ? tone.error : riskLevel === "medium" ? tone.warning : tone.success;
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={RISK_COLORS[riskLevel]} paddingX={1} paddingY={0}>
+    <Box
+      flexDirection="column"
+      borderStyle={riskBorderStyle(riskLevel)}
+      borderColor={borderColor}
+      paddingX={1}
+      paddingY={0}
+    >
       <Box gap={1}>
-        <Text color={RISK_COLORS[riskLevel]} bold>
-          [{riskLevel.toUpperCase()}]
+        <Pill tone={tone} label={riskLevel.toUpperCase()} variant={variant} />
+        <Text color={tone.text} bold>
+          Permission required: {toolName}
         </Text>
-        <Text bold>Permission required: {toolName}</Text>
       </Box>
 
       <Box paddingLeft={2}>
-        <Text dimColor>{description}</Text>
+        <Text color={tone.muted}>{description}</Text>
       </Box>
 
       <Box flexDirection="column" marginTop={1}>
         {OPTIONS.map((opt, i) => (
           <Box key={opt.key} gap={1}>
-            <Text color={i === selected ? "cyan" : "gray"}>
-              {i === selected ? ">" : " "}
+            <Text color={i === selected ? tone.primary : tone.border}>
+              {i === selected ? glyph.pointer : " "}
             </Text>
-            <Text bold={i === selected}>
+            <Text bold={i === selected} color={tone.text}>
               [{opt.key}] {opt.label}
             </Text>
           </Box>

@@ -2,10 +2,19 @@
  * Dispatch Inbox: shows inbound channel messages with triage actions.
  * Provides reply, snooze, and escalate actions for each message.
  * Displays in the TUI sidebar as a toggleable panel.
+ *
+ * V9 design polish:
+ *   - Pulls colors from the design tokens (no more "cyan"/"gray"
+ *     literals scattered through the file).
+ *   - Pointer glyph from tokens for selection consistency.
+ *   - Status icons preserved as-is so the test suite (which asserts
+ *     on ●, ○, etc.) keeps passing.
  */
 
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { PALETTES } from "../themes.js";
+import { buildTone, glyph } from "../theme/tokens.js";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -37,23 +46,27 @@ function formatTimestamp(ts: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-function priorityColor(p: InboxMessage["priority"]): string {
-  if (p === "high") return "red";
-  if (p === "normal") return "yellow";
-  return "gray";
+function priorityToneSlot(p: InboxMessage["priority"]): "error" | "warning" | "muted" {
+  if (p === "high") return "error";
+  if (p === "normal") return "warning";
+  return "muted";
 }
 
+/**
+ * Status icon — kept as raw unicode (●, ○, ◑, ✓, ↑) because the test
+ * suite asserts on the exact code points (●, ○).
+ */
 function statusIcon(s: InboxMessage["status"]): string {
-  if (s === "unread") return "●";
-  if (s === "read") return "○";
-  if (s === "snoozed") return "◑";
-  if (s === "replied") return "✓";
-  return "↑";
+  if (s === "unread") return "●"; // ●
+  if (s === "read") return "○"; // ○
+  if (s === "snoozed") return "◑"; // ◑
+  if (s === "replied") return "✓"; // ✓
+  return "↑"; // ↑
 }
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
-  return text.slice(0, max - 1) + "…";
+  return text.slice(0, max - 1) + "…"; // …
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -65,9 +78,10 @@ export function DispatchInbox({
   onEscalate,
   maxVisible = 8,
 }: DispatchInboxProps): React.ReactElement {
+  const tone = buildTone(PALETTES.dark);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const visibleMessages = messages.slice(0, maxVisible);
-  const unreadCount = messages.filter(m => m.status === "unread").length;
+  const unreadCount = messages.filter((m) => m.status === "unread").length;
 
   useInput((_input, key) => {
     if (key.upArrow && selectedIndex > 0) {
@@ -90,8 +104,10 @@ export function DispatchInbox({
   if (messages.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text bold color="cyan">📬 Dispatch Inbox</Text>
-        <Text color="gray" dimColor>No messages</Text>
+        <Text color={tone.primary} bold>
+          Dispatch Inbox
+        </Text>
+        <Text color={tone.muted}>No messages</Text>
       </Box>
     );
   }
@@ -99,29 +115,31 @@ export function DispatchInbox({
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box>
-        <Text bold color="cyan">📬 Dispatch Inbox</Text>
-        <Text color="gray"> ({unreadCount} unread)</Text>
+        <Text color={tone.primary} bold>
+          Dispatch Inbox
+        </Text>
+        <Text color={tone.muted}> ({unreadCount} unread)</Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {visibleMessages.map((msg, i) => {
           const isSelected = i === selectedIndex;
+          const priorityTone = tone[priorityToneSlot(msg.priority)];
           return (
             <Box key={msg.id} flexDirection="column">
               <Box>
-                <Text color={isSelected ? "white" : "gray"}>
-                  {isSelected ? "▸ " : "  "}
+                <Text color={isSelected ? tone.text : tone.muted}>
+                  {isSelected ? `${glyph.pointer} ` : "  "}
                 </Text>
-                <Text color={priorityColor(msg.priority)}>
-                  {statusIcon(msg.status)}
+                <Text color={priorityTone}>{statusIcon(msg.status)}</Text>
+                <Text color={tone.info}> [{msg.channel}]</Text>
+                <Text bold={msg.status === "unread"} color={isSelected ? tone.text : undefined}>
+                  {" "}
+                  {msg.sender}
                 </Text>
-                <Text color="blue"> [{msg.channel}]</Text>
-                <Text bold={msg.status === "unread"} color={isSelected ? "white" : undefined}>
-                  {" "}{msg.sender}
-                </Text>
-                <Text color="gray"> {formatTimestamp(msg.timestamp)}</Text>
+                <Text color={tone.muted}> {formatTimestamp(msg.timestamp)}</Text>
               </Box>
               <Box marginLeft={4}>
-                <Text color="gray" wrap="truncate">
+                <Text color={tone.muted} wrap="truncate">
                   {truncate(msg.content, 60)}
                 </Text>
               </Box>
@@ -130,14 +148,10 @@ export function DispatchInbox({
         })}
       </Box>
       {messages.length > maxVisible && (
-        <Text color="gray" dimColor>
-          +{messages.length - maxVisible} more messages
-        </Text>
+        <Text color={tone.muted}>+{messages.length - maxVisible} more messages</Text>
       )}
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
-          [r]eply  [s]nooze  [e]scalate  ↑↓ navigate
-        </Text>
+        <Text color={tone.muted}>[r]eply [s]nooze [e]scalate ↑↓ navigate</Text>
       </Box>
     </Box>
   );

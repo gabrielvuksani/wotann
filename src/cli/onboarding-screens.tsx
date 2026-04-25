@@ -303,12 +303,25 @@ function WelcomeScreen({ hardware, onNext, onCancel }: WelcomeScreenProps): Reac
     if (key.return) onNext();
     else if (key.escape) onCancel();
   });
+  // Norse rune flourish — same Ask/Relay/Autopilot mark used by the
+  // runtime TUI so the visual language carries between onboarding
+  // and the chat surface.
+  const RUNES = "ᚠ  ᚱ  ᛉ";
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Box flexDirection="column">
-        <Text color="cyan">╔══════════════════════════════════════════════════════════╗</Text>
-        <Text color="cyan">║ Welcome to WOTANN ║</Text>
-        <Text color="cyan">╚══════════════════════════════════════════════════════════╝</Text>
+      <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+        <Box justifyContent="space-between">
+          <Box gap={1}>
+            <Text color="cyan" bold>
+              {RUNES}
+            </Text>
+            <Text color="cyan" bold>
+              Welcome to WOTANN
+            </Text>
+          </Box>
+          <Text dimColor>setup wizard</Text>
+        </Box>
+        <Text dimColor>Unified Agent Harness · Ask · Relay · Autopilot</Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
         <Text>
@@ -321,7 +334,17 @@ function WelcomeScreen({ hardware, onNext, onCancel }: WelcomeScreenProps): Reac
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text>WOTANN will walk you through picking a provider in &lt;90 seconds.</Text>
-        <Text dimColor>Press Enter to continue, Esc to exit.</Text>
+        <Box gap={1} marginTop={1}>
+          <Text color="cyan" bold>
+            Enter
+          </Text>
+          <Text dimColor>continue</Text>
+          <Text dimColor>·</Text>
+          <Text color="cyan" bold>
+            Esc
+          </Text>
+          <Text dimColor>exit</Text>
+        </Box>
       </Box>
     </Box>
   );
@@ -677,42 +700,63 @@ function DoneScreen({ step, onExit }: DoneScreenProps): React.ReactElement {
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
       {step.reason === "success" && step.rung ? (
-        <>
-          <Text color="green" bold>
-            You're ready to go.
-          </Text>
+        <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
+          <Box gap={1}>
+            <Text color="green" bold>
+              ✓
+            </Text>
+            <Text color="green" bold>
+              You're ready to go.
+            </Text>
+          </Box>
           <Text dimColor>
             Provider: {step.rung.label} · Strategy: {step.strategy}
           </Text>
-          <Text>
-            Try: <Text bold>wotann ask "What can you help me build today?"</Text>
-          </Text>
-        </>
+          <Box marginTop={1}>
+            <Text dimColor>Try </Text>
+            <Text color="cyan" bold>
+              wotann ask "What can you help me build today?"
+            </Text>
+          </Box>
+        </Box>
       ) : step.reason === "skip" ? (
-        <>
-          <Text color="yellow" bold>
-            Skipped for now.
-          </Text>
+        <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+          <Box gap={1}>
+            <Text color="yellow" bold>
+              ◑
+            </Text>
+            <Text color="yellow" bold>
+              Skipped for now.
+            </Text>
+          </Box>
           <Text dimColor>
             Run <Text bold>wotann init</Text> again any time to finish setup.
           </Text>
           <Text dimColor>
             In the meantime you have 10 free demo queries via WOTANN's hosted backend.
           </Text>
-        </>
+        </Box>
       ) : (
-        <>
-          <Text color="red" bold>
-            Setup exited with errors.
-          </Text>
+        <Box flexDirection="column" borderStyle="round" borderColor="red" paddingX={1}>
+          <Box gap={1}>
+            <Text color="red" bold>
+              ✗
+            </Text>
+            <Text color="red" bold>
+              Setup exited with errors.
+            </Text>
+          </Box>
           {step.failureReason && <Text dimColor>Reason: {step.failureReason}</Text>}
           <Text dimColor>
             Your chosen provider may need configuration before WOTANN can reach it.
           </Text>
-        </>
+        </Box>
       )}
-      <Box marginTop={1}>
-        <Text dimColor>Press Enter to exit.</Text>
+      <Box marginTop={1} gap={1}>
+        <Text color="cyan" bold>
+          Enter
+        </Text>
+        <Text dimColor>exit</Text>
       </Box>
     </Box>
   );

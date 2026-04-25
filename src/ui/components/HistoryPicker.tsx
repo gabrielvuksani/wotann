@@ -2,10 +2,18 @@
  * History picker: fuzzy-search prompt history overlay.
  * Triggered by Ctrl+R, allows substring filtering with scored results,
  * arrow-key navigation, Enter to select, Escape to cancel.
+ *
+ * V9 design polish:
+ *   - Card primitive replaces hand-rolled rounded box.
+ *   - Footer uses KeyHintBar for visual parity with the command palette.
+ *   - Pointer + cursor glyphs from design tokens.
  */
 
 import React, { useState, useMemo, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
+import { PALETTES } from "../themes.js";
+import { buildTone, glyph } from "../theme/tokens.js";
+import { Card, KeyHintBar } from "./primitives/index.js";
 
 interface HistoryPickerProps {
   readonly history: readonly string[];
@@ -20,6 +28,12 @@ interface ScoredEntry {
 }
 
 const MAX_VISIBLE = 10;
+
+const FOOTER_HINTS = [
+  { keys: "Enter", description: "select" },
+  { keys: "Esc", description: "cancel" },
+  { keys: "Arrows", description: "navigate" },
+];
 
 /**
  * Fuzzy-score a candidate against a query using substring matching.
@@ -70,6 +84,7 @@ export function HistoryPicker({
   onSelect,
   onCancel,
 }: HistoryPickerProps): React.ReactElement {
+  const tone = buildTone(PALETTES.dark);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -136,43 +151,34 @@ export function HistoryPicker({
   const visibleEntries = filtered.slice(visibleStart, visibleStart + MAX_VISIBLE);
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor="cyan"
-      paddingX={1}
+    <Card
+      tone={tone}
+      title="History Search"
+      meta={`${filtered.length}/${history.length}`}
+      accent="primary"
     >
-      <Box gap={1} marginBottom={1}>
-        <Text color="cyan" bold>History Search</Text>
-        <Text dimColor>({filtered.length}/{history.length})</Text>
-      </Box>
-
       {/* Search input */}
       <Box gap={1}>
-        <Text color="cyan">{">"}</Text>
-        <Text>{query}</Text>
-        <Text color="cyan">|</Text>
+        <Text color={tone.primary}>{">"}</Text>
+        <Text color={tone.text}>{query}</Text>
+        <Text color={tone.primary}>{glyph.cursorBlock}</Text>
       </Box>
 
       {/* Results list */}
       <Box flexDirection="column" marginTop={1}>
-        {visibleEntries.length === 0 && (
-          <Text dimColor>No matching history entries</Text>
-        )}
+        {visibleEntries.length === 0 && <Text color={tone.muted}>No matching history entries</Text>}
         {visibleEntries.map((entry, displayIdx) => {
           const absoluteIdx = visibleStart + displayIdx;
           const isSelected = absoluteIdx === clampedIndex;
           // Truncate long entries for display
-          const displayText = entry.text.length > 80
-            ? entry.text.slice(0, 77) + "..."
-            : entry.text;
+          const displayText = entry.text.length > 80 ? entry.text.slice(0, 77) + "..." : entry.text;
 
           return (
             <Box key={`hist-${entry.index}`} gap={1}>
-              <Text color={isSelected ? "cyan" : "gray"}>
-                {isSelected ? ">" : " "}
+              <Text color={isSelected ? tone.primary : tone.border}>
+                {isSelected ? glyph.pointer : " "}
               </Text>
-              <Text bold={isSelected} color={isSelected ? "white" : undefined}>
+              <Text bold={isSelected} color={isSelected ? tone.text : tone.text}>
                 {displayText}
               </Text>
             </Box>
@@ -181,13 +187,9 @@ export function HistoryPicker({
       </Box>
 
       {/* Footer hints */}
-      <Box marginTop={1} gap={1}>
-        <Text dimColor>Enter: select</Text>
-        <Text dimColor>|</Text>
-        <Text dimColor>Esc: cancel</Text>
-        <Text dimColor>|</Text>
-        <Text dimColor>Arrows: navigate</Text>
+      <Box marginTop={1}>
+        <KeyHintBar bindings={FOOTER_HINTS} tone={tone} />
       </Box>
-    </Box>
+    </Card>
   );
 }

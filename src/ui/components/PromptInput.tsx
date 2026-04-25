@@ -1,10 +1,25 @@
 /**
  * Prompt input: text input with history, slash command hints,
  * Ctrl+C abort, and visual feedback during streaming.
+ *
+ * V9 design polish:
+ *   - Border + cursor colors come from the design tokens so theme
+ *     switches stay coherent with the rest of the surface.
+ *   - Slash autocomplete hint moved into a tiny KeyHint-style row that
+ *     reads "Tab → /command — description" instead of the cramped
+ *     literal joiner.
+ *   - Streaming feedback uses the Spinner primitive plus a runic
+ *     "ᚠ" mark — the same glyph the StartupScreen + ContextHUD use,
+ *     reinforcing the cyan signature.
+ *   - Mode badge upgraded to use the Pill primitive when active so
+ *     the mode prompt visually agrees with the StatusBar's mode pill.
  */
 
 import React, { useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
+import { PALETTES } from "../themes.js";
+import { buildTone, glyph, rune } from "../theme/tokens.js";
+import { Pill, Spinner } from "./primitives/index.js";
 
 interface PromptInputProps {
   readonly onSubmit: (value: string) => void;
@@ -87,23 +102,29 @@ export function PromptInput({
   mode = "default",
   value: controlledValue,
 }: PromptInputProps): React.ReactElement {
+  const tone = buildTone(PALETTES.dark);
   const [internalValue, setInternalValue] = useState("");
   const [historyIndex, setHistoryIndex] = useState(-1);
   const value = controlledValue ?? internalValue;
-  const setValue = useCallback((next: string | ((prev: string) => string)) => {
-    const resolved = typeof next === "function"
-      ? (next as (prev: string) => string)(value)
-      : next;
-    if (controlledValue === undefined) {
-      setInternalValue(resolved);
-    }
-    onChange?.(resolved);
-  }, [controlledValue, onChange, value]);
+  const setValue = useCallback(
+    (next: string | ((prev: string) => string)) => {
+      const resolved =
+        typeof next === "function" ? (next as (prev: string) => string)(value) : next;
+      if (controlledValue === undefined) {
+        setInternalValue(resolved);
+      }
+      onChange?.(resolved);
+    },
+    [controlledValue, onChange, value],
+  );
 
   // Find matching slash commands for autocomplete hint
-  const slashHint = value.startsWith("/") && value.length > 1 && value.length < 12
-    ? SLASH_COMMANDS.find((c) => c.cmd.startsWith(value.toLowerCase()) && c.cmd !== value.toLowerCase())
-    : null;
+  const slashHint =
+    value.startsWith("/") && value.length > 1 && value.length < 12
+      ? SLASH_COMMANDS.find(
+          (c) => c.cmd.startsWith(value.toLowerCase()) && c.cmd !== value.toLowerCase(),
+        )
+      : null;
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
@@ -169,40 +190,76 @@ export function PromptInput({
     }
   });
 
-  const borderColor = isStreaming ? "green" : value.startsWith("/") ? "yellow" : "blue";
+  // Border tone reflects state — streaming green, slash command warning,
+  // default brand cyan. Pulled from tokens so theme cycling stays coherent.
+  const borderTone = isStreaming
+    ? tone.success
+    : value.startsWith("/")
+      ? tone.warning
+      : tone.primary;
 
   return (
     <Box flexDirection="column">
       {/* Slash command autocomplete hint */}
       {slashHint && (
-        <Box paddingX={2}>
-          <Text dimColor>Tab: {slashHint.cmd} — {slashHint.desc}</Text>
+        <Box paddingX={2} gap={1}>
+          <Text color={tone.muted}>Tab</Text>
+          <Text color={tone.primary}>{glyph.arrowRight}</Text>
+          <Text color={tone.warning} bold>
+            {slashHint.cmd}
+          </Text>
+          <Text color={tone.muted}>
+            {glyph.bullet} {slashHint.desc}
+          </Text>
         </Box>
       )}
 
       {/* Input box */}
-      <Box borderStyle="round" borderColor={borderColor} paddingX={1}>
+      <Box borderStyle="round" borderColor={borderTone} paddingX={1}>
         {isStreaming ? (
           <Box gap={1}>
-            <Text color="green">●</Text>
-            <Text dimColor>Streaming... Press </Text>
-            <Text color="yellow" bold>Ctrl+C</Text>
-            <Text dimColor> to abort</Text>
+            <Spinner tone={tone} accent="success" />
+            <Text color={tone.muted}>Streaming...</Text>
+            <Text color={tone.muted}>Press</Text>
+            <Text color={tone.warning} bold>
+              Ctrl+C
+            </Text>
+            <Text color={tone.muted}>to abort</Text>
           </Box>
         ) : (
           <Box>
-            <Text color={borderColor} bold>{mode === "default" ? ">" : `[${mode}]>`} </Text>
+            {mode === "default" ? (
+              <Box gap={1}>
+                <Text color={tone.rune} bold>
+                  {rune.ask}
+                </Text>
+                <Text color={borderTone} bold>
+                  {">"}
+                </Text>
+              </Box>
+            ) : (
+              <Box gap={1}>
+                <Pill tone={tone} label={mode} variant="info" />
+                <Text color={borderTone} bold>
+                  {">"}
+                </Text>
+              </Box>
+            )}
+            <Text> </Text>
             {value.length > 0 ? (
               <Text>
                 {value.startsWith("/") ? (
-                  <Text color="yellow">{value}</Text>
+                  <Text color={tone.warning}>{value}</Text>
                 ) : (
-                  <Text>{value}</Text>
+                  <Text color={tone.text}>{value}</Text>
                 )}
-                <Text color="cyan">█</Text>
+                <Text color={tone.primary}>{glyph.cursorBlock}</Text>
               </Text>
             ) : (
-              <Text dimColor>{placeholder}<Text color="cyan">█</Text></Text>
+              <Text>
+                <Text color={tone.muted}>{placeholder}</Text>
+                <Text color={tone.primary}>{glyph.cursorBlock}</Text>
+              </Text>
             )}
           </Box>
         )}
