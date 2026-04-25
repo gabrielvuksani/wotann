@@ -76,6 +76,13 @@ jobs:
   macos-gui-dmg:
     name: Build macOS GUI DMG (Tauri arm64)
     runs-on: macos-latest
+    # Job-level env hoists the secret presence into a plain string ("true" /
+    # "false") so step-level `if:` expressions can branch on it. GitHub
+    # Actions does NOT permit `secrets.*` inside step `if:` expressions —
+    # only inside `env:`/`with:`/`run:`. This was the root cause of the
+    # release.yml parse failure that blocked v0.5.0 (SB-02).
+    env:
+      HAS_APPLE_CERT: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -144,14 +151,21 @@ jobs:
       # without requiring secrets to be present for a working release.
       # All secret values are passed through env: blocks (never inlined)
       # to avoid command-injection risk.
+      # Secret-name canonicalization (must match docs/RELEASE_PIPELINE_V2.md):
+      #   APPLE_SIGNING_IDENTITY     — full identity string ("Developer ID Application: Acme Inc (TEAMID)")
+      #   APPLE_ID                   — Apple ID email used for notarization
+      #   APPLE_TEAM_ID              — 10-char team ID
+      #   APPLE_PASSWORD             — app-specific password from appleid.apple.com (renamed from APPLE_APP_PASSWORD)
+      #   APPLE_CERTIFICATE          — base64-encoded .p12 (renamed from APPLE_CERTIFICATE_P12)
+      #   APPLE_CERTIFICATE_PASSWORD — passphrase for the .p12
       - name: Sign and notarize the app (Developer ID path)
-        if: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+        if: env.HAS_APPLE_CERT == 'true'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
@@ -166,7 +180,7 @@ jobs:
           security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
-          printf '%s' "$APPLE_CERTIFICATE_P12" | base64 -d > /tmp/cert.p12
+          printf '%s' "$APPLE_CERTIFICATE" | base64 -d > /tmp/cert.p12
           security import /tmp/cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed s/\"//g)
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PWD" "$KEYCHAIN"
@@ -183,7 +197,7 @@ jobs:
           xcrun notarytool submit "$NOTARIZE_ZIP" \
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD" \
+            --password "$APPLE_PASSWORD" \
             --wait
           # Staple the notarization ticket so Gatekeeper works offline
           xcrun stapler staple "$APP_PATH"
@@ -193,7 +207,7 @@ jobs:
           security delete-keychain "$KEYCHAIN" || true
 
       - name: Ad-hoc sign the app binary (fallback when no Developer ID secrets)
-        if: ${{ secrets.APPLE_SIGNING_IDENTITY == '' }}
+        if: env.HAS_APPLE_CERT != 'true'
         run: |
           set -euo pipefail
           APP_PATH="desktop-app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/WOTANN.app"
