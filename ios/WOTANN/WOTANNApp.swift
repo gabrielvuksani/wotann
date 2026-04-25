@@ -1,11 +1,19 @@
 import SwiftUI
 import Combine
+import UIKit
 import WatchConnectivity
 
 /// WOTANN iOS -- The All-Father's Companion.
 /// Connects to your desktop WOTANN instance via encrypted WebSocket.
 @main
 struct WOTANNApp: App {
+    /// V9 T14.3 — UIKit AppDelegate for APNs / PushKit callbacks.
+    /// SwiftUI's lifecycle does not surface `application(
+    /// _:didRegisterForRemoteNotificationsWithDeviceToken:)`, so we
+    /// bridge through a UIApplicationDelegate that forwards each push
+    /// callback to `NotificationService`.
+    @UIApplicationDelegateAdaptor(WOTANNAppDelegate.self) private var appDelegate
+
     @StateObject private var appState = AppState()
     @StateObject private var connectionManager = ConnectionManager()
     @AppStorage("colorScheme") private var colorSchemePreference = "dark"
@@ -594,6 +602,71 @@ final class PhoneWCSessionDelegate: NSObject, WCSessionDelegate {
             default:
                 break
             }
+        }
+    }
+}
+
+// MARK: - WOTANNAppDelegate (V9 T14.3 APNs registration)
+
+/// UIKit `AppDelegate` bridge for push-notification callbacks that
+/// SwiftUI's `App` lifecycle does not surface. This delegate is wired
+/// to the SwiftUI `App` via `@UIApplicationDelegateAdaptor` and
+/// forwards each push-related callback to `NotificationService`.
+///
+/// Per Apple's contract, the device-token callbacks fire on the main
+/// thread; `NotificationService` is `@MainActor`, so the forward is a
+/// direct method call. We also kick off `registerForRemoteNotifications`
+/// in `application(_:didFinishLaunchingWithOptions:)` so the app
+/// requests its APNs token at launch — the user-facing permission
+/// prompt is owned by `NotificationService.requestPermission()` and
+/// happens at a more deliberate moment in the onboarding flow.
+final class WOTANNAppDelegate: NSObject, UIApplicationDelegate {
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        // Honest stub: registering for remote notifications without
+        // the APNs entitlement does not crash — iOS will simply call
+        // `didFailToRegisterForRemoteNotificationsWithError`. We
+        // still kick it off so simulator builds without an APNs
+        // sandbox certificate exercise the failure-handling path.
+        Task { @MainActor in
+            NotificationService.shared.registerForRemoteNotifications()
+        }
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        Task { @MainActor in
+            NotificationService.shared.handleAPNsToken(deviceToken)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        Task { @MainActor in
+            NotificationService.shared.handleAPNsRegistrationFailure(error)
+        }
+    }
+
+    /// Handle remote notifications delivered while the app is
+    /// foregrounded or in the background. The completion handler
+    /// signals the system that we've finished any background work
+    /// triggered by the push.
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        Task { @MainActor in
+            NotificationService.shared.handleRemoteNotification(userInfo: userInfo)
+            completionHandler(.newData)
         }
     }
 }

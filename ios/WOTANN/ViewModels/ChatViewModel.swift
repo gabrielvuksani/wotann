@@ -145,6 +145,11 @@ final class ChatViewModel: ObservableObject {
                     }
                     isStreaming = false
                     HapticService.shared.trigger(.responseComplete)
+                    // V9 T14.3 — Siri suggestion donation for the
+                    // on-device path. We donate even when the
+                    // desktop is offline because the user did
+                    // successfully complete an "ask WOTANN" action.
+                    IntentDonationService.shared.donateAsk(prompt: text)
                 }
             } else {
                 offlineQueue.enqueue(prompt: text, provider: appState.currentProvider)
@@ -230,6 +235,12 @@ final class ChatViewModel: ObservableObject {
                     conversationId: conversationId,
                     prompt: text
                 )
+                // V9 T14.3 — Siri suggestion donation. Donate the
+                // intent AFTER the successful send so Siri only
+                // surfaces flows that actually completed. Failures
+                // skip donation, which keeps the suggestion ranking
+                // honest.
+                IntentDonationService.shared.donateAsk(prompt: text)
             } catch {
                 // If send fails, update the placeholder with error
                 appState.updateConversation(conversationId) { conv in
@@ -350,6 +361,11 @@ final class ChatViewModel: ObservableObject {
                 conversationId: self.conversationId,
                 prompt: prompt
             )
+            // V9 T14.3 — Siri suggestion donation for queued sends
+            // that finally make it through after a reconnect. The
+            // donation reflects the user's actual intent at the
+            // moment of original capture, not the reconnect time.
+            IntentDonationService.shared.donateAsk(prompt: prompt)
         }
     }
 }
