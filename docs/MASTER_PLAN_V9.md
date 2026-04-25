@@ -3549,9 +3549,17 @@ wotann
 - Per-OEM wake-lock whitelist documentation needed (Xiaomi/Oppo/Vivo/Huawei aggressive battery managers)
 - F-Droid only (Play Store Termux abandoned with Node 12)
 
-### FT.3.2 — Tauri Mobile Android AAB (4-6 weeks MVP)
+### FT.3.2 — Tauri Mobile Android AAB (4-6 weeks MVP) — DEFERRED
 
-**HOW**: `tauri android build --aab` — reuses existing `desktop-app/` React codebase.
+**Status (2026-04-25)**: DEFERRED — not yet shippable. Currently only `desktop-app/src-tauri/tauri.conf.json` declares the `bundle.android.minSdkVersion 24` block. To ship, the following are still required:
+
+1. Run `npx tauri android init` once locally and commit the generated `desktop-app/src-tauri/gen/android/` directory (NOT YET PRESENT).
+2. Add a `.github/workflows/android-release.yml` job that runs `tauri android build --aab` and uploads the artifact (NOT YET PRESENT).
+3. Provision an Android signing keystore + Play Console internal-testing track.
+
+Until items 1-3 land, FT.3.2 is config-only and the Android AAB is NOT built by CI.
+
+**HOW (target plan once unblocked)**: `tauri android build --aab` — reuses existing `desktop-app/` React codebase.
 
 **Week-by-week**:
 - Week 1: Bake-off — does Tauri Mobile build desktop-app/ cleanly? If yes proceed. If blocked by WebView IME/plugin capability bugs, pivot to FT.3.3.

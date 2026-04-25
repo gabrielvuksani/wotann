@@ -48,10 +48,6 @@
     "android": {
       "minSdkVersion": 24,
       "autoIncrementVersionCode": false
-    },
-    "externalBin": [
-      "binaries/ollama",
-      "binaries/whisper"
-    ]
+    }
   }
 }
