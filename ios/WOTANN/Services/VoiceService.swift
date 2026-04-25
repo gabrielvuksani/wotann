@@ -1,7 +1,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 import Speech
-import Combine
+import Observation
 
 // MARK: - VoiceError
 
@@ -37,24 +37,34 @@ enum VoiceError: LocalizedError {
 /// - Push-to-talk recording with real-time transcription
 /// - Audio level metering for waveform visualization
 /// - Locale-aware speech recognition
+///
+/// V9 T14.3 — Migrated from ObservableObject + @Published to the iOS 17
+/// @Observable macro. The owning views (VoiceInlineSheet, VoiceInputView)
+/// switched from @StateObject to @State accordingly.
 @MainActor
-final class VoiceService: ObservableObject {
+@Observable
+final class VoiceService {
 
-    // MARK: Published State
+    // MARK: Observable State
 
-    @Published var isRecording = false
-    @Published var transcription = ""
-    @Published var audioLevel: Float = 0
-    @Published var error: VoiceError?
+    var isRecording = false
+    var transcription = ""
+    var audioLevel: Float = 0
+    var error: VoiceError?
 
     // MARK: Private
 
+    @ObservationIgnored
     private var audioEngine: AVAudioEngine?
+    @ObservationIgnored
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    @ObservationIgnored
     private var recognitionTask: SFSpeechRecognitionTask?
+    @ObservationIgnored
     private let speechRecognizer: SFSpeechRecognizer?
 
     /// Exponential moving average smoothing for audio levels.
+    @ObservationIgnored
     private let levelSmoothing: Float = 0.3
 
     // MARK: Init

@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 
 // MARK: - HandoffView
 //
@@ -12,16 +13,20 @@ import SwiftUI
 // candidates before the app is even foregrounded — the `@State`
 // banner shows on next app activation.
 //
+// V9 T14.3 — `HandoffViewModel` migrated from ObservableObject +
+// @Published to the iOS 17 @Observable macro. The owning view switched
+// from @StateObject to @State accordingly.
+//
 // QUALITY BARS
 // - #6 (honest stubs): RPC failures route to `errorMessage`.
-// - #7 (per-session state): `HandoffViewModel` is @StateObject, so
+// - #7 (per-session state): `HandoffViewModel` is owned by `@State`, so
 //   each HandoffView instance has its own queue. No module-global.
 // - #11 (sibling-site scan): this file is the SINGLE site on iOS
 //   subscribing to `computer.session.handoff*`.
 
 struct HandoffView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
-    @StateObject private var viewModel = HandoffViewModel()
+    @State private var viewModel = HandoffViewModel()
     var onAccept: ((HandoffCandidate) -> Void)?
 
     var body: some View {
@@ -112,12 +117,16 @@ struct HandoffCandidate: Identifiable, Equatable {
 // MARK: - ViewModel
 
 @MainActor
-final class HandoffViewModel: ObservableObject {
-    @Published private(set) var current: HandoffCandidate?
-    @Published var errorMessage: String?
+@Observable
+final class HandoffViewModel {
+    private(set) var current: HandoffCandidate?
+    var errorMessage: String?
 
+    @ObservationIgnored
     private var queue: [HandoffCandidate] = []
+    @ObservationIgnored
     private var rpcClient: RPCClient?
+    @ObservationIgnored
     private var subscribed = false
 
     func configure(rpcClient: RPCClient) {

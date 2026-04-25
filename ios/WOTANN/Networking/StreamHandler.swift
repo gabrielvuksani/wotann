@@ -1,17 +1,29 @@
 import Foundation
+import Observation
 
 // MARK: - StreamHandler
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. `StreamHandler` is held privately by `ChatViewModel`
+// (never injected into SwiftUI as an environment object) so the migration is
+// strictly internal — no consumer-side changes required. Per-property
+// observation under `@Observable` keeps streaming-text invalidations from
+// triggering an artifacts-list re-render and vice versa.
 
 /// Handles real-time streaming events from the desktop.
 /// Parses incremental text chunks, tool use events, and completion signals.
 @MainActor
-final class StreamHandler: ObservableObject {
-    @Published var currentText = ""
-    @Published var isStreaming = false
-    @Published var artifacts: [Artifact] = []
+@Observable
+final class StreamHandler {
+    var currentText = ""
+    var isStreaming = false
+    var artifacts: [Artifact] = []
 
+    @ObservationIgnored
     private var onTextChunk: ((String) -> Void)?
+    @ObservationIgnored
     private var onComplete: ((Int, Double) -> Void)?
+    @ObservationIgnored
     private var onError: ((String) -> Void)?
 
     func startStream(

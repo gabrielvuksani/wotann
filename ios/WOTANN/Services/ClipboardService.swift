@@ -1,9 +1,17 @@
 import SwiftUI
+import Observation
 #if canImport(UIKit)
 import UIKit
 #endif
 
 // MARK: - ClipboardService
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. The single owner of this service is `WOTANNApp` which
+// holds it via `private let clipboardService = ClipboardService()` — there are
+// no SwiftUI bindings consuming `$lastClipboardContent` etc., so the migration
+// is strictly internal. Per-property observation prevents `hasNewContent`
+// flips from re-rendering anything that only reads `lastClipboardContent`.
 
 /// Monitors clipboard changes and bridges content between phone and desktop.
 ///
@@ -11,13 +19,17 @@ import UIKit
 /// hasn't been granted pasteboard access. The service handles this by
 /// catching errors silently rather than crashing or spamming logs.
 @MainActor
-class ClipboardService: ObservableObject {
-    @Published var lastClipboardContent: String = ""
-    @Published var hasNewContent = false
+@Observable
+final class ClipboardService {
+    var lastClipboardContent: String = ""
+    var hasNewContent = false
 
+    @ObservationIgnored
     private var checkTimer: Timer?
+    @ObservationIgnored
     private var lastChangeCount = 0
     /// Consecutive errors — if we hit 3, stop monitoring to avoid log spam.
+    @ObservationIgnored
     private var consecutiveErrors = 0
 
     /// Start monitoring clipboard for changes.

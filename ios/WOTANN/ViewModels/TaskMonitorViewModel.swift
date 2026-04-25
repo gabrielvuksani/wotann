@@ -1,17 +1,27 @@
 import Foundation
-import Combine
+import Observation
 
 // MARK: - TaskMonitorViewModel
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. No current `@StateObject`/`@ObservedObject` consumer
+// references this view-model; it is a forward-compatible scaffold that, when
+// wired into a TaskMonitorView, should be adopted as:
+//   `@State private var vm = TaskMonitorViewModel(...)`
+//   `@Bindable var vm: TaskMonitorViewModel` (for `Picker(selection: $vm.filterState)`).
 
 /// Monitors running agent tasks and provides actions.
 @MainActor
-final class TaskMonitorViewModel: ObservableObject {
-    @Published var agents: [AgentTask] = []
-    @Published var selectedAgent: AgentTask?
-    @Published var isLoading = false
-    @Published var filterState: TaskState?
+@Observable
+final class TaskMonitorViewModel {
+    var agents: [AgentTask] = []
+    var selectedAgent: AgentTask?
+    var isLoading = false
+    var filterState: TaskState?
 
+    @ObservationIgnored
     private let appState: AppState
+    @ObservationIgnored
     private let connectionManager: ConnectionManager
 
     init(appState: AppState, connectionManager: ConnectionManager) {

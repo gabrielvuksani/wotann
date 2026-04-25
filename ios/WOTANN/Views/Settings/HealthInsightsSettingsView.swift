@@ -5,7 +5,7 @@ import SwiftUI
 /// Displays HealthKit-derived coding/wellness insights.
 /// Accessed from the Health Insights section in SettingsView.
 struct HealthInsightsSettingsView: View {
-    @ObservedObject var healthKitService: HealthKitService
+    let healthKitService: HealthKitService
 
     var body: some View {
         List {

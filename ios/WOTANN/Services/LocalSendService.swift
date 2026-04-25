@@ -1,6 +1,6 @@
 import Foundation
 import Network
-import Combine
+import Observation
 
 // MARK: - LocalSendError
 
@@ -88,16 +88,21 @@ struct TransferProgress: Identifiable {
 /// 1. Announce via UDP multicast on 224.0.0.167:53317 every 5 seconds
 /// 2. Listen for other peers' announcements on the same multicast group
 /// 3. File transfer uses HTTPS POST to the peer's listener port
+///
+/// V9 T14.3 — Migrated from ObservableObject + @Published to the iOS 17
+/// @Observable macro. SettingsView switched from @StateObject to @State.
+/// All consumer reads are read-only so no @Bindable was required.
 @MainActor
-final class LocalSendService: ObservableObject {
+@Observable
+final class LocalSendService {
 
-    // MARK: Published State
+    // MARK: Observable State
 
-    @Published var discoveredPeers: [DiscoveredPeer] = []
-    @Published var isDiscovering = false
-    @Published var activeTransfers: [TransferProgress] = []
-    @Published var error: LocalSendError?
-    @Published var lastReceivedFile: URL?
+    var discoveredPeers: [DiscoveredPeer] = []
+    var isDiscovering = false
+    var activeTransfers: [TransferProgress] = []
+    var error: LocalSendError?
+    var lastReceivedFile: URL?
 
     // MARK: Constants
 
@@ -109,12 +114,19 @@ final class LocalSendService: ObservableObject {
 
     // MARK: Private
 
+    @ObservationIgnored
     private var connectionGroup: NWConnectionGroup?
+    @ObservationIgnored
     private var listener: NWListener?
+    @ObservationIgnored
     private var announceTask: Task<Void, Never>?
+    @ObservationIgnored
     private var pruneTask: Task<Void, Never>?
+    @ObservationIgnored
     private let deviceId = UUID().uuidString
+    @ObservationIgnored
     private let encoder = JSONEncoder()
+    @ObservationIgnored
     private let decoder = JSONDecoder()
 
     // MARK: - Device Identity

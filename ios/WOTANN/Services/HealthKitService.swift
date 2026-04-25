@@ -1,6 +1,6 @@
 import Foundation
 import HealthKit
-import Combine
+import Observation
 
 // MARK: - HealthInsight
 
@@ -41,19 +41,27 @@ struct HealthInsight: Identifiable, Codable, Hashable {
 ///
 /// Insights are stored in UserDefaults for widget display.
 /// All queries are read-only -- WOTANN never writes health data.
+///
+/// V9 T14.3 — Migrated from ObservableObject + @Published to the iOS 17
+/// @Observable macro. SettingsView switched from @StateObject to @State
+/// and HealthInsightsSettingsView switched from @ObservedObject to a plain
+/// `let` since it only reads.
 @MainActor
-final class HealthKitService: ObservableObject {
+@Observable
+final class HealthKitService {
 
-    // MARK: Published State
+    // MARK: Observable State
 
-    @Published var isAuthorized = false
-    @Published var insights: [HealthInsight] = []
-    @Published var error: String?
-    @Published var isLoading = false
+    var isAuthorized = false
+    var insights: [HealthInsight] = []
+    var error: String?
+    var isLoading = false
 
     // MARK: Private
 
+    @ObservationIgnored
     private let healthStore: HKHealthStore?
+    @ObservationIgnored
     private let insightsKey = "com.wotann.healthkit.insights"
 
     // MARK: - Initialization

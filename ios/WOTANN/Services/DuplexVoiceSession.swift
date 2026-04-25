@@ -1,7 +1,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 import Speech
-import Combine
+import Observation
 import os
 
 // MARK: - DuplexVoiceError
@@ -60,18 +60,25 @@ protocol DuplexVoiceSessionDelegate: AnyObject {
 ///   feels sluggish.
 /// - Premium voices loaded synchronously at start; first `speak()` blocks briefly the
 ///   first time but is cached afterward.
+///
+/// V9 T14.3 — Migrated from ObservableObject + @Published to the iOS 17
+/// @Observable macro. No SwiftUI consumer references this class via @StateObject
+/// or @ObservedObject; future consumers should adopt @State / @Bindable.
+/// AVSpeechSynthesizerDelegate conformance still requires NSObject inheritance.
 @MainActor
-final class DuplexVoiceSession: NSObject, ObservableObject {
+@Observable
+final class DuplexVoiceSession: NSObject {
 
-    // MARK: Published State
+    // MARK: Observable State
 
-    @Published private(set) var partialTranscript: String = ""
-    @Published private(set) var finalTranscript: String = ""
-    @Published private(set) var isListening: Bool = false
-    @Published private(set) var isSpeaking: Bool = false
-    @Published private(set) var inputLevel: Float = 0  // -inf...0 dBFS
-    @Published var errorMessage: String?
+    private(set) var partialTranscript: String = ""
+    private(set) var finalTranscript: String = ""
+    private(set) var isListening: Bool = false
+    private(set) var isSpeaking: Bool = false
+    private(set) var inputLevel: Float = 0  // -inf...0 dBFS
+    var errorMessage: String?
 
+    @ObservationIgnored
     weak var delegate: DuplexVoiceSessionDelegate?
 
     // MARK: VAD Tuning Constants
@@ -89,21 +96,32 @@ final class DuplexVoiceSession: NSObject, ObservableObject {
 
     // MARK: Audio Pipeline
 
+    @ObservationIgnored
     private let audioEngine: AVAudioEngine = AVAudioEngine()
+    @ObservationIgnored
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    @ObservationIgnored
     private var recognitionTask: SFSpeechRecognitionTask?
+    @ObservationIgnored
     private let speechRecognizer: SFSpeechRecognizer?
 
+    @ObservationIgnored
     private let synthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()
+    @ObservationIgnored
     private var configuredVoice: AVSpeechSynthesisVoice?
 
     // MARK: VAD State (per instance — no globals)
 
+    @ObservationIgnored
     private var speechStartTime: Date?
+    @ObservationIgnored
     private var lastSpeechTime: Date?
+    @ObservationIgnored
     private var lastSilenceStart: Date?
+    @ObservationIgnored
     private var bargeInDetected: Bool = false
 
+    @ObservationIgnored
     private let logger: Logger = Logger(subsystem: "com.wotann.ios", category: "DuplexVoice")
 
     // MARK: Init

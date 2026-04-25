@@ -1,6 +1,6 @@
 import Foundation
 @preconcurrency import CoreNFC
-import Combine
+import Observation
 
 // MARK: - NFCPairingError
 
@@ -76,24 +76,34 @@ struct NFCPairingData: Equatable {
 /// Writing tags:
 /// - Call `writePairingTag(host:publicKey:port:)` to write a WOTANN pairing
 ///   payload to a blank NFC tag
+///
+/// V9 T14.3 — Migrated from ObservableObject + @Published to the iOS 17
+/// @Observable macro. The owning view (PairingView) switched from
+/// @StateObject to @State accordingly. NFCNDEFReaderSessionDelegate
+/// conformance still requires NSObject inheritance so the class remains
+/// `final class : NSObject`.
 @MainActor
-final class NFCPairingService: NSObject, ObservableObject {
+@Observable
+final class NFCPairingService: NSObject {
 
-    // MARK: Published State
+    // MARK: Observable State
 
-    @Published var isScanning = false
-    @Published var lastPairingData: NFCPairingData?
-    @Published var error: NFCPairingError?
-    @Published var tagWriteSuccess = false
+    var isScanning = false
+    var lastPairingData: NFCPairingData?
+    var error: NFCPairingError?
+    var tagWriteSuccess = false
 
     // MARK: Callbacks
 
     /// Called when valid pairing data is read from an NFC tag.
+    @ObservationIgnored
     var onPairingDataRead: ((NFCPairingData) -> Void)?
 
     // MARK: Private
 
+    @ObservationIgnored
     private var readerSession: NFCNDEFReaderSession?
+    @ObservationIgnored
     private var pendingWritePayload: NFCPairingData?
 
     // MARK: - NFC Availability

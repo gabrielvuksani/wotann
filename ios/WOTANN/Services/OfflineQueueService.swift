@@ -1,14 +1,23 @@
 import Foundation
+import Observation
 
 // MARK: - OfflineQueueService
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. `OfflineQueueService` is held privately by
+// `ChatViewModel` and `OnDeviceModelService`; nothing reads
+// `offlineQueue.$queuedTasks` via Combine projection, so the migration is
+// strictly internal — no consumer-side changes required.
 
 /// Queues tasks when offline, executes them when connectivity returns.
 /// Enables subway/airplane usage — work is never lost.
 @MainActor
-class OfflineQueueService: ObservableObject {
-    @Published var queuedTasks: [QueuedTask] = []
-    @Published var isOnline = true
+@Observable
+final class OfflineQueueService {
+    var queuedTasks: [QueuedTask] = []
+    var isOnline = true
 
+    @ObservationIgnored
     private let storageKey = "wotann_offline_queue"
 
     struct QueuedTask: Codable, Identifiable {

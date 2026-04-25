@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 
 // MARK: - CreationsView
 //
@@ -6,17 +7,21 @@ import SwiftUI
 // docs, diffs). Subscribes to `creations.list` + `creations.watch`
 // RPCs and renders a grid of cards.
 //
+// V9 T14.3 — `CreationsViewModel` migrated from ObservableObject +
+// @Published to the iOS 17 @Observable macro. The owning view switched
+// from @StateObject to @State accordingly.
+//
 // QUALITY BARS
 // - #6 (honest stubs): RPC failures surface via `errorMessage` — no
 //   silent swallowing.
-// - #7 (per-session state): the `ViewModel` is a @StateObject,
+// - #7 (per-session state): the `ViewModel` is owned by `@State`,
 //   created per view instance. No module-global singletons.
 // - #11 (sibling-site scan): this file is the SINGLE site subscribing
 //   to `creations.*` on iOS.
 
 struct CreationsView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
-    @StateObject private var viewModel = CreationsViewModel()
+    @State private var viewModel = CreationsViewModel()
     @State private var selectedCreation: Creation?
 
     private let columns = [
@@ -232,12 +237,15 @@ struct Creation: Identifiable, Equatable {
 // MARK: - ViewModel
 
 @MainActor
-final class CreationsViewModel: ObservableObject {
-    @Published private(set) var creations: [Creation] = []
-    @Published private(set) var isLoading: Bool = false
-    @Published var errorMessage: String?
+@Observable
+final class CreationsViewModel {
+    private(set) var creations: [Creation] = []
+    private(set) var isLoading: Bool = false
+    var errorMessage: String?
 
+    @ObservationIgnored
     private var rpcClient: RPCClient?
+    @ObservationIgnored
     private var isWatching = false
 
     func configure(rpcClient: RPCClient) {

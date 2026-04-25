@@ -12,8 +12,8 @@ struct SettingsView: View {
     @AppStorage("hapticFeedback") private var hapticFeedback = true
     @State private var showUnpairAlert = false
     @State private var showDispatchFromDeepLink = false
-    @StateObject private var healthKitService = HealthKitService()
-    @StateObject private var localSendService = LocalSendService()
+    @State private var healthKitService = HealthKitService()
+    @State private var localSendService = LocalSendService()
 
     var body: some View {
         NavigationStack {

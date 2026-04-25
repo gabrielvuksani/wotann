@@ -7,7 +7,7 @@ struct VoiceInputView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @StateObject private var voiceService = VoiceService()
+    @State private var voiceService = VoiceService()
     @State private var waveformHeights: [CGFloat] = Array(repeating: 0.1, count: 40)
     @State private var pulseScale: CGFloat = 1.0
     @State private var ringOpacity: Double = 0.0

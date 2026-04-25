@@ -1,6 +1,6 @@
 import Foundation
 import Network
-import Combine
+import Observation
 import os.log
 
 // MARK: - ConnectivityMonitor
@@ -20,21 +20,29 @@ import os.log
 // are drained in insertion order the first time `isConnected` flips to `true`
 // after being `false`.
 //
-// Thread safety: `@MainActor` so every publish happens on the main queue
-// (SwiftUI observes these via @Published). The NWPathMonitor itself runs on
-// a dedicated serial queue so `NWPathMonitor` callbacks do not block the UI.
+// Thread safety: `@MainActor` so every publish happens on the main queue.
+// The NWPathMonitor itself runs on a dedicated serial queue so `NWPathMonitor`
+// callbacks do not block the UI.
+//
+// V9 T14.3 — Migrated from ObservableObject + @Published to the iOS 17
+// @Observable macro. The only consumer is `RPCClient` calling
+// `ConnectivityMonitor.shared.assertConnected(...)` — no SwiftUI binding ever
+// observed `$isConnected`, so the migration is strictly internal. QB #7
+// (per-session state) is satisfied because there is exactly one network
+// interface per process; the singleton is appropriate.
 
 @MainActor
-final class ConnectivityMonitor: ObservableObject {
+@Observable
+final class ConnectivityMonitor {
 
     /// Process-wide singleton. RPC clients and the connection manager resolve
     /// connectivity through this instance so state is consistent everywhere.
     static let shared = ConnectivityMonitor()
 
-    /// `true` when the OS reports a usable network path. Publishes on change
-    /// so SwiftUI can re-render connection banners immediately.
-    @Published private(set) var isConnected: Bool = true
-    @Published private(set) var interface: Interface = .unknown
+    /// `true` when the OS reports a usable network path. SwiftUI can observe
+    /// this via @Observable per-property tracking when consumers are wired in.
+    private(set) var isConnected: Bool = true
+    private(set) var interface: Interface = .unknown
 
     /// Kinds of interfaces we care about surfacing to callers. Mirrors the
     /// `NWInterface.InterfaceType` subset that matters for WOTANN.
@@ -61,12 +69,15 @@ final class ConnectivityMonitor: ObservableObject {
     // MARK: - Internals
 
     private static let log = Logger(subsystem: "com.wotann.ios", category: "Connectivity")
+    @ObservationIgnored
     private let monitor = NWPathMonitor()
+    @ObservationIgnored
     private let queue = DispatchQueue(label: "com.wotann.ConnectivityMonitor")
 
     /// FIFO queue of pending work to retry on reconnect. Each entry is
     /// captured with the method name so the failure surface can distinguish
     /// "send queued" from "send sent".
+    @ObservationIgnored
     private var pendingQueue: [PendingWork] = []
 
     private struct PendingWork {

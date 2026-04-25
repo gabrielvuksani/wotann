@@ -1,6 +1,6 @@
 import Foundation
 @preconcurrency import AVFoundation
-import Combine
+import Observation
 
 // MARK: - PairingProgressDelegate
 
@@ -13,19 +13,27 @@ protocol PairingProgressDelegate: AnyObject {
 }
 
 // MARK: - PairingManager
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. `PairingManager` is owned privately by
+// `PairingViewModel` (already `@Observable`); no SwiftUI consumer reads
+// `pairingManager.$state` directly, so the migration is strictly internal.
 
 /// Manages the QR scan -> key exchange -> PIN verify -> connect flow.
 @MainActor
-final class PairingManager: ObservableObject {
-    @Published var state: PairingState = .unpaired
-    @Published var scannedCode: String?
+@Observable
+final class PairingManager {
+    var state: PairingState = .unpaired
+    var scannedCode: String?
 
     /// Most recent progress phase reported to observers. Also emits via `progressDelegate`.
-    @Published private(set) var progressPhase: String = ""
+    private(set) var progressPhase: String = ""
 
     /// Optional delegate for granular progress updates during pairing.
+    @ObservationIgnored
     weak var progressDelegate: PairingProgressDelegate?
 
+    @ObservationIgnored
     private let connectionManager: ConnectionManager
 
     init(connectionManager: ConnectionManager) {

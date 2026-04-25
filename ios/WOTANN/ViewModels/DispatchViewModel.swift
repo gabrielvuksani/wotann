@@ -1,21 +1,32 @@
 import Foundation
-import Combine
+import Observation
 
 // MARK: - DispatchViewModel
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. The view-model has no current consumers in production
+// SwiftUI; no `@StateObject`/`@ObservedObject` reference exists today, so the
+// migration costs nothing on the consumer side. When a Dispatch surface is
+// wired in, it should adopt:
+//   `@State private var vm = DispatchViewModel(appState: ..., connectionManager: ...)`
+//   `@Bindable var vm: DispatchViewModel` (when forwarding two-way bindings).
 
 /// Manages task dispatch from phone to desktop.
 @MainActor
-final class DispatchViewModel: ObservableObject {
-    @Published var promptText = ""
-    @Published var selectedTemplate: DispatchTemplate?
-    @Published var selectedProvider: String = "anthropic"
-    @Published var selectedModel: String = "claude-opus-4-6"
-    @Published var isDispatching = false
-    @Published var lastDispatched: AgentTask?
-    @Published var errorMessage: String?
-    @Published var showConfirmation = false
+@Observable
+final class DispatchViewModel {
+    var promptText = ""
+    var selectedTemplate: DispatchTemplate?
+    var selectedProvider: String = "anthropic"
+    var selectedModel: String = "claude-opus-4-6"
+    var isDispatching = false
+    var lastDispatched: AgentTask?
+    var errorMessage: String?
+    var showConfirmation = false
 
+    @ObservationIgnored
     private let appState: AppState
+    @ObservationIgnored
     private let connectionManager: ConnectionManager
 
     init(appState: AppState, connectionManager: ConnectionManager) {

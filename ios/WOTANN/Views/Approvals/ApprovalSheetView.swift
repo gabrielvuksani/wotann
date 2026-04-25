@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 import os.log
 
 // MARK: - ApprovalSheetView
@@ -11,9 +12,13 @@ import os.log
 // request is auto-denied and the desktop is notified so the agent
 // does not hang forever. Matches the T5.5 integration test.
 //
+// V9 T14.3 — `ApprovalSheetViewModel` migrated from ObservableObject +
+// @Published to the iOS 17 @Observable macro. The owning view switched from
+// @StateObject to @State accordingly.
+//
 // QUALITY BARS
 // - #6 (honest stubs): every RPC failure surfaces via `errorMessage`.
-// - #7 (per-session state): the view-model is an `@StateObject`
+// - #7 (per-session state): the view-model is owned by `@State`
 //   created per view instance. Multiple phones paired to the same
 //   desktop can each have their own queue.
 // - #11 (sibling-site scan): this file is the SINGLE site on iOS
@@ -23,7 +28,7 @@ private let autoDenyTimeoutSeconds: UInt64 = 30
 
 struct ApprovalSheetView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
-    @StateObject private var viewModel = ApprovalSheetViewModel()
+    @State private var viewModel = ApprovalSheetViewModel()
 
     var body: some View {
         ZStack {
@@ -142,15 +147,21 @@ struct ApprovalRequest: Identifiable, Equatable {
 // MARK: - ViewModel
 
 @MainActor
-final class ApprovalSheetViewModel: ObservableObject {
-    @Published private(set) var current: ApprovalRequest?
-    @Published private(set) var remainingSeconds: Int = Int(autoDenyTimeoutSeconds)
-    @Published var errorMessage: String?
+@Observable
+final class ApprovalSheetViewModel {
+    private(set) var current: ApprovalRequest?
+    private(set) var remainingSeconds: Int = Int(autoDenyTimeoutSeconds)
+    var errorMessage: String?
 
+    @ObservationIgnored
     private var queue: [ApprovalRequest] = []
+    @ObservationIgnored
     private var rpcClient: RPCClient?
+    @ObservationIgnored
     private var expiryTask: Task<Void, Never>?
+    @ObservationIgnored
     private var countdownTask: Task<Void, Never>?
+    @ObservationIgnored
     private var subscribed: Bool = false
     private static let log = Logger(subsystem: "com.wotann.ios", category: "Approvals")
 

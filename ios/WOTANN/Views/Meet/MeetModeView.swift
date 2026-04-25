@@ -1,13 +1,19 @@
 import SwiftUI
+import Observation
 
 // MARK: - Meet Mode
 
 /// Meeting assistant — record, transcribe, summarize via WOTANN.
 /// Inspired by Cortex's Meet mode: templates, real-time transcription, AI summaries.
+///
+/// V9 T14.3 — `MeetModeViewModel` migrated from ObservableObject + @Published
+/// to the iOS 17 @Observable macro. The owning view switched from @StateObject
+/// to @State, and `ActiveMeetingView` switched from @ObservedObject to a plain
+/// `let` since it only reads from the view model.
 struct MeetModeView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var connectionManager: ConnectionManager
-    @StateObject private var meetVM = MeetModeViewModel()
+    @State private var meetVM = MeetModeViewModel()
 
     var body: some View {
         NavigationStack {
@@ -77,7 +83,7 @@ struct MeetingTemplateList: View {
 
 struct ActiveMeetingView: View {
     let meeting: ActiveMeeting
-    @ObservedObject var viewModel: MeetModeViewModel
+    let viewModel: MeetModeViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -271,24 +277,31 @@ struct TranscriptSegment: Identifiable {
 // MARK: - ViewModel
 
 @MainActor
-class MeetModeViewModel: ObservableObject {
-    @Published var activeMeeting: ActiveMeeting?
-    @Published var isRecording = false
-    @Published var transcriptSegments: [TranscriptSegment] = []
-    @Published var liveTranscript = ""
-    @Published var aiSummary: String?
-    @Published var elapsedSeconds: Int = 0
-    @Published var isSummarizing = false
-    @Published var isDispatching = false
+@Observable
+final class MeetModeViewModel {
+    var activeMeeting: ActiveMeeting?
+    var isRecording = false
+    var transcriptSegments: [TranscriptSegment] = []
+    var liveTranscript = ""
+    var aiSummary: String?
+    var elapsedSeconds: Int = 0
+    var isSummarizing = false
+    var isDispatching = false
 
+    @ObservationIgnored
     private var timer: Timer?
+    @ObservationIgnored
     private let voiceService = VoiceService()
+    @ObservationIgnored
     private var lastTranscription = ""
+    @ObservationIgnored
     private var rpcClient: RPCClient?
 
     /// Tracks the current speaker index (1 or 2) for simple diarization heuristic.
+    @ObservationIgnored
     private var currentSpeakerIndex = 1
     /// Timestamp (in elapsed seconds) when the last segment was finalized.
+    @ObservationIgnored
     private var lastSegmentEndTime: Int = 0
     /// Pause threshold in seconds -- gaps longer than this trigger a speaker change.
     private static let speakerChangeThreshold = 2

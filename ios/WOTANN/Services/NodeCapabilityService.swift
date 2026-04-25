@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import Observation
 import CoreLocation
 import EventKit
 import Contacts
@@ -51,21 +51,30 @@ struct NodeCapability: Identifiable, Hashable {
 ///
 /// Capabilities are registered with the desktop's CompanionServer on connect.
 /// Incoming `node.invoke` calls are routed to the appropriate handler.
+///
+/// V9 T14.3 — Migrated from ObservableObject + @Published to the iOS 17
+/// @Observable macro. The only consumer is `NodeCapabilityService.shared`
+/// (called as a singleton); no SwiftUI binding referenced this class so the
+/// migration is strictly internal.
 @MainActor
-final class NodeCapabilityService: ObservableObject {
+@Observable
+final class NodeCapabilityService {
 
     static let shared = NodeCapabilityService()
 
-    // MARK: Published State
+    // MARK: Observable State
 
-    @Published var registeredCapabilities: [NodeCapability] = []
-    @Published var lastInvocation: String?
-    @Published var isProcessing = false
+    var registeredCapabilities: [NodeCapability] = []
+    var lastInvocation: String?
+    var isProcessing = false
 
     // MARK: Private Services
 
+    @ObservationIgnored
     private let cameraService = CameraService()
+    @ObservationIgnored
     private let locationManager = CLLocationManager()
+    @ObservationIgnored
     private let eventStore = EKEventStore()
 
     // MARK: - Available Capabilities

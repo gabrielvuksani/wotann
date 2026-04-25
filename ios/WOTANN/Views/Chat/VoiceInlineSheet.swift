@@ -14,7 +14,7 @@ struct VoiceInlineSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @StateObject private var voiceService = VoiceService()
+    @State private var voiceService = VoiceService()
     @State private var waveform: [CGFloat] = Array(repeating: 0.1, count: 48)
     @State private var pulse: CGFloat = 1.0
     @State private var waveformTimer: Timer?

@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 
 // MARK: - CouncilView
 //
@@ -7,9 +8,13 @@ import SwiftUI
 // each response as a card. Subscribes to `council.update` so
 // streaming responses appear live.
 //
+// V9 T14.3 — `CouncilViewModel` migrated from ObservableObject +
+// @Published to the iOS 17 @Observable macro. The owning view switched
+// from @StateObject to @State accordingly.
+//
 // QUALITY BARS
 // - #6 (honest stubs): errors surface via `errorMessage`.
-// - #7 (per-session state): @StateObject ViewModel per instance.
+// - #7 (per-session state): @State ViewModel per instance.
 // - #11 (sibling-site scan): this file is the SINGLE site on iOS
 //   subscribing to `council.*` RPCs.
 
@@ -17,7 +22,7 @@ private let defaultProviders = ["anthropic", "openai", "gemini"]
 
 struct CouncilView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
-    @StateObject private var viewModel = CouncilViewModel()
+    @State private var viewModel = CouncilViewModel()
     @State private var prompt: String = ""
     @State private var selectedProviders: Set<String> = Set(defaultProviders)
 
@@ -228,13 +233,17 @@ struct CouncilResponse: Identifiable, Equatable {
 // MARK: - ViewModel
 
 @MainActor
-final class CouncilViewModel: ObservableObject {
-    @Published private(set) var responses: [CouncilResponse] = []
-    @Published private(set) var isRunning: Bool = false
-    @Published var errorMessage: String?
+@Observable
+final class CouncilViewModel {
+    private(set) var responses: [CouncilResponse] = []
+    private(set) var isRunning: Bool = false
+    var errorMessage: String?
 
+    @ObservationIgnored
     private var rpcClient: RPCClient?
+    @ObservationIgnored
     private var subscribed = false
+    @ObservationIgnored
     private var activeRequestId: String?
 
     func configure(rpcClient: RPCClient) {

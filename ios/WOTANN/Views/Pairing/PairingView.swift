@@ -16,7 +16,7 @@ struct PairingView: View {
     @State private var logoOpacity: Double = 0
     @State private var isScanning = false
     @State private var discoveredHost: String?
-    @StateObject private var nfcService = NFCPairingService()
+    @State private var nfcService = NFCPairingService()
 
     var body: some View {
         NavigationStack {

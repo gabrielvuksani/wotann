@@ -1,7 +1,7 @@
 import Foundation
 @preconcurrency import AVFoundation
 import Vision
-import Combine
+import Observation
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -42,21 +42,31 @@ enum CameraError: LocalizedError {
 /// Capabilities registered with NodeCapabilityService:
 /// - `camera.snap`: Capture a single photo
 /// - `camera.clip`: Extract text from a captured or provided image
+///
+/// V9 T14.3 — Migrated from ObservableObject + @Published to the iOS 17
+/// @Observable macro. CameraService is held privately by NodeCapabilityService
+/// and never bound to SwiftUI directly, so the migration is internal.
+/// AVCapturePhotoCaptureDelegate conformance still requires NSObject
+/// inheritance on the UIKit branch.
 #if canImport(UIKit)
 @MainActor
-final class CameraService: NSObject, ObservableObject {
+@Observable
+final class CameraService: NSObject {
 
-    // MARK: Published State
+    // MARK: Observable State
 
-    @Published var lastCapturedImage: UIImage?
-    @Published var extractedText: String = ""
-    @Published var isCapturing = false
-    @Published var error: CameraError?
+    var lastCapturedImage: UIImage?
+    var extractedText: String = ""
+    var isCapturing = false
+    var error: CameraError?
 
     // MARK: Private
 
+    @ObservationIgnored
     private var captureSession: AVCaptureSession?
+    @ObservationIgnored
     private var photoOutput: AVCapturePhotoOutput?
+    @ObservationIgnored
     private var photoContinuation: CheckedContinuation<UIImage, Error>?
 
     // MARK: - Permissions
@@ -213,10 +223,11 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
 
 /// Stub for non-UIKit platforms (macOS builds, tests).
 @MainActor
-final class CameraService: ObservableObject {
-    @Published var extractedText: String = ""
-    @Published var isCapturing = false
-    @Published var error: CameraError?
+@Observable
+final class CameraService {
+    var extractedText: String = ""
+    var isCapturing = false
+    var error: CameraError?
 
     func requestPermission() async -> Bool { false }
     func extractText(from data: Data) async throws -> String { "" }
