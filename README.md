@@ -15,6 +15,7 @@ One install. Every model. Every channel. Full autonomy.
   <a href="#headline-capabilities"><img src="https://img.shields.io/badge/channels-25%2B-0A84FF.svg" alt="25+ channels"></a>
   <a href="#tests"><img src="https://img.shields.io/badge/tests-5860%20passing-green.svg" alt="5860 passing tests"></a>
   <a href="https://wotann.com"><img src="https://img.shields.io/badge/wotann.com-Norse%20themed-8B5CF6.svg" alt="wotann.com"></a>
+  <a href="https://www.linuxfoundation.org/press/linux-foundation-announces-formation-of-agentic-ai-foundation"><img src="https://img.shields.io/badge/AAIF-Agentic%20AI%20Foundation-0094FF.svg" alt="AAIF aligned"></a>
 </p>
 
 <br/>

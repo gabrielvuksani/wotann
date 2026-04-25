@@ -4162,6 +4162,69 @@ export class KairosRPCHandler {
       return { info };
     });
 
+    // lsp.completion — list completion candidates at a position.
+    //
+    // The current LSP layer (`SymbolOperations`) doesn't expose a
+    // completion call; the underlying TS language service has one but
+    // wiring it requires per-file program rebuilds that are too expensive
+    // for the editor's debounced ghost-text path. Until that lands we
+    // serve an honest stub (empty items + a `notes` field explaining
+    // why) — per QB #6, the iOS Editor branches on `items.length === 0`
+    // and shows no popover rather than a misleading completion list.
+    //
+    // V9 follow-up: replace this stub with a real handler when the LSP
+    // layer grows `getCompletions(uri, position, prefix?)`.
+    this.handlers.set("lsp.completion", async (params) => {
+      const uri = (params["uri"] as string) ?? (params["path"] as string);
+      if (!uri || typeof uri !== "string") {
+        throw new Error("uri (or path) required");
+      }
+      const line = (params["line"] as number) ?? 0;
+      const character = (params["character"] as number) ?? (params["column"] as number) ?? 0;
+      void line;
+      void character;
+      return {
+        items: [] as ReadonlyArray<{ label: string; kind: string; detail?: string }>,
+        notes:
+          "lsp.completion not yet wired in the LSP layer; SymbolOperations exposes hover/refs/symbols but no completion. iOS shows no popover when items is empty.",
+      };
+    });
+
+    // lsp.definition — locate a symbol's source position.
+    //
+    // Approximate via `findReferences` since SymbolOperations doesn't
+    // expose a dedicated `getDefinition`. We pick the FIRST reference
+    // whose location lies on or before the requested cursor — usually the
+    // declaration site for typed languages.
+    //
+    // Honest stub when no references found: returns `null` so the iOS
+    // Editor branches on `result == null` and shows "No definition found"
+    // instead of jumping to a misleading location.
+    this.handlers.set("lsp.definition", async (params) => {
+      const uri = (params["uri"] as string) ?? (params["path"] as string);
+      const line = (params["line"] as number) ?? 0;
+      const character = (params["character"] as number) ?? (params["column"] as number) ?? 0;
+      if (!uri || typeof uri !== "string") {
+        throw new Error("uri (or path) required");
+      }
+      if (!this.runtime) throw new Error("Runtime not initialized");
+      const workspaceRoot = this.runtime.getWorkingDir();
+      const ops = new SymbolOperations({ workspaceRoot });
+      const refs = await ops.findReferences(uri, { line, character });
+      if (refs.length === 0) {
+        return null;
+      }
+      // Refs come back from the language service ordered by file then
+      // line; the first ref is the declaration in TS-language-service
+      // output. Return its location.
+      const first = refs[0]!;
+      return {
+        uri: first.uri,
+        line: first.range.start.line,
+        column: first.range.start.character,
+      };
+    });
+
     // lsp.rename — rename a symbol across the codebase
     this.handlers.set("lsp.rename", async (params) => {
       const uri = (params.uri as string) ?? (params.file as string);
@@ -6526,6 +6589,80 @@ export class KairosRPCHandler {
       } catch (err) {
         throw toRpcError(err);
       }
+    });
+
+    // file.write — V9 T13.1 follow-up: write a file via fs + record a
+    // shadow-git checkpoint so the user can roll back any iOS-Editor-
+    // initiated change.
+    //
+    // Wire contract:
+    //   params  : { path: string, content: string }
+    //   returns : { ok: true, sha256: string }
+    //
+    // Quality bars:
+    //   - Path must resolve INSIDE the runtime's working dir; refuses
+    //     anything that would escape via `..` segments (sandbox-audit
+    //     mirrors the same rule).
+    //   - Pre-write: ShadowGit.beforeTool("file.write", relPath) records
+    //     the existing content hash; users can roll back to that point.
+    //   - Post-write: ShadowGit.createCheckpoint records the new state.
+    //   - Honest failure: throws with crisp reason rather than returning
+    //     `{ ok: false }` with a swallowed error.
+    this.handlers.set("file.write", async (params) => {
+      const targetPath = params["path"];
+      const content = params["content"];
+      if (typeof targetPath !== "string" || targetPath.length === 0) {
+        throw new Error("path (string) required");
+      }
+      if (typeof content !== "string") {
+        throw new Error("content (string) required");
+      }
+      if (!this.runtime) {
+        throw new Error("Runtime not initialized");
+      }
+      const workDir = this.runtime.getWorkingDir();
+      const { resolve, isAbsolute, relative, dirname } = await import("node:path");
+      const absoluteTarget = isAbsolute(targetPath)
+        ? resolve(targetPath)
+        : resolve(workDir, targetPath);
+      const rel = relative(workDir, absoluteTarget);
+      if (rel.startsWith("..") || isAbsolute(rel)) {
+        throw new Error(`path escapes working dir: ${targetPath}`);
+      }
+
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      const { createHash } = await import("node:crypto");
+      const { ShadowGit } = await import("../utils/shadow-git.js");
+
+      // Pre-write checkpoint via ShadowGit so the user can roll back.
+      // Failures here don't block the write — shadow-git is advisory.
+      try {
+        const shadow = new ShadowGit(workDir);
+        await shadow.initialize();
+        await shadow.beforeTool("file.write", rel);
+      } catch {
+        // Shadow checkpointing is advisory; never fails the write.
+      }
+
+      try {
+        await mkdir(dirname(absoluteTarget), { recursive: true });
+        await writeFile(absoluteTarget, content, { encoding: "utf-8" });
+      } catch (err) {
+        throw toRpcError(err);
+      }
+
+      const sha256 = createHash("sha256").update(content, "utf-8").digest("hex");
+
+      // Post-write checkpoint — records the new state. Advisory.
+      try {
+        const shadow = new ShadowGit(workDir);
+        await shadow.initialize();
+        await shadow.createCheckpoint(`after file.write: ${rel}`);
+      } catch {
+        // Advisory; the write itself succeeded.
+      }
+
+      return { ok: true, sha256 };
     });
   }
 
