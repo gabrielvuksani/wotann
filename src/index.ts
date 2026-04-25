@@ -6257,6 +6257,156 @@ intentByoaCmd
   registerGrepCommand(program);
 }
 
+// ── wotann replay — V9 T14.7 trajectory replay ───────────────
+//
+// `wotann replay <trajectory.json>` plays back a recorded session
+// frame-by-frame. Pacing defaults to "fast" for non-interactive use;
+// `--realtime` reproduces the original timing. Audit-found gap:
+// runReplay was an exported factory with no `.command()` wire.
+program
+  .command("replay <trajectoryPath>")
+  .description("Play back a recorded trajectory file (V9 T14.7)")
+  .option("--realtime", "Use original frame timings (default: fast)", false)
+  .option("--pause <ms>", "Fixed ms between frames (overrides --realtime)", (v) => Number(v))
+  .action(async (trajectoryPath: string, opts: { realtime?: boolean; pause?: number }) => {
+    const { runReplay } = await import("./cli/replay.js");
+    const pacing: "realtime" | "fast" | number =
+      typeof opts.pause === "number" && Number.isFinite(opts.pause)
+        ? opts.pause
+        : opts.realtime === true
+          ? "realtime"
+          : "fast";
+    const result = await runReplay({ trajectoryPath, pacing });
+    if (result.ok === false) {
+      process.stderr.write(chalk.red(`replay failed: ${result.error}\n`));
+      process.exit(2);
+    }
+  });
+
+// ── wotann fork — V9 T14.7 trajectory fork ───────────────────
+program
+  .command("fork <trajectoryPath> <outputPath>")
+  .description("Fork a trajectory at a frame and write the truncated copy (V9 T14.7)")
+  .option("--at <seq>", "Fork at this seq (inclusive); mutually exclusive with --kind", (v) =>
+    Number(v),
+  )
+  .option("--kind <frameKind>", "Fork at the LAST frame of this kind")
+  .action(
+    async (trajectoryPath: string, outputPath: string, opts: { at?: number; kind?: string }) => {
+      const { runFork } = await import("./cli/fork.js");
+      type ForkOpts = Parameters<typeof runFork>[0];
+      const forkOpts: Record<string, unknown> = { trajectoryPath, outputPath };
+      if (typeof opts.at === "number" && Number.isFinite(opts.at)) forkOpts["at"] = opts.at;
+      if (typeof opts.kind === "string" && opts.kind.length > 0) forkOpts["atKind"] = opts.kind;
+      const result = await runFork(forkOpts as unknown as ForkOpts);
+      if (result.ok === false) {
+        process.stderr.write(chalk.red(`fork failed: ${result.error}\n`));
+        process.exit(2);
+      }
+      process.stderr.write(chalk.green(`✓ wrote forked trajectory to ${outputPath}\n`));
+    },
+  );
+
+// ── wotann rules — V9 T14.9 community rules marketplace ──────
+//
+// `wotann rules list | search <q> | install <id> | remove <id>`.
+// Browses a static JSON index hosted on GitHub Pages; SHA-256
+// verifies every rule before write. No "just trust it" fallback.
+const rulesCmd = program.command("rules").description("Community rules marketplace (V9 T14.9)");
+
+const DEFAULT_RULES_INDEX_URL =
+  "https://raw.githubusercontent.com/gabrielvuksani/wotann-rules/main/index.json";
+
+function rulesLayout() {
+  return { rulesDir: join(homedir(), ".wotann", "rules") };
+}
+
+rulesCmd
+  .command("list")
+  .description("List rules installed in ~/.wotann/rules/")
+  .action(async () => {
+    const { listInstalled } = await import("./cli/commands/rules.js");
+    const result = listInstalled(rulesLayout());
+    if (!result.ok) {
+      process.stderr.write(chalk.red(`rules list failed: ${result.error}\n`));
+      process.exit(2);
+    }
+    if (result.installed.length === 0) {
+      process.stderr.write(chalk.dim("(no rules installed)\n"));
+      return;
+    }
+    for (const r of result.installed) {
+      process.stdout.write(`${r.id}  ${chalk.dim(`${r.sizeBytes}B  ${r.modifiedAt}`)}\n`);
+    }
+  });
+
+rulesCmd
+  .command("search [query]")
+  .description("Search the community index")
+  .option("--index <url>", "Override the index URL", DEFAULT_RULES_INDEX_URL)
+  .action(async (query: string | undefined, opts: { index: string }) => {
+    const { searchRules } = await import("./cli/commands/rules.js");
+    const fetcher = async (url: string) => {
+      const r = await fetch(url);
+      return { ok: r.ok, status: r.status, text: () => r.text() };
+    };
+    const result = await searchRules(query ?? "", opts.index, fetcher);
+    if (!result.ok) {
+      process.stderr.write(chalk.red(`rules search failed: ${result.error}\n`));
+      process.exit(2);
+    }
+    if (result.matches.length === 0) {
+      process.stderr.write(chalk.dim("(no matches)\n"));
+      return;
+    }
+    for (const r of result.matches) {
+      process.stdout.write(`${r.id}  ${chalk.dim(r.description)}\n`);
+    }
+  });
+
+rulesCmd
+  .command("install <id>")
+  .description("Install a rule from the community index")
+  .option("--index <url>", "Override the index URL", DEFAULT_RULES_INDEX_URL)
+  .action(async (id: string, opts: { index: string }) => {
+    const { searchRules, installRule } = await import("./cli/commands/rules.js");
+    const fetcher = async (url: string) => {
+      const r = await fetch(url);
+      return { ok: r.ok, status: r.status, text: () => r.text() };
+    };
+    const search = await searchRules(id, opts.index, fetcher);
+    if (!search.ok) {
+      process.stderr.write(chalk.red(`rules install failed (search): ${search.error}\n`));
+      process.exit(2);
+    }
+    const entry = search.matches.find((m) => m.id === id);
+    if (!entry) {
+      process.stderr.write(chalk.red(`rules install: id "${id}" not found in index\n`));
+      process.exit(2);
+    }
+    const result = await installRule(entry, rulesLayout(), fetcher);
+    if (!result.ok) {
+      process.stderr.write(chalk.red(`rules install failed: ${result.error}\n`));
+      process.exit(2);
+    }
+    process.stderr.write(
+      chalk.green(`✓ installed ${result.installed.id} (sha=${result.verifiedSha.slice(0, 12)}…)\n`),
+    );
+  });
+
+rulesCmd
+  .command("remove <id>")
+  .description("Remove an installed rule")
+  .action(async (id: string) => {
+    const { removeRule } = await import("./cli/commands/rules.js");
+    const result = removeRule(id, rulesLayout());
+    if (!result.ok) {
+      process.stderr.write(chalk.red(`rules remove failed: ${result.error}\n`));
+      process.exit(2);
+    }
+    process.stderr.write(chalk.green(`✓ removed ${result.removed}\n`));
+  });
+
 // ── wotann build — V9 Tier 9 full-stack scaffold builder ─────
 //
 // Plan-only by default — pass --emit to actually write files. Picks a

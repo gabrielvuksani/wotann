@@ -61,6 +61,10 @@ const CouncilView = lazy(() => import("../council/CouncilView").then((m) => ({ d
 const TrainingReview = lazy(() => import("../intelligence/TrainingReview").then((m) => ({ default: m.TrainingReview })));
 const TrustView = lazy(() => import("../trust/TrustView").then((m) => ({ default: m.TrustView })));
 const IntegrationsView = lazy(() => import("../integrations/IntegrationsView").then((m) => ({ default: m.IntegrationsView })));
+// V9 T10.3 — agentic Browse tab (was ZERO callers per audit).
+const BrowsePanel = lazy(() => import("../browse/BrowsePanel").then((m) => ({ default: m.BrowsePanel })));
+// V9 T5.12 — cross-device Fleet Dashboard (separate from local AgentFleetDashboard).
+const FleetDashboard = lazy(() => import("../fleet/FleetDashboard").then((m) => ({ default: m.FleetDashboard })));
 
 // ── Resizable Panel Hook ───────────────────────────────────────────
 
@@ -191,6 +195,10 @@ function WorkspaceContent({ view }: { readonly view: string }) {
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><TrustView /></Suspense></ErrorBoundary>;
     case "integrations":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><IntegrationsView /></Suspense></ErrorBoundary>;
+    case "browse":
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><BrowsePanel /></Suspense></ErrorBoundary>;
+    case "fleet":
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><FleetDashboard /></Suspense></ErrorBoundary>;
     default:
       return <ErrorBoundary><ChatView /></ErrorBoundary>;
   }
