@@ -5899,6 +5899,33 @@ designCmd
     },
   );
 
+// ── wotann design serve-mcp ──────────────────────────────────
+// V9 Tier 8 T8.6 — expose the Design Bridge ToolHostAdapter as a
+// stdio MCP server so external clients (Claude Code, Cursor, etc.)
+// can call design.* tools (extract, verify, apply, preview).
+//
+// Audit-identified gap: createDesignBridgeAdapter() existed (342 LOC,
+// 13 tests) with ZERO production callers. WotannMcpServer was also
+// uninstantiated anywhere. This subcommand connects them.
+designCmd
+  .command("serve-mcp")
+  .description("Run the Design Bridge as a stdio MCP server (V9 T8.6)")
+  .option("--workspace <dir>", "Workspace root the tools scan (default: cwd)")
+  .action(async (opts: { workspace?: string }) => {
+    const { WotannMcpServer } = await import("./mcp/mcp-server.js");
+    const { createDesignBridgeAdapter } = await import("./mcp/servers/design-bridge.js");
+    const workspaceDir = opts.workspace ?? process.cwd();
+    const adapter = createDesignBridgeAdapter({ workspaceDir });
+    const server = new WotannMcpServer({
+      info: { name: "wotann-design-bridge", version: "0.6.0" },
+      adapter,
+    });
+    process.stderr.write(
+      chalk.green(`✓ design-bridge MCP server listening on stdio (workspace: ${workspaceDir})\n`),
+    );
+    await server.run();
+  });
+
 // ── wotann design mode ──────────────────────────────────────
 // P1-C7: Cursor 3 Design Mode + Canvases port. Canvases are
 // durable, serializable design artifacts persisted under
