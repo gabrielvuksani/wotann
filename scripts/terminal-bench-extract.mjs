@@ -2,7 +2,7 @@
 /**
  * TerminalBench task/results extractor.
  *
- * Two roles:
+ * Three roles:
  *
  *   1. CORPUS EXTRACTOR (default). Walks a cloned TerminalBench repo
  *      (--src DIR) and produces a flat JSONL (one task per line) at
@@ -23,11 +23,25 @@
  *      failing the whole run, so a single malformed task doesn't
  *      block 88 others.
  *
- *   2. RESULTS EXTRACTOR (when stdin piped). If stdin is piped with
- *      `tb run` stdout, this script extracts the JSON results blob and
- *      emits it to stdout as normalized JSON. Mirrors the in-process
+ *   2. RESULTS EXTRACTOR — STDIN MODE (--results). If stdin is piped
+ *      with `tb run` stdout, this script extracts the JSON results blob
+ *      and emits it to stdout as normalized JSON. Mirrors the in-process
  *      `parseTbStdout` function from terminal-bench.ts — useful when a
  *      user ran `tb run` manually and wants to ingest the output.
+ *
+ *   3. NORMALIZED REPORT MODE (--input <run-dir> --output <json>).
+ *      V9 T14.6 leaderboard-comparable mode. Walks
+ *      <run-dir>/tasks/<task_id>/result.json (TerminalBench standard
+ *      run output layout) and writes a normalized report at <json>:
+ *        {
+ *          benchmark: "terminal-bench",
+ *          version, ranAt, totalTasks, passedTasks, score,
+ *          leaderboardComparable, trajectories: [{ taskId, passed,
+ *          durationSec, costUsd, transcript? }], notes?
+ *        }
+ *      When the run dir is missing or empty, writes a report with
+ *      leaderboardComparable=false and a `notes` field explaining why,
+ *      rather than crashing — honest stub policy.
  *
  * Usage:
  *   # Corpus extraction:
@@ -38,6 +52,11 @@
  *
  *   # Dry-run (corpus): count tasks, don't write:
  *   node scripts/terminal-bench-extract.mjs --src <clone> --dry-run
+ *
+ *   # Normalized report mode (V9 T14.6):
+ *   WOTANN_TB_REAL=1 node scripts/terminal-bench-extract.mjs \\
+ *       --input bench-results/terminal-bench/<run-id> \\
+ *       --output bench-results/terminal-bench/<run-id>/report.json
  *
  * Exit codes:
  *   0 — success
@@ -52,7 +71,7 @@
  */
 
 import { readFile, writeFile, readdir, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync, readFileSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { argv, stdin, stdout, stderr, exit } from "node:process";
 
@@ -62,6 +81,8 @@ function parseArgs(args) {
   const opts = {
     src: null,
     out: null,
+    input: null,
+    output: null,
     dryRun: false,
     resultsMode: false,
     help: false,
@@ -72,6 +93,10 @@ function parseArgs(args) {
       opts.src = args[++i];
     } else if (a === "--out" && i + 1 < args.length) {
       opts.out = args[++i];
+    } else if (a === "--input" && i + 1 < args.length) {
+      opts.input = args[++i];
+    } else if (a === "--output" && i + 1 < args.length) {
+      opts.output = args[++i];
     } else if (a === "--dry-run") {
       opts.dryRun = true;
     } else if (a === "--results") {
@@ -82,6 +107,10 @@ function parseArgs(args) {
       opts.src = a.slice("--src=".length);
     } else if (a.startsWith("--out=")) {
       opts.out = a.slice("--out=".length);
+    } else if (a.startsWith("--input=")) {
+      opts.input = a.slice("--input=".length);
+    } else if (a.startsWith("--output=")) {
+      opts.output = a.slice("--output=".length);
     } else {
       stderr.write(`Unknown flag: ${a}\n`);
       exit(4);
@@ -97,14 +126,20 @@ Mode A (corpus):  Walk a cloned TerminalBench repo and write one JSONL
                   line per task.
 Mode B (results): Read tb-run stdout on stdin; emit the JSON results
                   blob to stdout.
+Mode C (report):  Walk a TerminalBench run directory and emit a
+                  normalized leaderboard-comparable report (V9 T14.6).
 
 USAGE:
   node scripts/terminal-bench-extract.mjs --src <clone-dir> --out <jsonl>
   node scripts/terminal-bench-extract.mjs --results < tb-output.log
+  WOTANN_TB_REAL=1 node scripts/terminal-bench-extract.mjs \\
+        --input <run-dir> --output <report.json>
 
 FLAGS:
   --src PATH     Path to cloned TerminalBench repo (mode A)
   --out PATH     Output JSONL path (mode A)
+  --input PATH   Path to a TerminalBench run dir (mode C)
+  --output PATH  Path to write the normalized report.json (mode C)
   --dry-run      Count tasks and print summary; do not write (mode A)
   --results      Read stdin, extract JSON results blob (mode B)
   -h, --help     Show this message
@@ -267,6 +302,169 @@ async function extractResults() {
   return 3;
 }
 
+// ── Normalized report mode (V9 T14.6) ─────────────────
+
+/**
+ * Walk <runDir>/tasks/<task_id>/result.json (TerminalBench standard
+ * output layout) and aggregate into a normalized leaderboard-comparable
+ * report. Returns { report, notes } — notes is non-empty when the run
+ * dir is missing/empty (honest stub).
+ *
+ * result.json shape (per task, liberal — fields are optional):
+ *   { task_id, passed, duration_sec, cost_usd, transcript }
+ *
+ * Defensive: any read/parse failure on a single task is skipped with a
+ * warning rather than crashing the aggregation.
+ */
+function buildTerminalBenchReport(runDir) {
+  const ranAt = new Date().toISOString();
+  const baseReport = {
+    benchmark: "terminal-bench",
+    version: "0.0.0",
+    ranAt,
+    totalTasks: 0,
+    passedTasks: 0,
+    score: 0,
+    leaderboardComparable: false,
+    trajectories: [],
+  };
+
+  if (!existsSync(runDir)) {
+    return {
+      ...baseReport,
+      notes: `run directory missing: ${runDir}`,
+    };
+  }
+
+  const tasksDir = join(runDir, "tasks");
+  if (!existsSync(tasksDir)) {
+    return {
+      ...baseReport,
+      notes: `tasks/ subdirectory missing under ${runDir}`,
+    };
+  }
+
+  let entries;
+  try {
+    entries = readdirSync(tasksDir, { withFileTypes: true });
+  } catch (e) {
+    return {
+      ...baseReport,
+      notes: `cannot read tasks dir: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+
+  // Optional version probe — TerminalBench writes a `meta.json` or
+  // `run.json` at the top of each run directory; we tolerate either.
+  let version = "0.0.0";
+  for (const candidate of ["meta.json", "run.json"]) {
+    const path = join(runDir, candidate);
+    if (existsSync(path)) {
+      try {
+        const meta = JSON.parse(readFileSync(path, "utf-8"));
+        if (typeof meta.version === "string") version = meta.version;
+        else if (typeof meta.tb_version === "string") version = meta.tb_version;
+      } catch {
+        // ignore — version stays 0.0.0
+      }
+      break;
+    }
+  }
+
+  const trajectories = [];
+  const warnings = [];
+  for (const ent of entries) {
+    if (!ent.isDirectory()) continue;
+    const taskDir = join(tasksDir, ent.name);
+    const resultPath = join(taskDir, "result.json");
+    if (!existsSync(resultPath)) {
+      warnings.push(`${ent.name}: no result.json`);
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(resultPath, "utf-8"));
+    } catch (e) {
+      warnings.push(`${ent.name}: parse failed — ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    const taskId = typeof parsed.task_id === "string" ? parsed.task_id : ent.name;
+    const passed = parsed.passed === true;
+    const durationSec =
+      typeof parsed.duration_sec === "number"
+        ? parsed.duration_sec
+        : typeof parsed.duration_ms === "number"
+          ? parsed.duration_ms / 1000
+          : 0;
+    const costUsd = typeof parsed.cost_usd === "number" ? parsed.cost_usd : 0;
+    const trajectory = {
+      taskId,
+      passed,
+      durationSec,
+      costUsd,
+    };
+    if (Array.isArray(parsed.transcript)) {
+      const transcript = parsed.transcript.filter((s) => typeof s === "string");
+      if (transcript.length > 0) trajectory.transcript = transcript;
+    } else if (typeof parsed.transcript === "string" && parsed.transcript.length > 0) {
+      trajectory.transcript = [parsed.transcript];
+    }
+    trajectories.push(trajectory);
+  }
+
+  const totalTasks = trajectories.length;
+  const passedTasks = trajectories.filter((t) => t.passed).length;
+  const score = totalTasks > 0 ? passedTasks / totalTasks : 0;
+
+  // Leaderboard-comparable iff (a) the upstream tb harness was the
+  // producer (WOTANN_TB_REAL=1) and (b) we got a non-zero task count.
+  const isReal = process.env.WOTANN_TB_REAL === "1";
+  const leaderboardComparable = isReal && totalTasks > 0;
+
+  const report = {
+    benchmark: "terminal-bench",
+    version,
+    ranAt,
+    totalTasks,
+    passedTasks,
+    score,
+    leaderboardComparable,
+    trajectories,
+  };
+
+  if (totalTasks === 0) {
+    report.notes = `zero tasks parsed from ${tasksDir}`;
+  } else if (!isReal) {
+    report.notes =
+      "WOTANN_TB_REAL=1 not set; report is not leaderboard-comparable";
+  }
+  if (warnings.length > 0) {
+    report.warnings = warnings.slice(0, 20);
+  }
+
+  return report;
+}
+
+async function extractNormalizedReport(inputPath, outputPath) {
+  const runDir = resolve(inputPath);
+  const outPath = resolve(outputPath);
+  const report = buildTerminalBenchReport(runDir);
+  try {
+    await writeFile(outPath, JSON.stringify(report, null, 2), "utf-8");
+  } catch (e) {
+    stderr.write(
+      `\nERROR: write failed — ${e instanceof Error ? e.message : String(e)}\n`,
+    );
+    return 3;
+  }
+  stdout.write(
+    `extracted ${report.totalTasks} tasks → ${outPath}` +
+      (report.leaderboardComparable ? " (leaderboard-comparable)" : " (not leaderboard-comparable)") +
+      "\n",
+  );
+  return 0;
+}
+
 // ── Main ──────────────────────────────────────────────
 
 async function main() {
@@ -275,6 +473,16 @@ async function main() {
   if (opts.help) {
     stdout.write(USAGE);
     exit(0);
+  }
+
+  if (opts.input !== null || opts.output !== null) {
+    if (opts.input === null || opts.output === null) {
+      stderr.write(USAGE);
+      stderr.write(`\nERROR: --input and --output must both be set\n`);
+      exit(4);
+    }
+    const code = await extractNormalizedReport(opts.input, opts.output);
+    exit(code);
   }
 
   if (opts.resultsMode) {
