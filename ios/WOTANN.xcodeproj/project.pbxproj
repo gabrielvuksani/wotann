@@ -16,6 +16,7 @@
 		06F959DB4461DE45ABF3CF0B /* HeroAsk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0B5B7E2D8D66209D1CBA27 /* HeroAsk.swift */; };
 		076E0F0599458A931AAEE041 /* ViewModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B8A2E47A7D1FD56830C0BC1 /* ViewModifiers.swift */; };
 		0AA2DE9B6C1138BFE8CCC4BB /* EmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 905C2C8B236BC13E840A7AAE /* EmptyState.swift */; };
+		0BEB0054D8005EE7B2485126 /* IntentDonationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 827060EA745218457ACB003B /* IntentDonationService.swift */; };
 		0C858D84A9A6C826AD4C3A29 /* RemoteDesktopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0AC9767EE7AB489B6DA7CD /* RemoteDesktopView.swift */; };
 		0D2161771F56E9914A1A66F3 /* HitTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B51AA79482C2489AC5AEAA5 /* HitTarget.swift */; };
 		0E29FD806F217CEA700E7AB1 /* EditorStatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47FE4319C176ED7030945350 /* EditorStatusBar.swift */; };
@@ -372,6 +373,7 @@
 		80CCBB631AFE4063CE846F87 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		80FEAB65125D51F4349D403B /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
 		81F687B73AF01D49E756D61A /* ConnectionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionManager.swift; sourceTree = "<group>"; };
+		827060EA745218457ACB003B /* IntentDonationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentDonationService.swift; sourceTree = "<group>"; };
 		838F52E129844764764DBF15 /* CostViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostViewModel.swift; sourceTree = "<group>"; };
 		858AA65551925BEBA0EA15AB /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
 		85CD124246CE92A9A09C3C73 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -462,7 +464,7 @@
 		FC4279027D915B49348FAA83 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
 		FD4FCFB6760540EF97A7DA40 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FF2C467534932F2AF3DCB79A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		"TEMP_E390F8A5-9E6E-427A-9A9B-141C4E47AD77" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+		"TEMP_AAA762DB-3641-4490-9411-BA8DC9899202" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -620,6 +622,7 @@
 				E35578B937A1B6B65955180A /* Haptics.swift */,
 				8F6F9658FE45E7FE8311F9EB /* HapticService.swift */,
 				36E5C03AEA8B07FACAC501D6 /* HealthKitService.swift */,
+				827060EA745218457ACB003B /* IntentDonationService.swift */,
 				80FEAB65125D51F4349D403B /* LiveActivityManager.swift */,
 				0B71A549F1B1CF80DA2FCC16 /* LocalSendService.swift */,
 				310AB0D5FB3641506FFCB027 /* NFCPairingService.swift */,
@@ -1120,10 +1123,10 @@
 			path = Dashboard;
 			sourceTree = "<group>";
 		};
-		"TEMP_88424B2F-CC4B-4591-83FF-7B93DFF088A8" /* ios */ = {
+		"TEMP_5AC17565-9942-42D4-8E5F-3BD1FAFEC3CC" /* ios */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_E390F8A5-9E6E-427A-9A9B-141C4E47AD77" /* Local.xcconfig */,
+				"TEMP_AAA762DB-3641-4490-9411-BA8DC9899202" /* Local.xcconfig */,
 			);
 			path = ios;
 			sourceTree = "<group>";
@@ -1479,6 +1482,7 @@
 				0D2161771F56E9914A1A66F3 /* HitTarget.swift in Sources */,
 				1DFA4133059A447B8F8FB65B /* HomeView.swift in Sources */,
 				ACE160DE9818A098FC0B25C0 /* IntelligenceDashboardView.swift in Sources */,
+				0BEB0054D8005EE7B2485126 /* IntentDonationService.swift in Sources */,
 				C6D37DF08E7E309327EBD44E /* KeychainManager.swift in Sources */,
 				D482B4D4DCDC0ED3A3EF2BDF /* LiveActivityManager.swift in Sources */,
 				C97535C1C7CBB9374DA8CF0D /* LiveAgentsStrip.swift in Sources */,
@@ -1693,7 +1697,7 @@
 		};
 		35715A6A8931B13D7362B776 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_E390F8A5-9E6E-427A-9A9B-141C4E47AD77" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_AAA762DB-3641-4490-9411-BA8DC9899202" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -1911,7 +1915,7 @@
 		};
 		E96B011291432A6F1F017F8B /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_E390F8A5-9E6E-427A-9A9B-141C4E47AD77" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_AAA762DB-3641-4490-9411-BA8DC9899202" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

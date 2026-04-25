@@ -5825,6 +5825,28 @@ export class KairosRPCHandler {
     this.registerDeliveryHandlers();
     this.registerCursorHandlers();
     this.registerLiveActivityHandlers();
+
+    // V9 wire-compat aliases. iOS code (per MASTER_PLAN_V9 spec) refers to
+    // these RPC methods using the dotted spec names; the canonical handlers
+    // were registered above under camelCase names. We register the aliases
+    // by referencing the same handler so both names round-trip identically.
+    //
+    // - `cursor.stream`            → `cursor.subscribe`
+    // - `live.activity.subscribe`  → `liveActivity.subscribe`
+    //
+    // Push-channel names also need cross-emit (the iOS side listens to
+    // `cursor.stream` / `live.activity` push events). The producer paths
+    // currently emit only `cursor.subscribe-style` events — to surface them
+    // under the alias names without duplicating the producer, listeners
+    // subscribe via the alias and we forward the event in the WS layer.
+    // For now the alias registration is enough for the .send() side; the
+    // WS push side will get a follow-up commit when the producer wires up.
+    const cursorSubscribe = this.handlers.get("cursor.subscribe");
+    if (cursorSubscribe) this.handlers.set("cursor.stream", cursorSubscribe);
+    const liveActivitySubscribe = this.handlers.get("liveActivity.subscribe");
+    if (liveActivitySubscribe) {
+      this.handlers.set("live.activity.subscribe", liveActivitySubscribe);
+    }
   }
 
   // ── F2: Cursor stream RPCs (real-time coordinate events) ──
@@ -6374,6 +6396,40 @@ export class KairosRPCHandler {
       } catch (err) {
         throw toRpcError(err);
       }
+    });
+
+    // V9 T5.10 (F13) iOS wire-compat: CarPlayService.swift subscribes to
+    // `carplay.voice.subscribe` and listens on the `carplay.voice` push
+    // channel. The daemon doesn't yet emit a continuous voice stream
+    // (the existing carplay.parseVoice / dispatch flow is one-shot).
+    //
+    // Honest stub: register the subscribe RPC so the iOS side gets a
+    // subscription id (avoiding an error toast on every CarPlayService
+    // attachRPC) and document that no events fire until the dispatch
+    // pipeline grows a streaming surface. This is QB#6 — ack the
+    // subscription truthfully rather than swallowing the error.
+    this.handlers.set("carplay.voice.subscribe", async (params) => {
+      const subscriptionIdIn = params["subscriptionId"];
+      const closeAfter = params["close"] === true;
+
+      if (typeof subscriptionIdIn === "string" && subscriptionIdIn.length > 0) {
+        return {
+          subscriptionId: subscriptionIdIn,
+          events: [],
+          more: false,
+          closed: closeAfter,
+          notes: "carplay.voice continuous stream not yet wired; dispatch is one-shot.",
+        };
+      }
+
+      const subId = `carplay-voice-${randomUUID()}`;
+      return {
+        subscriptionId: subId,
+        events: [],
+        more: false,
+        closed: false,
+        notes: "carplay.voice continuous stream not yet wired; dispatch is one-shot.",
+      };
     });
   }
 
