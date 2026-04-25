@@ -33,6 +33,17 @@ import type { Readable, Writable } from "node:stream";
 import { loadToolsWithOptions, resolveTier, type McpTier, type TieredTool } from "./tool-loader.js";
 // V9 T4.1 — WOTANN MCP Apps UI resource registry (SEP-1865).
 import { listUiResources, readUiResource } from "./ui-resources.js";
+// V9 T14.1 — Elicitation registry: server→client structured-input requests.
+// The server holds a registry per-instance (QB #7 per-call state, no
+// module singleton). The registry is exposed via getElicitationRegistry()
+// so wiring code can attach a UI handler at composition time.
+import {
+  createElicitationRegistry,
+  parseElicitationRequest,
+  parseElicitationResult,
+  type ElicitationRegistry,
+  type ElicitationRequest,
+} from "./elicitation.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -130,6 +141,13 @@ export class WotannMcpServer {
    */
   private readonly tierAllowlist: ReadonlySet<string> | null;
   private readonly activeTier: McpTier | null;
+  /**
+   * Per-server elicitation registry (V9 T14.1). Wires server→client
+   * structured-input requests so MCP clients (Claude, Cursor, etc.)
+   * can drive WOTANN tools that need mid-call user input. Created per
+   * server instance — QB #7 per-call state.
+   */
+  private readonly elicitationRegistry: ElicitationRegistry;
 
   constructor(options: McpServerOptions) {
     this.info = options.info;
@@ -162,6 +180,22 @@ export class WotannMcpServer {
       this.activeTier = null;
       this.tierAllowlist = null;
     }
+
+    // Per-server elicitation registry. Wiring code attaches a UI
+    // handler later via `getElicitationRegistry().register(handler)`.
+    // Until a handler is attached, elicitation/* requests honestly
+    // surface a "no-handler" error envelope (QB #6).
+    this.elicitationRegistry = createElicitationRegistry();
+  }
+
+  /**
+   * Returns the elicitation registry so wiring code (composition root,
+   * UI surface, etc.) can attach a handler that drives the user-input
+   * UI. Honest stub by default — until a handler is registered,
+   * elicitation/create requests get a "no-handler" error envelope.
+   */
+  getElicitationRegistry(): ElicitationRegistry {
+    return this.elicitationRegistry;
   }
 
   /**
@@ -323,6 +357,37 @@ export class WotannMcpServer {
           throw new Error(`resources/read: unknown uri: ${p.uri}`);
         }
         return { contents: [content] };
+      }
+      case "elicitation/create": {
+        // V9 T14.1 — A client (or peer) is asking THIS server to elicit
+        // structured input. Parse with the spec'd shape, route through
+        // the elicitation registry. When no handler is registered the
+        // registry returns an honest "no-handler" envelope (QB #6).
+        const parsed = parseElicitationRequest({ method, params });
+        if (parsed === null) {
+          throw new Error("elicitation/create: malformed params (need {message, requestedSchema})");
+        }
+        const handled = await this.elicitationRegistry.handle(parsed as ElicitationRequest);
+        if (handled.ok) return handled.result;
+        // Honest failure surface — never silently fabricate a response.
+        return {
+          action: "cancel",
+          ...(handled.error !== undefined
+            ? { _wotannError: handled.error, _wotannReason: handled.reason }
+            : { _wotannReason: handled.reason }),
+        };
+      }
+      case "elicitation/result": {
+        // V9 T14.1 — Inbound result from a previously-issued elicitation.
+        // We round-trip through the parser to enforce the spec'd shape,
+        // then echo back to the client (the registry doesn't store
+        // pending requests itself; callers correlate by id at the
+        // outbound layer).
+        const result = parseElicitationResult(params);
+        if (result === null) {
+          throw new Error("elicitation/result: malformed payload");
+        }
+        return result;
       }
       case "shutdown":
         this.closed = true;

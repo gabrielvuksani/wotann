@@ -20,6 +20,22 @@ import {
   type Synthesizer,
 } from "./parallel-coordinator.js";
 import { PhasedExecutor } from "./phased-executor.js";
+// V9 T14.7 — Anthropic Cowork pattern: lead dispatches N workers on
+// DISJOINT scopes. Wired as a third execution strategy alongside
+// "graph" and "parallel". Pure-logic layer — every dependency is
+// injected at executeCowork time.
+import {
+  decomposeTask,
+  runCoworkers,
+  aggregateCowork,
+  passthroughMerge,
+  type CoworkTask,
+  type CoworkSubtask,
+  type CoworkWorker,
+  type CoworkResult,
+  type CoworkAggregation,
+  type CoworkDecomposer,
+} from "./cowork.js";
 
 export interface CoordinatorTask {
   readonly id: string;
@@ -36,10 +52,12 @@ export interface CoordinatorConfig {
   readonly verifyAfterEach: boolean;
   readonly worktreeRoot?: string;
   /**
-   * Execution strategy: "graph" (default — phased DAG via executeWithGraph) or
-   * "parallel" (N-agent fan-out + synthesis via ParallelCoordinator).
+   * Execution strategy: "graph" (default — phased DAG via executeWithGraph),
+   * "parallel" (N-agent fan-out + synthesis via ParallelCoordinator), or
+   * "cowork" (V9 T14.7 — disjoint-scope decomposition + bounded-concurrency
+   * pool + scope-conflict aggregation via cowork.ts).
    */
-  readonly strategy?: "graph" | "parallel";
+  readonly strategy?: "graph" | "parallel" | "cowork";
 }
 
 export interface CoordinatorWorktree {
@@ -371,7 +389,73 @@ export class Coordinator {
     );
   }
 
-  getStrategy(): "graph" | "parallel" {
+  getStrategy(): "graph" | "parallel" | "cowork" {
     return this.config.strategy ?? "graph";
+  }
+
+  /**
+   * V9 T14.7 — Cowork strategy: lead decomposes the root task into
+   * disjoint-scope subtasks via the injected `decomposer`, runs them
+   * with bounded concurrency (capped by `maxSubagents`), and aggregates
+   * via the injected merge function. Tasks are tracked via the same
+   * `startTask`/`completeTask`/`failTask` lifecycle as the other
+   * strategies so progress reporting stays consistent.
+   *
+   * The orphan `cowork.ts` ships pure logic — this method is the
+   * single wiring point that drives task lifecycle + concurrency from
+   * Coordinator's existing config.
+   */
+  async executeCowork<T = readonly CoworkResult[]>(
+    rootTask: CoworkTask,
+    decomposer: CoworkDecomposer,
+    executor: (subtask: CoworkSubtask) => Promise<CoworkResult>,
+    options: {
+      readonly merge?: (results: readonly CoworkResult[]) => T;
+      readonly onConflict?: (conflictingScopes: readonly string[]) => void;
+      readonly abortSignal?: AbortSignal;
+    } = {},
+  ): Promise<CoworkAggregation<T>> {
+    const plan = decomposeTask(rootTask, decomposer);
+    const workers: readonly CoworkWorker[] = plan.subtasks.map((subtask) => ({
+      subtaskId: subtask.id,
+      execute: async () => {
+        // Track inside Coordinator's own task ledger so progress
+        // reporters keep working. Subtasks are added on the fly so
+        // cowork doesn't require pre-population.
+        if (!this.tasks.has(subtask.id)) {
+          this.addTask({
+            id: subtask.id,
+            description: subtask.description,
+            files: subtask.scope,
+            phase: "implement",
+            status: "pending",
+          });
+        }
+        this.startTask(subtask.id, `cowork-${subtask.id}`);
+        try {
+          const result = await executor(subtask);
+          if (result.ok) this.completeTask(subtask.id);
+          else this.failTask(subtask.id);
+          return result;
+        } catch (err) {
+          this.failTask(subtask.id);
+          return {
+            ok: false,
+            subtaskId: subtask.id,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      },
+    }));
+    const execution = await runCoworkers(workers, {
+      concurrency: this.config.maxSubagents,
+      ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+    });
+    const merge =
+      options.merge ?? (passthroughMerge as unknown as (r: readonly CoworkResult[]) => T);
+    return aggregateCowork(plan, execution, {
+      merge,
+      ...(options.onConflict !== undefined ? { onConflict: options.onConflict } : {}),
+    });
   }
 }

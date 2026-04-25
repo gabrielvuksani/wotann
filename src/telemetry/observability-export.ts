@@ -7,6 +7,20 @@
 import { writeFileSync, existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { isTelemetryOptedOut } from "./opt-out.js";
+// V9 T14.1 — W3C Trace Context helpers. Used by the OTLP exporter to
+// emit a spec-compliant `traceparent` header alongside each batch and
+// to honor inbound parent context when the caller supplies one. This
+// makes WOTANN telemetry interoperable with any OpenTelemetry-aware
+// collector (Jaeger, Tempo, Datadog, Honeycomb).
+import {
+  buildTraceparent,
+  childOf,
+  extractTraceparent,
+  formatTraceparent,
+  generateTraceId as generateW3cTraceId,
+  parseTraceparent,
+  type TraceparentFields,
+} from "./traceparent.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -58,6 +72,13 @@ export interface ExportConfig {
   readonly apiKey?: string;
   readonly batchSize: number;
   readonly flushIntervalMs: number;
+  /**
+   * V9 T14.1 — Optional inbound HTTP headers carrying a W3C
+   * `traceparent`. When supplied, the OTLP exporter parses + uses
+   * the parent's traceId for outbound spans so cross-service traces
+   * link up. When absent, a fresh root traceId is generated per flush.
+   */
+  readonly inboundHeaders?: Readonly<Record<string, string | readonly string[] | undefined>>;
 }
 
 // ── Observability Exporter ───────────────────────────────
@@ -315,7 +336,25 @@ export class ObservabilityExporter {
     // OpenTelemetry Protocol format — OTLP/JSON
     // In production, would POST to an OTLP collector endpoint.
     // For now, export as OTLP-compatible JSON for file-based collection.
-    const traceId = generateTraceId();
+    //
+    // V9 T14.1 — Honor inbound W3C `traceparent` for cross-service
+    // span linking. When the caller passed `inboundHeaders` carrying a
+    // traceparent, parse it and reuse its traceId so the OTLP spans
+    // chain up to the upstream parent. Absent headers → generate a
+    // fresh W3C-spec traceId.
+    const inbound = this.config.inboundHeaders
+      ? extractTraceparent(this.config.inboundHeaders)
+      : null;
+    const traceId = inbound?.traceId ?? generateTraceId();
+    // Build the header we'd emit on outbound HTTP for the next hop.
+    // Either propagate the inbound parent into a fresh child span, or
+    // open a brand-new root traceparent. We don't actually send it
+    // (this exporter is file-backed) but we record it on the payload
+    // so downstream collectors can correlate.
+    const outboundParent: TraceparentFields | null = inbound
+      ? childOf(inbound)
+      : (parseTraceparent(buildTraceparent({ traceId })) ?? null);
+    const outboundHeader = outboundParent ? formatTraceparent(outboundParent) : null;
 
     const spans: OTLPSpan[] = events.map((e) => {
       const attributes: OTLPAttribute[] = [
@@ -345,33 +384,49 @@ export class ObservabilityExporter {
 
       return {
         traceId,
-        spanId: e.id.replace(/[^a-f0-9]/g, "").slice(0, 16).padEnd(16, "0"),
-        parentSpanId: e.parentId?.replace(/[^a-f0-9]/g, "").slice(0, 16).padEnd(16, "0"),
+        spanId: e.id
+          .replace(/[^a-f0-9]/g, "")
+          .slice(0, 16)
+          .padEnd(16, "0"),
+        parentSpanId: e.parentId
+          ?.replace(/[^a-f0-9]/g, "")
+          .slice(0, 16)
+          .padEnd(16, "0"),
         name: e.name,
-        kind: e.type === "llm_call" ? "CLIENT" as const : "INTERNAL" as const,
+        kind: e.type === "llm_call" ? ("CLIENT" as const) : ("INTERNAL" as const),
         startTimeUnixNano: String(e.startTime * 1_000_000),
         endTimeUnixNano: String(e.endTime * 1_000_000),
         attributes,
         status: {
-          code: e.type === "error" ? "ERROR" as const : "OK" as const,
+          code: e.type === "error" ? ("ERROR" as const) : ("OK" as const),
           message: e.type === "error" ? e.output : undefined,
         },
       };
     });
 
     const otlpPayload = {
-      resourceSpans: [{
-        resource: {
-          attributes: [
-            { key: "service.name", value: { stringValue: "wotann" } },
-            { key: "service.version", value: { stringValue: "0.1.0" } },
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              { key: "service.name", value: { stringValue: "wotann" } },
+              { key: "service.version", value: { stringValue: "0.1.0" } },
+            ],
+          },
+          scopeSpans: [
+            {
+              scope: { name: "wotann-telemetry", version: "0.1.0" },
+              spans,
+            },
           ],
         },
-        scopeSpans: [{
-          scope: { name: "wotann-telemetry", version: "0.1.0" },
-          spans,
-        }],
-      }],
+      ],
+      // V9 T14.1 — outbound W3C traceparent + (when relevant) the
+      // inbound parent. Downstream collectors / agents that pick up
+      // this file can use the headers to link the trace into a
+      // distributed view (Jaeger / Tempo / Datadog).
+      ...(outboundHeader ? { traceparent: outboundHeader } : {}),
+      ...(inbound ? { _inboundTraceparent: formatTraceparent(inbound) } : {}),
     };
 
     const filePath = join(this.logDir, `otlp-${Date.now()}.json`);
@@ -381,7 +436,18 @@ export class ObservabilityExporter {
 
 // ── Helpers ──────────────────────────────────────────────
 
+/**
+ * V9 T14.1 — Generate a W3C-spec-compliant 32-hex-char trace ID.
+ * Delegates to the canonical helper in `traceparent.ts` (which uses
+ * crypto.randomBytes and rejects all-zero ids per spec). Kept as a
+ * local wrapper so the exportOTLP code reads naturally.
+ */
 function generateTraceId(): string {
+  return generateW3cTraceId();
+}
+
+// Legacy weak-random implementation (unreachable, kept for reference).
+function _legacyGenerateTraceId(): string {
   const bytes: string[] = [];
   for (let i = 0; i < 32; i++) {
     bytes.push(Math.floor(Math.random() * 16).toString(16));

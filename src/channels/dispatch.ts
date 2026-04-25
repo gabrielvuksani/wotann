@@ -8,6 +8,19 @@ import { createRuntime } from "../core/runtime.js";
 import { runRuntimeQuery } from "../cli/runtime-query.js";
 import { restoreSession } from "../core/session.js";
 import type { StreamChunk } from "../providers/types.js";
+// V9 T14.1 — Push-inversion: lets MCP/webhook/cron triggers initiate
+// messages INTO an active session instead of only responding. The
+// dispatch manager owns one registry per instance; sessions register
+// + deregister around their handleMessage lifecycle, and external
+// callers route via `pushIntoSession(sessionId, message)`.
+import {
+  createPushInversionRegistry,
+  type PushInversionRegistry,
+  type PushMessage,
+  type PushResult,
+  type RegisterOptions,
+  type DeregisterFn,
+} from "./push-inversion.js";
 
 export interface DispatchRouteSnapshot {
   readonly routeKey: string;
@@ -52,9 +65,8 @@ interface RuntimeLike {
   close(): void;
 }
 
-type DispatchInboundMessage =
-  Pick<ChannelMessage, "content" | "channelType" | "senderId">
-  & Partial<Pick<ChannelMessage, "channelId">>;
+type DispatchInboundMessage = Pick<ChannelMessage, "content" | "channelType" | "senderId"> &
+  Partial<Pick<ChannelMessage, "channelId">>;
 
 export interface ChannelDispatchManagerOptions {
   readonly workingDir: string;
@@ -98,13 +110,25 @@ export class ChannelDispatchManager {
   private readonly runtimes = new Map<string, RuntimeLike>();
   private readonly routes = new Map<string, DispatchRouteSnapshot>();
   private readonly policies = new Map<string, DispatchRoutePolicy>();
+  /**
+   * V9 T14.1 — Per-instance push-inversion registry. External triggers
+   * (MCP server-initiated, webhook, cron) call `pushIntoSession` to
+   * round-trip an event into an active session. Honest stub: pushes
+   * to unregistered sessions return `{ok:false, reason:"not-registered"}`
+   * rather than silently dropping (QB #6 honest failure envelopes).
+   */
+  private readonly pushRegistry: PushInversionRegistry = createPushInversionRegistry();
 
   constructor(options: ChannelDispatchManagerOptions) {
     this.workingDir = options.workingDir;
     this.initialMode = options.initialMode;
-    this.manifestPath = options.manifestPath ?? join(options.workingDir, ".wotann", "dispatch", "routes.json");
-    this.policyPath = options.policyPath ?? join(options.workingDir, ".wotann", "dispatch", "policies.json");
-    this.createRuntimeImpl = options.createRuntime ?? ((workingDir, initialMode) => createRuntime(workingDir, initialMode));
+    this.manifestPath =
+      options.manifestPath ?? join(options.workingDir, ".wotann", "dispatch", "routes.json");
+    this.policyPath =
+      options.policyPath ?? join(options.workingDir, ".wotann", "dispatch", "policies.json");
+    this.createRuntimeImpl =
+      options.createRuntime ??
+      ((workingDir, initialMode) => createRuntime(workingDir, initialMode));
     this.runQueryImpl = options.runQuery ?? runRuntimeQuery;
     this.loadManifest();
     this.loadPolicies();
@@ -186,6 +210,36 @@ export class ChannelDispatchManager {
     return deleted;
   }
 
+  /**
+   * V9 T14.1 — Register a session-bound sink for push-inversion. Other
+   * surfaces (MCP server, webhook router, cron) call `pushIntoSession`
+   * to deliver events. Caller invokes the returned `DeregisterFn` to
+   * unbind on session close. Pass `opts.maxPerMinute` / `opts.dedupe`
+   * to tune the throttle (defaults: 30/min, dedupe off).
+   */
+  registerPushSession(sessionId: string, opts: RegisterOptions): DeregisterFn {
+    return this.pushRegistry.register(sessionId, opts);
+  }
+
+  /**
+   * V9 T14.1 — Deliver a push-inversion message into a registered
+   * session. Returns the rate/dedupe/sink outcome. Honest stub: pushes
+   * to unregistered sessions return `{ok:false, reason:"not-registered"}`.
+   */
+  async pushIntoSession(sessionId: string, message: PushMessage): Promise<PushResult> {
+    return this.pushRegistry.push(sessionId, message);
+  }
+
+  /** V9 T14.1 — Active push-inversion sessions. */
+  listPushSessions(): readonly string[] {
+    return this.pushRegistry.list();
+  }
+
+  /** V9 T14.1 — Has the given session registered for push-inversion? */
+  hasPushSession(sessionId: string): boolean {
+    return this.pushRegistry.has(sessionId);
+  }
+
   async closeAll(): Promise<void> {
     for (const runtime of this.runtimes.values()) {
       runtime.close();
@@ -200,7 +254,10 @@ export class ChannelDispatchManager {
       return existing;
     }
 
-    const runtime = await this.createRuntimeImpl(route.workspaceDir, route.mode ?? this.initialMode);
+    const runtime = await this.createRuntimeImpl(
+      route.workspaceDir,
+      route.mode ?? this.initialMode,
+    );
     const snapshot = this.routes.get(route.routeKey);
     if (snapshot?.sessionPath) {
       const restored = restoreSession(snapshot.sessionPath);
@@ -236,7 +293,9 @@ export class ChannelDispatchManager {
     const ranked = this.getPolicies()
       .filter((policy) => matchesPolicy(policy, message))
       .map((policy) => ({ policy, score: specificityScore(policy) }))
-      .sort((left, right) => right.score - left.score || left.policy.id.localeCompare(right.policy.id));
+      .sort(
+        (left, right) => right.score - left.score || left.policy.id.localeCompare(right.policy.id),
+      );
     return ranked[0]?.policy;
   }
 
@@ -297,10 +356,7 @@ function normalizePolicy(policy: DispatchRoutePolicy): DispatchRoutePolicy {
   };
 }
 
-function matchesPolicy(
-  policy: DispatchRoutePolicy,
-  message: DispatchInboundMessage,
-): boolean {
+function matchesPolicy(policy: DispatchRoutePolicy, message: DispatchInboundMessage): boolean {
   if (policy.channelType && policy.channelType !== message.channelType) return false;
   if (policy.senderId && policy.senderId !== message.senderId) return false;
   if (policy.channelId && policy.channelId !== message.channelId) return false;

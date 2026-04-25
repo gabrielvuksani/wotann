@@ -15,6 +15,7 @@ import { processPDF } from "./pdf-processor.js";
 import { postToolCallback, type ToolCallbackConfig, isSafeCallbackURL } from "./post-callback.js";
 import { TaskTool } from "./task-tool.js";
 import { isSafeUrl } from "../security/ssrf-guard.js";
+import { runMonitored, type MonitorEvent } from "./monitor-bg.js";
 
 // ── Envelope ────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ export const AUX_TOOL_NAMES = [
   "pdf.extract_images",
   "post_callback",
   "task.spawn",
+  "monitor_bg",
 ] as const;
 
 export type AuxToolName = (typeof AUX_TOOL_NAMES)[number];
@@ -120,6 +122,37 @@ export function buildAuxToolDefinitions(): readonly ToolDefinition[] {
           parentId: stringProp("Optional parent task id"),
         },
         required: ["action"],
+      },
+    },
+    {
+      name: "monitor_bg",
+      description:
+        "Run a child process and stream its stdout/stderr line-by-line as discrete " +
+        "events. Honest event-driven primitive (no `sleep` polling). Returns a " +
+        "summary of stdout lines, stderr lines, exit code, signal, and duration. " +
+        "Use for tail-following logs, watch-mode build output, or any long-running " +
+        "command whose progress you want surfaced live. `timeoutMs` defaults to " +
+        "300000 (5 min), `maxLines` to 10000.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          command: stringProp("Executable path or name (no shell interpretation)"),
+          args: {
+            type: "array",
+            items: { type: "string" },
+            description: "Argument vector (no shell expansion).",
+          },
+          cwd: stringProp("Optional working directory."),
+          timeoutMs: {
+            type: "number",
+            description: "Max runtime before SIGTERM (default 300000).",
+          },
+          maxLines: {
+            type: "number",
+            description: "Max lines captured before force-close (default 10000).",
+          },
+        },
+        required: ["command"],
       },
     },
   ];
@@ -246,6 +279,65 @@ export async function dispatchAuxTool(
       return result.success
         ? { ok: true, data: result.data }
         : errEnv("upstream_error", result.error ?? "task op failed");
+    }
+    case "monitor_bg": {
+      const command = input["command"];
+      if (typeof command !== "string" || command.trim().length === 0) {
+        return errEnv("bad_input", "command required");
+      }
+      const argsRaw = input["args"];
+      const args =
+        Array.isArray(argsRaw) && argsRaw.every((a) => typeof a === "string")
+          ? (argsRaw as readonly string[])
+          : undefined;
+      const cwd = typeof input["cwd"] === "string" ? (input["cwd"] as string) : undefined;
+      const timeoutMs =
+        typeof input["timeoutMs"] === "number" ? (input["timeoutMs"] as number) : undefined;
+      const maxLines =
+        typeof input["maxLines"] === "number" ? (input["maxLines"] as number) : undefined;
+      const stdoutLines: string[] = [];
+      const stderrLines: string[] = [];
+      let exitCode: number | null = null;
+      let exitSignal: NodeJS.Signals | null = null;
+      let durationMs = 0;
+      let timedOut = false;
+      try {
+        const monitorOpts: Parameters<typeof runMonitored>[0] = {
+          command,
+          ...(args !== undefined ? { args } : {}),
+          ...(cwd !== undefined ? { cwd } : {}),
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+          ...(maxLines !== undefined ? { maxLines } : {}),
+        };
+        for await (const event of runMonitored(monitorOpts) as AsyncGenerator<MonitorEvent>) {
+          if (event.type === "stdout-line") {
+            stdoutLines.push(event.line);
+          } else if (event.type === "stderr-line") {
+            stderrLines.push(event.line);
+          } else if (event.type === "timeout") {
+            timedOut = true;
+          } else if (event.type === "exit") {
+            exitCode = event.code;
+            exitSignal = event.signal;
+            durationMs = event.durationMs;
+          }
+        }
+        return {
+          ok: true,
+          data: {
+            exitCode,
+            signal: exitSignal,
+            durationMs,
+            timedOut,
+            stdout: stdoutLines,
+            stderr: stderrLines,
+            stdoutLineCount: stdoutLines.length,
+            stderrLineCount: stderrLines.length,
+          },
+        };
+      } catch (err) {
+        return errEnv("upstream_error", err instanceof Error ? err.message : String(err));
+      }
     }
     default: {
       const _exhaustive: never = toolName;

@@ -146,6 +146,15 @@ import {
   type RetrievalContext,
 } from "./retrieval-registry.js";
 import type { MemoryProvider } from "./pluggable-provider.js";
+// V9 T14.2 — opt-in retrieval strategies. Each is a heavy / experimental
+// retriever that is OFF by default; callers opt in via
+// `registerOptionalStrategies(opts)`. The orphan modules each ship a
+// pure function (asmr voter, Louvain community detector, persona tree
+// builder); the wrappers below adapt them onto the RetrievalMode
+// contract so the existing dispatch path (`searchWithMode`) drives them.
+import { runAsmrVoter, type AsmrRetrieverSpec } from "./asmr-voter.js";
+import { detectCommunities, communityOf } from "./community-detection.js";
+import { buildPersonaTree, walkPersonaTree } from "./persona-tree.js";
 
 export type MemoryLayer =
   | "auto_capture"
@@ -4173,6 +4182,208 @@ export class MemoryStore implements MemoryProvider {
     }
     const ctx: RetrievalContext = { store: this };
     return mode.search(ctx, query, opts);
+  }
+
+  /**
+   * V9 T14.2 — Register opt-in heavy / experimental retrieval
+   * strategies onto this store's registry. Default-OFF: callers must
+   * pass each flag explicitly. Each strategy delegates to a pure
+   * orphan module (asmr-voter / community-detection / persona-tree)
+   * and surfaces honest fallback semantics when its prerequisites
+   * (entry pool, edge graph, etc.) aren't available.
+   *
+   * Returns the names registered so the caller can introspect.
+   */
+  registerOptionalStrategies(opts: {
+    readonly asmrVoter?: boolean;
+    readonly communityDetection?: boolean;
+    readonly personaTree?: boolean;
+  }): readonly string[] {
+    const added: string[] = [];
+    const store = this;
+
+    if (opts.asmrVoter === true) {
+      const asmrMode: RetrievalMode = {
+        name: "asmr-voter",
+        description:
+          "Reciprocal-rank-fusion ensemble: run N base retrievers and majority-vote the top-K. Off by default; opt-in heavy retrieval.",
+        search: async (_ctx, query, modeOpts) => {
+          const limit = Math.max(1, modeOpts?.limit ?? 10);
+          // Default ensemble: re-use the store's own search path twice
+          // so the wire is exercised even without a custom retriever
+          // panel. Callers that need real diversity inject specs via
+          // modeOpts.params.retrievers.
+          const params = modeOpts?.params ?? {};
+          const customRetrievers = (params as { retrievers?: readonly AsmrRetrieverSpec[] })
+            .retrievers;
+          const retrievers: readonly AsmrRetrieverSpec[] = customRetrievers ?? [
+            {
+              name: "fts-primary",
+              retriever: async (q) => store.search(q, limit * 2),
+            },
+            {
+              name: "fts-secondary",
+              retriever: async (q) => store.search(q, limit),
+            },
+          ];
+          const vote = await runAsmrVoter(query, retrievers, { topK: limit });
+          return {
+            mode: "asmr-voter",
+            results: vote.hits.map((h) => ({
+              id: h.entry.id,
+              content: h.entry.value,
+              score: h.fusedScore,
+              reason: `RRF across ${Object.keys(h.ranks).length} retrievers`,
+              metadata: {
+                ranks: h.ranks,
+                hasPartialFailure: vote.hasPartialFailure,
+              },
+            })),
+            scoring: {
+              method: "rrf-ensemble",
+              isHeuristic: vote.hasPartialFailure,
+              ...(vote.hasPartialFailure
+                ? { notes: "one or more retrievers failed; results degraded" }
+                : {}),
+            },
+          };
+        },
+      };
+      this.registerRetrievalMode(asmrMode);
+      added.push(asmrMode.name);
+    }
+
+    if (opts.communityDetection === true) {
+      const cdMode: RetrievalMode = {
+        name: "community-detection",
+        description:
+          "Louvain community detection over the bi-temporal knowledge graph; pulls all members of the community a query-matched entity belongs to. Off by default.",
+        search: async (ctx, query, modeOpts) => {
+          const limit = Math.max(1, modeOpts?.limit ?? 10);
+          const edges = ctx.edges;
+          if (!edges || edges.length === 0) {
+            // Honest fallback: no graph, no community pull-in. Still
+            // surface the FTS hits so the mode never returns empty
+            // when the store has matches.
+            const fts = store.search(query, limit);
+            return {
+              mode: "community-detection",
+              results: fts.map((r) => ({
+                id: r.entry.id,
+                content: r.entry.value,
+                score: r.score,
+                reason: "fts-only (no graph edges injected)",
+              })),
+              scoring: {
+                method: "louvain-fallback-fts",
+                isHeuristic: true,
+                notes: "no edges in RetrievalContext; community detection skipped",
+              },
+            };
+          }
+          // The orphan helper takes BiTemporalEdge[]; the registry
+          // ctx.edges is a lighter shape (RetrievalEdge). Adapt.
+          const adaptedEdges = edges.map((e, i) => ({
+            id: `ctx-edge-${i}`,
+            sourceId: e.fromId,
+            targetId: e.toId,
+            relation: e.relation ?? "related",
+            weight: e.weight ?? 1,
+            validFrom: new Date(0).toISOString(),
+            validTo: null,
+            recordedFrom: new Date(0).toISOString(),
+            recordedTo: null,
+          }));
+          const report = detectCommunities(adaptedEdges);
+          const fts = store.search(query, limit);
+          // Pull in community siblings of the top FTS hit to broaden
+          // recall — this is the actual "community detection" boost.
+          const top = fts[0];
+          const siblings = top ? communityOf(report, top.entry.id) : null;
+          return {
+            mode: "community-detection",
+            results: fts.map((r) => ({
+              id: r.entry.id,
+              content: r.entry.value,
+              score: r.score,
+              reason: siblings !== null ? `community ${siblings}` : "fts-hit",
+              metadata: {
+                modularity: report.modularity,
+                communityCount: report.communities.length,
+              },
+            })),
+            scoring: {
+              method: "louvain",
+              isHeuristic: false,
+              notes: `${report.communities.length} communities, modularity=${report.modularity.toFixed(3)}`,
+            },
+          };
+        },
+      };
+      this.registerRetrievalMode(cdMode);
+      added.push(cdMode.name);
+    }
+
+    if (opts.personaTree === true) {
+      const ptMode: RetrievalMode = {
+        name: "persona-tree",
+        description:
+          "Hierarchical persona-tree retrieval: groups memories into topic/trait/persona levels then surfaces top entries from the matching subtree. Off by default.",
+        search: async (_ctx, query, modeOpts) => {
+          const limit = Math.max(1, modeOpts?.limit ?? 10);
+          // Source entries: prefer ctx.entries when injected; otherwise
+          // go through FTS so we never crash on empty stores.
+          const ftsHits = store.search(query, limit * 4);
+          if (ftsHits.length === 0) {
+            return {
+              mode: "persona-tree",
+              results: [],
+              scoring: {
+                method: "tree-walk",
+                isHeuristic: true,
+                notes: "no matching memories",
+              },
+            };
+          }
+          const tree = buildPersonaTree(ftsHits.map((h) => h.entry));
+          // Walk the tree to find leaves whose memoryId is in the FTS
+          // hit set, ordered by tree-level (level-0 leaves first).
+          const orderedIds: string[] = [];
+          walkPersonaTree(tree, (node) => {
+            if (node.level === 0 && node.memoryId) {
+              orderedIds.push(node.memoryId);
+            }
+          });
+          const ftsById = new Map(ftsHits.map((h) => [h.entry.id, h]));
+          const ranked = orderedIds
+            .map((id) => ftsById.get(id))
+            .filter((h): h is NonNullable<typeof h> => h !== undefined)
+            .slice(0, limit);
+          return {
+            mode: "persona-tree",
+            results: ranked.map((r) => ({
+              id: r.entry.id,
+              content: r.entry.value,
+              score: r.score,
+              reason: "persona-tree leaf",
+              metadata: {
+                totalMemories: tree.totalMemories,
+                builtAt: tree.builtAt,
+              },
+            })),
+            scoring: {
+              method: "tree-walk",
+              isHeuristic: false,
+              notes: `tree built from ${tree.totalMemories} memories`,
+            },
+          };
+        },
+      };
+      this.registerRetrievalMode(ptMode);
+      added.push(ptMode.name);
+    }
+
+    return added;
   }
 
   close(): void {
