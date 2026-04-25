@@ -2853,6 +2853,31 @@ program
 
 const mcpCmd = program.command("mcp").description("MCP server management");
 
+// V9 T3.2 Wave 1 — expose WOTANN tools as a stdio MCP server so the
+// spawned `claude` subprocess can call into WOTANN's runtime via
+// `--mcp-config`. Wires src/mcp/servers/wotann-tools.ts (5 tools)
+// into a fresh WotannMcpServer instance bound to stdio.
+mcpCmd
+  .command("serve")
+  .description("Run WOTANN as a stdio MCP server (5 tools — V9 T3.2 Wave 1)")
+  .action(async () => {
+    const { WotannMcpServer } = await import("./mcp/mcp-server.js");
+    const { createWotannMcpAdapter } = await import("./mcp/servers/wotann-tools.js");
+    // For first-cut, all 5 deps are stubbed honestly (the adapter
+    // returns a typed error per tool when its dep isn't supplied).
+    // Later commits inject real runtime collaborators (memoryStore,
+    // skill registry, shadowGit, sessionStore, approvalQueue).
+    const adapter = createWotannMcpAdapter({});
+    const server = new WotannMcpServer({
+      info: { name: "wotann", version: "0.6.0" },
+      adapter,
+    });
+    process.stderr.write(
+      chalk.green("✓ wotann MCP server listening on stdio (5 tools, all stubbed honestly)\n"),
+    );
+    await server.run();
+  });
+
 mcpCmd
   .command("list")
   .description("List MCP servers")
