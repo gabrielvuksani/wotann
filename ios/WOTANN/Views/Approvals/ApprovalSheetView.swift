@@ -117,11 +117,14 @@ private struct ApprovalCard: View {
             }
         }
         .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.lg))
-        .overlay(
-            RoundedRectangle(cornerRadius: WTheme.Radius.lg)
-                .stroke(WTheme.Colors.border, lineWidth: 0.5)
+        // T7.3 — Approval sheet card. Drops the manual `.background +
+        // clipShape + overlay` triplet in favour of the wLiquidGlass
+        // helper so iOS 26 gets native Liquid Glass; iOS 18 keeps the
+        // ultra-thin + 0.5pt hairline ring the helper produces by
+        // default. The shape stays at `WTheme.Radius.lg` so the modal
+        // corners line up with the rest of the destructive-action UI.
+        .wLiquidGlass(
+            in: RoundedRectangle(cornerRadius: WTheme.Radius.lg)
         )
     }
 }

@@ -65,15 +65,29 @@ struct MainShell: View {
                     .tag(3)
             }
             .tint(WTheme.Colors.primary)
-            // T7.3 — Tab bar background stays `.ultraThinMaterial` on iOS 18
-            // for fidelity with every other OS-level bar. iOS 26 applies
-            // Liquid Glass automatically through the `.visible` token +
-            // system glass token, so no extra wrapper is needed at the
-            // `.toolbarBackground` layer. The `wLiquidGlass` sweep instead
-            // treats custom in-app bars (ChatInputBar, promptBar, ribbons,
-            // RemoteDesktop toolbars).
+            // T7.3 — Tab bar background. On iOS 18 we use
+            // `.ultraThinMaterial` for fidelity with every other OS-level
+            // bar. On iOS 26 the OS upgrades the `.toolbarBackground`
+            // material to native Liquid Glass automatically when the
+            // matching SDK is present and the `WOTANN_HAS_LIQUID_GLASS`
+            // flag is set, so the only iOS-26-specific work happens behind
+            // the same xcconfig flag the `wLiquidGlass` modifier uses.
+            // `.wLiquidGlass()` is also applied to the bottom safe-area
+            // sliver under the tab bar so the floating Ask button sits
+            // over a glass surface rather than a hard `.ultraThinMaterial`
+            // edge — same Phase C visual on iOS 18, native glass on iOS 26.
             .toolbarBackground(.ultraThinMaterial, for: .tabBar)
             .toolbarBackground(.visible, for: .tabBar)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // 0pt-tall liquid-glass shim under the tab bar. Renders
+                // the iOS 26 Liquid Glass surface for the floating Ask
+                // halo on iOS 26 + falls back to invisible on iOS 18 so
+                // the existing `.toolbarBackground` keeps the look.
+                Color.clear
+                    .frame(height: 0)
+                    .wLiquidGlass(in: Rectangle())
+                    .accessibilityHidden(true)
+            }
             // Floating Ask button, pinned 24pt above the tab bar area.
             .overlay(alignment: .bottom) {
                 FloatingAsk(

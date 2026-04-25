@@ -86,8 +86,12 @@ struct CouncilView: View {
                       !connectionManager.isConnected)
         }
         .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.md))
+        // T7.3 — Council prompt card uses the wLiquidGlass wrapper so
+        // iOS 26 picks up native Liquid Glass while iOS 18 keeps the
+        // existing ultra-thin material + hairline outline.
+        .wLiquidGlass(
+            in: RoundedRectangle(cornerRadius: WTheme.Radius.md)
+        )
     }
 
     private var providerSelector: some View {
@@ -183,8 +187,11 @@ private struct CouncilResponseCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.md))
+        // T7.3 — Per-provider response card glass. Same forward-compat
+        // path as the prompt card; reads as glass on every OS.
+        .wLiquidGlass(
+            in: RoundedRectangle(cornerRadius: WTheme.Radius.md)
+        )
     }
 }
 

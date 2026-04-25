@@ -30,7 +30,13 @@ import type { ProviderName } from "../core/types.js";
 
 // ── Rung types ────────────────────────────────────────────────────────────
 
-export type ProviderRungCategory = "subscription" | "free-tier" | "byok" | "local" | "advanced";
+export type ProviderRungCategory =
+  | "subscription"
+  | "free-tier"
+  | "free-aggregator"
+  | "byok"
+  | "local"
+  | "advanced";
 
 /**
  * One rung on the ladder. `id` is WOTANN's canonical provider name
@@ -167,8 +173,26 @@ export const PROVIDER_LADDER: readonly ProviderRung[] = [
     noCreditCard: true,
     fullyLocal: true,
   },
+  // V9 §T6.4 — OpenRouter is a BYOK aggregator that rotates a small
+  // free-tier across third-party hosts (Mistral 7B Instruct,
+  // Llama 3.1 8B, Gemma 2 9B, etc.). Spec line 1037 listed it at
+  // rank 11 — we keep it at #11 here so the wizard prefers a
+  // free-aggregator rung BEFORE LM-Studio's local model (which
+  // requires a 4-8 GB local model already downloaded). The rung is
+  // tagged with the bespoke `free-aggregator` category so the
+  // grouping UI keeps it distinct from single-provider free tiers.
   {
     rank: 11,
+    id: "openrouter" as ProviderName,
+    probe: "openrouter-free",
+    category: "free-aggregator",
+    label: "OpenRouter (free aggregator — Mistral 7B, Llama 3.1 8B, Gemma 2 9B)",
+    costNote: "rotating free tier, no CC; paid models behind the same key",
+    noCreditCard: true,
+    fullyLocal: false,
+  },
+  {
+    rank: 12,
     id: "lm-studio" as ProviderName,
     probe: "lm-studio-local",
     category: "local",
@@ -176,16 +200,6 @@ export const PROVIDER_LADDER: readonly ProviderRung[] = [
     costNote: "free, runs on your machine",
     noCreditCard: true,
     fullyLocal: true,
-  },
-  {
-    rank: 12,
-    id: "free",
-    probe: "openrouter-free",
-    category: "free-tier",
-    label: "OpenRouter free models",
-    costNote: "rotating free tier, no CC",
-    noCreditCard: true,
-    fullyLocal: false,
   },
 ] as const;
 
@@ -241,6 +255,7 @@ export function groupByCategory(): Readonly<Record<ProviderRungCategory, readonl
   const groups: Record<ProviderRungCategory, ProviderRung[]> = {
     subscription: [],
     "free-tier": [],
+    "free-aggregator": [],
     byok: [],
     local: [],
     advanced: [],

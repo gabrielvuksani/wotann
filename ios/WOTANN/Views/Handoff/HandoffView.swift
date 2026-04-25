@@ -87,11 +87,12 @@ private struct HandoffBanner: View {
             .accessibilityLabel("Open handoff")
         }
         .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.md))
-        .overlay(
-            RoundedRectangle(cornerRadius: WTheme.Radius.md)
-                .stroke(WTheme.Colors.border, lineWidth: 0.5)
+        // T7.3 — Handoff banner glass. The same wLiquidGlass treatment
+        // as ApprovalSheetView so the cross-cutting overlays read as one
+        // visual family. iOS 26 promotes to native Liquid Glass; iOS 18
+        // gets the ultra-thin material + hairline ring.
+        .wLiquidGlass(
+            in: RoundedRectangle(cornerRadius: WTheme.Radius.md)
         )
         .padding(.horizontal)
         .padding(.top, WTheme.Spacing.sm)

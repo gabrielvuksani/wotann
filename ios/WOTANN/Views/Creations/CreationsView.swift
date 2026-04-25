@@ -139,11 +139,13 @@ private struct CreationCard: View {
             }
             .padding(WTheme.Spacing.md)
             .frame(maxWidth: .infinity, minHeight: 140, alignment: .topLeading)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.md))
-            .overlay(
-                RoundedRectangle(cornerRadius: WTheme.Radius.md)
-                    .stroke(WTheme.Colors.border, lineWidth: 0.5)
+            // T7.3 — Creation tile glass. Replaces the manual
+            // `.background + clipShape + overlay` triplet with the
+            // wLiquidGlass helper so creations grid reads as native
+            // Liquid Glass on iOS 26 and the existing ultra-thin
+            // material + hairline ring on iOS 18.
+            .wLiquidGlass(
+                in: RoundedRectangle(cornerRadius: WTheme.Radius.md)
             )
         }
         .buttonStyle(.plain)

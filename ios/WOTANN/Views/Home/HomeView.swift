@@ -143,11 +143,14 @@ private struct WhereYouLeftOffCard: View {
         .padding(WTheme.Spacing.md)
         .frame(height: 96)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // T7.3 — Home dashboard "Where you left off" card uses the
+        // surface color underneath the glass so the rune background
+        // never bleeds through. On iOS 26 the `.wLiquidGlass(in:)`
+        // helper layers Liquid Glass on top; on iOS 18 it adds the
+        // standard ultra-thin material + hairline ring.
         .background(WTheme.Colors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.lg, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: WTheme.Radius.lg, style: .continuous)
-                .stroke(WTheme.Colors.border, lineWidth: WTheme.BorderWidth.hairline)
+        .wLiquidGlass(
+            in: RoundedRectangle(cornerRadius: WTheme.Radius.lg, style: .continuous)
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Resume conversation: \(conversation.title)")
