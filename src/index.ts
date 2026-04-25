@@ -6407,6 +6407,139 @@ rulesCmd
     process.stderr.write(chalk.green(`✓ removed ${result.removed}\n`));
   });
 
+// ── wotann offload — V9 T11.3 cloud-offload CLI ──────────────
+//
+// Routes a task to one of 3 cloud-offload providers (Anthropic
+// Managed, Fly Sprites, Cloudflare Agents) and prints session
+// progress via the registered adapter's onFrame callback.
+//
+// Audit-identified gap (2026-04-24): T11.3 shipped 2921 LOC of
+// adapter code + 92 tests but had ZERO user-facing surface.
+// `meta-harness.ts` referenced the providers but was itself orphan.
+// This command surfaces the offload trait so `wotann offload "task"`
+// actually invokes a cloud session.
+program
+  .command("offload <task...>")
+  .description(
+    "Run a task on a cloud provider (V9 T11.3 — anthropic-managed | fly-sprites | cloudflare-agents)",
+  )
+  .option(
+    "--provider <id>",
+    "Cloud provider: anthropic-managed | fly-sprites | cloudflare-agents",
+    "anthropic-managed",
+  )
+  .option("--budget <usd>", "Max USD spend for this session", (v) => Number(v))
+  .option("--max-duration <ms>", "Hard cap on session duration in milliseconds", (v) => Number(v))
+  .option("--api-key <key>", "Bearer credential for the chosen provider (env preferred — see docs)")
+  .option("--base-url <url>", "Override provider base URL (enterprise proxies, sandboxes)")
+  .action(
+    async (
+      taskWords: string[],
+      opts: {
+        provider?: string;
+        budget?: number;
+        maxDuration?: number;
+        apiKey?: string;
+        baseUrl?: string;
+      },
+    ) => {
+      const task = (taskWords ?? []).join(" ").trim();
+      if (task.length === 0) {
+        process.stderr.write(chalk.red("error: a task description is required\n"));
+        process.exit(2);
+      }
+      const provider = opts.provider ?? "anthropic-managed";
+      const apiKey =
+        opts.apiKey ??
+        process.env["WOTANN_OFFLOAD_API_KEY"] ??
+        (provider === "anthropic-managed"
+          ? process.env["ANTHROPIC_API_KEY"]
+          : provider === "cloudflare-agents"
+            ? process.env["CLOUDFLARE_API_TOKEN"]
+            : process.env["FLY_API_TOKEN"]);
+      if (!apiKey) {
+        process.stderr.write(
+          chalk.red(
+            `error: --api-key required (or set WOTANN_OFFLOAD_API_KEY / provider-specific env)\n`,
+          ),
+        );
+        process.exit(2);
+      }
+      const { isCloudOffloadProvider } = await import("./providers/cloud-offload/adapter.js");
+      if (!isCloudOffloadProvider(provider)) {
+        process.stderr.write(
+          chalk.red(
+            `error: unknown provider "${provider}". Choose: anthropic-managed | fly-sprites | cloudflare-agents\n`,
+          ),
+        );
+        process.exit(2);
+      }
+      // Build a minimal snapshot — full snapshot module ships in T11.3
+      // src/providers/cloud-offload/snapshot.ts but constructing one
+      // in CLI requires fs + git + heuristics. For first-cut we send
+      // an empty snapshot (provider-side will use its own bootstrap).
+      const snapshot = {
+        capturedAt: Date.now(),
+        cwd: process.cwd(),
+        gitHead: null,
+        gitStatus: null,
+        envAllowlist: {} as Readonly<Record<string, string>>,
+        sizeBytes: 0,
+        warnings: ["cli-stub-snapshot: no real capture"],
+      } as const;
+      try {
+        let session: { sessionId: string; status: string } | null = null;
+        if (provider === "anthropic-managed") {
+          const mod = await import("./providers/cloud-offload/anthropic-managed.js");
+          const adapter = mod.createAnthropicManagedCloudOffloadAdapter({
+            apiKey,
+            ...(opts.baseUrl !== undefined ? { baseUrl: opts.baseUrl } : {}),
+          });
+          const startOpts: Parameters<typeof adapter.start>[0] = {
+            task,
+            snapshot,
+            onFrame: (frame: { kind: string; data?: unknown }) => {
+              process.stderr.write(chalk.dim(`[${frame.kind}] `));
+              if (frame.data !== undefined) {
+                process.stderr.write(JSON.stringify(frame.data) + "\n");
+              } else {
+                process.stderr.write("\n");
+              }
+            },
+          };
+          if (opts.budget !== undefined && Number.isFinite(opts.budget))
+            (startOpts as { budgetUsd?: number }).budgetUsd = opts.budget;
+          if (opts.maxDuration !== undefined && Number.isFinite(opts.maxDuration))
+            (startOpts as { maxDurationMs?: number }).maxDurationMs = opts.maxDuration;
+          session = await adapter.start(startOpts);
+        } else if (provider === "cloudflare-agents") {
+          process.stderr.write(
+            chalk.yellow(
+              "cloudflare-agents adapter requires accountId + namespaceId; pass via env or future flags\n",
+            ),
+          );
+          process.exit(2);
+        } else {
+          process.stderr.write(
+            chalk.yellow(
+              "fly-sprites adapter requires app + machine config; pass via env or future flags\n",
+            ),
+          );
+          process.exit(2);
+        }
+        if (session) {
+          process.stderr.write(
+            chalk.green(`✓ session ${session.sessionId} status=${session.status}\n`),
+          );
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(chalk.red(`offload failed: ${msg}\n`));
+        process.exit(2);
+      }
+    },
+  );
+
 // ── wotann build — V9 Tier 9 full-stack scaffold builder ─────
 //
 // Plan-only by default — pass --emit to actually write files. Picks a
