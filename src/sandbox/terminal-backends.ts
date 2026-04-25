@@ -15,12 +15,14 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createFlyIoSandbox } from "./flyio-backend.js";
+import type { CloudSandboxBackend, CloudSandboxConfig } from "./cloud-sandbox-types.js";
 
 const execFileAsync = promisify(execFile);
 
 // ── Public Types ──────────────────────────────────────
 
-export type BackendType = "local" | "docker" | "ssh" | "daytona" | "modal";
+export type BackendType = "local" | "docker" | "ssh" | "daytona" | "modal" | "flyio";
 
 export interface ExecResult {
   readonly stdout: string;
@@ -59,6 +61,25 @@ export interface BackendConfig {
   readonly defaultTimeoutMs?: number;
   /** Extra environment variables passed into the backend. */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * Fly.io API key. When set on a `flyio` backend, the FlyioBackend routes
+   * commands through Fly.io's Machines REST API (via {@link createFlyIoSandbox})
+   * instead of the local `flyctl` CLI. Per QB #13 the value is threaded
+   * explicitly — never read from `process.env` inside this module.
+   */
+  readonly apiKey?: string;
+  /** Fly.io app name. Required when {@link apiKey} is set on a flyio backend. */
+  readonly app?: string;
+  /** Fly.io region (e.g. "iad", "sjc"). Defaults to "iad" inside the adapter. */
+  readonly region?: string;
+  /** Fly.io machine guest CPU class. */
+  readonly cpuKind?: "shared" | "performance";
+  /** Fly.io machine image (e.g. "alpine:3.19"). */
+  readonly image?: string;
+  /** Fly.io machine memory cap (MB). */
+  readonly memoryMb?: number;
+  /** Optional REST fetcher injection for tests (Fly.io REST mode). */
+  readonly fetcher?: typeof fetch;
 }
 
 // ── Constants ─────────────────────────────────────────
@@ -90,16 +111,12 @@ export class LocalBackend implements TerminalBackend {
     const startTime = Date.now();
 
     try {
-      const { stdout, stderr } = await execFileAsync(
-        "/bin/sh",
-        ["-c", command],
-        {
-          timeout,
-          maxBuffer: MAX_BUFFER,
-          cwd: options?.cwd,
-          env: options?.env ? { ...process.env, ...options.env } : undefined,
-        },
-      );
+      const { stdout, stderr } = await execFileAsync("/bin/sh", ["-c", command], {
+        timeout,
+        maxBuffer: MAX_BUFFER,
+        cwd: options?.cwd,
+        env: options?.env ? { ...process.env, ...options.env } : undefined,
+      });
       return { stdout, stderr, exitCode: 0, durationMs: Date.now() - startTime };
     } catch (error: unknown) {
       if (isExecError(error)) {
@@ -190,10 +207,10 @@ export class DockerTerminalBackend implements TerminalBackend {
     execArgs.push(this.containerId!, "sh", "-c", command);
 
     try {
-      const { stdout, stderr } = await execFileAsync(
-        "docker", execArgs,
-        { timeout, maxBuffer: MAX_BUFFER },
-      );
+      const { stdout, stderr } = await execFileAsync("docker", execArgs, {
+        timeout,
+        maxBuffer: MAX_BUFFER,
+      });
       return { stdout, stderr, exitCode: 0, durationMs: Date.now() - startTime };
     } catch (error: unknown) {
       if (isExecError(error)) {
@@ -276,7 +293,9 @@ export class SSHBackend implements TerminalBackend {
       }
       this.connected = true;
     } catch (error: unknown) {
-      throw new BackendError(`SSH connection failed to ${this.user}@${this.host}: ${String(error)}`);
+      throw new BackendError(
+        `SSH connection failed to ${this.user}@${this.host}: ${String(error)}`,
+      );
     }
   }
 
@@ -332,10 +351,14 @@ export class SSHBackend implements TerminalBackend {
 
   private buildSSHArgs(commandParts: readonly string[]): string[] {
     const args: string[] = [
-      "-o", "StrictHostKeyChecking=no",
-      "-o", "BatchMode=yes",
-      "-o", "ConnectTimeout=10",
-      "-p", String(this.port),
+      "-o",
+      "StrictHostKeyChecking=no",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=10",
+      "-p",
+      String(this.port),
     ];
 
     if (this.identityFile) {
@@ -389,6 +412,11 @@ export function createBackend(
     case "modal":
       // Modal cloud functions — stub for future Modal SDK integration
       return new ModalBackend(backendConfig);
+
+    case "flyio":
+      // Fly.io Machines — REST adapter (when apiKey+app present) or
+      // local `flyctl` CLI fallback. See FlyioBackend for routing rules.
+      return new FlyioBackend(backendConfig);
 
     default:
       throw new BackendError(`Unknown backend type: ${type as string}`);
@@ -535,6 +563,166 @@ class ModalBackend implements TerminalBackend {
   }
 }
 
+// ── Fly.io Backend ───────────────────────────────────
+//
+// V9 §T12.16 closure: bridges the orphaned `flyio-backend.ts`
+// REST adapter into the {@link TerminalBackend} registry. Two paths:
+//
+//   1. REST: when `config.apiKey` AND `config.app` are both supplied,
+//      every {@link FlyioBackend.execute} call spins a fresh ephemeral
+//      Fly Machine via the Machines REST API and tears it down
+//      (`auto_destroy:true`). Honest failures: REST errors surface as
+//      non-zero {@link ExecResult.exitCode} with the provider error
+//      string in stderr.
+//
+//   2. CLI: when `apiKey` is absent, falls back to the local `flyctl`
+//      CLI. Mirrors the {@link ModalBackend} CLI pattern so users
+//      without API tokens can still smoke-test the wiring.
+//
+// QB #13: never reads `process.env`. All knobs are threaded via
+// {@link BackendConfig}.
+
+class FlyioBackend implements TerminalBackend {
+  readonly name: string = "flyio";
+  readonly type: BackendType = "flyio";
+  private connected = false;
+  private readonly defaultTimeout: number;
+  private readonly defaultImage: string;
+  private readonly defaultMemoryMb: number;
+  private readonly env: Readonly<Record<string, string>>;
+  /** REST adapter — null when running in CLI fallback mode. */
+  private readonly restBackend: CloudSandboxBackend | null;
+
+  constructor(config?: Partial<BackendConfig>) {
+    this.defaultTimeout = config?.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.defaultImage = config?.image ?? "alpine:3.19";
+    this.defaultMemoryMb = config?.memoryMb ?? 512;
+    this.env = config?.env ?? {};
+
+    if (
+      typeof config?.apiKey === "string" &&
+      config.apiKey.length > 0 &&
+      typeof config?.app === "string" &&
+      config.app.length > 0
+    ) {
+      const flyConfig: CloudSandboxConfig & {
+        readonly providerOpts?: {
+          readonly app?: string;
+          readonly region?: string;
+          readonly cpuKind?: "shared" | "performance";
+        };
+      } = {
+        apiKey: config.apiKey,
+        fetcher: config.fetcher,
+        providerOpts: {
+          app: config.app,
+          region: config.region,
+          cpuKind: config.cpuKind,
+        },
+      };
+      this.restBackend = createFlyIoSandbox(flyConfig);
+    } else {
+      this.restBackend = null;
+    }
+  }
+
+  async connect(): Promise<void> {
+    if (this.connected) return;
+
+    if (this.restBackend) {
+      // Best-effort REST probe; mark connected even if the probe fails
+      // because Fly's `/v1/apps/<app>` may 404 before first machine.
+      // The first execute() will surface real errors via ExecResult.
+      try {
+        await this.restBackend.probe();
+      } catch {
+        // Probe failures do not block connect — failures travel through
+        // the ExecResult envelope per QB #6 honest stubs.
+      }
+      this.connected = true;
+      return;
+    }
+
+    try {
+      await execFileAsync("flyctl", ["version"], { timeout: 5_000 });
+      this.connected = true;
+    } catch {
+      throw new BackendError(
+        "Fly.io: provide config.apiKey + config.app for REST mode, or install flyctl from https://fly.io/docs/flyctl/install/",
+      );
+    }
+  }
+
+  async execute(command: string, options?: ExecOptions): Promise<ExecResult> {
+    this.assertConnected();
+    const timeout = options?.timeoutMs ?? this.defaultTimeout;
+    const startTime = Date.now();
+
+    if (this.restBackend) {
+      const mergedEnv: Record<string, string> = { ...this.env, ...(options?.env ?? {}) };
+      const fullCommand = options?.cwd ? `cd ${options.cwd} && ${command}` : command;
+      const result = await this.restBackend.run({
+        image: this.defaultImage,
+        command: fullCommand,
+        timeoutMs: timeout,
+        memoryMb: this.defaultMemoryMb,
+        env: mergedEnv,
+      });
+      const stderrCombined = result.error
+        ? result.stderr
+          ? `${result.stderr}\n${result.error}`
+          : result.error
+        : result.stderr;
+      return {
+        stdout: result.stdout,
+        stderr: stderrCombined,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+      };
+    }
+
+    const args: string[] = ["machine", "run", this.defaultImage, "--rm"];
+    if (options?.env) {
+      for (const [key, value] of Object.entries(options.env)) {
+        args.push("--env", `${key}=${value}`);
+      }
+    }
+    args.push("--", "sh", "-c", options?.cwd ? `cd ${options.cwd} && ${command}` : command);
+
+    try {
+      const { stdout, stderr } = await execFileAsync("flyctl", args, {
+        timeout,
+        maxBuffer: MAX_BUFFER,
+      });
+      return { stdout, stderr, exitCode: 0, durationMs: Date.now() - startTime };
+    } catch (error: unknown) {
+      if (isExecError(error)) {
+        return {
+          stdout: error.stdout ?? "",
+          stderr: error.stderr ?? "",
+          exitCode: typeof error.code === "number" ? error.code : 1,
+          durationMs: Date.now() - startTime,
+        };
+      }
+      return { stdout: "", stderr: String(error), exitCode: 1, durationMs: Date.now() - startTime };
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    this.connected = false;
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  private assertConnected(): void {
+    if (!this.connected) {
+      throw new BackendError("FlyioBackend is not connected. Call connect() first.");
+    }
+  }
+}
+
 // ── Terminal Manager ─────────────────────────────────
 
 /**
@@ -626,12 +814,11 @@ export class TerminalManager {
 
 // ── Helpers ───────────────────────────────────────────
 
-function buildDockerRunArgs(
-  image: string,
-  env: Readonly<Record<string, string>>,
-): string[] {
+function buildDockerRunArgs(image: string, env: Readonly<Record<string, string>>): string[] {
   const args = [
-    "run", "--detach", "--rm",
+    "run",
+    "--detach",
+    "--rm",
     "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
     "--network=none",
@@ -654,11 +841,7 @@ interface ExecFileError {
 }
 
 function isExecError(error: unknown): error is ExecFileError {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    ("stdout" in error || "stderr" in error)
-  );
+  return typeof error === "object" && error !== null && ("stdout" in error || "stderr" in error);
 }
 
 // ── Error Type ────────────────────────────────────────

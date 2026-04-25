@@ -79,11 +79,12 @@ the project boots with `npm install && npm run dev` and serves:
 }
 ```
 
-### next.config.mjs
+### next.config.ts
 
-```js
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+```ts
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   experimental: {
@@ -200,7 +201,7 @@ http://localhost:3000/api/health and returns `{ "ok": true }`.
 - `app/layout.tsx` — root layout
 - `app/page.tsx` — landing page
 - `app/api/health/route.ts` — health endpoint
-- `next.config.mjs` — minimal Next config (typed routes on)
+- `next.config.ts` — minimal Next config (typed routes on)
 
 Ready for: Tailwind, server actions, route handlers, server components.
 

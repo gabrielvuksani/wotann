@@ -6,7 +6,7 @@ source: wotann
 materializes: hono-react-edge
 license: MIT
 context: fork
-paths: ["**/wrangler.toml", "**/src/server.*", "**/src/client.*"]
+paths: ["**/wrangler.toml", "**/src/server.*", "**/src/index.tsx"]
 ---
 
 # Pack: Hono + React (edge)
@@ -76,7 +76,7 @@ runtime is provider-agnostic edge.
 
 ```toml
 name = "wotann-hono-edge"
-main = "src/server.tsx"
+main = "src/server.ts"
 compatibility_date = "2024-07-01"
 
 [build]
@@ -84,23 +84,6 @@ command = ""
 
 [observability]
 enabled = true
-```
-
-### src/index.html
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Wotann — Hono + React (edge)</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/client.js"></script>
-  </body>
-</html>
 ```
 
 ### src/app.tsx
@@ -133,9 +116,9 @@ export function App({ hydrationOrigin }: AppProps) {
 }
 ```
 
-### src/server.tsx
+### src/server.ts
 
-```tsx
+```ts
 import { Hono } from "hono";
 import { renderToString } from "react-dom/server";
 import * as React from "react";
@@ -145,14 +128,19 @@ const app = new Hono();
 
 app.get("/api/health", (c) => c.json({ ok: true, scaffold: "hono-react-edge" }));
 
+// Inline client bundle served alongside the SSR'd HTML. In production
+// you'd bundle src/index.tsx via Vite/esbuild and ship a real /client.js;
+// in dev this hydrates from esm.sh so the page works zero-config.
 app.get("/client.js", (c) => {
-  // The bundler is expected to emit a sibling client.js; in dev we
-  // serve a stub that mounts the React tree in the browser.
   c.header("content-type", "application/javascript; charset=utf-8");
   return c.body(
     `import { hydrateRoot } from "https://esm.sh/react-dom@18.3.1/client";
      import * as React from "https://esm.sh/react@18.3.1";
-     import { App } from "/app.js";
+     const App = (props) => React.createElement("main",
+       { style: { fontFamily: "system-ui", padding: 24, maxWidth: 720 } },
+       React.createElement("h1", null, "Wotann build — Hono + React (edge)"),
+       React.createElement("p", null, "Hydrated from " + props.hydrationOrigin)
+     );
      const el = document.getElementById("root");
      if (el) hydrateRoot(el, React.createElement(App, { hydrationOrigin: "browser" }));`,
   );
@@ -173,9 +161,13 @@ app.get("*", (c) => {
 export default app;
 ```
 
-### src/client.tsx
+### src/index.tsx
 
 ```tsx
+// Client-side hydration entry. Bundlers (Vite, esbuild, Rspack) point
+// at this file when producing the browser bundle; the output is served
+// by the Hono server at /client.js in production. In dev the inline
+// /client.js handler in src/server.ts provides a zero-config fallback.
 import * as React from "react";
 import { hydrateRoot } from "react-dom/client";
 import { App } from "./app.js";
@@ -225,10 +217,9 @@ npm run deploy
 
 ## What's inside
 
-- `src/server.tsx` — Hono app: routes, SSR, JSON API
+- `src/server.ts` — Hono app: routes, SSR, JSON API, inline /client.js
 - `src/app.tsx` — React component shared between SSR and client
-- `src/client.tsx` — hydration entry
-- `src/index.html` — static HTML shell (used by static-site bundlers)
+- `src/index.tsx` — client-side hydration entry (bundler input)
 - `wrangler.toml` — Cloudflare Workers config
 
 ## Provenance
