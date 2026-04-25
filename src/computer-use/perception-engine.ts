@@ -16,11 +16,38 @@
 import { platform } from "node:os";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import type { Perception, ScreenElement, ActiveWindow } from "./types.js";
+import type { Perception, ScreenElement, ActiveWindow, CUAction } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
 export type PlatformType = "darwin" | "linux" | "win32" | "unknown";
+
+// ── V9 T14.1 — ROI zoom constants ────────────────────────
+//
+// When an OCR / a11y target has a bounding box smaller than this
+// threshold (in screen pixels) the perception engine assumes the
+// downstream model will struggle to click it accurately. We synthesise
+// a zoom action that re-perceives a magnified region around the target,
+// then map any coordinates the LLM returns back to original screen-space.
+//
+// 32×32 was chosen because it matches macOS's default "minimum tappable
+// target" guideline (44pt @ 1x = 44px on a non-retina display, 22pt @ 2x
+// = 44 logical pixels) — anything smaller is hard to click reliably even
+// for vision models.
+
+/** Pixels: any element whose bounding box is below this on either side
+ *  triggers a single ROI-zoom recovery on the next perceive() cycle. */
+const SMALL_TARGET_THRESHOLD_PX = 32;
+
+/** Multiplier used to compute the ROI zoom region around a tiny target.
+ *  We zoom into roughly 4x the target's size on each axis (or a sensible
+ *  minimum) so the magnified frame contains useful surrounding context. */
+const ZOOM_REGION_MULTIPLIER = 4;
+
+/** Lower bound for the zoom region size, in screen pixels. Prevents the
+ *  region from collapsing to a tiny crop when the target is itself only
+ *  a few pixels wide. */
+const MIN_ZOOM_REGION_SIZE_PX = 128;
 
 /**
  * A text region extracted from a screenshot via OCR.
@@ -98,6 +125,166 @@ export class PerceptionEngine {
       elements,
       activeWindow,
       timestamp: Date.now(),
+    };
+  }
+
+  // ── V9 T14.1 — ROI zoom recovery ───────────────────────
+  //
+  // When elements come back from a11y/OCR with target boxes smaller than
+  // ~32x32 px in screen-space, downstream models — especially text-only
+  // ones using coordinate clicks — frequently miss. The recovery flow:
+  //
+  //   1. perceive()                      — capture screen + classify.
+  //   2. detectSmallTarget(perception)   — look for tiny clickable boxes.
+  //   3. If any are found, build a `{type:"zoom", region:{x,y,w,h}}`
+  //      action centred on the smallest one.
+  //   4. Caller applies the zoom (cropping the screenshot to that
+  //      region) and re-perceives the cropped image.
+  //   5. Map coordinates back to original screen-space via
+  //      `mapZoomedToScreen`.
+  //
+  // Cap: at most one zoom per perception cycle, enforced by
+  // `perceiveWithZoom`, so a pathological screen full of tiny widgets
+  // can't trigger an infinite chain of zooms.
+
+  /**
+   * Detect any element whose bounding box is too small for reliable
+   * targeting and return the *smallest* such element. Returns null when
+   * no small targets are found OR when all elements have zero-width
+   * boxes (which means a11y didn't supply geometry — zooming wouldn't
+   * help in that case).
+   *
+   * The heuristic only triggers for *interactive* element types
+   * (buttons, links, inputs, checkboxes, selects, menus, tabs). Tiny
+   * "text" or "image" elements aren't usually click targets so zooming
+   * on them would waste a recovery cycle.
+   */
+  detectSmallTarget(perception: Perception): ScreenElement | null {
+    let smallest: ScreenElement | null = null;
+    let smallestArea = Number.POSITIVE_INFINITY;
+    for (const el of perception.elements) {
+      // Skip elements that don't have geometry — a11y on macOS often
+      // omits dimensions. Zooming on a (0,0,0,0) box would produce
+      // garbage so we'd rather report "no small targets" than guess.
+      if (el.width <= 0 || el.height <= 0) continue;
+      // Both axes need to be small for the heuristic to fire. Wide
+      // toolbars with short height don't benefit from a zoom — and
+      // zooming would just make them less informative.
+      if (el.width >= SMALL_TARGET_THRESHOLD_PX) continue;
+      if (el.height >= SMALL_TARGET_THRESHOLD_PX) continue;
+      // Prefer interactive types — clicking a "static text" element
+      // with a tiny box doesn't usually need zoom recovery.
+      if (el.type === "image" || el.type === "text") continue;
+      const area = el.width * el.height;
+      if (area < smallestArea) {
+        smallestArea = area;
+        smallest = el;
+      }
+    }
+    return smallest;
+  }
+
+  /**
+   * Build a `{type:"zoom"}` CUAction centred on a target element. The
+   * region is sized to roughly 4x the target with a sane minimum so the
+   * magnified frame retains useful surrounding context. The region is
+   * clamped to the active window's bounds so we never request a crop
+   * outside the screen.
+   */
+  buildZoomAction(target: ScreenElement, screenBounds: ActiveWindow["bounds"]): CUAction {
+    const regionWidth = Math.max(MIN_ZOOM_REGION_SIZE_PX, target.width * ZOOM_REGION_MULTIPLIER);
+    const regionHeight = Math.max(MIN_ZOOM_REGION_SIZE_PX, target.height * ZOOM_REGION_MULTIPLIER);
+    // Center the region on the target. Clamp so the region stays inside
+    // the active window's bounds.
+    const centerX = target.x + target.width / 2;
+    const centerY = target.y + target.height / 2;
+    const rawX = Math.round(centerX - regionWidth / 2);
+    const rawY = Math.round(centerY - regionHeight / 2);
+    const x = Math.max(
+      screenBounds.x,
+      Math.min(rawX, screenBounds.x + screenBounds.width - regionWidth),
+    );
+    const y = Math.max(
+      screenBounds.y,
+      Math.min(rawY, screenBounds.y + screenBounds.height - regionHeight),
+    );
+    return {
+      type: "zoom",
+      region: {
+        x: Math.max(0, x),
+        y: Math.max(0, y),
+        width: Math.round(regionWidth),
+        height: Math.round(regionHeight),
+      },
+    };
+  }
+
+  /**
+   * Map a coordinate from a zoomed image back to the original
+   * screen-space. The zoomed image always covers `region.width` ×
+   * `region.height` pixels of the screen — the LLM may emit normalized
+   * coordinates (0..1) or pixel coordinates assuming the cropped
+   * image's own dimensions. We accept either via the `mode` param.
+   *
+   * - `mode: "pixel"`      : `(x,y)` are pixel coords inside the cropped
+   *                          image whose dimensions match the region.
+   * - `mode: "normalized"` : `(x,y)` are 0..1 fractions of the cropped
+   *                          image dimensions. Useful for vision models
+   *                          that always emit normalized coords.
+   */
+  mapZoomedToScreen(
+    point: { x: number; y: number },
+    zoomAction: Extract<CUAction, { type: "zoom" }>,
+    mode: "pixel" | "normalized" = "pixel",
+  ): { x: number; y: number } {
+    const { region } = zoomAction;
+    const fx = mode === "normalized" ? point.x : point.x / region.width;
+    const fy = mode === "normalized" ? point.y : point.y / region.height;
+    return {
+      x: Math.round(region.x + fx * region.width),
+      y: Math.round(region.y + fy * region.height),
+    };
+  }
+
+  /**
+   * One-shot ROI zoom recovery. Performs `perceive()`, looks for a tiny
+   * target, and if one is found returns:
+   *
+   *   - the original perception (so the caller still sees the full
+   *     screen layout),
+   *   - the zoom action to apply, plus the target element it was built
+   *     for (callers may want to highlight or annotate the target).
+   *
+   * Capped at exactly one zoom per cycle. The caller decides whether to
+   * actually act on the suggestion (e.g., by capturing the cropped
+   * screenshot and re-running classification) — this method does not
+   * recursively re-perceive, which prevents infinite loops on screens
+   * with nested tiny widgets.
+   *
+   * Returns `{ perception, zoom: null }` when no small targets are
+   * detected so callers can treat the result uniformly.
+   */
+  async perceiveWithZoom(): Promise<{
+    readonly perception: Perception;
+    readonly zoom: {
+      readonly action: Extract<CUAction, { type: "zoom" }>;
+      readonly target: ScreenElement;
+    } | null;
+  }> {
+    const perception = await this.perceive();
+    const target = this.detectSmallTarget(perception);
+    if (!target) {
+      return { perception, zoom: null };
+    }
+    const action = this.buildZoomAction(target, perception.activeWindow.bounds);
+    if (action.type !== "zoom") {
+      // Defensive — buildZoomAction always returns a zoom action, but
+      // TS narrowing wants the explicit check before the destructure.
+      return { perception, zoom: null };
+    }
+    return {
+      perception,
+      zoom: { action, target },
     };
   }
 
@@ -198,10 +385,16 @@ export class PerceptionEngine {
     }
 
     // Fallback: no OCR available
-    return [{
-      text: "[No OCR engine available — install tesseract: brew install tesseract]",
-      x: 0, y: 0, width: 0, height: 0, confidence: 0,
-    }];
+    return [
+      {
+        text: "[No OCR engine available — install tesseract: brew install tesseract]",
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        confidence: 0,
+      },
+    ];
   }
 
   /**
@@ -212,17 +405,19 @@ export class PerceptionEngine {
     if (!isCommandAvailable("tesseract")) return [];
 
     try {
-      const { stdout } = await execFileAsync("tesseract", [
-        imagePath, "stdout", "--psm", "3", "-c", "tessedit_create_tsv=1", "tsv",
-      ], { timeout: 30_000 });
+      const { stdout } = await execFileAsync(
+        "tesseract",
+        [imagePath, "stdout", "--psm", "3", "-c", "tessedit_create_tsv=1", "tsv"],
+        { timeout: 30_000 },
+      );
 
       return parseTesseractTSV(stdout);
     } catch {
       // Try simpler mode if TSV fails
       try {
-        const { stdout } = await execFileAsync("tesseract", [
-          imagePath, "stdout",
-        ], { timeout: 30_000 });
+        const { stdout } = await execFileAsync("tesseract", [imagePath, "stdout"], {
+          timeout: 30_000,
+        });
 
         // Without TSV, we only get text without positions
         const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
@@ -312,16 +507,16 @@ return output`;
   /**
    * Get image dimensions using sips (macOS) or identify (ImageMagick).
    */
-  private async getImageDimensions(
-    imagePath: string,
-  ): Promise<{ width: number; height: number }> {
+  private async getImageDimensions(imagePath: string): Promise<{ width: number; height: number }> {
     const defaultDims = { width: 1920, height: 1080 };
 
     if (this.platform === "darwin") {
       try {
-        const { stdout } = await execFileAsync("sips", [
-          "-g", "pixelWidth", "-g", "pixelHeight", imagePath,
-        ], { timeout: 5000 });
+        const { stdout } = await execFileAsync(
+          "sips",
+          ["-g", "pixelWidth", "-g", "pixelHeight", imagePath],
+          { timeout: 5000 },
+        );
 
         const widthMatch = stdout.match(/pixelWidth:\s*(\d+)/);
         const heightMatch = stdout.match(/pixelHeight:\s*(\d+)/);
@@ -338,9 +533,9 @@ return output`;
 
     if (isCommandAvailable("identify")) {
       try {
-        const { stdout } = await execFileAsync("identify", [
-          "-format", "%w %h", imagePath,
-        ], { timeout: 5000 });
+        const { stdout } = await execFileAsync("identify", ["-format", "%w %h", imagePath], {
+          timeout: 5000,
+        });
 
         const parts = stdout.trim().split(/\s+/);
         const w = parseInt(parts[0] ?? "0", 10);
@@ -379,8 +574,7 @@ return output`;
           const cellRight = cellX + cellWidth;
           const cellBottom = cellY + cellHeight;
 
-          return r.x < cellRight && regionRight > cellX
-              && r.y < cellBottom && regionBottom > cellY;
+          return r.x < cellRight && regionRight > cellX && r.y < cellBottom && regionBottom > cellY;
         });
 
         cells.push({
@@ -403,9 +597,7 @@ return output`;
    * Classify OCR text regions into likely UI element types.
    * Uses heuristics based on text content and spatial patterns.
    */
-  private classifyRegions(
-    regions: readonly OCRTextRegion[],
-  ): readonly ClassifiedElement[] {
+  private classifyRegions(regions: readonly OCRTextRegion[]): readonly ClassifiedElement[] {
     return regions
       .filter((r) => r.text.trim().length > 0 && r.confidence > 0.3)
       .map((region, index) => {
@@ -517,10 +709,14 @@ return output`;
       case "linux": {
         try {
           const { stdout } = await execFileAsync("gdbus", [
-            "call", "--session",
-            "--dest", "org.a11y.Bus",
-            "--object-path", "/org/a11y/bus",
-            "--method", "org.a11y.Bus.GetAddress",
+            "call",
+            "--session",
+            "--dest",
+            "org.a11y.Bus",
+            "--object-path",
+            "/org/a11y/bus",
+            "--method",
+            "org.a11y.Bus.GetAddress",
           ]);
           return stdout;
         } catch {
@@ -591,7 +787,9 @@ return output`;
       if (trimmed.length === 0) continue;
 
       // Extract element type from AppleScript UI element naming
-      const typeMatch = trimmed.match(/^(button|text field|static text|checkbox|radio button|pop up button|menu item|link|image|tab group|scroll area|text area|combo box|slider)/i);
+      const typeMatch = trimmed.match(
+        /^(button|text field|static text|checkbox|radio button|pop up button|menu item|link|image|tab group|scroll area|text area|combo box|slider)/i,
+      );
       const labelMatch = trimmed.match(/"([^"]+)"/);
 
       if (typeMatch) {
@@ -617,20 +815,20 @@ return output`;
 
   private mapA11yType(rawType: string): ScreenElement["type"] {
     const mapping: Record<string, ScreenElement["type"]> = {
-      "button": "button",
+      button: "button",
       "text field": "input",
       "text area": "input",
       "static text": "text",
-      "checkbox": "checkbox",
+      checkbox: "checkbox",
       "radio button": "checkbox",
       "pop up button": "select",
       "combo box": "select",
       "menu item": "menu",
-      "link": "link",
-      "image": "image",
+      link: "link",
+      image: "image",
       "tab group": "tab",
       "scroll area": "text",
-      "slider": "input",
+      slider: "input",
     };
     return mapping[rawType] ?? "text";
   }
@@ -659,19 +857,36 @@ interface ClassifiedElement {
  * Classify a text region as a likely UI element type.
  * Uses pattern matching on the text content and spatial properties.
  */
-function classifyTextAsUIElement(
-  text: string,
-  region: OCRTextRegion,
-): ClassifiedElement["type"] {
+function classifyTextAsUIElement(text: string, region: OCRTextRegion): ClassifiedElement["type"] {
   const lower = text.toLowerCase();
   const wordCount = text.split(/\s+/).length;
 
   // Short text that looks like a button label
   const buttonPatterns = [
-    "ok", "cancel", "submit", "save", "close", "open", "delete",
-    "apply", "done", "next", "back", "yes", "no", "confirm",
-    "sign in", "log in", "sign up", "log out", "continue",
-    "download", "upload", "install", "update", "send",
+    "ok",
+    "cancel",
+    "submit",
+    "save",
+    "close",
+    "open",
+    "delete",
+    "apply",
+    "done",
+    "next",
+    "back",
+    "yes",
+    "no",
+    "confirm",
+    "sign in",
+    "log in",
+    "sign up",
+    "log out",
+    "continue",
+    "download",
+    "upload",
+    "install",
+    "update",
+    "send",
   ];
   if (wordCount <= 3 && buttonPatterns.some((p) => lower === p || lower.startsWith(p))) {
     return "button";
@@ -683,7 +898,16 @@ function classifyTextAsUIElement(
   }
 
   // Looks like a menu item (short, title-cased)
-  const menuPatterns = ["file", "edit", "view", "window", "help", "tools", "preferences", "settings"];
+  const menuPatterns = [
+    "file",
+    "edit",
+    "view",
+    "window",
+    "help",
+    "tools",
+    "preferences",
+    "settings",
+  ];
   if (wordCount <= 2 && menuPatterns.includes(lower)) {
     return "menu";
   }
@@ -753,9 +977,7 @@ function parseTesseractTSV(tsv: string): readonly OCRTextRegion[] {
  * Merge adjacent OCR regions that are on the same line into phrases.
  * This turns individual word detections into more meaningful text blocks.
  */
-function mergeAdjacentRegions(
-  regions: readonly OCRTextRegion[],
-): readonly OCRTextRegion[] {
+function mergeAdjacentRegions(regions: readonly OCRTextRegion[]): readonly OCRTextRegion[] {
   if (regions.length === 0) return [];
 
   // Sort by Y position, then X position

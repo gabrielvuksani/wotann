@@ -9,14 +9,14 @@
  * This single change activates ~3,625 lines of previously dead code.
  */
 
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef, memo } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { StartupScreen } from "./components/StartupScreen.js";
 import { ChatView } from "./components/ChatView.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { PromptInput } from "./components/PromptInput.js";
 import { ContextHUD } from "./components/ContextHUD.js";
-import { DiffViewer } from "./components/DiffViewer.js";
+import { DiffViewer, type DiffHunk } from "./components/DiffViewer.js";
 import { AgentStatusPanel, type SubagentStatus } from "./components/AgentStatusPanel.js";
 import { HistoryPicker } from "./components/HistoryPicker.js";
 import { CommandPalette } from "./components/CommandPalette.js";
@@ -85,6 +85,178 @@ interface WotannAppProps {
   readonly initialMessages?: readonly AgentMessage[];
   readonly runtime?: WotannRuntime;
 }
+
+// ── V9 T14.1 — Flicker-free TUI mode ───────────────────────
+//
+// Ink's default reconciliation is React's full virtual-DOM diff per render.
+// Most of the time that's fine, but on slow terminals or low-power
+// machines the cumulative re-render cost shows up as visible flicker —
+// the StatusBar, ContextHUD, and right-pane all repaint on every
+// keystroke even though their props didn't move.
+//
+// Setting `CLAUDE_CODE_NO_FLICKER=1` (Anthropic-compatible env name) or
+// passing `--no-flicker` on the CLI enables a memoization layer:
+//   - The central body (chat + side panel) is wrapped in <MainScene/>,
+//     a `React.memo` component with a custom equality predicate so we
+//     only re-render when conversational state actually changes.
+//   - Stable React keys on every list item ensure Ink's reconciler can
+//     diff in-place rather than tearing whole rows down and recreating
+//     them.
+//   - Status / overlay layers stay outside the memoized scene because
+//     they own their own animation loops.
+//
+// When the env var / flag is unset, the original render path is
+// preserved exactly — no behavioural change for callers who don't opt in.
+//
+// We read `process.argv` once at module-load so the flag survives across
+// re-renders without forcing a useEffect chain. This is intentional: the
+// flag is start-up scoped, not toggleable mid-session.
+
+/**
+ * True when the user requested flicker-free rendering for this process.
+ * Honoured by the `MainScene` memoization layer below.
+ *
+ * Triggers: `CLAUDE_CODE_NO_FLICKER=1`, `WOTANN_NO_FLICKER=1`, or any
+ * `--no-flicker` CLI flag.
+ */
+const NO_FLICKER_MODE: boolean = (() => {
+  // env var takes precedence so launch scripts can set it once.
+  const envVal = process.env["CLAUDE_CODE_NO_FLICKER"] ?? process.env["WOTANN_NO_FLICKER"];
+  if (envVal === "1" || envVal === "true") return true;
+  // CLI flag — scan argv defensively in case the harness wrapper passes
+  // it through. We don't shift it out of argv (parsing belongs to the
+  // CLI entry, not this component).
+  if (Array.isArray(process.argv) && process.argv.includes("--no-flicker")) return true;
+  return false;
+})();
+
+/**
+ * Props for the memoized main scene. We pass only the values the scene
+ * actually reads so the equality check stays narrow — extra props mean
+ * extra re-renders, defeating the whole point of the optimisation.
+ */
+interface MainSceneProps {
+  readonly messages: readonly AgentMessage[];
+  readonly isStreaming: boolean;
+  readonly streamingContent: string;
+  readonly currentModel: string;
+  readonly activePanel: UIPanel;
+  readonly diffPanel:
+    | { readonly filePath: string; readonly hunks: readonly DiffHunk[] }
+    | undefined;
+  readonly agentStatuses: readonly SubagentStatus[];
+  readonly thinkingEffort: ThinkingEffort;
+  readonly history: readonly string[];
+  readonly currentThemeBorder: string;
+  readonly currentThemePrimary: string;
+  readonly currentThemeInfo: string;
+}
+
+/**
+ * Core chat + side-panel scene. Wrapped in `React.memo` so re-renders
+ * happen only when the props actually move. Outside the memo: the
+ * StatusBar (animated), the ContextHUD (token gauge), and any overlays
+ * (HistoryPicker, CommandPalette, etc.) — those layers either own their
+ * own paint loops or are mutually exclusive overlays where freshness
+ * matters more than skip-paint cost.
+ */
+const MainScene = memo(
+  function MainScene(props: MainSceneProps) {
+    const {
+      messages,
+      isStreaming,
+      streamingContent,
+      currentModel,
+      activePanel,
+      diffPanel,
+      agentStatuses,
+      thinkingEffort,
+      history,
+      currentThemeBorder,
+      currentThemePrimary,
+      currentThemeInfo,
+    } = props;
+    return (
+      <Box flexGrow={1}>
+        <Box flexGrow={1} flexBasis={0}>
+          <ChatView
+            messages={messages}
+            isStreaming={isStreaming}
+            streamingContent={streamingContent}
+            currentModel={currentModel}
+          />
+        </Box>
+
+        <Box
+          width={44}
+          marginLeft={1}
+          borderStyle="single"
+          borderColor={currentThemeBorder}
+          flexDirection="column"
+          paddingX={1}
+        >
+          <Text bold color={currentThemePrimary}>
+            {activePanel === "diff"
+              ? "Diff Panel"
+              : activePanel === "agents"
+                ? "Agent Tree"
+                : "Task View"}
+          </Text>
+          {activePanel === "diff" && diffPanel && (
+            <DiffViewer
+              filePath={diffPanel.filePath}
+              hunks={diffPanel.hunks}
+              compact
+              maxLines={40}
+            />
+          )}
+          {activePanel === "diff" && !diffPanel && (
+            <Text dimColor>No workspace diff available yet.</Text>
+          )}
+          {activePanel === "agents" && <AgentStatusPanel agents={agentStatuses} />}
+          {activePanel === "tasks" && (
+            <Box flexDirection="column" gap={1}>
+              <Text color={currentThemeInfo}>Thinking: {thinkingEffort}</Text>
+              <Text color={currentThemeInfo}>Panel: {activePanel}</Text>
+              <Text dimColor>Recent prompts:</Text>
+              {history.slice(0, 5).map((entry, index) => (
+                // Stable key (entry index) keeps Ink's reconciler from
+                // tearing rows down on every render — required for
+                // flicker-free updates on the diff side.
+                <Text key={`task-${index}`} dimColor>
+                  {index + 1}. {entry.slice(0, 36)}
+                  {entry.length > 36 ? "..." : ""}
+                </Text>
+              ))}
+            </Box>
+          )}
+        </Box>
+      </Box>
+    );
+  },
+  // Custom equality: skip re-render if every prop reference is unchanged
+  // AND messages.length matches. We use length + last-message identity as
+  // a fast-path for the streaming case so paint only fires when the new
+  // chunk actually changes the visible row count or the trailing message.
+  (prev, next) => {
+    if (!NO_FLICKER_MODE) return false; // memoization disabled in legacy mode
+    if (prev.isStreaming !== next.isStreaming) return false;
+    if (prev.streamingContent !== next.streamingContent) return false;
+    if (prev.currentModel !== next.currentModel) return false;
+    if (prev.activePanel !== next.activePanel) return false;
+    if (prev.diffPanel !== next.diffPanel) return false;
+    if (prev.agentStatuses !== next.agentStatuses) return false;
+    if (prev.thinkingEffort !== next.thinkingEffort) return false;
+    if (prev.history !== next.history) return false;
+    if (prev.currentThemeBorder !== next.currentThemeBorder) return false;
+    if (prev.currentThemePrimary !== next.currentThemePrimary) return false;
+    if (prev.currentThemeInfo !== next.currentThemeInfo) return false;
+    if (prev.messages.length !== next.messages.length) return false;
+    if (prev.messages[prev.messages.length - 1] !== next.messages[next.messages.length - 1])
+      return false;
+    return true; // identical — skip the re-render
+  },
+);
 
 // ── App ────────────────────────────────────────────────────
 
@@ -3049,58 +3221,29 @@ export function WotannApp({
         costUsd={runtimeStatus?.totalCost ?? stats.cost}
       />
 
-      <Box flexGrow={1}>
-        <Box flexGrow={1} flexBasis={0}>
-          <ChatView
-            messages={messages}
-            isStreaming={isStreaming}
-            streamingContent={streamingContent}
-            currentModel={currentModel}
-          />
-        </Box>
-
-        <Box
-          width={44}
-          marginLeft={1}
-          borderStyle="single"
-          borderColor={currentTheme.colors.border}
-          flexDirection="column"
-          paddingX={1}
-        >
-          <Text bold color={currentTheme.colors.primary}>
-            {activePanel === "diff"
-              ? "Diff Panel"
-              : activePanel === "agents"
-                ? "Agent Tree"
-                : "Task View"}
-          </Text>
-          {activePanel === "diff" && diffPanel && (
-            <DiffViewer
-              filePath={diffPanel.filePath}
-              hunks={diffPanel.hunks}
-              compact
-              maxLines={40}
-            />
-          )}
-          {activePanel === "diff" && !diffPanel && (
-            <Text dimColor>No workspace diff available yet.</Text>
-          )}
-          {activePanel === "agents" && <AgentStatusPanel agents={agentStatuses} />}
-          {activePanel === "tasks" && (
-            <Box flexDirection="column" gap={1}>
-              <Text color={currentTheme.colors.info}>Thinking: {thinkingEffort}</Text>
-              <Text color={currentTheme.colors.info}>Panel: {activePanel}</Text>
-              <Text dimColor>Recent prompts:</Text>
-              {history.slice(0, 5).map((entry, index) => (
-                <Text key={`task-${index}`} dimColor>
-                  {index + 1}. {entry.slice(0, 36)}
-                  {entry.length > 36 ? "..." : ""}
-                </Text>
-              ))}
-            </Box>
-          )}
-        </Box>
-      </Box>
+      {/*
+        V9 T14.1 — Main scene wrapped in a memoized subcomponent. When
+        `CLAUDE_CODE_NO_FLICKER=1` (or `--no-flicker`) is set, MainScene's
+        custom equality predicate skips re-renders whose props haven't
+        moved — the StatusBar / ContextHUD outside still paint, but the
+        chat + side-panel only repaint on real state changes. When the
+        flag is unset, the equality predicate returns false unconditionally
+        so behaviour matches the original full-redraw path exactly.
+      */}
+      <MainScene
+        messages={messages}
+        isStreaming={isStreaming}
+        streamingContent={streamingContent}
+        currentModel={currentModel}
+        activePanel={activePanel}
+        diffPanel={diffPanel ? { filePath: diffPanel.filePath, hunks: diffPanel.hunks } : undefined}
+        agentStatuses={agentStatuses}
+        thinkingEffort={thinkingEffort}
+        history={history}
+        currentThemeBorder={currentTheme.colors.border}
+        currentThemePrimary={currentTheme.colors.primary}
+        currentThemeInfo={currentTheme.colors.info}
+      />
 
       {/* ── Overlay Panels ─────────────────────────────────── */}
       {showHistoryPicker && (

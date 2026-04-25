@@ -25,6 +25,53 @@ import { ChatView } from "../chat/ChatView";
 import { DisconnectedBanner } from "../shared/ErrorState";
 import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { QuickActionsOverlay } from "../palette/QuickActionsOverlay";
+import { TwinRavenSplit } from "./TwinRavenSplit";
+import { SigilStamp, type SigilKind } from "../editor/SigilStamp";
+import { CostGlint } from "../cost/CostGlint";
+
+// ── V9 T14.4 helpers ─────────────────────────────────────────
+
+/** Shape of a `wotann:agent-edit` window event detail. */
+interface AgentEditDetail {
+  readonly path: string;
+  readonly kind: SigilKind; // "modified" | "created" | "deleted"
+}
+
+/** Free-tier provider names. Matches the canonical FREE_PROVIDERS list in
+ *  src/providers/fallback-chain.ts so the CostGlint sheen only fires for
+ *  paid (BYOK) keys. Anything else (anthropic, openai, openrouter, etc.)
+ *  is treated as paid. */
+const FREE_PROVIDERS = new Set<string>([
+  "gemini",
+  "ollama",
+  "free",
+  "lmstudio",
+  "lm-studio",
+  "gpt4all",
+]);
+
+/** Format a USD cost for the CostGlint badge. */
+function formatCost(value: number): string {
+  if (value >= 1) return `$${value.toFixed(2)}`;
+  if (value >= 0.01) return `$${value.toFixed(3)}`;
+  return `$${value.toFixed(4)}`;
+}
+
+/** Recently-edited entry for the Creations strip. */
+interface CreationEntry {
+  readonly id: string;
+  readonly path: string;
+  readonly kind: SigilKind;
+  readonly at: number;
+}
+
+/** Truncate a filesystem path to its final 28 characters or so for the strip. */
+function shortPath(path: string): string {
+  if (path.length <= 32) return path;
+  const segments = path.split(/[\\/]/);
+  if (segments.length <= 2) return `…${path.slice(-30)}`;
+  return `…/${segments.slice(-2).join("/")}`;
+}
 
 /* Lazy-loaded heavy views (code-split for faster initial load).
  *
@@ -143,10 +190,38 @@ function ViewSkeleton() {
   );
 }
 
-/** Resolve the view component for the main workspace area. */
-function WorkspaceContent({ view }: { readonly view: string }) {
+/** Resolve the view component for the main workspace area.
+ *
+ * `twinRavenSplit`: when true and the current view is "chat", wrap the
+ * chat surface in <TwinRavenSplit/> with Huginn (chat) on the left and
+ * Muninn (memory recall) on the right. The split is layout-only — both
+ * panes still get the live chat / memory state via their own components.
+ */
+function WorkspaceContent({
+  view,
+  twinRavenSplit = false,
+}: {
+  readonly view: string;
+  readonly twinRavenSplit?: boolean;
+}) {
   switch (view) {
     case "chat":
+      if (twinRavenSplit) {
+        return (
+          <ErrorBoundary>
+            <TwinRavenSplit
+              left={<ChatView />}
+              right={
+                <Suspense fallback={<ViewSkeleton />}>
+                  <MemoryInspector />
+                </Suspense>
+              }
+              className="twin-raven-split--chat"
+              style={{ height: "100%" }}
+            />
+          </ErrorBoundary>
+        );
+      }
       return <ErrorBoundary><ChatView /></ErrorBoundary>;
     case "editor":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><EditorPanel /></Suspense></ErrorBoundary>;
@@ -204,7 +279,19 @@ function WorkspaceContent({ view }: { readonly view: string }) {
   }
 }
 
-export function AppShell() {
+/**
+ * AppShell props.
+ *
+ * `twinRavenSplit` is the V9 T14.4 motif toggle owned by `App.tsx`.
+ * When true, chat workspace renders inside the dual-pane Huginn/Muninn
+ * surface. We accept it as a prop (rather than reading from the store)
+ * so the motif state stays local to App.tsx where the keybinding lives.
+ */
+export interface AppShellProps {
+  readonly twinRavenSplit?: boolean;
+}
+
+export function AppShell({ twinRavenSplit = false }: AppShellProps = {}) {
   const [sidebarWidth] = useState(250);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const contextPanelOpen = useStore((s) => s.contextPanelOpen);
@@ -220,6 +307,52 @@ export function AppShell() {
   const terminalPanelOpen = useStore((s) => s.terminalPanelOpen);
   const diffPanelOpen = useStore((s) => s.diffPanelOpen);
   const isMeetActive = layoutMode === "meet";
+
+  // ── V9 T14.4 — SigilStamp wiring ──────────────────────────
+  //
+  // Subscribe to `wotann:agent-edit` window events emitted by tool-use
+  // handlers / RPC handlers when the agent modifies the workspace. We
+  // keep the most recent 5 entries and render them as a "Creations"
+  // strip just above the StatusBar. Each entry uses SigilStamp to mark
+  // the filename with the appropriate gold/moss/blood underline.
+  //
+  // The strip is opt-in: it stays empty (and renders nothing) until at
+  // least one event fires, so existing layouts are unaffected.
+  const [creations, setCreations] = useState<readonly CreationEntry[]>([]);
+  useEffect(() => {
+    function onEdit(evt: Event) {
+      const detail = (evt as CustomEvent<AgentEditDetail>).detail;
+      if (!detail || typeof detail.path !== "string") return;
+      const kind: SigilKind =
+        detail.kind === "created" || detail.kind === "deleted" ? detail.kind : "modified";
+      const entry: CreationEntry = {
+        id: `${Date.now()}-${detail.path}`,
+        path: detail.path,
+        kind,
+        at: Date.now(),
+      };
+      setCreations((prev) => {
+        // Drop any earlier entry for the same path so the latest kind
+        // is the one we surface, then keep the trailing 5 most recent.
+        const filtered = prev.filter((c) => c.path !== detail.path);
+        const next = [...filtered, entry];
+        return next.length > 5 ? next.slice(next.length - 5) : next;
+      });
+    }
+    window.addEventListener("wotann:agent-edit", onEdit);
+    return () => window.removeEventListener("wotann:agent-edit", onEdit);
+  }, []);
+
+  // ── V9 T14.4 — CostGlint wiring ───────────────────────────
+  //
+  // The sheen reads as "this number is real money" — we only flip
+  // `paid={true}` when the active provider is a BYOK key. Free / local
+  // providers (ollama, gemini free tier, etc.) keep the sheen quiet so
+  // running locally never feels visually taxed.
+  const provider = useStore((s) => s.provider);
+  const cost = useStore((s) => s.cost);
+  const isPaidProvider =
+    provider !== "" && !FREE_PROVIDERS.has(provider.toLowerCase());
 
   const terminalResize = useResizable(220, 120, 500, "wotann-terminal-height", "vertical");
   const diffResize = useResizable(380, 280, 600, "wotann-diff-width", "horizontal");
@@ -336,7 +469,7 @@ export function AppShell() {
                   `key={currentView}` forces React to re-mount so the
                   view-enter animation replays on every tab switch. */}
               <div key={currentView} className="flex-1 min-h-0 flex flex-col view-enter">
-                <WorkspaceContent view={currentView} />
+                <WorkspaceContent view={currentView} twinRavenSplit={twinRavenSplit} />
               </div>
 
               {/* Terminal bottom panel — independent toggle, resizable from AppShell */}
@@ -425,6 +558,78 @@ export function AppShell() {
               </aside>
             )}
           </div>
+
+          {/*
+            V9 T14.4 — Creations strip. Sits between the workspace area and
+            the StatusBar. Renders only when at least one agent edit has
+            fired so existing layouts stay unchanged. Each entry is a
+            <SigilStamp/> badge with the gold/moss/blood underline that
+            matches the change kind.
+          */}
+          {creations.length > 0 && (
+            <div
+              className="creations-strip"
+              role="status"
+              aria-label="Recent agent edits"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "4px 12px",
+                background: "var(--surface-1)",
+                borderTop: "1px solid var(--border-subtle)",
+                fontSize: 11,
+                color: "var(--color-text-secondary)",
+                overflowX: "auto",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
+            >
+              <span style={{ opacity: 0.7, fontWeight: 600, letterSpacing: "0.04em" }}>
+                Creations
+              </span>
+              {creations.map((entry) => (
+                <SigilStamp
+                  key={entry.id}
+                  filename={shortPath(entry.path)}
+                  kind={entry.kind}
+                />
+              ))}
+            </div>
+          )}
+
+          {/*
+            V9 T14.4 — Cost glint. Mirrors the active session cost just
+            above the StatusBar so the sheen reads alongside the rest of
+            the chrome. The StatusBar still owns the canonical cost text
+            — this is the polished-metal accent that signals BYOK. We
+            only render when the user has at least an entered provider so
+            the glance line stays empty during onboarding.
+          */}
+          {provider !== "" && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                padding: "2px 12px",
+                background: "transparent",
+                fontSize: 11,
+                pointerEvents: "none",
+                flexShrink: 0,
+              }}
+              aria-hidden="true"
+            >
+              <CostGlint
+                paid={isPaidProvider}
+                value={formatCost(cost.sessionCost)}
+                title={
+                  isPaidProvider
+                    ? `Session cost — paid (${provider})`
+                    : `Session cost — free (${provider})`
+                }
+              />
+            </div>
+          )}
 
           <StatusBar />
         </main>

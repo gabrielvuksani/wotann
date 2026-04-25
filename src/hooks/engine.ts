@@ -68,8 +68,25 @@ export interface HookPayload {
   readonly timestamp?: number;
 }
 
+/**
+ * V9 T14.1 — Defer resolvers.
+ *
+ * Names of the downstream resolvers a `defer` hook can route to. Each
+ * resolver represents a different decision-making surface:
+ *
+ *   - "council" : multi-model deliberation (Council view in desktop).
+ *   - "arena"   : side-by-side model comparison (Arena view).
+ *   - "approval": ExecApprovals queue (human-in-the-loop list).
+ *   - "human"   : direct prompt to the user — block until they answer.
+ *
+ * The shape is exhaustive so a hook author can't typo the resolver name
+ * without TypeScript catching it. Adding a new resolver is a one-line
+ * change here; the dispatch table below picks it up automatically.
+ */
+export type DeferResolver = "council" | "arena" | "approval" | "human";
+
 export interface HookResult {
-  readonly action: "allow" | "block" | "warn" | "modify";
+  readonly action: "allow" | "block" | "warn" | "modify" | "defer";
   readonly message?: string;
   readonly modifiedContent?: string;
   readonly hookName?: string;
@@ -82,6 +99,22 @@ export interface HookResult {
   readonly contextPrefix?: string;
   /** Aggregated warnings surfaced by sync-path hooks (replaces silent swallowing). */
   readonly warnings?: readonly string[];
+  /**
+   * V9 T14.1 — Defer fields. Only meaningful when `action === "defer"`.
+   *
+   * The hook engine recognises `defer` and routes the tool call to the
+   * named resolver. The resolver returns a final HookResult ("allow"/
+   * "block"/"warn") which the engine then surfaces to the caller.
+   *
+   * Honest stub semantics: the in-tree resolver dispatcher logs the
+   * decision request and returns a default-block result so production
+   * code can wire real resolvers (Council, Arena, ExecApprovals, human
+   * prompt) without changing the hook contract. Hooks can defer today
+   * and pick up real downstream behaviour as those resolvers ship.
+   */
+  readonly resolver?: DeferResolver;
+  readonly deferTimeoutMs?: number;
+  readonly reason?: string;
 }
 
 interface HookStats {
@@ -95,10 +128,32 @@ interface HookStats {
 const DEFAULT_TIMEOUT = 5000;
 const DEFAULT_PRIORITY = 100;
 
+/**
+ * V9 T14.1 — Defer resolver handler signature.
+ *
+ * A resolver receives the original hook payload (so it can inspect the
+ * tool name / input / file path being intercepted) plus the original
+ * `defer` HookResult (so it can read the reason / timeout the hook
+ * specified) and returns a final HookResult. Resolvers are async by
+ * design — the canonical Council / Arena / approval queue all involve
+ * round trips that the synchronous hook chain can't accommodate.
+ */
+export type DeferResolverHandler = (
+  payload: HookPayload,
+  deferResult: HookResult,
+) => Promise<HookResult> | HookResult;
+
 export class HookEngine {
   private readonly hooks: Map<HookEvent, HookHandler[]> = new Map();
   private activeProfile: HookProfile;
   private readonly stats: Map<string, HookStats> = new Map();
+  /**
+   * V9 T14.1 — registry of resolvers for `defer` HookResults. Empty by
+   * default; real handlers are registered by the runtime via
+   * `setDeferResolver(name, handler)`. When empty the engine treats
+   * deferrals as honest-stub blocks.
+   */
+  private readonly deferResolvers: Map<DeferResolver, DeferResolverHandler> = new Map();
   private paused = false;
 
   constructor(profile: HookProfile = "standard") {
@@ -209,6 +264,26 @@ export class HookEngine {
           if (stats) stats.blocks++;
           return { ...result, hookName: handler.name };
         }
+        if (result.action === "defer") {
+          // V9 T14.1 — route to the named resolver. The resolver
+          // returns a final HookResult that we treat exactly like the
+          // direct return: "block" stops the chain, "warn" accumulates,
+          // "allow" proceeds to the next hook. We attribute the result
+          // back to the hook that deferred so dashboards and audit logs
+          // record who initiated the deferral.
+          const resolved = await this.dispatchDeferral(result, handler.name, payload);
+          if (resolved.action === "block") {
+            if (stats) stats.blocks++;
+            return { ...resolved, hookName: handler.name };
+          }
+          if (resolved.action === "warn") {
+            if (stats) stats.warnings++;
+            if (resolved.message) warnings.push(resolved.message);
+          }
+          // "allow" / "modify" / "defer" (re-entrant) just fall through
+          // — the engine treats them as benign continues.
+          continue;
+        }
         if (result.action === "warn") {
           if (stats) stats.warnings++;
           if (result.message) warnings.push(result.message);
@@ -310,6 +385,16 @@ export class HookEngine {
             contextPrefix,
           };
         }
+        if (syncResult.action === "defer") {
+          // V9 T14.1 — sync path can't await a resolver. Surface a
+          // warning so the caller sees the deferral and downgrade to
+          // "allow" rather than silently failing. Hook authors who need
+          // a real defer must register on an async event.
+          if (stats) stats.warnings++;
+          warnings.push(
+            `Hook ${handler.name} requested defer to ${syncResult.resolver ?? "unknown"} on the sync path; treating as allow`,
+          );
+        }
         if (syncResult.action === "warn") {
           if (stats) stats.warnings++;
           if (syncResult.message) warnings.push(syncResult.message);
@@ -329,6 +414,95 @@ export class HookEngine {
       return { action: "allow", contextPrefix };
     }
     return { action: "allow" };
+  }
+
+  /**
+   * V9 T14.1 — Resolver dispatcher.
+   *
+   * When a hook returns `{ action: "defer", resolver }`, the engine routes
+   * the decision to the named resolver and awaits a final HookResult.
+   * Real resolvers (Council, Arena, ExecApprovals, human prompt) plug in
+   * via `setDeferResolver(name, fn)` — see below. Until they're wired,
+   * the dispatch returns a default-block result so the agent doesn't
+   * silently continue past a hook that explicitly asked for review.
+   *
+   * Honest stub: returns block-with-reason instead of pretending to have
+   * consulted the resolver. This is the "honest stubs over silent
+   * success" rule from session 2 quality bars.
+   */
+  private async dispatchDeferral(
+    deferResult: HookResult,
+    hookName: string,
+    payload: HookPayload,
+  ): Promise<HookResult> {
+    const resolver = deferResult.resolver;
+    if (!resolver) {
+      return {
+        action: "block",
+        message: `Hook ${hookName} returned defer without a resolver name`,
+      };
+    }
+    const handler = this.deferResolvers.get(resolver);
+    if (!handler) {
+      // Honest stub — log the deferral and reject by default. Real
+      // resolvers register via `setDeferResolver`; until then a deferral
+      // is treated as a block so the agent never bypasses an intentional
+      // review request.
+      const reason = deferResult.reason ?? "no resolver registered";
+      return {
+        action: "block",
+        message: `Hook ${hookName} deferred to "${resolver}" but no resolver is wired (${reason}); rejecting by default`,
+        reason: deferResult.reason,
+        resolver,
+      };
+    }
+    const timeout = deferResult.deferTimeoutMs ?? 60_000;
+    try {
+      // Race the resolver against its timeout. If it doesn't respond in
+      // time we surface a block so the agent can't proceed past a stalled
+      // resolver.
+      const resolved = await Promise.race<HookResult>([
+        Promise.resolve(handler(payload, deferResult)),
+        new Promise<HookResult>((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                action: "block",
+                message: `Resolver "${resolver}" timed out after ${timeout}ms`,
+                resolver,
+              }),
+            timeout,
+          ),
+        ),
+      ]);
+      return resolved;
+    } catch (error) {
+      return {
+        action: "block",
+        message: `Resolver "${resolver}" threw: ${error instanceof Error ? error.message : "unknown"}`,
+        resolver,
+      };
+    }
+  }
+
+  /**
+   * Register a real resolver for a `defer` target. Production code wires
+   * Council / Arena / ExecApprovals / human-prompt resolvers via this
+   * method. Unregistered resolvers fall through to the honest-stub block
+   * branch in `dispatchDeferral`.
+   */
+  setDeferResolver(name: DeferResolver, handler: DeferResolverHandler): void {
+    this.deferResolvers.set(name, handler);
+  }
+
+  /** Remove a previously registered resolver. */
+  clearDeferResolver(name: DeferResolver): void {
+    this.deferResolvers.delete(name);
+  }
+
+  /** List the currently registered resolver names. */
+  getRegisteredDeferResolvers(): readonly DeferResolver[] {
+    return Array.from(this.deferResolvers.keys());
   }
 
   private isHookActiveInProfile(hookProfile: HookProfile): boolean {
