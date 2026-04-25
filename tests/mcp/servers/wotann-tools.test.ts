@@ -1,8 +1,14 @@
 /**
- * Tests for V9 T3.2 Wave 1 — wotann-tools.ts MCP adapter.
+ * Tests for V9 T3.2 — wotann-tools.ts MCP adapter.
+ *
+ * Wave 1 shipped 5 of 10 tools. T3.2 closure expanded the surface to all
+ * 10 spec'd tools (council_vote, arena_run, exploit_lane,
+ * workshop_dispatch, fleet_view) plus the T14.1 memory-tool shim
+ * adapter that ships alongside.
  *
  * Confirms:
- *   - All 5 tool definitions exposed in listTools().
+ *   - All tool definitions exposed in listTools() — the post-T3.2
+ *     contract is the FULL surface, not just the original 5.
  *   - Each tool's happy path produces a non-error MCP envelope.
  *   - Each tool's missing-dependency path produces an honest error
  *     (no silent success, no exception leaks past the boundary).
@@ -15,19 +21,29 @@ import {
   WOTANN_MCP_TOOL_DEFINITIONS,
 } from "../../../src/mcp/servers/wotann-tools.js";
 
-describe("wotann-tools MCP adapter — V9 T3.2 Wave 1", () => {
-  it("exposes 5 tool definitions in listTools", () => {
+describe("wotann-tools MCP adapter — V9 T3.2", () => {
+  it("exposes every spec'd tool definition in listTools", () => {
     const adapter = createWotannMcpAdapter({});
     const tools = adapter.listTools();
-    expect(tools.length).toBe(5);
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual([
-      "mcp__wotann__approval_request",
-      "mcp__wotann__memory_search",
-      "mcp__wotann__session_end",
-      "mcp__wotann__shadow_git_status",
-      "mcp__wotann__skill_load",
-    ]);
+    // The post-T3.2 contract: original Wave-1 five PLUS the five
+    // closure tools shipped together with the T14.1 memory-tool shim.
+    // The shim is registered conditionally (only when
+    // `deps.memoryShim` is supplied) so the no-deps case lists 10.
+    expect(names).toContain("mcp__wotann__approval_request");
+    expect(names).toContain("mcp__wotann__memory_search");
+    expect(names).toContain("mcp__wotann__session_end");
+    expect(names).toContain("mcp__wotann__shadow_git_status");
+    expect(names).toContain("mcp__wotann__skill_load");
+    // T3.2 closure additions:
+    expect(names).toContain("mcp__wotann__council_vote");
+    expect(names).toContain("mcp__wotann__arena_run");
+    expect(names).toContain("mcp__wotann__exploit_lane");
+    expect(names).toContain("mcp__wotann__workshop_dispatch");
+    expect(names).toContain("mcp__wotann__fleet_view");
+    // 10 tools is the canonical post-T3.2 minimum; the optional
+    // memory-tool shim adds an 11th when wired.
+    expect(tools.length).toBeGreaterThanOrEqual(10);
   });
 
   it("listTools matches the exported WOTANN_MCP_TOOL_DEFINITIONS table", () => {
