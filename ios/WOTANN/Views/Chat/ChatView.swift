@@ -132,7 +132,6 @@ struct ChatViewContent: View {
                     editorFilePath = nil
                 }
             )
-            .environmentObject(connectionManager)
         }
     }
 

@@ -64,11 +64,12 @@ struct EditorView: View {
     /// Optional initial source. May also be set later via `loadSource`.
     let initialSource: Source?
 
-    // MARK: - Environment
-
-    @EnvironmentObject private var connectionManager: ConnectionManager
-
     // MARK: - State
+
+    // Note: we deliberately do NOT declare an `@EnvironmentObject` for the
+    // connection manager. EditorView is constructed with the connection
+    // manager handed to it explicitly so it remains usable from any host
+    // surface — chat sheet, document picker, deep-link, etc.
 
     @StateObject private var viewModel: EditorViewModel
     @Environment(\.dismiss) private var dismiss
