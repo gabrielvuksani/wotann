@@ -19,6 +19,7 @@ import { useStreaming } from "../../hooks/useStreaming";
 import type { ChatMode } from "../../types";
 import { WORKSPACE_PRESETS, getQuickActionVisual, getActionRoute } from "../../lib/workspace-presets";
 import type { QuickActionConfig } from "../../lib/workspace-presets";
+import { SafeHtml } from "../shared/SafeHtml";
 
 /** Lock icon for incognito mode. */
 function LockIcon({ size = 12 }: { readonly size?: number }) {
@@ -170,7 +171,7 @@ function WelcomeScreen() {
                   e.currentTarget.style.boxShadow = "none";
                 }}
               >
-                <div
+                <SafeHtml
                   className="flex items-center justify-center shrink-0"
                   style={{
                     width: 28,
@@ -179,8 +180,8 @@ function WelcomeScreen() {
                     background: "var(--surface-2)",
                     color: "var(--color-text-dim)",
                   }}
-                  dangerouslySetInnerHTML={{ __html: visual.svg }}
-                  aria-hidden="true"
+                  html={visual.svg}
+                  aria-hidden={true}
                 />
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-secondary)", lineHeight: 1.3, letterSpacing: "-0.01em" }}>{action.label}</div>

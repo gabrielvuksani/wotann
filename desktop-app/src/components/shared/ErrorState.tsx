@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { SafeHtml } from "./SafeHtml";
 
 interface ErrorStateProps {
   readonly title?: string;
@@ -28,8 +29,8 @@ export function ErrorState({
       role="alert"
       aria-live="assertive"
     >
-      {/* SVG icon is a trusted internal string, not user input */}
-      <div style={{ marginBottom: "var(--space-sm)", color: "var(--color-warning)" }} aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon }} />
+      {/* SafeHtml routes through DOMPurify -- safe even if icon string is ever sourced from outside the bundle */}
+      <SafeHtml html={icon} style={{ marginBottom: "var(--space-sm)", color: "var(--color-warning)" }} aria-hidden={true} />
       <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "var(--space-xs)" }}>{title}</h3>
       <p style={{ fontSize: "var(--font-size-xs)", maxWidth: 384, color: "var(--color-text-muted)", marginBottom: "var(--space-md)" }}>{message}</p>
       {onRetry && (
@@ -188,7 +189,7 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center justify-center text-center animate-fadeIn" style={{ padding: "48px var(--space-lg)" }}>
       {icon && (
-        <div
+        <SafeHtml
           className="flex items-center justify-center mx-auto"
           style={{
             width: 48,
@@ -199,9 +200,8 @@ export function EmptyState({
             color: "var(--color-text-muted)",
             marginBottom: "var(--space-sm)",
           }}
-          aria-hidden="true"
-          /* SVG icon is a trusted internal string, not user input */
-          dangerouslySetInnerHTML={{ __html: icon }}
+          aria-hidden={true}
+          html={icon}
         />
       )}
       {title && <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "var(--space-xs)" }}>{title}</h3>}

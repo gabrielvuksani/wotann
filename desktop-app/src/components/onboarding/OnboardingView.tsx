@@ -26,6 +26,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useStore } from "../../store";
 import { commands, type DependencyStatus } from "../../hooks/useTauriCommand";
 import { ValknutSpinner } from "../wotann/ValknutSpinner";
+import { SafeHtml } from "../shared/SafeHtml";
 
 /* Inject onboarding-specific keyframes once */
 const ONBOARDING_KEYFRAMES_ID = "wotann-onboarding-keyframes";
@@ -477,7 +478,7 @@ export function OnboardingView() {
                       padding: "20px 16px",
                     }}
                   >
-                    <div style={{ marginBottom: 8, display: "flex", justifyContent: "center", color: "var(--color-text-secondary)" }} dangerouslySetInnerHTML={{ __html: f.svg }} aria-hidden="true" />
+                    <SafeHtml style={{ marginBottom: 8, display: "flex", justifyContent: "center", color: "var(--color-text-secondary)" }} html={f.svg} aria-hidden={true} />
                     <div style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: 4, letterSpacing: "var(--tracking-tight)" }}>{f.label}</div>
                     <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", lineHeight: 1.4 }}>{f.desc}</div>
                   </div>
