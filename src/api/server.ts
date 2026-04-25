@@ -23,6 +23,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { URL } from "node:url";
+// V9 T1.2 — SSE producer for `/events/computer-session`. Wired into the
+// route table below so the daemon's HTTP plane forwards live session
+// events to phone/desktop/CLI subscribers without polling.
+import { handleComputerSessionSseRequest } from "./sse-computer-session.js";
+import type { ComputerSessionStore } from "../session/computer-session-store.js";
 
 export interface APIServerConfig {
   readonly port: number;
@@ -105,18 +110,34 @@ const DEFAULT_CONFIG: APIServerConfig = {
 };
 
 export type RequestHandler = (req: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
-export type StreamHandler = (req: ChatCompletionRequest, write: (chunk: StreamChunk) => void) => Promise<void>;
+export type StreamHandler = (
+  req: ChatCompletionRequest,
+  write: (chunk: StreamChunk) => void,
+) => Promise<void>;
 
 export class WotannAPIServer {
   private readonly config: APIServerConfig;
   private server: ReturnType<typeof createServer> | null = null;
   private readonly rateLimits: Map<string, RateLimitState> = new Map();
-  private readonly sessions: Map<string, { model: string; createdAt: string; messages: number }> = new Map();
+  private readonly sessions: Map<string, { model: string; createdAt: string; messages: number }> =
+    new Map();
   private requestHandler: RequestHandler | null = null;
   private streamHandler: StreamHandler | null = null;
+  // V9 T1.2 — Optional ComputerSessionStore wired in by the daemon for the
+  // SSE producer at `/events/computer-session`. We don't import the daemon
+  // here (would create a cycle); we accept the store via setter instead.
+  private computerSessionStore: ComputerSessionStore | null = null;
 
   constructor(config?: Partial<APIServerConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /**
+   * V9 T1.2 — Inject the ComputerSessionStore for the SSE route. Without
+   * a store wired in, `/events/computer-session` returns 503.
+   */
+  setComputerSessionStore(store: ComputerSessionStore): void {
+    this.computerSessionStore = store;
   }
 
   /** Set the handler for chat completion requests */
@@ -173,7 +194,9 @@ export class WotannAPIServer {
     const clientIP = req.socket.remoteAddress ?? "unknown";
     if (!this.checkRateLimit(clientIP)) {
       res.writeHead(429, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: { message: "Rate limit exceeded", type: "rate_limit_error" } }));
+      res.end(
+        JSON.stringify({ error: { message: "Rate limit exceeded", type: "rate_limit_error" } }),
+      );
       return;
     }
 
@@ -182,7 +205,11 @@ export class WotannAPIServer {
       const auth = req.headers.authorization;
       if (!auth || auth !== `Bearer ${this.config.authToken}`) {
         res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: { message: "Invalid authentication", type: "authentication_error" } }));
+        res.end(
+          JSON.stringify({
+            error: { message: "Invalid authentication", type: "authentication_error" },
+          }),
+        );
         return;
       }
     }
@@ -200,18 +227,24 @@ export class WotannAPIServer {
         this.handleHealth(res);
       } else if (path === "/wotann/sessions" && req.method === "GET") {
         this.handleListSessions(res);
+      } else if (path === "/events/computer-session" && req.method === "GET") {
+        // V9 T1.2 — SSE producer route. Single line wires the producer in;
+        // the producer module owns the lifecycle + framing.
+        this.handleComputerSessionEvents(req, res);
       } else {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: { message: "Not found", type: "not_found" } }));
       }
     } catch (error) {
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        error: {
-          message: error instanceof Error ? error.message : "Internal server error",
-          type: "server_error",
-        },
-      }));
+      res.end(
+        JSON.stringify({
+          error: {
+            message: error instanceof Error ? error.message : "Internal server error",
+            type: "server_error",
+          },
+        }),
+      );
     }
   }
 
@@ -222,7 +255,11 @@ export class WotannAPIServer {
     // Validate
     if (!request.messages || request.messages.length === 0) {
       res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: { message: "messages is required", type: "invalid_request_error" } }));
+      res.end(
+        JSON.stringify({
+          error: { message: "messages is required", type: "invalid_request_error" },
+        }),
+      );
       return;
     }
 
@@ -239,7 +276,7 @@ export class WotannAPIServer {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
+        Connection: "keep-alive",
       });
 
       await this.streamHandler(request, (chunk) => {
@@ -253,7 +290,9 @@ export class WotannAPIServer {
 
     if (!this.requestHandler) {
       res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: { message: "No handler configured", type: "server_error" } }));
+      res.end(
+        JSON.stringify({ error: { message: "No handler configured", type: "server_error" } }),
+      );
       return;
     }
 
@@ -276,18 +315,49 @@ export class WotannAPIServer {
 
   private handleHealth(res: ServerResponse): void {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({
-      status: "ok",
-      version: "0.1.0",
-      sessions: this.sessions.size,
-      uptime: process.uptime(),
-    }));
+    res.end(
+      JSON.stringify({
+        status: "ok",
+        version: "0.1.0",
+        sessions: this.sessions.size,
+        uptime: process.uptime(),
+      }),
+    );
   }
 
   private handleListSessions(res: ServerResponse): void {
     const sessions = [...this.sessions.entries()].map(([id, data]) => ({ id, ...data }));
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ sessions }));
+  }
+
+  /**
+   * V9 T1.2 — `/events/computer-session` SSE handler.
+   *
+   * Returns 503 until the daemon wires a store via
+   * `setComputerSessionStore(...)`. When the store is present, the actual
+   * framing logic lives in `sse-computer-session.ts`; we only thread
+   * req/res through here.
+   */
+  private handleComputerSessionEvents(req: IncomingMessage, res: ServerResponse): void {
+    if (!this.computerSessionStore) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: {
+            message: "computer-session store not configured",
+            type: "service_unavailable",
+          },
+        }),
+      );
+      return;
+    }
+    // The producer sets its own SSE headers and owns the lifecycle. It
+    // writes a `retry:` preamble, subscribes to the store, and ends the
+    // response on close / disconnect. No further work needed here.
+    handleComputerSessionSseRequest(req, res, {
+      store: this.computerSessionStore,
+    });
   }
 
   private setCorsHeaders(res: ServerResponse): void {

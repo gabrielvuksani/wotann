@@ -1,0 +1,99 @@
+name: PR Checks (WOTANN)
+
+# V9 T12.5 — runs `.wotann/checks/*.md` on every pull request and posts
+# each result as a separate GitHub Check Run on the PR's head SHA.
+
+on:
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to run checks against"
+        required: true
+        type: number
+
+concurrency:
+  group: pr-checks-${{ github.workflow }}-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  run-pr-checks:
+    name: Run WOTANN PR Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Compile TypeScript
+        run: npx tsc
+
+      - name: Compute PR number + head SHA
+        id: prinfo
+        env:
+          PR_NUMBER_INPUT: ${{ github.event.inputs.pr_number }}
+          PR_NUMBER_AUTO: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          FALLBACK_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_NUMBER_INPUT:-}" ]; then
+            printf 'pr=%s\n' "$PR_NUMBER_INPUT" >> "$GITHUB_OUTPUT"
+          else
+            printf 'pr=%s\n' "$PR_NUMBER_AUTO" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${PR_HEAD_SHA:-}" ]; then
+            printf 'sha=%s\n' "$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          else
+            printf 'sha=%s\n' "$FALLBACK_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Load PR diff via gh
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.prinfo.outputs.pr }}
+          REPO_SLUG: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p .wotann/.tmp
+          : > .wotann/.tmp/pr.diff
+          if gh pr diff "$PR_NUMBER" --repo "$REPO_SLUG" > .wotann/.tmp/pr.diff 2>/dev/null; then
+            :
+          fi
+          if [ -s .wotann/.tmp/pr.diff ]; then
+            printf 'have_diff=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'have_diff=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run WOTANN PR checks
+        if: steps.diff.outputs.have_diff == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_HEAD_SHA: ${{ steps.prinfo.outputs.sha }}
+          PR_DIFF_PATH: .wotann/.tmp/pr.diff
+          WOTANN_CHECKS_DIR: .wotann/checks
+        run: node scripts/pr-checks-runner.mjs
+
+      - name: No diff notice
+        if: steps.diff.outputs.have_diff != 'true'
+        run: echo "::notice::PR diff is empty or unavailable — skipping checks."
