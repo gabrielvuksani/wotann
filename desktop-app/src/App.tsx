@@ -14,6 +14,7 @@ import { AppShell } from "./components/layout/AppShell";
 import { NotificationToast, type ToastData } from "./components/notifications/NotificationToast";
 import { Runering, emitRuneEvent, type RuneKind } from "./components/wotann/Runering";
 import { KeyboardShortcutsOverlay } from "./components/shared/KeyboardShortcutsOverlay";
+import { McpAppOverlay } from "./components/mcp-apps/McpAppOverlay";
 
 export function App() {
   useShortcuts();
@@ -70,6 +71,10 @@ export function App() {
           and renders null when idle so they cost nothing when unused. */}
       <Runering />
       <KeyboardShortcutsOverlay />
+      {/* V9 T4.2 — MCP App overlay. Listens to `wotann:mcp-app-mount`
+          window events and renders sandboxed iframe Apps. Without this
+          mount the McpAppHost component existed in isolation. */}
+      <McpAppOverlay />
     </>
   );
 }
