@@ -12,18 +12,21 @@ import UIKit
 // file registers four controls, all thin wrappers over app intents that
 // live alongside the existing `WOTANNIntents` extension pattern:
 //
-//   1. `WOTANNAutopilotControl`    — toggle (bound to `ToggleAutopilotIntent`)
+//   1. `WOTANNAutopilotControl`    — toggle (bound to `SetAutopilotIntent`)
 //   2. `WOTANNVoiceAskControl`     — button, foregrounds app into voice sheet
 //   3. `WOTANNRelayControl`        — button, relays clipboard to paired desktop
 //   4. `WOTANNCostControl`         — button, surfaces today's cost dialog
 //
-// The intents below ship in the widget extension so Control Center can
-// invoke them without waking the main app. `openAppWhenRun = true` is only
-// set on the voice-ask + cost-dialog intents because they need the iOS app
-// foregrounded to present a view; the autopilot toggle + clipboard relay
-// run headless via the shared `WOTANNIntentService` path.
+// The four `AppIntent` types these controls invoke
+// (`SetAutopilotIntent` / `OpenVoiceAskIntent` / `RelayClipboardIntent` /
+// `OpenCostDialogIntent`) live at
+// `ios/WOTANN/Models/ControlWidgetIntents.swift` and are compiled into BOTH
+// the main `WOTANN` target AND this `WOTANNWidgets` extension target — that
+// is the V9 T7.4 dual-target requirement (the main app registers the
+// AppIntent metadata so Spotlight + AppShortcuts surface them; the widget
+// extension dispatches them when a control is tapped).
 //
-// Shared state lives in the same app group (`group.com.wotann.shared`) used
+// Shared state lives in the App Group `group.com.wotann.shared` used
 // by `CostWidget` / `AgentStatusWidget`, so the main app can write fresh
 // snapshots and Control Center can read them without an IPC hop.
 
@@ -74,32 +77,11 @@ enum WOTANNAutopilotValueProvider {
     }
 }
 
-/// Writes the new Autopilot state to the shared defaults. The main app
-/// reads this key on every `AppState` sync. Kept as a plain `AppIntent`
-/// rather than `AudioPlaybackIntent` / `LiveActivityIntent` because
-/// toggling autopilot is neither audio nor a live activity operation.
-@available(iOS 18.0, *)
-struct SetAutopilotIntent: SetValueIntent {
-    nonisolated(unsafe) static var title: LocalizedStringResource = "Set Autopilot"
-    nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
-        "Enable or disable WOTANN Autopilot.",
-        categoryName: "Autopilot"
-    )
-
-    @Parameter(title: "Autopilot")
-    var value: Bool
-
-    init() {}
-
-    init(_ value: Bool) {
-        self.value = value
-    }
-
-    func perform() async throws -> some IntentResult {
-        WOTANNAutopilotValueProvider.set(value)
-        return .result()
-    }
-}
+// `SetAutopilotIntent` lives in `ios/WOTANN/Models/ControlWidgetIntents.swift`
+// (compiled into BOTH targets per V9 T7.4 dual-target requirement). The
+// widget extension instantiates it as the action for
+// `WOTANNAutopilotControl.ControlWidgetToggle`; the main app sees the
+// updated `control.autopilot.isOn` defaults key on scene activation.
 
 // MARK: - Voice Ask Control
 
@@ -119,26 +101,8 @@ struct WOTANNVoiceAskControl: ControlWidget {
     }
 }
 
-@available(iOS 18.0, *)
-struct OpenVoiceAskIntent: AppIntent {
-    nonisolated(unsafe) static var title: LocalizedStringResource = "Voice Ask"
-    nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
-        "Open WOTANN into the voice-ask sheet.",
-        categoryName: "Chat"
-    )
-    nonisolated(unsafe) static var openAppWhenRun: Bool = true
-
-    init() {}
-
-    func perform() async throws -> some IntentResult {
-        // The main app observes the shared-defaults key on scene activation
-        // and routes into the voice sheet. `openAppWhenRun` above handles
-        // the foregrounding handshake.
-        let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
-        defaults.set(Date().timeIntervalSince1970, forKey: "control.voice.requestedAt")
-        return .result()
-    }
-}
+// `OpenVoiceAskIntent` lives in `ios/WOTANN/Models/ControlWidgetIntents.swift`
+// (dual-target, V9 T7.4).
 
 // MARK: - Relay Control
 
@@ -159,38 +123,8 @@ struct WOTANNRelayControl: ControlWidget {
     }
 }
 
-@available(iOS 18.0, *)
-struct RelayClipboardIntent: AppIntent {
-    nonisolated(unsafe) static var title: LocalizedStringResource = "Relay Clipboard"
-    nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
-        "Relay the current clipboard contents to the paired WOTANN desktop.",
-        categoryName: "Relay"
-    )
-    // Foreground the app so `RelayCoordinator` (main app) can pick up the
-    // clipboard payload and dispatch it over the already-paired ECDH
-    // channel owned by the main-app `ConnectionManager`. Running headless
-    // from the widget extension would require duplicating the RPC client,
-    // keychain pairing, and ECDH key rehydration — which we deliberately
-    // avoid per the V9 "main app owns the connection" rule.
-    nonisolated(unsafe) static var openAppWhenRun: Bool = true
-
-    init() {}
-
-    @MainActor
-    func perform() async throws -> some IntentResult {
-        let pasteboard = UIPasteboard.general
-        let text = pasteboard.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
-        if text.isEmpty {
-            defaults.removeObject(forKey: "control.relay.payload")
-            defaults.set(Date().timeIntervalSince1970, forKey: "control.relay.requestedAt")
-            return .result()
-        }
-        defaults.set(text, forKey: "control.relay.payload")
-        defaults.set(Date().timeIntervalSince1970, forKey: "control.relay.requestedAt")
-        return .result()
-    }
-}
+// `RelayClipboardIntent` lives in `ios/WOTANN/Models/ControlWidgetIntents.swift`
+// (dual-target, V9 T7.4).
 
 // MARK: - Cost Control
 
@@ -210,23 +144,17 @@ struct WOTANNCostControl: ControlWidget {
     }
 }
 
+// `OpenCostDialogIntent` lives in `ios/WOTANN/Models/ControlWidgetIntents.swift`
+// (dual-target, V9 T7.4).
+
 @available(iOS 18.0, *)
-struct OpenCostDialogIntent: AppIntent {
-    nonisolated(unsafe) static var title: LocalizedStringResource = "Open Today's Cost"
-    nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
-        "Open WOTANN to today's cost breakdown.",
-        categoryName: "Cost"
-    )
-    nonisolated(unsafe) static var openAppWhenRun: Bool = true
-
-    init() {}
-
-    @MainActor
-    func perform() async throws -> some IntentResult {
-        // The main app reads `control.cost.requestedAt` on scene
-        // activation and navigates to the Cost tab.
-        let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
-        defaults.set(Date().timeIntervalSince1970, forKey: "control.cost.requestedAt")
-        return .result()
-    }
+private enum _T74_TargetMembershipMarker {
+    /// Compile-time tripwire — referenced from a no-op static so the file
+    /// fails to compile if the dual-target file is missing. Do not remove.
+    static let _intent_types_present: [Any.Type] = [
+        SetAutopilotIntent.self,
+        OpenVoiceAskIntent.self,
+        RelayClipboardIntent.self,
+        OpenCostDialogIntent.self,
+    ]
 }

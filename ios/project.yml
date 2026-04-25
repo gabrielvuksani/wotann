@@ -148,6 +148,16 @@ targets:
           # StatusShape.swift references TaskState which lives in the main
           # app's Models target; extensions use their own status tokens.
           - "StatusShape.swift"
+      # T7.4 — Control Widget AppIntents (`SetAutopilotIntent`,
+      # `OpenVoiceAskIntent`, `RelayClipboardIntent`, `OpenCostDialogIntent`)
+      # MUST be compiled into BOTH the widgets extension (so the four
+      # `ControlWidgetButton` / `ControlWidgetToggle` definitions resolve
+      # the action) AND the main app (so AppShortcuts + Spotlight surface
+      # them, and `openAppWhenRun` deep-link routing works on scene
+      # activation). The file is sourced from the main-app `Models` group
+      # but compiled into this extension via this explicit reference.
+      - path: WOTANN/Models/ControlWidgetIntents.swift
+        buildPhase: sources
     settings:
       base:
         SUPPORTED_PLATFORMS: "iphonesimulator iphoneos"

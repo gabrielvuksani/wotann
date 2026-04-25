@@ -1,5 +1,5 @@
 {
-  "originHash" : "a44afb4191a46a75b517ab5ab37c38fa605689578b4d0d383d32f7931e968536",
+  "originHash" : "7374b481882f7cb3e6594128fdaba1a04308ccf01be2e8f6e51f68fda2ccdfa7",
   "pins" : [
     {
       "identity" : "gzipswift",
@@ -38,6 +38,15 @@
       }
     },
     {
+      "identity" : "runestone",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/simonbs/Runestone",
+      "state" : {
+        "revision" : "592434a103a4d1ab83e14f87ac6eef569dd7a99d",
+        "version" : "0.5.2"
+      }
+    },
+    {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-argument-parser.git",
@@ -71,6 +80,15 @@
       "state" : {
         "revision" : "f000aa7aec0e78acd0211685e4094e1fca84cd8b",
         "version" : "0.1.24"
+      }
+    },
+    {
+      "identity" : "tree-sitter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tree-sitter/tree-sitter",
+      "state" : {
+        "revision" : "98be227227af10cc7a269cb3ffb23686c0610b17",
+        "version" : "0.20.9"
       }
     }
   ],
