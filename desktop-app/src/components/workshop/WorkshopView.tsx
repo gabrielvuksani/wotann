@@ -14,6 +14,7 @@ import { ScheduledTasks } from "../tasks/ScheduledTasks";
 import { CodePlayground } from "../playground/CodePlayground";
 import { WorkflowBuilder } from "../workflow/WorkflowBuilder";
 import { AgentConfigPanel } from "./AgentConfigPanel";
+import { ComputerSessionPanel } from "./ComputerSessionPanel";
 import { CanvasStream } from "../canvases/CanvasStream";
 import { parseCanvasBlocks } from "../../lib/canvas-registry";
 import type { WorkflowNodeDef } from "../workflow/dag-layout";
@@ -26,6 +27,7 @@ type WorkshopTab =
   | "playground"
   | "workflows"
   | "canvases"
+  | "computer"
   | "config";
 
 const TABS: readonly { readonly id: WorkshopTab; readonly label: string }[] = [
@@ -36,6 +38,7 @@ const TABS: readonly { readonly id: WorkshopTab; readonly label: string }[] = [
   { id: "playground", label: "Playground" },
   { id: "workflows", label: "Workflows" },
   { id: "canvases", label: "Canvases" },
+  { id: "computer", label: "Computer" },
   { id: "config", label: "Config" },
 ];
 
@@ -57,6 +60,7 @@ export function WorkshopView() {
     playground: null,
     workflows: null,
     canvases: null,
+    computer: null,
     config: null,
   };
 
@@ -188,6 +192,7 @@ export function WorkshopView() {
         {activeTab === "playground" && <CodePlayground />}
         {activeTab === "workflows" && <WorkflowsPanel />}
         {activeTab === "canvases" && <CanvasesPanel />}
+        {activeTab === "computer" && <ComputerSessionPanel />}
         {activeTab === "config" && <AgentConfigPanel />}
       </div>
     </div>
