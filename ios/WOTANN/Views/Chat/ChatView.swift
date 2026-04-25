@@ -442,6 +442,11 @@ struct ChatViewContent: View {
 private struct EditorPath: Identifiable, Hashable {
     let path: String
     var id: String { path }
+
+    /// Unlabelled initializer so `.map(EditorPath.init)` is concise.
+    init(_ path: String) {
+        self.path = path
+    }
 }
 
 // MARK: - CameraInputSheet

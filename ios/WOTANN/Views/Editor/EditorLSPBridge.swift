@@ -174,33 +174,43 @@ final class EditorLSPBridge {
     // MARK: - Helpers
 
     /// Race a body against a timeout. Returns the body's value if it
-    /// finishes first, otherwise throws `LSPError.timeout`.
+    /// finishes first, otherwise throws `LSPError.timeout` and the
+    /// body's task is cancelled (which propagates into RPCClient.send).
     ///
-    /// Implementation note: we spawn the body inline and watch a timeout
-    /// side-channel via Task. This avoids the Swift 6 Sendable inference
-    /// pain that `withThrowingTaskGroup` causes when a MainActor-isolated
-    /// `EditorLSPBridge` is captured by group children. We keep the body
-    /// on MainActor (where rpcClient.send lives) and let the timeout
-    /// run in a detached task.
+    /// Implementation note: We spawn the body in a `Task` (inheriting
+    /// MainActor isolation, since `EditorLSPBridge` is MainActor-bound)
+    /// and watch a timeout side-channel. First to finish wins; the
+    /// other is cancelled cooperatively. We avoid `withThrowingTaskGroup`
+    /// here because Swift 6's Sendable inference flags the MainActor
+    /// state crossing as a hazard.
+    @MainActor
     private func withTimeout<T>(
         _ nanos: UInt64,
-        body: () async throws -> T
+        body: @escaping @MainActor () async throws -> T
     ) async throws -> T {
-        // Spawn the timeout watcher; if the body finishes first we cancel
-        // it. If the timeout fires first the body's outer Task (in the
-        // public `hover`/`completion`/`definition` methods) will be
-        // cancelled by `cancelAll()`, propagating cooperatively through
-        // RPCClient.send which checks Task.isCancelled.
-        let timeoutDeadline = Date().addingTimeInterval(Double(nanos) / 1_000_000_000.0)
+        // Body Task — inherits MainActor; rpcClient.send is callable here.
+        let bodyTask = Task<T, Error> { @MainActor in
+            try await body()
+        }
 
-        // Race conceptually: if the body returns before the deadline, win.
-        // Otherwise throw timeout. The body is awaited inline so its actor
-        // context is preserved (MainActor → MainActor, no Sendable lift).
-        let value = try await body()
-        if Date() > timeoutDeadline {
+        // Timeout watcher — detached so it can fire while body is mid-flight.
+        let timeoutTask = Task<Void, Error> {
+            try await Task.sleep(nanoseconds: nanos)
+            bodyTask.cancel()
             throw LSPError.timeout
         }
-        return value
+
+        do {
+            let value = try await bodyTask.value
+            timeoutTask.cancel()
+            return value
+        } catch is CancellationError {
+            // Body cancellation = timeout fired first.
+            throw LSPError.timeout
+        } catch {
+            timeoutTask.cancel()
+            throw error
+        }
     }
 }
 
