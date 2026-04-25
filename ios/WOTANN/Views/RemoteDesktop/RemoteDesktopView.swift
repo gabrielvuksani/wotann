@@ -53,6 +53,7 @@ struct RemoteDesktopView: View {
                 .onAppear {
                     viewModel.configure(rpcClient: connectionManager.rpcClient)
                     viewModel.startCapture()
+                    viewModel.subscribeToCursorStream()
                 }
                 .onDisappear {
                     viewModel.disconnect()
@@ -122,6 +123,12 @@ private struct RemoteDesktopContent: View {
                 if let tapPoint = viewModel.lastTapPoint {
                     TapRippleView(at: tapPoint)
                 }
+
+                // T5.2 — remote cursor overlay (driven by cursor.stream
+                // subscription). Maps the daemon-emitted screen-space
+                // coordinate back into view space using the same scale we
+                // use for tap translation.
+                cursorOverlay
 
                 // Minimap — visible when zoomed past 1.5x
                 if viewModel.zoomScale > 1.5, viewModel.screenImage != nil {
@@ -663,6 +670,63 @@ private extension RemoteDesktopContent {
     }
 }
 
+// MARK: - Cursor Overlay (T5.2)
+
+private extension RemoteDesktopContent {
+
+    /// Translucent crosshair drawn at the remote cursor's last reported
+    /// position. Hidden until the cursor.stream subscription delivers its
+    /// first sample, so unpaired sessions do not show a phantom crosshair.
+    @ViewBuilder
+    var cursorOverlay: some View {
+        GeometryReader { geometry in
+            if let position = viewModel.cursorPosition,
+               viewModel.cursorOpacity > 0 {
+                let displayPoint = translateFromScreenCoordinates(
+                    point: position,
+                    viewSize: geometry.size
+                )
+                CursorMarker()
+                    .opacity(viewModel.cursorOpacity)
+                    .position(displayPoint)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .animation(WTheme.Animation.smooth, value: viewModel.cursorPosition)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Inverse of `translateToScreenCoordinates`. Maps a remote-screen-space
+    /// point (what the daemon publishes) into the iOS view's coordinate
+    /// space at the current zoom.
+    func translateFromScreenCoordinates(point: CGPoint, viewSize: CGSize) -> CGPoint {
+        guard viewModel.screenWidth > 0, viewModel.screenHeight > 0 else {
+            return .zero
+        }
+        let displayWidth = viewSize.width * viewModel.zoomScale
+        let displayHeight = imageHeight(for: viewSize.width) * viewModel.zoomScale
+        let ratioX = point.x / CGFloat(viewModel.screenWidth)
+        let ratioY = point.y / CGFloat(viewModel.screenHeight)
+        return CGPoint(x: ratioX * displayWidth, y: ratioY * displayHeight)
+    }
+}
+
+/// Crosshair-style marker for the remote cursor. WTheme tokens only —
+/// no hex literals, per quality bar #6.
+private struct CursorMarker: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(WTheme.Colors.primary, lineWidth: 1.5)
+                .frame(width: 22, height: 22)
+            Circle()
+                .fill(WTheme.Colors.primary.opacity(0.35))
+                .frame(width: 8, height: 8)
+        }
+    }
+}
+
 // MARK: - Minimap Overlay
 
 private extension RemoteDesktopContent {
@@ -798,11 +862,30 @@ final class RemoteDesktopViewModel: ObservableObject {
     /// Stores the zoom scale before the current pinch gesture started.
     var lastZoomScale: CGFloat = 1.0
 
+    // MARK: - Remote Cursor (T5.2)
+
+    /// Last-reported remote cursor position in **remote screen coordinates**.
+    /// `nil` means we have never seen a cursor sample; the overlay hides
+    /// itself in that state so unpaired/idle sessions do not show a
+    /// phantom crosshair.
+    @Published var cursorPosition: CGPoint?
+
+    /// Opacity of the cursor overlay. Fades out a couple of seconds after
+    /// the most recent cursor sample so a stale position does not look
+    /// like a live cursor.
+    @Published var cursorOpacity: Double = 0
+
+    /// Cancels the in-flight fade animation when a new sample arrives.
+    private var cursorFadeTask: Task<Void, Never>?
+
     private var rpcClient: RPCClient?
     private var refreshTimer: Timer?
     private var frameCount = 0
     private var frameRateTimer: Timer?
     private var lastFrameTime: Date = .now
+    /// True once we have wired the cursor.stream RPC subscription, so a
+    /// view re-render does not double-subscribe.
+    private var cursorSubscribed = false
 
     // MARK: - Configuration
 
@@ -842,8 +925,77 @@ final class RemoteDesktopViewModel: ObservableObject {
     func disconnect() {
         stopRefreshTimer()
         stopFrameRateTracking()
+        cursorFadeTask?.cancel()
+        cursorFadeTask = nil
+        cursorPosition = nil
+        cursorOpacity = 0
         isConnected = false
         screenImage = nil
+    }
+
+    // MARK: - Cursor Stream (T5.2)
+
+    /// Subscribe to the daemon's `cursor.stream` push events so the user
+    /// can see where the desktop-control agent is moving the cursor in
+    /// near real time. Idempotent — calling twice is a no-op.
+    ///
+    /// QUALITY BARS:
+    /// - #6 (honest stubs): seed-call errors surface via `errorMessage`.
+    /// - #7 (per-session state): subscription state lives on the view
+    ///   model, never on a module-global.
+    /// - #11 (sibling-site scan): this view is the SINGLE site on iOS
+    ///   subscribing to `cursor.stream`.
+    func subscribeToCursorStream() {
+        guard !cursorSubscribed, let rpcClient else { return }
+        cursorSubscribed = true
+
+        // Seed the subscription so the daemon starts buffering events.
+        // Errors are surfaced — no silent failures (quality bar #6).
+        Task { [weak self, weak rpcClient] in
+            guard let rpcClient else { return }
+            do {
+                _ = try await rpcClient.send("cursor.stream")
+            } catch {
+                await MainActor.run {
+                    self?.errorMessage = "Cursor stream subscribe failed: \(error.localizedDescription)"
+                }
+            }
+        }
+
+        rpcClient.subscribe("cursor.stream") { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleCursorEvent(event)
+            }
+        }
+    }
+
+    private func handleCursorEvent(_ event: RPCEvent) {
+        guard let obj = event.params?.objectValue else { return }
+
+        // Coordinates may be shipped as either int or double; accept both
+        // to stay robust against the daemon serializer's discretion.
+        let xValue = obj["x"]?.doubleValue ?? obj["x"]?.intValue.map(Double.init)
+        let yValue = obj["y"]?.doubleValue ?? obj["y"]?.intValue.map(Double.init)
+        guard let x = xValue, let y = yValue else { return }
+
+        cursorPosition = CGPoint(x: x, y: y)
+        cursorOpacity = 0.85
+
+        // Fade out 1.5 seconds after the last sample. ActivityKit-style
+        // staleness — keeps the overlay from looking live when the agent
+        // has stopped moving.
+        cursorFadeTask?.cancel()
+        cursorFadeTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await MainActor.run {
+                guard let self else { return }
+                if !Task.isCancelled {
+                    withAnimation(.easeOut(duration: 0.4)) {
+                        self.cursorOpacity = 0
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Screen Capture

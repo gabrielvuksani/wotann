@@ -196,6 +196,15 @@ struct PairingView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
 
+                    // V9 T5.13 — "Continue without pairing" escape hatch.
+                    // Lets the user enter the main shell so on-device
+                    // surfaces (Editor in browse mode, cached Exploit
+                    // history, Memory snapshots, settings, on-device
+                    // model preview) remain reachable even when there is
+                    // no paired desktop. RPC-backed surfaces render an
+                    // unpaired empty state via `connectionManager.isPaired`.
+                    continueWithoutPairingButton
+
                     // Error
                     if let error = errorMessage {
                         Text(error)
@@ -240,8 +249,56 @@ struct PairingView: View {
                     logoScale = 1.0
                     logoOpacity = 1.0
                 }
+                // Wire RPC subscriptions if a prior pairing was restored
+                // from the keychain at app launch (ConnectionManager.init
+                // restores isPaired before this view appears).
+                wireRPCSubscriptionsIfPaired()
+            }
+            .onChange(of: connectionManager.isPaired) { _, paired in
+                if paired {
+                    wireRPCSubscriptionsIfPaired()
+                }
             }
         }
+    }
+
+    // MARK: - RPC Subscription Wiring (T5.3 / T5.7)
+
+    /// Attach the singleton RPC-backed services to the active client. We
+    /// only attach when isPaired is true and the rpcClient is in scope.
+    /// Both services guard against double-subscribe internally — calling
+    /// twice is a no-op (quality bar #11 sibling-site scan).
+    private func wireRPCSubscriptionsIfPaired() {
+        guard connectionManager.isPaired else { return }
+        LiveActivityManager.shared.attachRPC(connectionManager.rpcClient)
+        NotificationService.shared.attachRPC(connectionManager.rpcClient)
+    }
+
+    // MARK: - Continue Without Pairing (T5.13)
+
+    /// Tertiary affordance that lets the user enter the main shell with
+    /// no paired desktop. We never call `connectionManager.pair(with:)`
+    /// in this path — pairing implies an authenticated remote session.
+    /// Instead we flip the `isPaired` state machine to its "ambient"
+    /// position so `ContentView` falls through to `MainShell`. RPC-backed
+    /// views check `connectionManager.isPaired` and present empty states.
+    @ViewBuilder
+    private var continueWithoutPairingButton: some View {
+        Button {
+            HapticService.shared.trigger(.buttonTap)
+            // No network call — purely a UX bypass. The main shell will
+            // show empty states for paired-only surfaces.
+            connectionManager.isPaired = true
+        } label: {
+            Text("Continue without pairing")
+                .font(WTheme.Typography.caption)
+                .foregroundColor(WTheme.Colors.textTertiary)
+                .underline()
+                .padding(.vertical, WTheme.Spacing.xs)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Continue without pairing")
+        .accessibilityHint("Enter the app without a paired desktop. Some features will require pairing.")
     }
 
     // MARK: - Manual Connection

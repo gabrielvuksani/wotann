@@ -102,7 +102,15 @@ struct PairingWizardView: View {
                 }
             }
             .onChange(of: connectionManager.isPaired) { _, paired in
-                if paired { showSuccess = true }
+                if paired {
+                    showSuccess = true
+                    // V9 T5.3 / T5.7 — attach RPC subscriptions once
+                    // pairing succeeds so live-activity and delivery
+                    // pushes start flowing immediately. Both services
+                    // are idempotent on re-attach.
+                    LiveActivityManager.shared.attachRPC(connectionManager.rpcClient)
+                    NotificationService.shared.attachRPC(connectionManager.rpcClient)
+                }
             }
         }
     }

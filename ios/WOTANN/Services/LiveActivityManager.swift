@@ -56,7 +56,29 @@ final class LiveActivityManager: ObservableObject {
     /// Remembers the kind of each activity so we can tailor dismiss policies
     /// at end time without plumbing it through every update call site.
     private var kinds: [UUID: ActivityKind] = [:]
+    /// Maps a daemon sessionId (the key the RPC payload uses) to the
+    /// in-flight activity id we minted for it. Lets `live.activity` push
+    /// events route updates to the right ActivityKit activity instead of
+    /// re-creating one per event (which would flood the Dynamic Island).
+    private var sessionToActivity: [String: UUID] = [:]
     #endif
+
+    /// Latest error encountered while wiring the `live.activity.subscribe`
+    /// stream. Surfaced as `@Published` so a Settings/diagnostics screen
+    /// can render the failure rather than have it disappear silently.
+    /// Honest-stub quality bar (#6): every RPC failure must be surface-able.
+    @Published var subscribeError: String?
+
+    /// True once we have wired the live-activity push subscription against
+    /// the supplied RPC client. Idempotent so a re-pair / re-connect does
+    /// not double-subscribe (quality bar #11 sibling-site scan: this is the
+    /// SINGLE site on iOS subscribing to `live.activity.subscribe`).
+    private var subscribed = false
+
+    /// Weak handle to the RPC client whose subscription we own. Held weak
+    /// because the connection manager outlives any individual session and
+    /// we never want the manager to retain the client.
+    private weak var rpcClient: RPCClient?
 
     private static let log = Logger(subsystem: "com.wotann.ios", category: "LiveActivity")
 
@@ -310,6 +332,132 @@ final class LiveActivityManager: ObservableObject {
         return activities[id] != nil
         #else
         return false
+        #endif
+    }
+
+    // MARK: - RPC Subscription (T5.3)
+
+    /// Wire the manager to a paired desktop's RPC client and subscribe to
+    /// the `live.activity.subscribe` push stream. Idempotent — calling
+    /// twice with the same client is a no-op so a UI re-render cannot
+    /// double-subscribe (quality bar #7 per-session state).
+    ///
+    /// Behavior:
+    /// - Sends the seed `live.activity.subscribe` RPC so the daemon
+    ///   begins buffering events.
+    /// - Wires a push handler that mirrors each TaskProgress event into
+    ///   ActivityKit (Dynamic Island lights up).
+    /// - Surfaces failures via `subscribeError` instead of silently
+    ///   swallowing them (quality bar #6 honest stubs).
+    func attachRPC(_ client: RPCClient) {
+        guard !subscribed else { return }
+        if rpcClient === client { return }
+        rpcClient = client
+        subscribed = true
+
+        Task { [weak self, weak client] in
+            guard let client else { return }
+            do {
+                _ = try await client.send("live.activity.subscribe")
+                await MainActor.run { self?.subscribeError = nil }
+            } catch {
+                await MainActor.run {
+                    self?.subscribeError = "live.activity.subscribe failed: \(error.localizedDescription)"
+                    Self.log.error(
+                        "live.activity.subscribe seed failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+        }
+
+        client.subscribe("live.activity") { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleLiveActivityEvent(event)
+            }
+        }
+    }
+
+    /// Translate a daemon `live.activity` push payload into an
+    /// ActivityKit start/update call. Schema (best-effort decode — daemon
+    /// payloads vary slightly by surface):
+    ///
+    ///   { sessionId: String,
+    ///     title:    String,
+    ///     status:   String?,
+    ///     progress: Double in 0...1,
+    ///     cost:     Double?,
+    ///     elapsedSeconds: Int?,
+    ///     provider: String?,
+    ///     model:    String?,
+    ///     done:     Bool? }
+    private func handleLiveActivityEvent(_ event: RPCEvent) {
+        #if canImport(ActivityKit)
+        guard let obj = event.params?.objectValue else { return }
+        guard let sessionId = obj["sessionId"]?.stringValue ?? obj["taskId"]?.stringValue else {
+            return
+        }
+
+        let title = obj["title"]?.stringValue
+            ?? obj["taskTitle"]?.stringValue
+            ?? "Task"
+        let status = obj["status"]?.stringValue ?? "Running"
+        let progress = obj["progress"]?.doubleValue
+            ?? obj["progress"]?.intValue.map(Double.init)
+            ?? 0
+        let cost = obj["cost"]?.doubleValue
+            ?? obj["cost"]?.intValue.map(Double.init)
+            ?? 0
+        let elapsedSeconds = obj["elapsedSeconds"]?.intValue
+            ?? obj["elapsed"]?.intValue
+            ?? 0
+        let provider = obj["provider"]?.stringValue ?? "remote"
+        let model = obj["model"]?.stringValue ?? "agent"
+        let done = obj["done"]?.boolValue ?? (progress >= 1)
+
+        if done, let activityId = sessionToActivity.removeValue(forKey: sessionId) {
+            end(
+                id: activityId,
+                outcome: LiveActivityOutcome(
+                    progress: progress,
+                    status: status,
+                    cost: cost,
+                    elapsedSeconds: elapsedSeconds
+                )
+            )
+            return
+        }
+
+        if let activityId = sessionToActivity[sessionId] {
+            updateTaskRun(
+                id: activityId,
+                title: title,
+                progress: progress,
+                status: status,
+                cost: cost,
+                elapsedSeconds: elapsedSeconds
+            )
+        } else {
+            let activityId = UUID()
+            if startTaskRun(
+                id: activityId,
+                title: title,
+                provider: provider,
+                model: model,
+                initialStatus: status
+            ) != nil {
+                sessionToActivity[sessionId] = activityId
+                if progress > 0 {
+                    updateTaskRun(
+                        id: activityId,
+                        title: title,
+                        progress: progress,
+                        status: status,
+                        cost: cost,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                }
+            }
+        }
         #endif
     }
 }

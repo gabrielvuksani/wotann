@@ -28,6 +28,34 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// Maximum number of messages shown in the CarPlay conversation detail.
     private let maxDetailMessages = 8
 
+    // MARK: - Voice Conversation State (T5.10)
+    //
+    // The daemon exposes a `carplay.voice.subscribe` RPC stream so the
+    // car-side surface can mirror the active voice conversation's state
+    // (current transcript, agent response, "speaking" indicator) without
+    // round-tripping through the iPhone UI. We capture the latest payload
+    // so the voice tab list-template can re-render with fresh status when
+    // a daemon update arrives.
+
+    /// Last reported active voice conversation id (per daemon push).
+    /// `nil` means no voice session is in progress.
+    private var activeVoiceConversationId: String?
+    /// Last reported transcript for the active voice session.
+    private var activeVoiceTranscript: String = ""
+    /// Last reported agent reply for the active voice session.
+    private var activeVoiceReply: String = ""
+    /// Whether the daemon thinks the agent is currently "speaking" (TTS in
+    /// flight). Drives the `Voice` tab list item title.
+    private var activeVoiceSpeaking: Bool = false
+    /// Last error encountered while wiring the voice subscription. Held so
+    /// a status-screen can render it without leaking into the foreground UI.
+    /// (Honest stubs — quality bar #6.)
+    private var voiceSubscribeError: String?
+    /// True once we have wired the carplay.voice.subscribe RPC against
+    /// `rpcClient`. Idempotent so reconnects do not double-subscribe
+    /// (quality bar #11 — single sibling site for `carplay.voice.*`).
+    private var voiceSubscribed = false
+
     func templateApplicationScene(
         _ templateApplicationScene: CPTemplateApplicationScene,
         didConnect interfaceController: CPInterfaceController
@@ -41,6 +69,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         }
 
         subscribeToConversationUpdates()
+        subscribeToCarPlayVoice()
 
         let rootTemplate = buildRootTemplate()
         interfaceController.setRootTemplate(rootTemplate, animated: true, completion: nil)
@@ -229,6 +258,147 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 self?.handleConversationUpdate(event)
             }
         }
+    }
+
+    // MARK: - Voice Subscription (T5.10)
+
+    /// Wire `carplay.voice.subscribe` so the daemon can push live voice-
+    /// conversation state (transcript, agent reply, speaking flag) into
+    /// the CarPlay templates without round-tripping through the iPhone
+    /// UI. Idempotent so a re-connect (driver leaves/returns the car)
+    /// does not double-subscribe.
+    ///
+    /// QUALITY BARS:
+    /// - #6 (honest stubs): seed-RPC errors surface via `voiceSubscribeError`.
+    /// - #7 (per-session state): subscription state lives on the scene
+    ///   delegate instance, not on a module-global.
+    /// - #11 (sibling-site scan): this is the SINGLE site on iOS
+    ///   subscribing to `carplay.voice.*`.
+    private func subscribeToCarPlayVoice() {
+        guard !voiceSubscribed, let client = rpcClient else { return }
+        voiceSubscribed = true
+
+        Task { [weak self, weak client] in
+            guard let client else { return }
+            do {
+                _ = try await client.send("carplay.voice.subscribe")
+                await MainActor.run { self?.voiceSubscribeError = nil }
+            } catch {
+                await MainActor.run {
+                    self?.voiceSubscribeError =
+                        "carplay.voice.subscribe failed: \(error.localizedDescription)"
+                }
+            }
+        }
+
+        client.subscribe("carplay.voice") { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleVoiceEvent(event)
+            }
+        }
+    }
+
+    /// Translate a daemon `carplay.voice` push payload into local state +
+    /// (when relevant) a refreshed Voice tab template.
+    ///
+    /// Schema (best-effort decode):
+    ///
+    ///   { conversationId: String?,
+    ///     transcript:     String?,
+    ///     reply:          String?,
+    ///     speaking:       Bool?,
+    ///     done:           Bool? }
+    ///
+    /// `done == true` clears the active state; otherwise we patch the
+    /// fields the daemon sent and re-render the Voice tab so the driver
+    /// sees the latest transcription / agent reply.
+    private func handleVoiceEvent(_ event: RPCEvent) {
+        guard let obj = event.params?.objectValue else { return }
+
+        let done = obj["done"]?.boolValue ?? false
+        if done {
+            activeVoiceConversationId = nil
+            activeVoiceTranscript = ""
+            activeVoiceReply = ""
+            activeVoiceSpeaking = false
+        } else {
+            if let id = obj["conversationId"]?.stringValue {
+                activeVoiceConversationId = id
+            }
+            if let transcript = obj["transcript"]?.stringValue {
+                activeVoiceTranscript = transcript
+            }
+            if let reply = obj["reply"]?.stringValue {
+                activeVoiceReply = reply
+            }
+            if let speaking = obj["speaking"]?.boolValue {
+                activeVoiceSpeaking = speaking
+            }
+        }
+
+        refreshVoiceTabIfActive()
+    }
+
+    /// Replace the Voice tab's sections with a fresh snapshot of the
+    /// active voice conversation state. Only fires when the Voice tab is
+    /// currently the active tab — otherwise we wait until the next render.
+    private func refreshVoiceTabIfActive() {
+        guard let tabBar = interfaceController?.rootTemplate as? CPTabBarTemplate else { return }
+        guard let voiceTemplate = tabBar.selectedTemplate as? CPListTemplate else { return }
+        // Heuristic: only refresh the Voice tab. The Voice list-template
+        // we built has its `tabImage` set to `mic`. The other tabs use
+        // `message` and `chart.bar`, so checking the tab image is a
+        // cheaper-than-tagging discriminator.
+        guard voiceTemplate.tabImage == UIImage(systemName: "mic") else { return }
+
+        let voiceItem = CPListItem(
+            text: activeVoiceSpeaking ? "Speaking..." : "Voice Input",
+            detailText: activeVoiceTranscript.isEmpty
+                ? "Tap to speak to WOTANN"
+                : String(activeVoiceTranscript.prefix(120))
+        )
+        voiceItem.handler = { [weak self] _, completion in
+            self?.startVoiceInput()
+            completion()
+        }
+
+        let replyItems: [CPListItem]
+        if !activeVoiceReply.isEmpty {
+            replyItems = [
+                CPListItem(
+                    text: "WOTANN",
+                    detailText: String(activeVoiceReply.prefix(140))
+                ),
+            ]
+        } else {
+            replyItems = []
+        }
+
+        let quickActions = [
+            CPListItem(text: "Check Build Status", detailText: "Did my tests pass?"),
+            CPListItem(text: "Summarize Changes", detailText: "What changed today?"),
+            CPListItem(text: "Check Cost", detailText: "How much have I spent?"),
+        ]
+        for action in quickActions {
+            action.handler = { [weak self] item, completion in
+                self?.executeQuickAction(item.text ?? "")
+                completion()
+            }
+        }
+
+        var sections: [CPListSection] = [
+            CPListSection(items: [voiceItem], header: "Voice", sectionIndexTitle: nil),
+        ]
+        if !replyItems.isEmpty {
+            sections.append(
+                CPListSection(items: replyItems, header: "Reply", sectionIndexTitle: nil)
+            )
+        }
+        sections.append(
+            CPListSection(items: quickActions, header: "Quick Actions", sectionIndexTitle: nil)
+        )
+
+        voiceTemplate.updateSections(sections)
     }
 
     private func handleConversationUpdate(_ event: RPCEvent) {
