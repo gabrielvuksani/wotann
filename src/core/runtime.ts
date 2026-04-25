@@ -4436,11 +4436,15 @@ export class WotannRuntime {
    * surfaces as a mode-switch failure.
    */
   private maybeWarmupPromptCache(): void {
+    // V9 T1.5 default-on semantic (audit fix 2026-04-24): warmup runs
+    // unless explicitly disabled via `config.enablePromptCacheWarmup =
+    // false` OR `WOTANN_PROMPT_CACHE_WARMUP=0`. Previous opt-in default
+    // meant the warmup never fired in production for users who hadn't
+    // discovered the flag — silently leaving 40%+ token-cache savings
+    // on the floor.
+    if (this.config.enablePromptCacheWarmup === false) return;
     const envFlag = process.env["WOTANN_PROMPT_CACHE_WARMUP"];
     if (envFlag === "0" || envFlag === "false") return;
-    const configFlag = this.config.enablePromptCacheWarmup === true;
-    const envEnabled = envFlag === "1" || envFlag === "true";
-    if (!configFlag && !envEnabled) return;
     if (!this.infra || !this.systemPrompt || this.systemPrompt.length === 0) return;
 
     const bridge = this.infra.bridge;

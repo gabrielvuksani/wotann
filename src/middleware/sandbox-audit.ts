@@ -85,6 +85,14 @@ export interface SandboxAuditEntry {
   readonly command: string;
   readonly verdict: AuditVerdict;
   readonly rejectionReason?: string;
+  /**
+   * V9 T1.7 — graduated PermissionDecision (allow / deny / always-allow)
+   * computed from the active PermissionMode. Present only when the
+   * middleware adapter received `options.permissionMode`. Legacy
+   * callers see this field as undefined and the verdict-only contract
+   * is unchanged.
+   */
+  readonly permissionDecision?: PermissionDecision;
 }
 
 export interface SandboxAuditStats {
@@ -258,7 +266,25 @@ export class SandboxAuditMiddleware {
 
 // -- Pipeline adapter -----------------------------------------------------
 
-export function createSandboxAuditMiddleware(instance: SandboxAuditMiddleware): Middleware {
+/**
+ * Pipeline adapter options.
+ *
+ * V9 T1.7 — `permissionMode` opts into the graduated permission
+ * decision surface. When supplied, the adapter calls
+ * `instance.resolveToolPermission(msg, mode)` for each tool-use it
+ * audits and attaches the canonical `PermissionDecision` to the
+ * resulting `SandboxAuditEntry` (via `entry.permissionDecision`).
+ * Without this option the legacy verdict-only path runs unchanged
+ * — matching the audit's findings of `audit()` + `verdict` shape.
+ */
+export interface SandboxAuditMiddlewareOptions {
+  readonly permissionMode?: PermissionMode;
+}
+
+export function createSandboxAuditMiddleware(
+  instance: SandboxAuditMiddleware,
+  options: SandboxAuditMiddlewareOptions = {},
+): Middleware {
   return {
     name: "SandboxAudit",
     order: 4.7,
@@ -286,7 +312,16 @@ export function createSandboxAuditMiddleware(instance: SandboxAuditMiddleware): 
         ) {
           continue;
         }
-        const entry = instance.audit(ctx.sessionId, msg);
+        let entry = instance.audit(ctx.sessionId, msg);
+        // V9 T1.7 — when caller opted into the graduated permission
+        // surface, attach the resolveToolPermission decision so the
+        // audit trail records BOTH the verdict (block/warn/pass) AND
+        // the permission decision (allow/deny/always-allow). Closes
+        // the orphan that `resolveToolPermission` was identified as.
+        if (options.permissionMode !== undefined) {
+          const decision = instance.resolveToolPermission(msg, options.permissionMode);
+          entry = { ...entry, permissionDecision: decision };
+        }
         newEntries.push(entry);
         if (entry.verdict === "block") {
           blockInjections.push(instance.buildBlockMessage(entry));
