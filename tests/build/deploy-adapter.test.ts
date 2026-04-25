@@ -21,12 +21,16 @@ import {
 } from "../../src/build/deploy-adapter.js";
 
 describe("deploy-adapter: structure", () => {
-  it("exposes exactly 4 targets in declared order", () => {
+  it("exposes exactly 6 targets in declared order", () => {
+    // V9 T12.20 added coolify + dokploy as deploy targets so the
+    // self-host VPS adapters in src/build/deploy-targets/ are reachable.
     expect(listDeployTargets()).toEqual([
       "cloudflare-pages",
       "vercel",
       "fly",
       "self-host",
+      "coolify",
+      "dokploy",
     ]);
   });
 
