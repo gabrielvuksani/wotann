@@ -13,11 +13,18 @@
  * the browser flow falls back to device code flow automatically.
  */
 
-import { existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import chalk from "chalk";
 import { runDeviceCodeFlow, getGitHubDeviceCodeConfig } from "./oauth-server.js";
+import {
+  type AuthMode,
+  type AuthModeConfig,
+  createAuthModeConfig,
+  refuseReasonForMode,
+  bannerLabelForMode,
+} from "./auth-mode.js";
 
 export type LoginProvider = "anthropic" | "codex" | "copilot" | "openai" | "gemini" | "ollama";
 
@@ -26,6 +33,93 @@ export interface LoginResult {
   readonly success: boolean;
   readonly message: string;
   readonly method: string;
+}
+
+/**
+ * --mode parameter accepted by `wotann login`. Maps directly onto
+ * AuthMode minus a third "ask" sentinel for the interactive prompt.
+ * Per V9 SB-07 dual-auth: personal = OAuth-via-CC, business = API key.
+ */
+export type LoginModeArg = "personal" | "business";
+
+/**
+ * Path on disk where the AuthModeConfig is persisted. Single source
+ * of truth — exported so tests can stub `homedir()` and assert path.
+ */
+export const AUTH_MODE_CONFIG_PATH = join(homedir(), ".wotann", "auth-mode.json");
+
+/**
+ * Persist an AuthModeConfig to ~/.wotann/auth-mode.json with mode-0600
+ * perms (user-only read/write). Centralised so the wizard + the CLI
+ * verb call the same write path.
+ *
+ * Returns the absolute path written to so callers can log it.
+ */
+export function persistAuthModeConfig(
+  config: AuthModeConfig,
+  configPath: string = AUTH_MODE_CONFIG_PATH,
+): string {
+  const dir = join(configPath, "..");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  // Defensive chmod — writeFileSync's mode arg only applies on file
+  // *creation*, so an overwrite of an existing file with looser perms
+  // would silently keep the looser bits. Re-set explicitly.
+  try {
+    chmodSync(configPath, 0o600);
+  } catch {
+    // chmod can fail on Windows or odd FS — non-fatal; file is still written.
+  }
+  return configPath;
+}
+
+/**
+ * Detect whether Anthropic Claude Code OAuth credentials are present.
+ * Looks for ~/.claude/.credentials.json which is what the official
+ * Claude Code CLI writes after `claude login`. Pure read — no probe
+ * to Anthropic's servers.
+ */
+function hasClaudeCliCreds(): boolean {
+  return existsSync(join(homedir(), ".claude", ".credentials.json"));
+}
+
+/**
+ * Detect whether the user has a real ANTHROPIC_API_KEY in env. Used
+ * by the dual-auth gate — business mode requires this; OAuth alone
+ * is not enough since 2026-01-09.
+ */
+function hasAnthropicApiKey(env: NodeJS.ProcessEnv = process.env): boolean {
+  const key = env["ANTHROPIC_API_KEY"];
+  return typeof key === "string" && key.trim().length > 0;
+}
+
+/**
+ * Run the dual-auth gate before we touch any provider login. Returns
+ * { ok: true } when the user's chosen mode is compatible with their
+ * available creds, or { ok: false, reason } when business mode was
+ * picked with no API key (the policy-rejected combo).
+ */
+export function checkAuthModeGate(opts: {
+  readonly mode: AuthMode;
+  readonly env?: NodeJS.ProcessEnv;
+}): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
+  const env = opts.env ?? process.env;
+  const reason = refuseReasonForMode({
+    mode: opts.mode,
+    hasClaudeCliCreds: hasClaudeCliCreds(),
+    hasAnthropicApiKey: hasAnthropicApiKey(env),
+  });
+  if (reason !== null) return { ok: false, reason };
+  return { ok: true };
+}
+
+/**
+ * Convert the CLI-flag form ("personal" | "business") into the
+ * canonical AuthMode used everywhere else. Kept as a pure function
+ * so tests don't need to mount commander.
+ */
+export function authModeFromCliArg(arg: LoginModeArg): AuthMode {
+  return arg === "personal" ? "personal-oauth" : "business-api-key";
 }
 
 // ── Anthropic Login ────────────────────────────────────────
@@ -296,8 +390,50 @@ async function loginOpenAI(): Promise<LoginResult> {
 
 // ── Unified Login Command ──────────────────────────────────
 
-export async function runLogin(provider?: string): Promise<void> {
+export interface RunLoginOptions {
+  /**
+   * Dual-auth mode the user picked via `--mode personal|business`.
+   * Omitted → interactive prompt (or inferred from invocation flag).
+   * Per V9 SB-07: no silent default — we'd rather refuse than guess.
+   */
+  readonly mode?: LoginModeArg;
+}
+
+export async function runLogin(provider?: string, options: RunLoginOptions = {}): Promise<void> {
   console.log(chalk.bold("\nWOTANN Login\n"));
+
+  // ── SB-07 dual-auth gate ────────────────────────────────
+  // If the user passed --mode, persist it BEFORE any provider login.
+  // This ensures business-mode rejection happens up front rather than
+  // halfway through a CLI-delegation flow.
+  if (options.mode) {
+    const mode = authModeFromCliArg(options.mode);
+    const gate = checkAuthModeGate({ mode });
+    if (!gate.ok) {
+      console.log(chalk.red("  Cannot proceed in business mode:"));
+      console.log(chalk.yellow(`  ${gate.reason}\n`));
+      // Do not persist a mode the user couldn't actually use.
+      return;
+    }
+
+    const config = createAuthModeConfig({ mode, userAcknowledgedTos: true });
+    const written = persistAuthModeConfig(config);
+    console.log(chalk.green(`  Auth mode set to: ${bannerLabelForMode(mode)}`));
+    console.log(chalk.dim(`  Saved to ${written} (mode 0600)\n`));
+
+    if (mode === "personal-oauth") {
+      // QB#1 honest one-line warning — no vendor-biased silent fallback.
+      console.log(
+        chalk.yellow("  WARNING: personal-oauth mode is for personal experimentation only."),
+      );
+      console.log(
+        chalk.dim("  Anthropic rejects non-Claude-Code OAuth tokens server-side since 2026-01-09."),
+      );
+      console.log(
+        chalk.dim("  For products/business use --mode business with an ANTHROPIC_API_KEY.\n"),
+      );
+    }
+  }
 
   if (provider) {
     const result = await loginSingleProvider(provider as LoginProvider);

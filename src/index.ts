@@ -314,9 +314,20 @@ program
 program
   .command("login [provider]")
   .description("Authenticate with a provider (anthropic, codex, copilot, gemini, ollama, openai)")
-  .action(async (provider?: string) => {
+  .option(
+    "--mode <mode>",
+    "Auth mode for Anthropic (SB-07): 'personal' (OAuth-via-Claude-Code, personal use only) or 'business' (Anthropic API key, TOS-compliant for products)",
+  )
+  .action(async (provider: string | undefined, opts: { mode?: string }) => {
     const { runLogin } = await import("./auth/login.js");
-    await runLogin(provider);
+    let mode: "personal" | "business" | undefined;
+    if (opts.mode === "personal" || opts.mode === "business") {
+      mode = opts.mode;
+    } else if (typeof opts.mode === "string") {
+      console.log(`Invalid --mode value: ${opts.mode}. Expected 'personal' or 'business'.`);
+      process.exit(2);
+    }
+    await runLogin(provider, mode ? { mode } : {});
   });
 
 // ── wotann providers ─────────────────────────────────────────
@@ -3673,7 +3684,6 @@ program
         } finally {
           runtime.close();
         }
-        return;
       }
 
       // ── Long-horizon path ──

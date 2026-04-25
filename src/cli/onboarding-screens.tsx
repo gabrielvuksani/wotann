@@ -51,6 +51,10 @@ import type { FirstRunQueryRunner } from "./first-run-success.js";
 import type { MigrationPlan } from "../core/config-migration.js";
 import { FirstRunScreen } from "./onboarding-screens/first-run-screen.js";
 import { DoneScreen } from "./onboarding-screens/done-screen.js";
+// SB-07 dual-auth banner — clearly-separated additive surface owned
+// by the SB-07 wave. See src/auth/auth-mode.ts for the policy basis.
+import { AuthModeBanner } from "./components/AuthModeBanner.js";
+import type { AuthMode } from "../auth/auth-mode.js";
 
 // ═══ Types ════════════════════════════════════════════════════════════════
 
@@ -521,6 +525,24 @@ interface ConfirmScreenProps {
   readonly onBack: () => void;
 }
 
+/**
+ * Infer the Anthropic auth mode for the confirm-screen banner from
+ * the wizard's selected rung. SB-07 only governs Anthropic — for
+ * non-Anthropic rungs we return null and the banner is skipped.
+ *
+ * Pure helper, exported so tests can lock the mapping down without
+ * mounting the wizard.
+ */
+export function inferAuthModeForRung(rung: ProviderRung | null): AuthMode | null {
+  if (rung === null) return null;
+  // claude-cli subscription delegation = OAuth-via-Claude-Code path.
+  if (rung.probe === "claude-cli") return "personal-oauth";
+  // anthropic-byok = explicit ANTHROPIC_API_KEY = business-api-key.
+  if (rung.probe === "anthropic-byok") return "business-api-key";
+  // Other providers don't sit under SB-07's policy.
+  return null;
+}
+
 function ConfirmScreen({
   strategy,
   rung,
@@ -528,6 +550,7 @@ function ConfirmScreen({
   onConfirm,
   onBack,
 }: ConfirmScreenProps): React.ReactElement {
+  const inferredAuthMode = inferAuthModeForRung(rung);
   useInput((_input, key) => {
     if (key.return) onConfirm();
     else if (key.escape) onBack();
@@ -574,6 +597,12 @@ function ConfirmScreen({
           <Text dimColor>
             Your old config will be backed up to {migration.backupPath ?? "~/.wotann/.legacy/"}.
           </Text>
+        </Box>
+      )}
+      {/* SB-07 dual-auth banner — additive, owned by SB-07 wave. */}
+      {inferredAuthMode !== null && (
+        <Box marginTop={1}>
+          <AuthModeBanner mode={inferredAuthMode} />
         </Box>
       )}
       <Box marginTop={1}>
