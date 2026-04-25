@@ -1,0 +1,304 @@
+---
+name: pack-expo
+description: Materializes a minimal Expo SDK 50+ scaffold with expo-router (file-based routing for iOS, Android, and web).
+type: scaffold-pack
+source: wotann
+materializes: expo
+license: MIT
+context: fork
+paths: ["**/app.json", "**/app/_layout.*", "**/App.tsx"]
+---
+
+# Pack: Expo (iOS + Android + Web)
+
+A minimal but functional Expo SDK 50+ scaffold emitted by `wotann build`
+when the selected scaffold is `expo`. Uses `expo-router` for file-based
+routing so the same codebase compiles to iOS, Android, and web. After
+materialization the project boots with `npm install && npx expo start`.
+
+The pack ships both `App.tsx` (legacy entry, in 1:1 sync with the
+scaffold registry's file list) and the `app/` router tree (modern
+entry — `expo-router` takes precedence when `expo-router/entry` is the
+main field). This means the project works on any Expo template
+consumer while preferring the router pattern.
+
+## Files
+
+### package.json
+
+```json
+{
+  "name": "wotann-expo-app",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "expo": "~50.0.17",
+    "expo-router": "~3.4.10",
+    "expo-status-bar": "~1.11.1",
+    "expo-constants": "~15.4.6",
+    "expo-linking": "~6.2.2",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-native": "0.73.6",
+    "react-native-safe-area-context": "4.8.2",
+    "react-native-screens": "~3.29.0",
+    "react-native-web": "~0.19.10"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.7",
+    "@types/react": "~18.2.79",
+    "typescript": "^5.3.3"
+  }
+}
+```
+
+### app.json
+
+```json
+{
+  "expo": {
+    "name": "wotann-expo-app",
+    "slug": "wotann-expo-app",
+    "scheme": "wotann",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wotann.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a0a"
+      },
+      "package": "com.wotann.app"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
+```
+
+### tsconfig.json
+
+```json
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ]
+}
+```
+
+### babel.config.js
+
+```js
+module.exports = function (api) {
+  api.cache(true);
+  return {
+    presets: ["babel-preset-expo"],
+    plugins: [],
+  };
+};
+```
+
+### App.tsx
+
+```tsx
+// Legacy entry — kept so the scaffold registry's file invariant
+// (`App.tsx`) stays satisfied. The active entry point is
+// `expo-router/entry` (see package.json#main), which loads the `app/`
+// directory below. If you remove expo-router, this file boots.
+import { StatusBar } from "expo-status-bar";
+import { StyleSheet, Text, View } from "react-native";
+
+export default function App() {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Wotann build — Expo</Text>
+      <Text style={styles.body}>
+        Legacy entry. The router-based UI lives in app/index.tsx.
+      </Text>
+      <StatusBar style="light" />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#0a0a0a",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  title: { color: "#f5f5f5", fontSize: 24, fontWeight: "600" },
+  body: { color: "#a3a3a3", marginTop: 8, textAlign: "center" },
+});
+```
+
+### app/_layout.tsx
+
+```tsx
+import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+
+export default function RootLayout() {
+  return (
+    <>
+      <StatusBar style="light" />
+      <Stack
+        screenOptions={{
+          headerStyle: { backgroundColor: "#0a0a0a" },
+          headerTintColor: "#f5f5f5",
+          contentStyle: { backgroundColor: "#0a0a0a" },
+        }}
+      >
+        <Stack.Screen name="index" options={{ title: "Wotann" }} />
+      </Stack>
+    </>
+  );
+}
+```
+
+### app/index.tsx
+
+```tsx
+import { ScrollView, StyleSheet, Text, View } from "react-native";
+
+export default function Index() {
+  const features: readonly string[] = [
+    "expo-router file-based routing",
+    "iOS, Android, and web from one codebase",
+    "TypeScript strict + typed routes",
+    "Edit app/index.tsx and save to hot-reload",
+  ];
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Welcome to Wotann</Text>
+      <Text style={styles.subtitle}>
+        Generated by `wotann build` using the Expo scaffold.
+      </Text>
+      <View style={styles.list}>
+        {features.map((f) => (
+          <Text key={f} style={styles.item}>
+            • {f}
+          </Text>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    padding: 24,
+    paddingTop: 48,
+    backgroundColor: "#0a0a0a",
+  },
+  title: { color: "#f5f5f5", fontSize: 28, fontWeight: "600" },
+  subtitle: { color: "#a3a3a3", marginTop: 8, fontSize: 16 },
+  list: { marginTop: 24, gap: 6 },
+  item: { color: "#d4d4d4", fontSize: 15, lineHeight: 22 },
+});
+```
+
+### .gitignore
+
+```
+node_modules
+.expo
+dist
+web-build
+ios/Pods
+android/.gradle
+android/app/build
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.env*
+.wotann
+.DS_Store
+*.log
+```
+
+### README.md
+
+```md
+# Wotann App — Expo
+
+Generated by `wotann build` using the **expo** scaffold (Expo SDK 50,
+expo-router 3, React Native 0.73).
+
+## Run locally
+
+```bash
+npm install
+npx expo start
+```
+
+Press `i` to open iOS simulator, `a` for Android, or `w` for web.
+
+## Routes
+
+- `app/_layout.tsx` — root stack layout (status bar + screen options)
+- `app/index.tsx` — welcome screen at `/`
+
+## Scripts
+
+- `npm run start` — Expo dev server
+- `npm run ios` / `npm run android` / `npm run web` — open in target
+- `npm run typecheck` — `tsc --noEmit`
+
+## Build native binaries
+
+```bash
+npx expo install --check
+eas build --platform ios
+eas build --platform android
+```
+
+(Requires an Expo account and `eas-cli`.)
+
+## Provenance
+
+Materialized from `skills/pack-expo.md` by Wotann's build pipeline. See
+`docs/build-templates/README.md` for the full flow.
+```
+
+## Provenance
+
+WOTANN scaffold pack used by `wotann build` when the registry picks
+`expo`. Tested with Expo SDK 50 (React Native 0.73, expo-router 3). The
+core file list is kept in 1:1 sync with `SCAFFOLDS[expo].files` in
+`src/build/scaffold-registry.ts`; the `app/` router tree is an
+additive superset that activates when `expo-router/entry` is the main.
