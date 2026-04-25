@@ -8,6 +8,12 @@ import type { DreamInstinct, Gotcha } from "./types.js";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import type {
+  SleepTimeAgent,
+  SleepTimeOpportunity,
+  SleepSessionReport,
+} from "./sleep-time-agent.js";
+import type { SummarizableEntry, SummarizeResult } from "../context/sleep-summarizer.js";
 
 export type { DreamInstinct, Gotcha };
 
@@ -437,4 +443,138 @@ function formatGotchasAsMarkdown(gotchas: readonly Gotcha[]): string {
   }
 
   return lines.join("\n");
+}
+
+// ── Sleep-Time-Agent + Summarizer Wire (V9 T11.2) ───────────
+
+/**
+ * Function shape for the optional sleep-summarizer hook. Caller injects
+ * the bound `summarizeForSleep` from `src/context/sleep-summarizer.ts`,
+ * keeping autodream pure (no direct module-level coupling).
+ */
+export type SleepSummarizerHook = (opts: {
+  readonly entries: readonly SummarizableEntry[];
+  readonly targetTokens?: number;
+}) => SummarizeResult;
+
+/**
+ * The optional dependency-injection bag for end-of-cycle sleep wiring.
+ *
+ * `sleepAgent` lets the dream pipeline schedule durable maintenance
+ * (memory consolidation, cache warmup, plan rehearsal) during the same
+ * idle window that triggered the dream. `summarizer` lets it collapse
+ * recent observations into a compact summary block.
+ *
+ * Both are optional — when missing, the cycle reports `agentRan=false` /
+ * `summaryProduced=false` rather than crashing. Per QB #6 honest stubs.
+ * Per QB #7, callers thread fresh instances per cycle (no module globals).
+ */
+export interface SleepHooks {
+  readonly sleepAgent?: SleepTimeAgent;
+  readonly opportunity?: SleepTimeOpportunity;
+  readonly summarizer?: SleepSummarizerHook;
+  /** Target tokens for the summary block. Default 1024. */
+  readonly summaryTargetTokens?: number;
+}
+
+export interface DreamResultWithSleepHooks extends DreamResult {
+  /** True when sleepAgent.runIdleSession actually ran. */
+  readonly sleepAgentRan: boolean;
+  /** Tasks completed during the sleep session (zero when agentRan=false). */
+  readonly sleepTasksCompleted: number;
+  /** True when the summarizer produced a non-empty summary block. */
+  readonly summaryProduced: boolean;
+  /** Bytes of summary text emitted (zero when summaryProduced=false). */
+  readonly summaryBytes: number;
+  /** Honest reason when an optional hook didn't fire. */
+  readonly skipReasons: readonly string[];
+}
+
+/**
+ * Run the full 4-phase dream pipeline AND, when hooks are supplied,
+ * wire the sleep-time-agent (`processIdleTime`) and summarizer
+ * (`summarize`) at the END of the cycle.
+ *
+ * Honest stubs: missing hooks ⇒ `sleepAgentRan=false` /
+ * `summaryProduced=false` with a reason in `skipReasons`. We never
+ * silently treat absent dependencies as success.
+ *
+ * Per-call state: each invocation builds its own SummarizableEntry
+ * list and forwards a fresh opportunity. No module globals.
+ */
+export async function runDreamPipelineWithSleepHooks(
+  observations: readonly string[],
+  corrections: readonly { message: string; context: string }[],
+  confirmations: readonly { message: string; context: string }[],
+  existingInstincts: readonly Instinct[],
+  hooks: SleepHooks = {},
+): Promise<DreamResultWithSleepHooks> {
+  const baseResult = runDreamPipeline(observations, corrections, confirmations, existingInstincts);
+
+  const skipReasons: string[] = [];
+  let sleepAgentRan = false;
+  let sleepTasksCompleted = 0;
+  let summaryProduced = false;
+  let summaryBytes = 0;
+
+  // ── Sleep-time agent ───────────────────────────────────
+  if (hooks.sleepAgent) {
+    if (!hooks.opportunity) {
+      skipReasons.push("sleepAgent supplied without opportunity");
+    } else {
+      try {
+        const report: SleepSessionReport = await hooks.sleepAgent.runIdleSession(hooks.opportunity);
+        sleepAgentRan = true;
+        sleepTasksCompleted = report.results.filter((r) => r.ok).length;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        skipReasons.push(`sleepAgent threw: ${msg}`);
+      }
+    }
+  } else {
+    skipReasons.push("sleepAgent not supplied");
+  }
+
+  // ── Sleep summarizer ───────────────────────────────────
+  if (hooks.summarizer) {
+    const entries: SummarizableEntry[] = observations.map((content, idx) => ({
+      id: `obs-${idx}`,
+      timestamp: Date.now() - (observations.length - idx) * 1000,
+      source: "autodream-recall",
+      content,
+    }));
+    if (entries.length === 0) {
+      skipReasons.push("summarizer skipped: no observations to summarize");
+    } else {
+      try {
+        const summarizeOpts: { entries: readonly SummarizableEntry[]; targetTokens?: number } = {
+          entries,
+        };
+        if (hooks.summaryTargetTokens !== undefined) {
+          summarizeOpts.targetTokens = hooks.summaryTargetTokens;
+        }
+        const result = hooks.summarizer(summarizeOpts);
+        if (result.ok) {
+          summaryProduced = true;
+          summaryBytes = result.block.summary.length;
+        } else {
+          skipReasons.push(`summarizer abstained: ${result.error}`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        skipReasons.push(`summarizer threw: ${msg}`);
+      }
+    }
+  } else {
+    skipReasons.push("summarizer not supplied");
+  }
+
+  return {
+    ...baseResult,
+    sleepAgentRan,
+    sleepTasksCompleted,
+    summaryProduced,
+    summaryBytes,
+    skipReasons,
+  };
 }
