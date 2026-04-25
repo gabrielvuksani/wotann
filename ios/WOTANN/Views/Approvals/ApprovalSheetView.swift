@@ -5,7 +5,7 @@ import os.log
 //
 // V9 T5.5 (F6) — iOS approval sheet that slides up when a destructive
 // tool call needs user sign-off. Subscribes to
-// `approval.queue.subscribe` + calls `approval.decide`.
+// `approvals.subscribe` + calls `approvals.decide`.
 //
 // AUTO-DENY: if the user does not decide within 30 seconds, the
 // request is auto-denied and the desktop is notified so the agent
@@ -17,7 +17,7 @@ import os.log
 //   created per view instance. Multiple phones paired to the same
 //   desktop can each have their own queue.
 // - #11 (sibling-site scan): this file is the SINGLE site on iOS
-//   subscribing to `approval.queue.*`.
+//   subscribing to `approvals.*`.
 
 private let autoDenyTimeoutSeconds: UInt64 = 30
 
@@ -164,16 +164,16 @@ final class ApprovalSheetViewModel: ObservableObject {
 
         Task { [weak rpcClient] in
             guard let rpcClient else { return }
-            _ = try? await rpcClient.send("approval.queue.subscribe")
+            _ = try? await rpcClient.send("approvals.subscribe")
         }
 
-        rpcClient.subscribe("approval.queue.request") { [weak self] event in
+        rpcClient.subscribe("approvals.notify") { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleIncoming(event)
             }
         }
 
-        rpcClient.subscribe("approval.queue.dismiss") { [weak self] event in
+        rpcClient.subscribe("approvals.dismiss") { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleDismiss(event)
             }
@@ -241,14 +241,14 @@ final class ApprovalSheetViewModel: ObservableObject {
         cancelTimers()
 
         do {
-            _ = try await rpcClient.send("approval.decide", params: [
+            _ = try await rpcClient.send("approvals.decide", params: [
                 "id": .string(request.id),
                 "granted": .bool(granted),
             ])
             errorMessage = nil
         } catch {
             errorMessage = "Could not send decision: \(error.localizedDescription)"
-            Self.log.error("approval.decide failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("approvals.decide failed: \(error.localizedDescription, privacy: .public)")
         }
 
         advance()

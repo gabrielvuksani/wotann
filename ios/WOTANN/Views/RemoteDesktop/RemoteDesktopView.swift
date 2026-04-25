@@ -2,6 +2,7 @@ import SwiftUI
 import ImageIO
 import UniformTypeIdentifiers
 import os.log
+import Combine
 
 // MARK: - RemoteDesktopView
 
@@ -11,10 +12,20 @@ struct RemoteDesktopView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = RemoteDesktopViewModel()
+    // V9 T5.1 (F1) — Wire the iOS consumer for the computer-session
+    // event stream into this surface. The service was previously
+    // dead at runtime because no view ever instantiated it. We use a
+    // holder because `ComputerSessionService.init(rpcClient:)`
+    // requires a dependency that is only available after the view
+    // is attached to the environment, which `@StateObject` cannot
+    // see at struct init time. The holder forwards the inner
+    // service's `objectWillChange` so SwiftUI re-renders on every
+    // published change.
+    @StateObject private var sessionHolder = ComputerSessionServiceHolder()
 
     var body: some View {
         NavigationStack {
-            RemoteDesktopContent(viewModel: viewModel)
+            RemoteDesktopContent(viewModel: viewModel, sessionHolder: sessionHolder)
                 .environmentObject(connectionManager)
                 .navigationTitle("Desktop Control")
                 .navigationBarTitleDisplayMode(.inline)
@@ -54,9 +65,23 @@ struct RemoteDesktopView: View {
                     viewModel.configure(rpcClient: connectionManager.rpcClient)
                     viewModel.startCapture()
                     viewModel.subscribeToCursorStream()
+                    // V9 T5.1 (F1) — Bring the computer-session service to
+                    // life. The desktop-control surface is the right home
+                    // because every action it dispatches becomes a session
+                    // step, and the service is the single channel through
+                    // which step lifecycle (started / claimed / released /
+                    // failed) reaches the user. If the daemon emits a
+                    // session id we should track, downstream wires will
+                    // call `sessionHolder.service?.subscribe(sessionId:)`;
+                    // configure here is idempotent so re-entries are safe.
+                    sessionHolder.configure(rpcClient: connectionManager.rpcClient)
                 }
                 .onDisappear {
                     viewModel.disconnect()
+                    // Tear the session subscription down with the view so
+                    // we do not leak the live RPC subscription when the
+                    // user dismisses the desktop control surface.
+                    sessionHolder.service?.disconnect()
                 }
         }
     }
@@ -98,6 +123,11 @@ struct RemoteDesktopView: View {
 /// Inner content for the remote desktop viewer.
 private struct RemoteDesktopContent: View {
     @ObservedObject var viewModel: RemoteDesktopViewModel
+    /// V9 T5.1 (F1) — observe the same holder owned by the parent so
+    /// session-lifecycle changes (status, step count, errors) trigger
+    /// re-renders here. Holder is passed in (not env-injected) so the
+    /// dependency is explicit and testable.
+    @ObservedObject var sessionHolder: ComputerSessionServiceHolder
     @EnvironmentObject var connectionManager: ConnectionManager
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
@@ -112,6 +142,19 @@ private struct RemoteDesktopContent: View {
                     message: errorMessage,
                     type: .error,
                     onRetry: { viewModel.errorMessage = nil }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // V9 T5.1 (F1) — surface session-side errors as a separate
+            // banner so a transport-level capture failure (above) and a
+            // session-level action failure read distinctly to the user.
+            if let sessionError = sessionHolder.service?.errorMessage,
+               !sessionError.isEmpty {
+                ErrorBanner(
+                    message: sessionError,
+                    type: .error,
+                    onRetry: { sessionHolder.clearError() }
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -417,11 +460,50 @@ private struct RemoteDesktopContent: View {
                 .background(WTheme.Colors.primary.opacity(0.1))
                 .clipShape(Capsule())
                 .accessibilityLabel("Quality: \(viewModel.quality.label)")
+
+            // V9 T5.1 (F1) — session-status pill. Hidden until a
+            // session is being tracked; ensures the wire is observable
+            // in the UI while still keeping the bar uncluttered for
+            // pure manual remote-desktop sessions.
+            if let service = sessionHolder.service,
+               let sessionLabel = sessionStatusLabel(for: service.sessionStatus) {
+                Text(sessionLabel)
+                    .font(WTheme.Typography.caption2)
+                    .foregroundColor(sessionStatusColor(for: service.sessionStatus))
+                    .padding(.horizontal, WTheme.Spacing.sm)
+                    .padding(.vertical, WTheme.Spacing.xxs)
+                    .background(sessionStatusColor(for: service.sessionStatus).opacity(0.1))
+                    .clipShape(Capsule())
+                    .accessibilityLabel("Agent session: \(sessionLabel), \(service.stepCount) steps")
+                    .transition(.opacity)
+            }
         }
         .padding(.horizontal, WTheme.Spacing.md)
         .padding(.vertical, WTheme.Spacing.sm)
         // T7.3 — Status bar Liquid Glass surface.
         .wLiquidGlass(in: Rectangle())
+    }
+
+    /// V9 T5.1 (F1) — render the typed `SessionStatus` enum into a
+    /// short pill label. Returns `nil` while idle so the pill stays
+    /// hidden when no agent is driving the session.
+    private func sessionStatusLabel(for status: ComputerSessionService.SessionStatus) -> String? {
+        switch status {
+        case .idle:               return nil
+        case .running:            return "Agent running"
+        case .claimed(let by):    return "Claimed by \(by)"
+        case .released:           return "Released"
+        case .failed:             return "Failed"
+        }
+    }
+
+    private func sessionStatusColor(for status: ComputerSessionService.SessionStatus) -> Color {
+        switch status {
+        case .idle, .released:   return WTheme.Colors.textSecondary
+        case .running:           return WTheme.Colors.success
+        case .claimed:           return WTheme.Colors.warning
+        case .failed:            return WTheme.Colors.error
+        }
     }
 
     private var latencyText: String {
@@ -1263,6 +1345,89 @@ final class RemoteDesktopViewModel: ObservableObject {
                 errorMessage = "Key send failed: \(error.localizedDescription)"
             }
         }
+    }
+}
+
+// MARK: - ComputerSessionServiceHolder (V9 T5.1 / F1)
+//
+// Lazy holder for `ComputerSessionService`.
+//
+// `ComputerSessionService.init(rpcClient:)` requires an RPCClient that
+// only exists once the view is attached to its environment. SwiftUI's
+// `@StateObject` cannot reach into the environment at struct-init time,
+// so we cannot construct the service eagerly. The standard pattern for
+// a service that needs late dependency injection AND must drive
+// SwiftUI re-renders is to wrap it in an outer `ObservableObject`
+// holder that:
+//
+//   1. Provides a no-arg init suitable for `@StateObject`
+//   2. Builds the inner service on `configure(rpcClient:)`
+//   3. Forwards the inner service's `objectWillChange` so any
+//      `@Published` change inside the service still triggers SwiftUI
+//      diffing on the view that observes the holder.
+//
+// This file is the SOLE construction site for `ComputerSessionService`
+// inside the iOS app. RemoteDesktopView is the natural home because
+// every action it dispatches becomes a session step, and the service
+// is the channel through which step lifecycle reaches the user.
+//
+// QUALITY BARS
+// - #6 (honest stubs): `configure(rpcClient:)` is idempotent — a
+//   second call after the service is built is a silent no-op rather
+//   than a re-construction that would drop in-flight subscriptions.
+// - #7 (per-session state): the holder is `@StateObject` so each
+//   RemoteDesktopView instance owns its own service. No module-global.
+// - #11 (sibling-site scan): grep confirms there is no other site
+//   constructing `ComputerSessionService`. This holder is the bridge.
+@MainActor
+final class ComputerSessionServiceHolder: ObservableObject {
+    /// The wrapped service. `nil` until `configure` runs. Code that
+    /// needs to subscribe to a specific session id reaches in here:
+    ///
+    ///   sessionHolder.service?.subscribe(sessionId: id)
+    ///
+    /// Read-only externally so the holder remains the single source
+    /// of construction.
+    private(set) var service: ComputerSessionService?
+
+    /// Subscription that forwards inner-service `objectWillChange`
+    /// events out to anyone observing the holder. Held strongly so
+    /// the forwarding lives as long as the holder.
+    private var objectWillChangeForward: AnyCancellable?
+
+    /// Build the inner service once we have an `RPCClient`. Calling
+    /// this twice is a no-op — we never replace a live service.
+    func configure(rpcClient: RPCClient) {
+        guard service == nil else { return }
+        let svc = ComputerSessionService(rpcClient: rpcClient)
+        // Forward the inner ObservableObject's `objectWillChange` to
+        // ours so SwiftUI re-renders when any `@Published` property on
+        // the service changes (events, status, errorMessage, etc.).
+        objectWillChangeForward = svc.objectWillChange.sink { [weak self] _ in
+            // Hop to the main actor — Combine sinks don't inherit
+            // `@MainActor` from the holder by default.
+            Task { @MainActor [weak self] in
+                self?.objectWillChange.send()
+            }
+        }
+        service = svc
+    }
+
+    /// Convenience for the error banner's onRetry — clearing requires
+    /// reaching into the inner service. The service does not currently
+    /// expose a public `clearError`, so we work with what is published:
+    /// trigger `disconnect()` if there is no active session id, which
+    /// resets `errorMessage` to nil. If there IS a session id we leave
+    /// the error in place — the user has acknowledged it via tap, but
+    /// we should not silently disconnect a live subscription.
+    func clearError() {
+        guard let svc = service else { return }
+        if svc.sessionId == nil {
+            svc.disconnect()
+        }
+        // Send objectWillChange so the banner re-evaluates even when
+        // we cannot mutate the service's private state directly.
+        objectWillChange.send()
     }
 }
 

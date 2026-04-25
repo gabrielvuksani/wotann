@@ -86,7 +86,7 @@ launcher + stream-json parser, not an authentication broker.
 Specifically:
 
 - **Claude Max/Pro**: WOTANN spawns `claude -p` (the Claude Code CLI)
-  with 38 environment variables scrubbed (see
+  with 41 environment variables scrubbed (see
   `src/providers/claude-cli-backend.ts` — `CLAUDE_CLI_CLEAR_ENV`). The
   `claude` binary reads its own credentials from
   `~/.claude/.credentials.json` or macOS Keychain service

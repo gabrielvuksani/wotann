@@ -112,6 +112,10 @@ const IntegrationsView = lazy(() => import("../integrations/IntegrationsView").t
 const BrowsePanel = lazy(() => import("../browse/BrowsePanel").then((m) => ({ default: m.BrowsePanel })));
 // V9 T5.12 — cross-device Fleet Dashboard (separate from local AgentFleetDashboard).
 const FleetDashboard = lazy(() => import("../fleet/FleetDashboard").then((m) => ({ default: m.FleetDashboard })));
+// V9 T5.4 — Creations browser (per-session agent-output file list).
+// Was ZERO callers per the 2026-04-25 desktop-app gap audit; the daemon
+// owns a CreationsStore + RPC surface but desktop had no UI mount.
+const CreationsBrowser = lazy(() => import("../creations/CreationsBrowser").then((m) => ({ default: m.CreationsBrowser })));
 
 // ── Resizable Panel Hook ───────────────────────────────────────────
 
@@ -274,6 +278,12 @@ function WorkspaceContent({
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><BrowsePanel /></Suspense></ErrorBoundary>;
     case "fleet":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><FleetDashboard /></Suspense></ErrorBoundary>;
+    case "creations":
+      // V9 T5.4 — Creations browser as a first-class view. The daemon
+      // owns the per-session creations store; this surface lists, views,
+      // and deletes them. Reachable via setView("creations") from the
+      // command palette or any future sidebar entry.
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><CreationsBrowser /></Suspense></ErrorBoundary>;
     default:
       return <ErrorBoundary><ChatView /></ErrorBoundary>;
   }

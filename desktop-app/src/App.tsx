@@ -29,6 +29,8 @@ import {
   type RavenFlight,
 } from "./components/chat/RavensFlightAnimation";
 import { PatronSummoning, type Patron } from "./components/onboarding/PatronSummoning";
+import { CursorTrailOverlay } from "./components/workshop/CursorTrailOverlay";
+import { Delivery } from "./components/Delivery";
 
 /**
  * Dispatch-fired event payload for RavensFlightAnimation. Pages or
@@ -69,6 +71,23 @@ export function App() {
 
   /** Active raven flights. Pruned by RavensFlightAnimation's onFlightComplete. */
   const [flights, setFlights] = useState<readonly RavenFlight[]>([]);
+
+  /**
+   * V9 T5.2 — CursorTrailOverlay session id. Producers (computer-use
+   * panels, Workshop, RPC handlers) emit `wotann:computer-session-active`
+   * with `{ sessionId | null }` to start / stop the live overlay. Null or
+   * empty string clears the overlay so leftovers from a prior session
+   * never linger over the canvas.
+   */
+  const [cursorSessionId, setCursorSessionId] = useState<string | null>(null);
+
+  /**
+   * V9 T5.7 — Delivery panel toggle. Components fire `wotann:open-delivery`
+   * (e.g. a notification badge click, a daemon push handler) to bring the
+   * sheet up. Acks are sent by the panel itself; closing the sheet does
+   * not cancel in-flight RPCs — same opt-in pattern as PatronSummoning.
+   */
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
 
   // T14.4 keybindings — kept here so they live alongside the motif state.
   // The base keybinding map is in src/hooks/useShortcuts.ts; we layer the
@@ -124,6 +143,40 @@ export function App() {
     }
     window.addEventListener("wotann:open-patron", onOpen);
     return () => window.removeEventListener("wotann:open-patron", onOpen);
+  }, []);
+
+  // V9 T5.2 — CursorTrailOverlay subscriber. Anywhere the desktop app
+  // starts/stops a computer-use session, it emits
+  //   window.dispatchEvent(new CustomEvent("wotann:computer-session-active",
+  //                        { detail: { sessionId: "..." | null } }))
+  // and the global overlay either mounts an SSE-backed cursor trail or
+  // tears it down. Empty / null detail clears the overlay so a stale
+  // trail from a previous session never lingers over the canvas.
+  useEffect(() => {
+    function onSession(evt: Event) {
+      const detail =
+        (evt as CustomEvent<{ readonly sessionId?: string | null }>).detail ??
+        {};
+      const next =
+        typeof detail.sessionId === "string" && detail.sessionId.length > 0
+          ? detail.sessionId
+          : null;
+      setCursorSessionId(next);
+    }
+    window.addEventListener("wotann:computer-session-active", onSession);
+    return () =>
+      window.removeEventListener("wotann:computer-session-active", onSession);
+  }, []);
+
+  // V9 T5.7 — Delivery panel open-trigger subscriber. Any surface (a
+  // notification badge, a daemon push handler, the command palette) can
+  // emit `wotann:open-delivery` to bring the global delivery sheet up.
+  useEffect(() => {
+    function onOpen() {
+      setDeliveryOpen(true);
+    }
+    window.addEventListener("wotann:open-delivery", onOpen);
+    return () => window.removeEventListener("wotann:open-delivery", onOpen);
   }, []);
 
   const handleFlightComplete = useCallback((flightId: string) => {
@@ -323,6 +376,77 @@ export function App() {
               </button>
             </header>
             <ConversationBraids threads={braidsSeed} />
+          </div>
+        </div>
+      )}
+
+      {/*
+        V9 T5.2 — CursorTrailOverlay. Rendered as a global fixed-
+        position layer (pointer-events: none from the component itself)
+        so the trail follows the agent's cursor across whatever view is
+        active. We only mount when a session id is present — otherwise
+        the layer is omitted entirely so idle desktops cost nothing.
+        The component opens its own SSE subscription against the daemon
+        when given just a sessionId (no `samples` prop).
+      */}
+      {cursorSessionId !== null && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            pointerEvents: "none",
+            zIndex: 900,
+          }}
+        >
+          <CursorTrailOverlay sessionId={cursorSessionId} />
+        </div>
+      )}
+
+      {/*
+        V9 T5.7 — Delivery panel modal. Open via `wotann:open-delivery`
+        window event (notification badge click, daemon push, etc.). The
+        sheet renders the pending-deliveries list with Acknowledge
+        buttons. Closing dismisses the modal but does not cancel
+        in-flight RPCs.
+      */}
+      {deliveryOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Pending deliveries"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeliveryOpen(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setDeliveryOpen(false);
+          }}
+          tabIndex={-1}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 9, 15, 0.78)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 32,
+          }}
+        >
+          <div
+            style={{
+              width: "min(640px, 100%)",
+              maxHeight: "min(720px, 100%)",
+              overflow: "hidden",
+              background: "var(--surface-1)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 12,
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <Delivery />
           </div>
         </div>
       )}

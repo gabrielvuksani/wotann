@@ -4,7 +4,7 @@ import SwiftUI
 //
 // V9 T5.11 (F14) — Handoff banner that appears when the desktop
 // signals a session is eligible to resume on the phone. Subscribes
-// to `session.handoff.subscribe` and, when a candidate exists,
+// to `computer.session.handoff` and, when a candidate exists,
 // presents a pill the user taps to adopt the session.
 //
 // Behaviour mirrors the iOS `NSUserActivity` Handoff card but is
@@ -17,7 +17,7 @@ import SwiftUI
 // - #7 (per-session state): `HandoffViewModel` is @StateObject, so
 //   each HandoffView instance has its own queue. No module-global.
 // - #11 (sibling-site scan): this file is the SINGLE site on iOS
-//   subscribing to `session.handoff.*`.
+//   subscribing to `computer.session.handoff*`.
 
 struct HandoffView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
@@ -130,15 +130,15 @@ final class HandoffViewModel: ObservableObject {
 
         Task { [weak rpcClient] in
             guard let rpcClient else { return }
-            _ = try? await rpcClient.send("session.handoff.subscribe")
+            _ = try? await rpcClient.send("computer.session.handoff")
         }
 
-        rpcClient.subscribe("session.handoff.announce") { [weak self] event in
+        rpcClient.subscribe("computer.session.handoff") { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleAnnounce(event)
             }
         }
-        rpcClient.subscribe("session.handoff.revoke") { [weak self] event in
+        rpcClient.subscribe("computer.session.expireHandoff") { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleRevoke(event)
             }
@@ -189,7 +189,7 @@ final class HandoffViewModel: ObservableObject {
     func accept() async {
         guard let candidate = current, let rpcClient else { return }
         do {
-            _ = try await rpcClient.send("session.handoff.accept", params: [
+            _ = try await rpcClient.send("computer.session.acceptHandoff", params: [
                 "sessionId": .string(candidate.id),
             ])
             errorMessage = nil
@@ -207,7 +207,7 @@ final class HandoffViewModel: ObservableObject {
         }
         Task { [weak rpcClient] in
             guard let rpcClient else { return }
-            _ = try? await rpcClient.send("session.handoff.dismiss", params: [
+            _ = try? await rpcClient.send("computer.session.expireHandoff", params: [
                 "sessionId": .string(candidate.id),
             ])
         }

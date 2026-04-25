@@ -72,6 +72,8 @@ import {
   DeferredToolFilterMiddleware,
   createDeferredToolFilterMiddleware,
 } from "./deferred-tool-filter.js";
+import { createTrifectaGuardMiddleware } from "./layers.js";
+import type { TrifectaContext } from "./trifecta-guard.js";
 
 // ── Shared instances for new middleware ────────────────────────
 
@@ -94,6 +96,30 @@ const defaultSandboxAuditInstance = new SandboxAuditMiddleware();
 const defaultTitleInstance = new TitleMiddleware();
 const defaultDeferredToolFilterInstance = new DeferredToolFilterMiddleware();
 
+// V9 T10.P0.4 — Trifecta Guard middleware. Closure of the agentic-browser
+// P0 security gate: ANY tool call simultaneously satisfying Willison's
+// lethal trifecta (untrusted page input + private data access + external
+// communication capability) requires human approval. Default approval
+// handler conservatively DENIES until the runtime injects a real
+// ApprovalQueue handler — this fail-closed default matches QB #6.
+const defaultTrifectaContextProvider = (
+  ctx: import("./types.js").MiddlewareContext,
+): TrifectaContext | null => {
+  const tool = (ctx as unknown as { toolName?: unknown }).toolName;
+  if (typeof tool !== "string" || tool.length === 0) return null;
+  const args = (ctx as unknown as { toolArgs?: Readonly<Record<string, unknown>> }).toolArgs;
+  return {
+    toolName: tool,
+    ...(args ? { args } : {}),
+    initiatedFromUntrustedSource:
+      (ctx as unknown as { initiatedFromUntrustedSource?: boolean })
+        .initiatedFromUntrustedSource === true,
+    sessionHasPrivateData:
+      (ctx as unknown as { sessionHasPrivateData?: boolean }).sessionHasPrivateData === true,
+  };
+};
+const defaultDenyApprovalHandler = async (): Promise<"approve" | "deny"> => "deny";
+
 // ── Pipeline Definition (31 layers in order, 6 Lane 2 additions) ─
 
 const PIPELINE: readonly Middleware[] = [
@@ -107,6 +133,11 @@ const PIPELINE: readonly Middleware[] = [
   createSandboxAuditMiddleware(defaultSandboxAuditInstance), // 4.7. Lane 2: sandbox command audit
   guardrailMiddleware, // 5. Pre-execution auth (keyword heuristic — existing)
   createGuardrailProviderMiddleware(defaultGuardrailProviderInstance), // 5.5. Lane 2: pluggable provider
+  createTrifectaGuardMiddleware({
+    approvalHandler: defaultDenyApprovalHandler,
+    contextProvider: defaultTrifectaContextProvider,
+    strictMode: false,
+  }), // 5.7. V9 T10.P0.4: Trifecta Guard (untrusted-input + private-data + external-comm = approval-required)
   toolErrorMiddleware, // 6. Error standardization
   createOutputTruncationMiddleware(defaultOutputTruncationInstance), // 6.5. Output truncation
   createLLMErrorHandlingMiddleware(defaultLLMErrorHandlingInstance), // 6.7. Lane 2: canonical provider errors
