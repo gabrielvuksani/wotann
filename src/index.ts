@@ -5750,6 +5750,144 @@ designCmd
     },
   );
 
+// ── wotann design verify ─────────────────────────────────────
+// V9 Tier 8 T8.4 — diff a workspace's current design tokens against
+// a Claude-Design handoff bundle. Used by the T8.7 design-drift CI
+// action and by developers auditing alignment.
+designCmd
+  .command("verify")
+  .description("Diff a workspace's tokens against a Claude-Design handoff bundle")
+  .requiredOption("--bundle <path>", "Path to the handoff bundle (.zip)")
+  .option("--workspace <dir>", "Workspace to extract from (default: cwd)")
+  .option("--json", "Emit a structured JSON envelope (used by CI)", false)
+  .action(async (opts: { bundle: string; workspace?: string; json?: boolean }) => {
+    const { runDesignVerify } = await import("./cli/commands/design-verify.js");
+    const result = await runDesignVerify({
+      bundlePath: opts.bundle,
+      workspaceDir: opts.workspace ?? process.cwd(),
+    });
+    if (opts.json === true) {
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      process.exit(result.ok ? 0 : 2);
+    }
+    if (!result.ok) {
+      process.stderr.write(chalk.red(`design verify failed: ${result.error}\n`));
+      process.exit(2);
+    }
+    process.stderr.write(result.summary);
+    if (result.hasDrift) process.exit(1);
+  });
+
+// ── wotann design preview ────────────────────────────────────
+// V9 Tier 8 T8.4 — render a workspace's current tokens (or a
+// handoff bundle's tokens) as a structured palette/spacing/typography
+// summary. Pass exactly one of --workspace or --bundle.
+designCmd
+  .command("preview")
+  .description("Render a workspace's or handoff bundle's tokens as a summary")
+  .option("--workspace <dir>", "Workspace to extract from")
+  .option("--bundle <path>", "Handoff bundle (.zip) to render")
+  .option("--json", "Emit JSON (default: pretty)", false)
+  .action(async (opts: { workspace?: string; bundle?: string; json?: boolean }) => {
+    const hasWs = typeof opts.workspace === "string" && opts.workspace.length > 0;
+    const hasBundle = typeof opts.bundle === "string" && opts.bundle.length > 0;
+    if (hasWs === hasBundle) {
+      process.stderr.write(chalk.red("error: pass exactly one of --workspace or --bundle\n"));
+      process.exit(2);
+    }
+    const { runDesignPreview } = await import("./cli/commands/design-preview.js");
+    const result = hasWs
+      ? await runDesignPreview({ workspaceDir: opts.workspace as string })
+      : await runDesignPreview({ bundlePath: opts.bundle as string });
+    if (!result.ok) {
+      process.stderr.write(chalk.red(`design preview failed: ${result.error}\n`));
+      process.exit(2);
+    }
+    if (opts.json === true) {
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      return;
+    }
+    process.stderr.write(
+      chalk.green("✓") +
+        ` palettes=${result.palettes.length} spacing=${result.spacing.length} ` +
+        `font-families=${result.typography.fontFamilies.length}\n`,
+    );
+    for (const p of result.palettes.slice(0, 5)) {
+      process.stderr.write(chalk.dim(`  palette '${p.name}': ${p.colors.length} colors\n`));
+    }
+  });
+
+// ── wotann design apply ──────────────────────────────────────
+// V9 Tier 8 T8.4 — apply a handoff bundle's tokens to the workspace.
+// CLI mode auto-approves every change (--auto). Without --auto the
+// command prompts via stdin per change.
+designCmd
+  .command("apply")
+  .description("Apply tokens from a handoff bundle to a workspace (interactive by default)")
+  .requiredOption("--bundle <path>", "Path to the handoff bundle (.zip)")
+  .option("--workspace <dir>", "Workspace to apply against (default: cwd)")
+  .option("--auto", "Auto-approve every change without prompting", false)
+  .action(async (opts: { bundle: string; workspace?: string; auto?: boolean }) => {
+    const { runDesignApply } = await import("./cli/commands/design-apply.js");
+    const result = await runDesignApply({
+      bundlePath: opts.bundle,
+      workspaceDir: opts.workspace ?? process.cwd(),
+      approvalHandler: async (change) => {
+        if (opts.auto === true) return true;
+        // Default to safe: do not auto-apply when interactive prompt
+        // isn't available (CLI mode without --auto). Future work:
+        // wire to readline prompt.
+        process.stderr.write(
+          chalk.yellow(
+            `[skip] ${change.path}: pass --auto to apply, or use the TUI for per-change prompting\n`,
+          ),
+        );
+        return false;
+      },
+    });
+    if (!result.ok) {
+      process.stderr.write(chalk.red(`design apply failed: ${result.error}\n`));
+      process.exit(2);
+    }
+    process.stderr.write(
+      chalk.green("✓") + ` applied=${result.applied.length} skipped=${result.skipped.length}\n`,
+    );
+  });
+
+// ── wotann design export ─────────────────────────────────────
+// V9 Tier 8 T8.4 — extract a workspace's design system and write a
+// portable Claude-Design handoff bundle to disk.
+designCmd
+  .command("export")
+  .description("Extract a workspace's design system to a handoff bundle")
+  .requiredOption("--out <dir>", "Output directory for the bundle")
+  .option("--workspace <dir>", "Workspace to extract from (default: cwd)")
+  .option("--include-frequency-meta", "Annotate tokens with frequency metadata", false)
+  .option("--force", "Overwrite --out if it exists", false)
+  .action(
+    async (opts: {
+      out: string;
+      workspace?: string;
+      includeFrequencyMeta?: boolean;
+      force?: boolean;
+    }) => {
+      const { runDesignExport } = await import("./cli/commands/design-export.js");
+      const result = await runDesignExport({
+        workspaceDir: opts.workspace ?? process.cwd(),
+        outDir: opts.out,
+        includeFrequencyMeta: opts.includeFrequencyMeta === true,
+        force: opts.force === true,
+      });
+      if (!result.ok) {
+        process.stderr.write(chalk.red(`design export failed: ${result.error}\n`));
+        process.exit(2);
+      }
+      process.stderr.write(
+        chalk.green(`✓ wrote ${result.fileCount} files to ${result.bundleDir}\n`),
+      );
+    },
+  );
+
 // ── wotann design mode ──────────────────────────────────────
 // P1-C7: Cursor 3 Design Mode + Canvases port. Canvases are
 // durable, serializable design artifacts persisted under
