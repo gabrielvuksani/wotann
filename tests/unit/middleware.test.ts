@@ -16,13 +16,15 @@ describe("Middleware Pipeline", () => {
       // Lane 2 added 6 more middleware (DanglingToolCall, SandboxAudit,
       // GuardrailProvider, LLMErrorHandling, DeferredToolFilter, Title).
       // P1-B6 added LoopDetection at 24.5 (Crush port, per-session).
-      // Total: 33 layers.
+      // V9 T10.P0.4 added TrifectaGuard at 5.7 (lethal-trifecta gate).
+      // Total: 34 layers.
       const pipeline = createDefaultPipeline();
       const names = pipeline.getLayerNames();
 
-      expect(names).toHaveLength(33);
+      expect(names).toHaveLength(34);
       expect(names[0]).toBe("ToolPairValidator");
       expect(names[1]).toBe("IntentGate");
+      expect(names).toContain("TrifectaGuard");
       expect(names[2]).toBe("ThreadData");
       expect(names[3]).toBe("Uploads");
       expect(names[4]).toBe("FileTypeGate");

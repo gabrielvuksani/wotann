@@ -1205,6 +1205,33 @@ export class CompanionServer {
     }
   }
 
+  /**
+   * Broadcast a JSON-RPC notification (topic-string `method`) to every
+   * connected WebSocket client. This is the entrypoint used by the
+   * `companion-bridge` (see `src/session/dispatch/companion-bridge.ts`)
+   * to translate UnifiedDispatchPlane events into the iOS-subscribed
+   * topics: `approvals.notify`, `creations.updated`, `cursor.stream`,
+   * `live.activity`, `delivery`, `computer.session.events`, etc.
+   *
+   * Per-client send failures are swallowed so a single bad socket does
+   * not poison the broadcast (matches the behavior of broadcastHaptic /
+   * broadcastStreamEvent).
+   */
+  broadcastNotification(notification: {
+    readonly jsonrpc: "2.0";
+    readonly method: string;
+    readonly params: Readonly<Record<string, unknown>>;
+  }): void {
+    const data = JSON.stringify(notification);
+    for (const client of this.connectedClients) {
+      try {
+        (client as WebSocketLike).send(data);
+      } catch {
+        // Per-client send failure must not poison the broadcast.
+      }
+    }
+  }
+
   private registerDefaultHandlers(): void {
     this.rpcHandler.register("ping", async () => ({
       status: "ok",

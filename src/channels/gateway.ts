@@ -24,6 +24,21 @@
 import { randomUUID } from "node:crypto";
 import type { ChannelType } from "./channel-types.js";
 import type { RoutePolicyEngine } from "./route-policies.js";
+// V9 T14.1 closure: push-inversion is the substrate that lets MCP /
+// webhook / cron triggers initiate messages INTO an active session.
+// The gateway exposes it as a participating layer so external surfaces
+// can route through `gateway.pushIntoSession(...)` without holding a
+// reference to a separate registry. ChannelDispatchManager (dispatch.ts)
+// continues to own its own per-instance registry; the gateway's wiring
+// is the second consumer the V9 audit asked for, alongside the first.
+import {
+  createPushInversionRegistry,
+  type DeregisterFn as PushInversionDeregisterFn,
+  type PushInversionRegistry,
+  type PushMessage,
+  type PushResult,
+  type RegisterOptions as PushInversionRegisterOptions,
+} from "./push-inversion.js";
 
 export type { ChannelType } from "./channel-types.js";
 
@@ -115,6 +130,15 @@ export class ChannelGateway {
   // keep passing unchanged.
   private routePolicyEngine: RoutePolicyEngine | null = null;
 
+  // V9 T14.1: push-inversion registry — external triggers (MCP, webhook,
+  // cron) call `gateway.pushIntoSession(sessionId, msg)` to deliver a
+  // message into an active session without going through the inbound-
+  // message pipeline. Registry is per-gateway (QB #7) — each gateway
+  // instance owns its own state, no module globals. Defaults to a fresh
+  // registry; callers may override via `setPushInversionRegistry()` to
+  // share state with `ChannelDispatchManager`.
+  private pushInversionRegistry: PushInversionRegistry = createPushInversionRegistry();
+
   constructor(config?: Partial<GatewayConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
@@ -130,6 +154,57 @@ export class ChannelGateway {
 
   getRoutePolicyEngine(): RoutePolicyEngine | null {
     return this.routePolicyEngine;
+  }
+
+  /**
+   * V9 T14.1 — Replace the gateway's push-inversion registry. Callers
+   * that want the gateway to share registry state with a
+   * `ChannelDispatchManager` pass that manager's registry here so a
+   * single source of truth covers both inbound message routing and
+   * out-of-band push-inversion deliveries. Honest stub: when no caller
+   * calls this method, the gateway uses its own private registry.
+   */
+  setPushInversionRegistry(registry: PushInversionRegistry): void {
+    this.pushInversionRegistry = registry;
+  }
+
+  /** V9 T14.1 — Read access to the registry, e.g. for diagnostics. */
+  getPushInversionRegistry(): PushInversionRegistry {
+    return this.pushInversionRegistry;
+  }
+
+  /**
+   * V9 T14.1 — Register a session-bound sink for push-inversion. The
+   * caller (typically the runtime that owns the session) supplies the
+   * sink that delivers a {@link PushMessage} to the session's input
+   * channel. Returns a deregister function the caller invokes on
+   * session close.
+   */
+  registerPushSession(
+    sessionId: string,
+    opts: PushInversionRegisterOptions,
+  ): PushInversionDeregisterFn {
+    return this.pushInversionRegistry.register(sessionId, opts);
+  }
+
+  /**
+   * V9 T14.1 — Deliver a push-inversion message into a registered
+   * session. Returns the rate/dedupe/sink outcome envelope from the
+   * registry; pushes to unregistered sessions return
+   * `{ok:false, reason:"not-registered"}` per QB #6 honest failures.
+   */
+  async pushIntoSession(sessionId: string, message: PushMessage): Promise<PushResult> {
+    return this.pushInversionRegistry.push(sessionId, message);
+  }
+
+  /** V9 T14.1 — Active push-inversion session ids. */
+  listPushSessions(): readonly string[] {
+    return this.pushInversionRegistry.list();
+  }
+
+  /** V9 T14.1 — Has the given session registered for push-inversion? */
+  hasPushSession(sessionId: string): boolean {
+    return this.pushInversionRegistry.has(sessionId);
   }
 
   /**

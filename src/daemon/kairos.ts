@@ -28,6 +28,11 @@ import { WotannRuntime } from "../core/runtime.js";
 import { loadConfig } from "../core/config.js";
 import { CompanionServer } from "../desktop/companion-server.js";
 import { SupabaseRelay } from "../desktop/supabase-relay.js";
+import {
+  createCompanionBridge,
+  type CompanionBridgeHandle,
+} from "../session/dispatch/companion-bridge.js";
+import { createReplayRegistry, type ReplayRegistry } from "./transport/index.js";
 import { BackgroundWorkerManager } from "./background-workers.js";
 import { PatternCrystallizer } from "../learning/pattern-crystallizer.js";
 import { FeedbackCollector } from "../learning/feedback-collector.js";
@@ -177,6 +182,27 @@ export class KairosDaemon {
   private rpcHandler: KairosRPCHandler | null = null;
   private ipcServer: KairosIPCServer | null = null;
   private companionServer: CompanionServer | null = null;
+
+  // T5 cross-surface dispatch bridge — translates UnifiedDispatchPlane
+  // events into JSON-RPC notifications on the iOS-subscribed topic strings
+  // (`approvals.notify`, `creations.updated`, `cursor.stream`, `live.activity`,
+  // `delivery`, `computer.session.events`, etc). Without this, iOS's
+  // `rpcClient.subscribe(...)` calls never see plane-emitted events because
+  // the daemon only emits `method:"stream"` over the WS surface. Bridge is
+  // minted after the runtime + companion server are alive (runtime owns the
+  // dispatch plane) and torn down before either is closed.
+  private companionBridge: CompanionBridgeHandle | null = null;
+
+  // T12.18 ReplayRegistry singleton — minted at start(), torn down at
+  // stop(). Single capture point for outgoing WebSocket frames; emit
+  // sites in CompanionServer / RpcSubscription forwarders call
+  // `replayRegistry.append(sessionId, payload)` so reconnecting clients
+  // can drain missed frames via `replayRegistry.since(sessionId, lastSeq)`.
+  // Holding the instance on the daemon keeps the registry per-daemon
+  // (QB #7 — no module-global singleton) and threads it via DI from the
+  // composition root rather than parallel-constructing buffers at each
+  // emit site (QB #10 — sibling-site safety).
+  private replayRegistry: ReplayRegistry | null = null;
 
   // Self-improvement subsystems (wired at start, accessible from all surfaces via RPC)
   private readonly backgroundWorkers = new BackgroundWorkerManager();
@@ -390,11 +416,44 @@ export class KairosDaemon {
       });
       this.ipcServer.start();
 
+      // T12.18: mint the per-daemon ReplayRegistry BEFORE the WS server
+      // starts so any emit site that captures the registry on construction
+      // (CompanionServer / RPC subscription forwarders) picks up a live
+      // instance rather than null. The registry holds per-session bounded
+      // buffers — a reconnecting client can drain missed frames via
+      // `replayRegistry.since(sessionId, lastSeq)` after calling
+      // `auth.handshake` to re-bind its sessionId. defaultCapacity left at
+      // the module default (64) — large enough for typical reconnect
+      // windows without flooding memory under abusive clients.
+      this.replayRegistry = createReplayRegistry();
+
       // Phase A5: Start CompanionServer for iOS connections
       this.companionServer = new CompanionServer({ port: 3849 });
       this.companionServer.setRuntime(this.runtime);
       this.companionServer.setBridgeRPCHandler(this.rpcHandler);
       this.companionServer.start();
+
+      // T5 cross-surface dispatch bridge — wire the runtime's
+      // UnifiedDispatchPlane to the CompanionServer's WS broadcast so iOS
+      // subscribers on `approvals.notify`, `creations.updated`,
+      // `cursor.stream`, `live.activity`, `delivery`,
+      // `computer.session.events`, `computer.session.handoff`, and
+      // `watch.dispatch` actually receive the events the plane already
+      // emits in-process. Closes the silent dead-letter at the WS boundary
+      // for every F-series cross-surface feature (T5.5/6/7/9/10/11/12/13).
+      try {
+        const plane = this.runtime.getDispatchPlane();
+        this.companionBridge = createCompanionBridge(plane, this.companionServer);
+        this.appendLog({
+          type: "start",
+          message: "T5 companion bridge wired (UnifiedDispatchPlane -> WS topics)",
+        });
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `Failed to wire companion bridge: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
 
       // Phase A6: Start Supabase Relay for remote iOS access
       this.supabaseRelay = new SupabaseRelay();
@@ -770,9 +829,31 @@ export class KairosDaemon {
       this.ipcServer.stop();
       this.ipcServer = null;
     }
+    // T5 — tear down the companion bridge BEFORE the companion server
+    // closes so any in-flight plane events that try to broadcast via the
+    // bridge see the dispose'd bridge (no-op) rather than racing a
+    // partially-shut WS server. The bridge unsubscribes from the plane
+    // and clears its surface-subscriber registry on dispose().
+    if (this.companionBridge) {
+      try {
+        this.companionBridge.dispose();
+      } catch {
+        /* best-effort */
+      }
+      this.companionBridge = null;
+    }
     if (this.companionServer) {
       this.companionServer.stop();
       this.companionServer = null;
+    }
+    // T12.18: tear down the replay registry AFTER the WS server has
+    // stopped so any in-flight close-handler emits land in the buffer
+    // before disposeAll() forbids further appends. disposeAll() clears
+    // every per-session buffer and flips the registry into a state where
+    // every subsequent append returns `{ok:false, reason:"registry-disposed"}`.
+    if (this.replayRegistry) {
+      this.replayRegistry.disposeAll();
+      this.replayRegistry = null;
     }
     if (this.runtime) {
       this.runtime.close();
@@ -823,6 +904,21 @@ export class KairosDaemon {
    */
   getCompanionServer(): CompanionServer | null {
     return this.companionServer;
+  }
+
+  /**
+   * T12.18: Get the per-daemon ReplayRegistry for WebSocket frame
+   * replay. Emit sites (CompanionServer push handlers, RPC subscription
+   * forwarders) that want to capture outgoing frames pull the registry
+   * here and call `append(sessionId, payload)`. Reconnect logic resolves
+   * `since(sessionId, lastSeq)` to drain missed frames.
+   *
+   * Returns null when the daemon hasn't started yet or has already
+   * stopped — callers must branch on null and treat it as "no replay
+   * available, fall back to fresh subscribe".
+   */
+  getReplayRegistry(): ReplayRegistry | null {
+    return this.replayRegistry;
   }
 
   getStatus(): DaemonState {

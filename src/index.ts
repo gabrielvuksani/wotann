@@ -7210,6 +7210,33 @@ program
     },
   );
 
+// ── wotann magic — V9 T12.17 dot-shortcut wire ─────────────
+//
+// 15 magic handlers (.fix, .test, .review, .refactor, .explain,
+// .docstring, .format, .optimize, .investigate-issue, .investigate-pr,
+// .investigate-workflow, .ai-commit, .pr-content, .merge-conflict,
+// .release-notes) shipped with zero CLI callers. This wire exposes
+// them as `wotann magic <command> [args...]` so users can preview the
+// expanded prompt/system-augment a handler produces. The command list
+// in --help is generated from MAGIC_COMMANDS so new shortcuts surface
+// automatically.
+{
+  const { runMagicCommand, listMagicCommands } = await import("./cli/commands/magic.js");
+  program
+    .command("magic <command> [args...]")
+    .description(`Invoke a magic dot-shortcut by id (V9 T12.17).\n${listMagicCommands()}`)
+    .action((command: string, args: string[]) => {
+      const result = runMagicCommand({ command, args: args ?? [] });
+      if (!result.ok) {
+        process.stderr.write(chalk.red(`${result.error ?? "magic: unknown error"}\n`));
+        process.exit(1);
+      }
+      if (result.output !== undefined) {
+        process.stdout.write(result.output + "\n");
+      }
+    });
+}
+
 // ── Parse ───────────────────────────────────────────────────
 
 // Deep-link fast path — if the first positional arg is a `wotann://` URL,

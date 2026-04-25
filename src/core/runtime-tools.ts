@@ -329,6 +329,70 @@ function buildTmuxPullTool(): ToolDefinition {
 }
 
 /**
+ * Build the parallel_search tool definition (T12.3 — WarpGrep wrapper).
+ * Fans a list of queries out across the parallel-search primitive
+ * (codebase / memory / docs / git / file-content) with hard budgets so
+ * the model can ask multi-hypothesis questions without starving the
+ * event loop. Returns a ranked SearchHit[] envelope; honest-failure
+ * posture (ok:false on bad input, no throws into dispatch).
+ */
+function buildParallelSearchTool(): ToolDefinition {
+  return {
+    name: "parallel_search",
+    description:
+      "Run up to 8 search queries in parallel across codebase, docs, " +
+      "memory, git history, and file content. Returns a deduplicated, " +
+      "score-ranked SearchHit[] capped at 200 hits / 30KB / 3000ms. " +
+      "Use when investigating multi-hypothesis questions (e.g. 'find " +
+      "every place X is wired AND every place Y is configured AND every " +
+      "test that exercises Z') — much faster than sequential greps. " +
+      "Returns `{ok:true, hits, totalHits, truncated, durationMs}` on " +
+      "success or `{ok:false, reason, error}` on bad input.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        queries: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Non-empty list of search queries. Each query fans out across " +
+            "every active source. Empty strings are dropped. Capped at 8 " +
+            "queries per call — additional queries are silently truncated.",
+        },
+        sources: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [
+              "codebase",
+              "memory",
+              "web",
+              "academic",
+              "documentation",
+              "git-history",
+              "file-content",
+            ],
+          },
+          description:
+            "Optional restriction to a subset of search sources. " + "Default: every source.",
+        },
+        maxHits: {
+          type: "number",
+          description: "Optional override of the 200-hit cap. Hard ceiling: 200.",
+        },
+        maxWallclockMs: {
+          type: "number",
+          description:
+            "Optional override of the 3000ms wall-clock budget. " +
+            "Hard ceiling: 3000ms — requests above the ceiling are clamped.",
+        },
+      },
+      required: ["queries"],
+    },
+  };
+}
+
+/**
  * Build the find_symbol tool definition (Serena port).
  * Exposes workspace-wide symbol search as a first-class agent tool so
  * the model can target by name rather than reading whole files.
@@ -416,6 +480,7 @@ export const RUNTIME_TOOL_NAMES = [
   "terminal_run",
   "image_read",
   "tmux_pull",
+  "parallel_search",
 ] as const;
 
 export type RuntimeToolName = (typeof RUNTIME_TOOL_NAMES)[number];
@@ -495,6 +560,13 @@ export function buildEffectiveTools(
   // shells via execFile). Each returns an honest envelope; a missing tmux
   // binary surfaces as `{ok:false, reason:...}` rather than a runtime throw.
   tools.push(buildTerminalRunTool(), buildImageReadTool(), buildTmuxPullTool());
+
+  // T12.3 parallel_search: WarpGrep multi-query wrapper around the
+  // ParallelSearchDispatcher primitive. Always registered — the
+  // dispatcher reads from disk + git, never writes, and is bounded by a
+  // 3000ms wallclock + 200-hit + 30KB output cap inside the agent
+  // wrapper, so registering unconditionally is safe.
+  tools.push(buildParallelSearchTool());
 
   // plan tools: only when PlanStore is available
   if (deps.planStoreAvailable) {

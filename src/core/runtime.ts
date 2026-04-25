@@ -923,6 +923,13 @@ export class WotannRuntime {
   private readonly toolPatternDetector = new PatternDetector({ maxHistory: 500 });
   private searchProvider: WebSearchProvider | null = null;
 
+  // ── V9 T3.1 Claude SDK bridge handle ──
+  // Set by initialize() when the active provider is a Claude subscription
+  // (anthropic + oauth-token) AND `WOTANN_SUBSCRIPTION_SDK_ENABLED` is on.
+  // Null otherwise — runtime falls through to the BYOK provider path.
+  // close() releases the embedded HTTP hook server + temp config files.
+  private claudeBridge: import("../claude/index.js").BridgeHandle | null = null;
+
   /**
    * Dual-terminal steering — when `WOTANN_STEERING=1` (or
    * `config.enableSteering`), the runtime allocates a SteeringServer bound
@@ -1907,6 +1914,36 @@ export class WotannRuntime {
       if (firstProvider) {
         this.session = createSession(firstProvider.provider, firstProvider.models[0] ?? "auto");
         this.contextIntelligence.adaptToProvider(this.session.provider, this.session.model);
+      }
+    }
+
+    // ── V9 T3.1 — Claude SDK bridge ──
+    // When the active provider is a Claude subscription (anthropic +
+    // oauth-token billing) AND `WOTANN_SUBSCRIPTION_SDK_ENABLED` is not
+    // disabled, spin up the in-process bridge so the entire
+    // src/claude/{hooks,agents,channels,hardening} apparatus is reachable.
+    // Honest fallback: any failure (flag off, hook server bind error,
+    // missing dep) leaves `claudeBridge` null and lets the runtime continue
+    // on the legacy non-bridged Claude path. Single call site by design.
+    if (this.claudeBridge === null) {
+      const claudeSubscription = providers.find(
+        (p) => p.provider === "anthropic" && p.method === "oauth-token",
+      );
+      if (claudeSubscription) {
+        try {
+          const { startBridge } = await import("../claude/index.js");
+          this.claudeBridge = await startBridge({
+            deps: {},
+            sessionId: this.session.id,
+            log: (level, msg) =>
+              level === "error"
+                ? console.error(`[WOTANN claude-bridge] ${msg}`)
+                : console.warn(`[WOTANN claude-bridge] ${msg}`),
+          });
+        } catch (err) {
+          console.warn(`[WOTANN] claude-bridge init failed: ${(err as Error).message}`);
+          this.claudeBridge = null;
+        }
       }
     }
 
@@ -6682,6 +6719,19 @@ export class WotannRuntime {
     // probe predecessors via detectSupersession to auto-emit `updates`
     // edges on contradictions. Async; fire-and-forget from sync close().
     void this.runPhaseHSessionIngestion();
+
+    // V9 T3.1 — release the Claude SDK bridge (HTTP hook server + temp
+    // config files). Async close is fire-and-forget since runtime close()
+    // is sync; honest warn on dispose failure so leaked fds are visible.
+    if (this.claudeBridge) {
+      const handle = this.claudeBridge;
+      this.claudeBridge = null;
+      void handle.close().catch((err: unknown) => {
+        console.warn(
+          `[WOTANN] claude-bridge close failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    }
 
     this.memoryStore?.close();
     runWorkspaceDreamIfDue(this.config.workingDir, { quiet: true });

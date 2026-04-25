@@ -28,6 +28,7 @@ import { QuickActionsOverlay } from "../palette/QuickActionsOverlay";
 import { TwinRavenSplit } from "./TwinRavenSplit";
 import { SigilStamp, type SigilKind } from "../editor/SigilStamp";
 import { CostGlint } from "../cost/CostGlint";
+import { ExecutionModeSelector } from "../status/ExecutionModeSelector";
 
 // ── V9 T14.4 helpers ─────────────────────────────────────────
 
@@ -621,35 +622,44 @@ export function AppShell({ twinRavenSplit = false }: AppShellProps = {}) {
           )}
 
           {/*
-            V9 T14.4 — Cost glint. Mirrors the active session cost just
-            above the StatusBar so the sheen reads alongside the rest of
-            the chrome. The StatusBar still owns the canonical cost text
-            — this is the polished-metal accent that signals BYOK. We
-            only render when the user has at least an entered provider so
-            the glance line stays empty during onboarding.
+            V9 T12.19 + T14.4 — Pre-statusbar accent row. Houses two
+            sibling affordances:
+              left  → ExecutionModeSelector (T12.19): user picks the
+                       execution stance (interactive / autopilot / dry-run
+                       / review / audit). Persists to localStorage and
+                       broadcasts a `wotann:execution-mode` window event
+                       so any other surface (chat input, command palette)
+                       can react.
+              right → CostGlint (T14.4): polished-metal sheen that flips
+                       to "paid" when the active provider is BYOK. The
+                       StatusBar still owns the canonical cost text.
+            The row only renders when the user has at least entered a
+            provider — onboarding stays uncluttered.
           */}
           {provider !== "" && (
             <div
               style={{
                 display: "flex",
-                justifyContent: "flex-end",
+                justifyContent: "space-between",
+                alignItems: "center",
                 padding: "2px 12px",
                 background: "transparent",
                 fontSize: 11,
-                pointerEvents: "none",
                 flexShrink: 0,
               }}
-              aria-hidden="true"
             >
-              <CostGlint
-                paid={isPaidProvider}
-                value={formatCost(cost.sessionCost)}
-                title={
-                  isPaidProvider
-                    ? `Session cost — paid (${provider})`
-                    : `Session cost — free (${provider})`
-                }
-              />
+              <ExecutionModeSelector />
+              <div aria-hidden="true" style={{ pointerEvents: "none" }}>
+                <CostGlint
+                  paid={isPaidProvider}
+                  value={formatCost(cost.sessionCost)}
+                  title={
+                    isPaidProvider
+                      ? `Session cost — paid (${provider})`
+                      : `Session cost — free (${provider})`
+                  }
+                />
+              </div>
             </div>
           )}
 

@@ -25,6 +25,11 @@ import {
 import { runTerminal } from "../cli/tricks/terminal-run.js";
 import { readImage } from "../cli/tricks/image-read.js";
 import { tmuxPull } from "../cli/tricks/tmux-pull.js";
+import {
+  dispatchParallelSearch,
+  type ParallelSearchAgentBudget,
+} from "../intelligence/parallel-search-agent.js";
+import type { SearchType } from "../intelligence/parallel-search.js";
 
 // ── Tool Timing Tracker ─────────────────────────────────────
 
@@ -648,6 +653,93 @@ export async function dispatchTmuxPull(
   }
 }
 
+// ── T12.3 parallel_search dispatcher ────────────────────────
+
+/**
+ * Execute the parallel_search tool. Validates the input, hands the
+ * normalised queries + budget down to `dispatchParallelSearch`, and
+ * serialises the resulting envelope as JSON for transcript inclusion.
+ *
+ * Honest-stub posture: missing workspaceDir / non-array queries / a
+ * primitive throw all surface as `{ok:false, reason, error}` — never
+ * throw out of dispatch.
+ */
+async function dispatchParallelSearchTool(
+  input: Record<string, unknown>,
+  workspaceDir: string | undefined,
+  memoryFn:
+    | ((
+        query: string,
+      ) => readonly { source: SearchType; title: string; content: string; score: number }[])
+    | undefined,
+  ctx: ToolDispatchContext,
+): Promise<ToolDispatchResult> {
+  if (typeof workspaceDir !== "string" || workspaceDir.length === 0) {
+    return {
+      type: "text",
+      content: `\n[parallel_search] ${JSON.stringify({
+        ok: false,
+        reason: "invalid-input",
+        error:
+          "parallel_search: runtime did not provide a workspaceDir — tool is unavailable in this dispatch context",
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+
+  const rawQueries = input["queries"];
+  if (!Array.isArray(rawQueries)) {
+    return {
+      type: "text",
+      content: `\n[parallel_search] ${JSON.stringify({
+        ok: false,
+        reason: "invalid-input",
+        error: "parallel_search: `queries` must be an array of strings",
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+
+  const budget: ParallelSearchAgentBudget = {};
+  const rawSources = input["sources"];
+  if (Array.isArray(rawSources) && rawSources.every((s): s is string => typeof s === "string")) {
+    (budget as { sources?: readonly SearchType[] }).sources = rawSources as readonly SearchType[];
+  }
+  if (typeof input["maxHits"] === "number") {
+    (budget as { maxHits?: number }).maxHits = input["maxHits"] as number;
+  }
+  if (typeof input["maxWallclockMs"] === "number") {
+    (budget as { maxWallclockMs?: number }).maxWallclockMs = input["maxWallclockMs"] as number;
+  }
+
+  try {
+    const result = await dispatchParallelSearch(rawQueries, budget, {
+      workspaceDir,
+      ...(memoryFn ? { memorySearchFn: memoryFn } : {}),
+    });
+    return {
+      type: "text",
+      content: `\n[parallel_search] ${JSON.stringify(result)}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return {
+      type: "text",
+      content: `\n[parallel_search] ${JSON.stringify({
+        ok: false,
+        reason: "primitive-threw",
+        error: `parallel_search: unexpected throw — ${reason}`,
+      })}\n`,
+      provider: ctx.responseProvider,
+      model: ctx.responseModel,
+    };
+  }
+}
+
 // ── Unified Dispatcher ──────────────────────────────────────
 
 /**
@@ -714,6 +806,24 @@ export interface ToolDispatchDeps {
    * gate that keeps the 34-tool connector surface honest.
    */
   readonly connectorRegistry?: ConnectorRegistry | null;
+  /**
+   * T12.3: workspace directory used by the `parallel_search` tool to
+   * scope codebase / git-history / file-content searches. Optional —
+   * when absent, parallel_search returns `{ok:false, reason:"invalid-input"}`
+   * rather than guessing a default. Caller threads this through from
+   * the runtime's resolved cwd so the agent never hits a stale path.
+   */
+  readonly workspaceDir?: string;
+  /**
+   * T12.3: optional memory search backend wired for the `parallel_search`
+   * tool. When absent, the memory source returns no hits; behaviour is
+   * isomorphic to providing an empty function. Threaded via DI so the
+   * runtime can plug in its real memory store without this module
+   * importing the concrete class.
+   */
+  readonly parallelSearchMemoryFn?: (
+    query: string,
+  ) => readonly { source: SearchType; title: string; content: string; score: number }[];
 }
 
 /**
@@ -776,6 +886,10 @@ export async function dispatchRuntimeTool(
 
       case "tmux_pull":
         return () => dispatchTmuxPull(input, ctx);
+
+      case "parallel_search":
+        return () =>
+          dispatchParallelSearchTool(input, deps.workspaceDir, deps.parallelSearchMemoryFn, ctx);
 
       default:
         // Wave-4C: if the tool name matches one of the 34 connector tools,
