@@ -35,7 +35,7 @@
  * - Spec: SEP-1865 (MCP Apps, Jan 26 2026)
  */
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createMcpBridge, type McpBridge } from "./mcp-bridge";
 import type { HostMessage, McpAppMessage } from "./types";
@@ -98,7 +98,7 @@ type Phase =
  * Sandboxed iframe host for MCP Apps UI resources. Mount one per
  * URI — switching URIs unmounts the previous bridge.
  */
-export function McpAppHost(props: McpAppHostProps): JSX.Element {
+export function McpAppHost(props: McpAppHostProps): ReactElement {
   const { resourceUri, fetchResource, onToolCall, style, className } = props;
 
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
