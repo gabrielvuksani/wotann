@@ -21,7 +21,15 @@ export type MagicCommandId =
   | "explain"
   | "docstring"
   | "format"
-  | "optimize";
+  | "optimize"
+  // V9 Tier 12 T12.17 — Jean dev-workflow commands.
+  | "investigate-issue"
+  | "investigate-pr"
+  | "investigate-workflow"
+  | "ai-commit"
+  | "pr-content"
+  | "merge-conflict"
+  | "release-notes";
 
 /**
  * Static metadata for a magic command. Handlers live in their own
@@ -34,7 +42,16 @@ export interface MagicCommand {
   /** One-line user-facing description shown in `wotann magic list`. */
   readonly description: string;
   /** Suggested tone keywords; the handler maps these to a system prompt. */
-  readonly category: "fix" | "review" | "refactor" | "explain" | "format";
+  readonly category:
+    | "fix"
+    | "review"
+    | "refactor"
+    | "explain"
+    | "format"
+    // V9 Tier 12 T12.17 — Jean dev-workflow categories.
+    | "investigate"
+    | "git"
+    | "release";
 }
 
 /**
