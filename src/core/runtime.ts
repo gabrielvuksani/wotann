@@ -1120,6 +1120,28 @@ export class WotannRuntime {
       const dbPath = join(stateDir, "memory.db");
       try {
         this.memoryStore = new MemoryStore(dbPath);
+        // V9 T1.3 — auto-attach sqlite-vec backend if the native
+        // extension is loadable. Returns false silently when the
+        // extension or required prebuilt is missing; TEMPR then
+        // falls through to FTS5 + heuristic cosine. 384 dimensions
+        // matches MiniLM-L-6 and the default embedder shipped with
+        // WOTANN. Callers that use a different embedder can call
+        // `memoryStore.attachVectorBackend(...)` themselves with
+        // their dimension count.
+        try {
+          this.memoryStore.attachVectorBackend(384);
+        } catch {
+          /* honest fallback to heuristic cosine */
+        }
+        // V9 T1.4 — auto-attach the ONNX cross-encoder when the
+        // runtime + MiniLM .onnx model are present. Async fire-and-
+        // forget so constructor stays sync. On success, TEMPR's
+        // rerank stage upgrades from heuristic to real MiniLM
+        // similarity on the next query (the default cross-encoder
+        // is read per-call, not cached at construction time).
+        this.memoryStore.attachOnnxCrossEncoder().catch(() => {
+          /* honest fallback to heuristic rerank */
+        });
       } catch {
         // Memory store creation may fail if state directory doesn't exist yet — not fatal
         // Store will be created on first write when the directory exists

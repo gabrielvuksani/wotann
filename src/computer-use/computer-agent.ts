@@ -313,16 +313,35 @@ export class ComputerUseAgent {
 
     // Agentic path — dynamic import keeps the stealth path free of
     // the orchestrator's large dep graph and avoids a circular import.
+    //
+    // V9 T10.1 honesty fix (2026-04-24 audit): the previous shape
+    // returned `{ready: true, task}` if `runAgenticBrowse` was a
+    // function, falsely implying the agent had RUN. It hadn't — the
+    // computer-agent layer cannot construct the full BrowseOrchestratorOptions
+    // (planner LLM, security guards, browser driver) without explicit
+    // dependency injection. Per QB #6, surface the stub honestly:
+    // requested=true says "the user asked for agentic" but agenticReady
+    // = false says "we did NOT actually run a session". Callers that
+    // need real agentic browse construct BrowseOrchestratorOptions
+    // themselves and call `runAgenticBrowse(task, options)` directly.
     if (options?.agentic === true) {
       const mod = (await import("../browser/agentic-browser.js")) as {
         runAgenticBrowse?: unknown;
       };
-      const session = mod.runAgenticBrowse;
+      const orchestratorPresent = typeof mod.runAgenticBrowse === "function";
       return {
         page: { url, title: "", success: true },
         text: null,
         stealth: false,
-        agenticSession: { ready: typeof session === "function", task: options.agenticTask ?? url },
+        agenticSession: {
+          requested: true,
+          orchestratorPresent,
+          ran: false,
+          task: options.agenticTask ?? url,
+          reason:
+            "computer-agent does not construct BrowseOrchestratorOptions; " +
+            "call runAgenticBrowse from src/browser/agentic-browser.ts directly with a full options object.",
+        },
       };
     }
 

@@ -229,6 +229,7 @@ program
     "--shell <shell>",
     "Generate OSC 133 shell init script for Warp-style blocks (zsh|bash|fish)",
   )
+  .option("--wizard", "Launch the V9 Tier 6 5-screen Ink TUI onboarding wizard (T6.2)")
   .action(
     async (options: {
       free?: boolean;
@@ -238,6 +239,7 @@ program
       extendedContext?: boolean;
       tdd?: boolean;
       shell?: string;
+      wizard?: boolean;
     }) => {
       // ── --shell short-circuit: write the OSC 133 init file and exit.
       // Side-by-side with workspace init so users can bootstrap blocks
@@ -274,6 +276,15 @@ program
             `  Then start a new shell. WOTANN will render Warp-style blocks for every command.`,
           ),
         );
+        return;
+      }
+
+      // V9 T6.2 — opt-in to the Ink TUI wizard via `--wizard`. The
+      // legacy chalk flow remains the default until the wizard is
+      // proven on real users.
+      if (options.wizard) {
+        const { runOnboardingWizard } = await import("./cli/run-onboarding-wizard.js");
+        await runOnboardingWizard();
         return;
       }
 
