@@ -203,6 +203,110 @@ function mockClassifier(_payload) {
         };
       }
     }
+    // V9 T10.5 — fuzzy "ignore + prior/previous" within 30 chars.
+    // Catches "ignore all prior context", "ignore — prior — instructions",
+    // and other imperative restatements that don't match a verbatim
+    // imperative phrase.
+    const fuzzy = lower.replace(/\s+/g, " ").trim();
+    const ignoreIdx = fuzzy.indexOf("ignore");
+    if (ignoreIdx >= 0) {
+      const window = fuzzy.slice(ignoreIdx, ignoreIdx + 50);
+      if (/(prior|previous|prev|earlier|above|safety|policy|instructions|context|rules)/.test(window)) {
+        return {
+          injection_detected: true,
+          confidence: 0.85,
+          category: "ignore-previous",
+          citations: ["fuzzy:" + window.slice(0, 40)],
+        };
+      }
+    }
+    // V9 T10.5 — DOM-injection patterns. Pages that ship script
+    // tags, on-* event handlers, iframe srcdoc, meta refresh, or
+    // form-action to a non-self origin are agent-injection-class
+    // attacks even when no imperative imperative is present.
+    const domPatterns = [
+      /<script\b[^>]*>/i,
+      /\son(?:error|load|click|mouseover|focus|blur|submit|change)\s*=/i,
+      /<iframe[^>]*\bsrcdoc\s*=/i,
+      /<meta[^>]*http-equiv\s*=\s*["']refresh["']/i,
+      /<object[^>]*\bdata\s*=\s*["']data:/i,
+      /<form[^>]*\baction\s*=\s*["']https?:\/\//i,
+      /\{\{[^}]*fetch\s*\(/i,
+      /javascript\s*:/i,
+    ];
+    for (const re of domPatterns) {
+      if (re.test(content)) {
+        return {
+          injection_detected: true,
+          confidence: 0.85,
+          category: "tool-call-injection",
+          citations: [String(re).slice(0, 80)],
+        };
+      }
+    }
+    // Encoding bypass detection: ROT13, full-width Unicode, or HTML
+    // entity-encoded imperatives. We detect by un-encoding and
+    // re-checking the imperatives list. Also try double-base64.
+    const stripZeroWidth = (s) => s.replace(/[​‌‍‎‏­‪-‮﻿]/g, "");
+    const tryB64 = (s) => {
+      try {
+        if (s.length < 8) return "";
+        const buf = Buffer.from(s, "base64");
+        const decoded = buf.toString("utf-8");
+        // Reject if mostly non-printable.
+        const printable = decoded.replace(/[^\x20-\x7e]/g, "").length;
+        return printable / Math.max(1, decoded.length) > 0.5 ? decoded : "";
+      } catch {
+        return "";
+      }
+    };
+    const candidates = [
+      // Zero-width joiner / non-joiner / soft-hyphen / direction-override stripped
+      stripZeroWidth(lower),
+      // ROT13
+      lower.replace(/[A-Za-z]/g, (ch) => {
+        const code = ch.charCodeAt(0);
+        const base = code >= 97 ? 97 : 65;
+        return String.fromCharCode(base + ((code - base + 13) % 26));
+      }),
+      // Full-width → ASCII
+      lower.normalize("NFKC"),
+      // HTML entity decode (decimal)
+      lower.replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code))),
+      // HTML entity decode (hex)
+      lower.replace(/&#x([0-9a-f]+);/gi, (_m, hex) => String.fromCharCode(parseInt(hex, 16))),
+      // Single-base64 decode (extract longest base64-looking run)
+      tryB64(((content.match(/[A-Za-z0-9+/=]{12,}/g) ?? []).sort((a, b) => b.length - a.length)[0]) ?? ""),
+      // Double-base64 decode
+      tryB64(tryB64(((content.match(/[A-Za-z0-9+/=]{12,}/g) ?? []).sort((a, b) => b.length - a.length)[0]) ?? "")),
+    ];
+    for (const variant of candidates) {
+      if (variant === lower) continue;
+      const lv = variant.toLowerCase();
+      for (const phrase of imperatives) {
+        if (lv.includes(phrase)) {
+          return {
+            injection_detected: true,
+            confidence: 0.85,
+            category: "ignore-previous",
+            citations: [`encoded:${phrase}`],
+          };
+        }
+      }
+      // Fuzzy variant — same window check as on the raw text.
+      const idx = lv.indexOf("ignore");
+      if (idx >= 0) {
+        const win = lv.slice(idx, idx + 50);
+        if (/(prior|previous|prev|earlier|above|safety|policy|instructions|context|rules)/.test(win)) {
+          return {
+            injection_detected: true,
+            confidence: 0.85,
+            category: "ignore-previous",
+            citations: ["encoded-fuzzy:" + win.slice(0, 40)],
+          };
+        }
+      }
+    }
     return {
       injection_detected: false,
       confidence: 0.05,

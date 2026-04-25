@@ -88,6 +88,14 @@ export class DiscordAdapter implements ChannelAdapter {
       // OID wrapping for Ed25519 (RFC 8410).
       const rawKey = Buffer.from(publicKeyHex, "hex");
       if (rawKey.length !== 32) return false;
+      // SECURITY (V9 T1.6): explicitly reject the all-zero public key
+      // and all-zero signature. Ed25519 with both at identity accepts
+      // any message — a known pitfall when the host doesn't validate
+      // its configured pubkey. We treat zero-keys as misconfiguration
+      // and never verify against them.
+      if (rawKey.every((b) => b === 0)) return false;
+      const sigBytes = Buffer.from(signatureHex, "hex");
+      if (sigBytes.length === 64 && sigBytes.every((b) => b === 0)) return false;
       const derPrefix = Buffer.from([
         0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
       ]);

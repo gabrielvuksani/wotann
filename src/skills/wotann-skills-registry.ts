@@ -87,8 +87,11 @@ export const WOTANN_SKILLS: readonly WotannSkillEntry[] = [
     description: "Multi-pass code review with severity-tiered findings (CRITICAL/HIGH/MEDIUM/LOW)",
     triggers: [
       "review this code",
+      "review this pr",
       "review the pr",
       "review the diff",
+      "review my pr",
+      "review my code",
       "look over my code",
       "code review",
       "pr review",

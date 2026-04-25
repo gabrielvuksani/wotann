@@ -287,7 +287,11 @@ export function detectHiddenText(
   const fontThreshold = options.fontSizeThresholdPx ?? 2;
   const opacityThreshold = options.opacityThreshold ?? 0.1;
   const contrastThreshold = options.contrastThreshold ?? 10;
-  const offscreenPx = options.offscreenPx ?? 9999;
+  // Default 999px (was 9999 — too lenient to catch the canonical
+  // `left:-9999px` attack since that condition uses strict `<`).
+  // Anything at left/top below -999px is well past any legitimate
+  // viewport.
+  const offscreenPx = options.offscreenPx ?? 999;
 
   const hits: HiddenTextHit[] = [];
   const hiddenPieces: string[] = [];

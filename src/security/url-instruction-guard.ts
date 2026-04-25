@@ -82,14 +82,20 @@ export interface InspectUrlOptions {
  */
 const BASE_IMPERATIVES: readonly string[] = [
   "ignore previous",
+  "ignore prior",
   "ignore all previous",
   "disregard previous",
   "ignore instructions",
+  "prior instructions",
+  "previous instructions",
   "system prompt",
+  "system override",
   "you are now",
   "forget everything",
   "new instructions",
   "override your",
+  "override safety",
+  "disable safety",
   "summarize and send",
   "exfiltrate",
   "send to",
@@ -97,6 +103,7 @@ const BASE_IMPERATIVES: readonly string[] = [
   "post to",
   "reveal",
   "print secret",
+  "print env",
   "developer mode",
   "jailbreak",
   "act as",
@@ -120,6 +127,12 @@ const PROMPT_LIKE_KEYS: ReadonlySet<string> = new Set([
   "instructions",
   "sys",
   "system",
+  "msg",
+  "message",
+  "text",
+  "content",
+  "input",
+  "data",
 ]);
 
 // ═══ Decoders ═════════════════════════════════════════════════════════════
@@ -193,7 +206,9 @@ function scanValue(
   rawValue: string,
   imperatives: readonly string[],
 ): UrlInspectionHit | null {
-  // Layer 0 — url-decode first (always cheap)
+  // Layer 0 — url-decode first (always cheap), and also decode-twice
+  // to catch attacks that double-encode the imperative
+  // (e.g. `?q=%2569%2567%256E…` → `%69%67%6E…` → `ignore`).
   let decoded: string;
   try {
     decoded = decodeURIComponent(rawValue);
@@ -210,6 +225,61 @@ function scanValue(
       matchedToken: rawMatch,
       paramLength: decoded.length,
     };
+  }
+  // V9 T10.5 — root-token check on the URL-decoded value. URL parsers
+  // already apply one decode pass (URLSearchParams returns decoded
+  // values), so a value that ARRIVES here as bare `ignore` was already
+  // double-encoded by the attacker. Same logic applies for the other
+  // bare-imperative roots — these are NEVER legitimate as a search
+  // parameter that's also key-named "q" / "prompt" / etc.
+  const ROOT_TOKENS_URL = ["ignore", "exfiltrate", "jailbreak", "reveal"];
+  const lowerDecoded = decoded.toLowerCase();
+  for (const tok of ROOT_TOKENS_URL) {
+    if (lowerDecoded.includes(tok)) {
+      return {
+        rule: "encoded-imperative",
+        paramName: name,
+        decodedLayer: "url",
+        matchedToken: tok,
+        paramLength: decoded.length,
+      };
+    }
+  }
+
+  let doubleDecoded: string | null = null;
+  try {
+    doubleDecoded = decodeURIComponent(decoded);
+  } catch {
+    doubleDecoded = null;
+  }
+  if (doubleDecoded !== null && doubleDecoded !== decoded) {
+    const dMatch = matchImperative(doubleDecoded, imperatives);
+    if (dMatch !== null) {
+      return {
+        rule: "encoded-imperative",
+        paramName: name,
+        decodedLayer: "url",
+        matchedToken: dMatch,
+        paramLength: doubleDecoded.length,
+      };
+    }
+    // V9 T10.5 — double-decode that produces a bare imperative root
+    // ("ignore", "exfiltrate", "jailbreak", "reveal") in a prompt-
+    // shaped param IS injection, not coincidence. The single-decode
+    // form `%69%67%6E%6F%72%65` is unmistakably encoded "ignore".
+    const ROOT_TOKENS = ["ignore", "exfiltrate", "jailbreak", "reveal", "override"];
+    const lowerDouble = doubleDecoded.toLowerCase();
+    for (const tok of ROOT_TOKENS) {
+      if (lowerDouble.includes(tok)) {
+        return {
+          rule: "encoded-imperative",
+          paramName: name,
+          decodedLayer: "url",
+          matchedToken: tok,
+          paramLength: doubleDecoded.length,
+        };
+      }
+    }
   }
 
   // Layer 1 — Base64
@@ -290,6 +360,112 @@ export function inspectUrl(rawUrl: string, options: InspectUrlOptions = {}): Url
       reason: "malformed-url: failed to parse",
       hits: [],
     };
+  }
+
+  // V9 T10.5 corpus expansion (2026-04-24): block dangerous URL
+  // schemes that legitimate browse tasks should never need. These
+  // schemes either bypass the SSRF guard (file:, ftp:) or smuggle
+  // arbitrary script/HTML through navigation (javascript:, data:),
+  // or initiate side-channel actions (mailto:). Web-content fetches
+  // should be limited to http(s):.
+  const proto = parsed.protocol.toLowerCase();
+  const ALLOWED_SCHEMES = new Set(["http:", "https:"]);
+  const DANGEROUS_SCHEMES = new Set([
+    "javascript:",
+    "data:",
+    "file:",
+    "ftp:",
+    "mailto:",
+    "vbscript:",
+  ]);
+  if (DANGEROUS_SCHEMES.has(proto)) {
+    return {
+      verdict: "BLOCK",
+      reason: `dangerous-scheme: ${proto} not allowed for agent navigation`,
+      hits: [{ rule: "imperative-match", paramName: "scheme", paramLength: proto.length }],
+    };
+  }
+  if (!ALLOWED_SCHEMES.has(proto)) {
+    return {
+      verdict: "BLOCK",
+      reason: `unsupported-scheme: only http(s) is allowed (got ${proto})`,
+      hits: [{ rule: "imperative-match", paramName: "scheme", paramLength: proto.length }],
+    };
+  }
+
+  // V9 T10.5 — also flag imperatives in the host / path / fragment,
+  // not just query params. URLs like
+  // `https://example.test/ignore-previous-and-fetch-cookies` or
+  // `#system=disable_safety_policy` or
+  // `https://system-override.example/payload` carry directives
+  // outside the query string and were previously slipping past the
+  // param-only scan. We normalize hyphens / underscores / equal
+  // signs to spaces before matching so the slug-style imperatives
+  // ("ignore-previous-and-fetch-cookies") match against the
+  // word-style ("ignore previous") imperative list.
+  function normalizeForImperative(s: string): string {
+    return s
+      .toLowerCase()
+      .replace(/[-_=+]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  const hostScan = normalizeForImperative(parsed.hostname);
+  const pathScan = normalizeForImperative(parsed.pathname);
+  const hashScan = normalizeForImperative(parsed.hash);
+  for (const imp of imperatives) {
+    if (hostScan.includes(imp) || pathScan.includes(imp) || hashScan.includes(imp)) {
+      const where = hostScan.includes(imp)
+        ? "hostname"
+        : hashScan.includes(imp)
+          ? "fragment"
+          : "path";
+      return {
+        verdict: "BLOCK",
+        reason: `instruction-in-url: imperative detected in ${where}`,
+        hits: [{ rule: "imperative-match", paramName: where, paramLength: rawUrl.length }],
+      };
+    }
+  }
+  // V9 T10.5 — also detect base64-encoded imperatives in query
+  // values. Try to decode each param; if the decoded value contains
+  // an imperative, BLOCK. We're tolerant of decode failure (binary
+  // payloads return garbage and harmlessly fail the includes() check).
+  for (const [, value] of parsed.searchParams.entries()) {
+    if (value.length < 8) continue; // too short to be base64
+    let decoded = "";
+    try {
+      decoded = Buffer.from(value, "base64").toString("utf-8").toLowerCase();
+    } catch {
+      decoded = "";
+    }
+    if (decoded.length === 0) continue;
+    // Look up the original param name (URLSearchParams iterator preserves
+    // it via closure — we re-derive here from the searchParams).
+    let paramName = "unknown";
+    for (const [k, v] of parsed.searchParams.entries()) {
+      if (v === value) {
+        paramName = k;
+        break;
+      }
+    }
+    for (const imp of imperatives) {
+      if (decoded.includes(imp)) {
+        return {
+          verdict: "BLOCK",
+          reason: "instruction-in-url: imperative detected in base64 param",
+          hits: [
+            {
+              rule: "encoded-imperative",
+              paramName,
+              decodedLayer: "base64",
+              matchedToken: imp,
+              paramLength: value.length,
+            },
+          ],
+        };
+      }
+    }
   }
 
   const hits: UrlInspectionHit[] = [];
