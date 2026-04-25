@@ -20,6 +20,12 @@ struct WOTANNApp: App {
     @StateObject private var biometricAuth = BiometricAuth()
     @State private var isUnlocked = false
 
+    /// V9 T7.6 — Per-process sting session id, set once at launch and used
+    /// to gate the "play once per session on first unlock" rule. Re-deriving
+    /// per launch (not per scene activation) means returning from background
+    /// during the same process does NOT replay the cue.
+    private let stingSessionId = UUID().uuidString
+
     /// Services wired at app startup.
     private let clipboardService = ClipboardService()
     private let localSendService = LocalSendService()
@@ -180,6 +186,15 @@ struct WOTANNApp: App {
         case .active:
             if biometricLockEnabled {
                 // Re-lock was already handled by isUnlocked state
+            }
+            // V9 T7.6 — play the 6-note Wotann sting once per launch on
+            // first scene activation, AFTER any biometric unlock has been
+            // resolved (so the cue lands on the user's first sight of the
+            // app, not on a locked screen they can't dismiss).
+            if !biometricLockEnabled || isUnlocked {
+                if #available(iOS 16.0, *) {
+                    WotannStingService.shared.playIfFirstUnlock(sessionId: stingSessionId)
+                }
             }
         default:
             break
