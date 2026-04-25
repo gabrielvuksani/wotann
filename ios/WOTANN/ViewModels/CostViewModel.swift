@@ -1,18 +1,34 @@
 import Foundation
-import Combine
+import Observation
 
 // MARK: - CostViewModel
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. Every stored property is automatically tracked, so the
+// `@Published` wrappers are dropped. SwiftUI views invalidate per-property
+// instead of per-publish, eliminating Combine fan-out on every refresh.
+//
+// Consumer migration (when this VM gets wired into a Cost view):
+//   - `@StateObject private var vm = CostViewModel(...)`
+//       → `@State private var vm = CostViewModel(...)`
+//   - `@ObservedObject var vm: CostViewModel`
+//       → `var vm: CostViewModel` (read-only) or
+//         `@Bindable var vm: CostViewModel` (two-way bindings, e.g.
+//         `Picker(selection: $vm.selectedPeriod)`).
 
 /// Manages cost data with daily/weekly/monthly breakdowns.
 @MainActor
-final class CostViewModel: ObservableObject {
-    @Published var snapshot: CostSnapshot = .empty
-    @Published var isLoading = false
-    @Published var selectedPeriod: CostPeriod = .week
-    @Published var weeklyBudget: Double = 50.0
-    @Published var showBudgetEditor = false
+@Observable
+final class CostViewModel {
+    var snapshot: CostSnapshot = .empty
+    var isLoading = false
+    var selectedPeriod: CostPeriod = .week
+    var weeklyBudget: Double = 50.0
+    var showBudgetEditor = false
 
+    @ObservationIgnored
     private let appState: AppState
+    @ObservationIgnored
     private let connectionManager: ConnectionManager
 
     enum CostPeriod: String, CaseIterable {

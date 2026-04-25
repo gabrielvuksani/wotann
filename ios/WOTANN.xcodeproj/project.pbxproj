@@ -464,7 +464,7 @@
 		FC4279027D915B49348FAA83 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
 		FD4FCFB6760540EF97A7DA40 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FF2C467534932F2AF3DCB79A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		"TEMP_AAA762DB-3641-4490-9411-BA8DC9899202" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+		"TEMP_F3A6507D-B6C3-4B51-9D9A-5D48085DF186" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -1123,10 +1123,10 @@
 			path = Dashboard;
 			sourceTree = "<group>";
 		};
-		"TEMP_5AC17565-9942-42D4-8E5F-3BD1FAFEC3CC" /* ios */ = {
+		"TEMP_43B796F5-009A-41DD-90BC-D0692A589113" /* ios */ = {
 			isa = PBXGroup;
 			children = (
-				"TEMP_AAA762DB-3641-4490-9411-BA8DC9899202" /* Local.xcconfig */,
+				"TEMP_F3A6507D-B6C3-4B51-9D9A-5D48085DF186" /* Local.xcconfig */,
 			);
 			path = ios;
 			sourceTree = "<group>";
@@ -1697,7 +1697,7 @@
 		};
 		35715A6A8931B13D7362B776 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_AAA762DB-3641-4490-9411-BA8DC9899202" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_F3A6507D-B6C3-4B51-9D9A-5D48085DF186" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -1915,7 +1915,7 @@
 		};
 		E96B011291432A6F1F017F8B /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = "TEMP_AAA762DB-3641-4490-9411-BA8DC9899202" /* Local.xcconfig */;
+			baseConfigurationReference = "TEMP_F3A6507D-B6C3-4B51-9D9A-5D48085DF186" /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;

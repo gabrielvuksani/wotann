@@ -1,15 +1,34 @@
 import Foundation
-import Combine
+import Observation
 
 // MARK: - ConversationListVM
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. Every stored property is automatically tracked, so the
+// `@Published` wrappers are dropped. SwiftUI views invalidate per-property
+// instead of per-publish, which matters here because the filtered list is a
+// computed property whose body reads `appState.conversations` plus the local
+// search/filter/sort state — under `@Observable` only views that read the
+// changed inputs re-evaluate.
+//
+// Consumer migration (when this VM gets wired into ConversationListView):
+//   - `@StateObject private var vm = ConversationListVM(appState: ...)`
+//       → `@State private var vm = ConversationListVM(appState: ...)`
+//   - `@ObservedObject var vm: ConversationListVM`
+//       → `var vm: ConversationListVM` (read-only) or
+//         `@Bindable var vm: ConversationListVM` (for two-way bindings, e.g.
+//         `TextField(...,  text: $vm.searchText)` or
+//         `Picker(selection: $vm.filterMode)`).
 
 /// Manages conversation list filtering, searching, and actions.
 @MainActor
-final class ConversationListVM: ObservableObject {
-    @Published var searchText = ""
-    @Published var filterMode: FilterMode = .all
-    @Published var sortOrder: SortOrder = .updated
+@Observable
+final class ConversationListVM {
+    var searchText = ""
+    var filterMode: FilterMode = .all
+    var sortOrder: SortOrder = .updated
 
+    @ObservationIgnored
     private let appState: AppState
 
     init(appState: AppState) {

@@ -1,18 +1,36 @@
 import Foundation
-import Combine
+import Observation
 
 // MARK: - PairingViewModel
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. Every stored property is automatically tracked, so
+// the `@Published` wrappers are dropped. SwiftUI invalidates per-property
+// rather than per-publish, which is the right model for the pairing flow:
+// touching `errorMessage` should not redraw the QR scanner host field, and
+// vice versa.
+//
+// Consumer migration (when this VM gets wired into PairingView):
+//   - `@StateObject private var vm = PairingViewModel(connectionManager: ...)`
+//       → `@State private var vm = PairingViewModel(connectionManager: ...)`
+//   - `@ObservedObject var vm: PairingViewModel`
+//       → `var vm: PairingViewModel` (read-only) or
+//         `@Bindable var vm: PairingViewModel` (two-way bindings, e.g.
+//         `TextField(..., text: $vm.manualHost)` or
+//         `.sheet(isPresented: $vm.showScanner)`).
 
 /// Drives the pairing flow UI (scan, verify PIN, connect).
 @MainActor
-final class PairingViewModel: ObservableObject {
-    @Published var state: PairingState = .unpaired
-    @Published var showScanner = false
-    @Published var manualHost = ""
-    @Published var manualPort = "3849"
-    @Published var errorMessage: String?
-    @Published var isPairing = false
+@Observable
+final class PairingViewModel {
+    var state: PairingState = .unpaired
+    var showScanner = false
+    var manualHost = ""
+    var manualPort = "3849"
+    var errorMessage: String?
+    var isPairing = false
 
+    @ObservationIgnored
     private let pairingManager: PairingManager
 
     init(connectionManager: ConnectionManager) {

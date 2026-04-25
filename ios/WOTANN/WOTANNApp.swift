@@ -25,7 +25,9 @@ struct WOTANNApp: App {
     private let phoneWCDelegate = PhoneWCSessionDelegate()
 
     /// Biometric authentication state for app lock.
-    @StateObject private var biometricAuth = BiometricAuth()
+    /// V9 T14.3 — `BiometricAuth` migrated to `@Observable`; root storage
+    /// switches from `@StateObject` to `@State` accordingly.
+    @State private var biometricAuth = BiometricAuth()
     @State private var isUnlocked = false
 
     /// V9 T7.6 — Per-process sting session id, set once at launch and used
@@ -410,7 +412,11 @@ struct MainTabView: View {
 
 /// Biometric lock screen shown when the app requires authentication.
 struct LockedView: View {
-    @ObservedObject var biometricAuth: BiometricAuth
+    /// V9 T14.3 — `BiometricAuth` is `@Observable`; consumers receive it
+    /// as a plain reference. The view reads `biometricAuth.error` and
+    /// `biometricAuth.biometryType` so the macro re-evaluates body
+    /// automatically when those properties change.
+    let biometricAuth: BiometricAuth
     let onUnlock: () -> Void
 
     var body: some View {

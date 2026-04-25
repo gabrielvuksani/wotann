@@ -1,20 +1,38 @@
 import LocalAuthentication
+import Observation
 import SwiftUI
 
 // MARK: - BiometricAuth
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro (Observation framework). The macro generates per-property
+// observation registration so SwiftUI only invalidates views that actually read
+// the changed property, eliminating Combine wrapping and reducing the
+// invalidation cascade that the old `ObservableObject` conformance produced.
+//
+// Consumer migration:
+//   - `@StateObject private var biometricAuth = BiometricAuth()`
+//       → `@State private var biometricAuth = BiometricAuth()`
+//   - `@ObservedObject var biometricAuth: BiometricAuth`
+//       → `var biometricAuth: BiometricAuth` (read-only) or
+//         `@Bindable var biometricAuth: BiometricAuth` (two-way)
+//
+// See: https://developer.apple.com/documentation/observation/observable
 
 /// Face ID / Touch ID authentication via LAContext.
 /// Gate destructive operations (deploy, force push, delete) behind biometric.
 @MainActor
-class BiometricAuth: ObservableObject {
-    @Published var isAuthenticated = false
-    @Published var biometryType: BiometryType = .none
-    @Published var error: String?
+@Observable
+final class BiometricAuth {
+    var isAuthenticated = false
+    var biometryType: BiometryType = .none
+    var error: String?
 
     enum BiometryType {
         case faceID, touchID, none
     }
 
+    @ObservationIgnored
     private let context = LAContext()
 
     init() {

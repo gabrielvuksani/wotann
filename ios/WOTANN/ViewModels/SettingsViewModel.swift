@@ -1,24 +1,40 @@
 import Foundation
-import Combine
+import Observation
 
 // MARK: - SettingsViewModel
+//
+// V9 T14.3 — Migrated from `ObservableObject` + `@Published` to the iOS 17
+// `@Observable` macro. Every stored property is automatically tracked, so
+// the `@Published` wrappers are dropped. SwiftUI views invalidate per-property
+// instead of per-publish, eliminating fan-out across the entire view tree on
+// any single field change.
+//
+// Consumer migration (when this VM gets wired into Settings):
+//   - `@StateObject private var vm = SettingsViewModel(connectionManager: ...)`
+//       → `@State private var vm = SettingsViewModel(connectionManager: ...)`
+//   - `@ObservedObject var vm: SettingsViewModel`
+//       → `var vm: SettingsViewModel` (read-only) or
+//         `@Bindable var vm: SettingsViewModel` (for two-way bindings such
+//         as `Toggle(isOn: $vm.hapticFeedback)`).
 
 /// Manages all app settings.
 @MainActor
-final class SettingsViewModel: ObservableObject {
-    @Published var theme: AppTheme = .dark
-    @Published var hapticFeedback = true
-    @Published var biometricLock = false
-    @Published var autoConnect = true
-    @Published var notificationsEnabled = true
-    @Published var notifyTaskComplete = true
-    @Published var notifyErrors = true
-    @Published var notifyBudgetAlerts = true
-    @Published var notifyApprovalRequests = true
-    @Published var voiceBackend: VoiceBackend = .onDevice
-    @Published var cacheSize = "Calculating..."
-    @Published var showUnpairConfirmation = false
+@Observable
+final class SettingsViewModel {
+    var theme: AppTheme = .dark
+    var hapticFeedback = true
+    var biometricLock = false
+    var autoConnect = true
+    var notificationsEnabled = true
+    var notifyTaskComplete = true
+    var notifyErrors = true
+    var notifyBudgetAlerts = true
+    var notifyApprovalRequests = true
+    var voiceBackend: VoiceBackend = .onDevice
+    var cacheSize = "Calculating..."
+    var showUnpairConfirmation = false
 
+    @ObservationIgnored
     private let connectionManager: ConnectionManager
 
     init(connectionManager: ConnectionManager) {
