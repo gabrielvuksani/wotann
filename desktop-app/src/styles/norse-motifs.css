@@ -1,0 +1,490 @@
+/**
+ * Norse Motif Styles — V9 T14.4
+ *
+ * Supporting styles for the seven cinematic UI motifs that give WOTANN
+ * its signature visual language. All styles read from the canonical
+ * design tokens declared in `wotann-tokens.css` — no raw hex / px.
+ *
+ * MOTIF INDEX
+ * -----------
+ *   .twin-raven-split — the Cmd+Shift+2 dual-pane (Huginn / Muninn).
+ *   .sigil-stamp      — gold underline / chevron under modified files.
+ *   .conv-braid       — multi-thread conversation canvas.
+ *   .ravens-flight    — parabolic-arc dispatch animation.
+ *   .patron-card      — onboarding card with tarot-style flip-on-hover.
+ *   .cost-glint       — paid-key specular sheen.
+ *
+ * Scope rules:
+ *   - All keyframes are namespaced `wotann-norse-*` to avoid clashes.
+ *   - All CSS custom properties are namespaced `--norse-*`.
+ *   - Reduced-motion override at the bottom of the file.
+ */
+
+/* ================================================================
+ * Section 1 — Shared Tokens
+ * Norse-motif-specific tokens that derive from the existing design
+ * system but give the motifs their own knobs.
+ * ================================================================ */
+
+:root {
+  /* Raven silhouette tint — derived from accent.glyph but slightly
+     desaturated so the bird reads as ink, not as UI primary. */
+  --norse-raven-ink: var(--wotann-ink-secondary, #9fb1c8);
+  --norse-raven-shadow: rgba(7, 9, 15, 0.45);
+
+  /* Sigil stroke. Gold across all themes, thinned to 1.5px. */
+  --norse-sigil-stroke: var(--wotann-accent-gold, #c9a14a);
+  --norse-sigil-stroke-width: 1.5px;
+
+  /* Braid colours — a triad chosen to read well at low saturation.
+     Each conversation strand cycles through these in order. */
+  --norse-braid-1: var(--wotann-accent-rune, #3e8fd1);
+  --norse-braid-2: var(--wotann-accent-glyph, #7dc4f5);
+  --norse-braid-3: var(--wotann-accent-gold, #c9a14a);
+  --norse-braid-4: var(--wotann-success-moss, #4fa37f);
+  --norse-braid-5: var(--wotann-warn-blood, #c04a3e);
+
+  /* Flight arc duration components (sum = 800ms total). */
+  --norse-flight-takeoff: 50ms;
+  --norse-flight-arc: 600ms;
+  --norse-flight-landing: 150ms;
+  --norse-flight-total: 800ms;
+
+  /* Glint period — paid-key sheen sweeps across once per 6s. */
+  --norse-glint-period: 6000ms;
+  --norse-glint-sweep: 1100ms;
+
+  /* Patron card flip duration. */
+  --norse-flip-duration: var(--wotann-duration-slow, 400ms);
+}
+
+/* ================================================================
+ * Section 2 — Twin Raven Split
+ * Side-by-side Huginn / Muninn pane container.
+ * ================================================================ */
+
+.twin-raven-split {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  isolation: isolate;
+}
+
+.twin-raven-split__pane {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--wotann-bg-panel, #0c1118);
+}
+
+.twin-raven-split__pane--huginn {
+  border-right: 1px solid var(--wotann-surface-stroke, rgba(138, 176, 224, 0.08));
+}
+
+.twin-raven-split__divider {
+  flex: 0 0 4px;
+  cursor: col-resize;
+  background: var(--wotann-surface-stroke, rgba(138, 176, 224, 0.08));
+  transition: background var(--wotann-duration-fast, 150ms) var(--wotann-ease-standard, ease);
+  position: relative;
+}
+
+.twin-raven-split__divider:hover,
+.twin-raven-split__divider[data-dragging="true"] {
+  background: var(--wotann-accent-rune, #3e8fd1);
+}
+
+.twin-raven-split__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--norse-raven-ink);
+  background: transparent;
+}
+
+.twin-raven-split__label-name {
+  font-weight: 600;
+}
+
+.twin-raven-split__raven-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--norse-raven-ink);
+  filter: drop-shadow(0 1px 1px var(--norse-raven-shadow));
+}
+
+/* ================================================================
+ * Section 3 — Sigil Stamp
+ * Animated gold underline / chevron under file names that the agent
+ * has touched.
+ * ================================================================ */
+
+.sigil-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  animation: wotann-norse-sigil-reveal var(--wotann-duration-base, 240ms)
+    var(--wotann-ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+.sigil-stamp__underline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: var(--norse-sigil-stroke-width);
+  background: var(--norse-sigil-stroke);
+  border-radius: 1px;
+  transform-origin: left center;
+  animation: wotann-norse-sigil-trace 200ms var(--wotann-ease-out-expo, ease-out) both;
+}
+
+.sigil-stamp__chevron {
+  width: 10px;
+  height: 10px;
+  color: var(--norse-sigil-stroke);
+  flex-shrink: 0;
+  animation: wotann-norse-sigil-chevron 240ms 80ms
+    var(--wotann-ease-pop, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
+}
+
+.sigil-stamp[data-kind="created"] .sigil-stamp__underline {
+  background: var(--wotann-success-moss, #4fa37f);
+}
+
+.sigil-stamp[data-kind="deleted"] .sigil-stamp__underline {
+  background: var(--wotann-warn-blood, #c04a3e);
+}
+
+@keyframes wotann-norse-sigil-reveal {
+  0%   { opacity: 0; transform: translateY(2px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes wotann-norse-sigil-trace {
+  0%   { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+
+@keyframes wotann-norse-sigil-chevron {
+  0%   { transform: scale(0.4) rotate(-30deg); opacity: 0; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* ================================================================
+ * Section 4 — Conversation Braids
+ * Multi-thread canvas: 3-5 strands flowing left → right with
+ * timeline markers and merge / fork points.
+ * ================================================================ */
+
+.conv-braid {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--wotann-bg-canvas, #07090f);
+  overflow: hidden;
+}
+
+.conv-braid__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.conv-braid__strand {
+  fill: none;
+  stroke-width: 1.5;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 6px currentColor);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.conv-braid__strand--animating {
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+  animation: wotann-norse-braid-flow 1400ms
+    var(--wotann-ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) forwards;
+}
+
+.conv-braid__node {
+  fill: var(--wotann-bg-canvas, #07090f);
+  stroke-width: 2;
+}
+
+.conv-braid__label {
+  font-size: 11px;
+  fill: var(--wotann-ink-secondary, #9fb1c8);
+  font-family: var(--wotann-font-sans, system-ui);
+  pointer-events: none;
+}
+
+.conv-braid__tick {
+  stroke: var(--wotann-surface-stroke, rgba(138, 176, 224, 0.12));
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+@keyframes wotann-norse-braid-flow {
+  to { stroke-dashoffset: 0; }
+}
+
+/* ================================================================
+ * Section 5 — Ravens Flight
+ * Parabolic-arc dispatch animation. The component lays out an SVG
+ * raven on a CSS-transformed container and the keyframes drive a
+ * three-phase translation: takeoff lift, arc, landing.
+ * ================================================================ */
+
+.ravens-flight {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  width: 24px;
+  height: 24px;
+  /* Component sets --norse-flight-from-x / -to-x / -peak-y at runtime. */
+  --norse-flight-from-x: 0px;
+  --norse-flight-from-y: 0px;
+  --norse-flight-to-x: 0px;
+  --norse-flight-to-y: 0px;
+  --norse-flight-peak-y: -120px;
+}
+
+.ravens-flight__bird {
+  position: absolute;
+  inset: 0;
+  color: var(--norse-raven-ink);
+  filter: drop-shadow(0 1px 2px var(--norse-raven-shadow));
+  animation: wotann-norse-flight-takeoff var(--norse-flight-takeoff)
+      var(--wotann-ease-out-expo, ease-out) both,
+    wotann-norse-flight-arc var(--norse-flight-arc) var(--norse-flight-takeoff)
+      var(--wotann-ease-standard, ease-in-out) both,
+    wotann-norse-flight-landing var(--norse-flight-landing)
+      calc(var(--norse-flight-takeoff) + var(--norse-flight-arc))
+      var(--wotann-ease-out-expo, ease-out) both,
+    wotann-norse-flight-flap 120ms linear infinite;
+}
+
+@keyframes wotann-norse-flight-takeoff {
+  0%   { transform: translate(var(--norse-flight-from-x), var(--norse-flight-from-y)) scale(0.85); opacity: 0; }
+  100% { transform: translate(var(--norse-flight-from-x), calc(var(--norse-flight-from-y) - 6px)) scale(1); opacity: 1; }
+}
+
+@keyframes wotann-norse-flight-arc {
+  0%   { transform: translate(var(--norse-flight-from-x), calc(var(--norse-flight-from-y) - 6px)); }
+  50%  { transform: translate(
+           calc((var(--norse-flight-from-x) + var(--norse-flight-to-x)) / 2),
+           var(--norse-flight-peak-y)
+         ); }
+  100% { transform: translate(var(--norse-flight-to-x), var(--norse-flight-to-y)); }
+}
+
+@keyframes wotann-norse-flight-landing {
+  0%   { transform: translate(var(--norse-flight-to-x), var(--norse-flight-to-y)) scale(1); opacity: 1; }
+  100% { transform: translate(var(--norse-flight-to-x), calc(var(--norse-flight-to-y) + 4px)) scale(0.9); opacity: 0; }
+}
+
+/* Flap is a tiny vertical bob layered on top of the arc. */
+@keyframes wotann-norse-flight-flap {
+  0%, 100% { filter: drop-shadow(0 1px 2px var(--norse-raven-shadow)) brightness(1); }
+  50%      { filter: drop-shadow(0 2px 3px var(--norse-raven-shadow)) brightness(0.92); }
+}
+
+/* ================================================================
+ * Section 6 — Patron Cards
+ * Onboarding tarot-style flip cards. Each card is a 3D-flipped
+ * container with face / back as siblings, hover triggers the flip.
+ * ================================================================ */
+
+.patron-card {
+  position: relative;
+  width: 100%;
+  perspective: 1200px;
+  cursor: pointer;
+}
+
+.patron-card__inner {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 5 / 7;
+  transform-style: preserve-3d;
+  transition: transform var(--norse-flip-duration)
+    var(--wotann-ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+}
+
+.patron-card:hover .patron-card__inner,
+.patron-card:focus-visible .patron-card__inner,
+.patron-card[data-flipped="true"] .patron-card__inner {
+  transform: rotateY(180deg);
+}
+
+.patron-card__face,
+.patron-card__back {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--wotann-radius-card, 12px);
+  background: var(--wotann-bg-raised, #111823);
+  border: 1px solid var(--wotann-surface-stroke, rgba(138, 176, 224, 0.08));
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  box-shadow: var(--wotann-elevation-2, 0 4px 12px rgba(0, 0, 0, 0.45));
+}
+
+.patron-card__back {
+  transform: rotateY(180deg);
+}
+
+.patron-card__name {
+  font-family: var(--wotann-font-display, system-ui);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--wotann-ink-primary, #e8eef7);
+  letter-spacing: 0.02em;
+}
+
+.patron-card__epithet {
+  font-size: 12px;
+  color: var(--wotann-ink-muted, #5f7389);
+  margin-top: 4px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.patron-card__glyph {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--wotann-font-rune, "Noto Sans Runic", system-ui);
+  font-size: 64px;
+  line-height: 1;
+  color: var(--wotann-accent-gold, #c9a14a);
+  text-shadow: 0 0 24px rgba(201, 161, 74, 0.35);
+}
+
+.patron-card__traits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--wotann-ink-secondary, #9fb1c8);
+  line-height: 1.45;
+  flex: 1 1 auto;
+  margin-top: 12px;
+}
+
+.patron-card__select {
+  margin-top: 14px;
+  padding: 8px 14px;
+  border-radius: var(--wotann-radius-input, 6px);
+  background: var(--wotann-accent-rune, #3e8fd1);
+  color: var(--wotann-bg-canvas, #07090f);
+  border: none;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+
+.patron-card__select:hover {
+  filter: brightness(1.08);
+}
+
+.patron-card[data-selected="true"] .patron-card__face,
+.patron-card[data-selected="true"] .patron-card__back {
+  border-color: var(--wotann-accent-gold, #c9a14a);
+  box-shadow: var(--wotann-elevation-glow-gold, 0 0 24px rgba(201, 161, 74, 0.35));
+}
+
+/* ================================================================
+ * Section 7 — Cost Glint
+ * Specular sheen that sweeps across a paid-key cost number once per
+ * ~6s. Pure CSS — pseudo-element sweeps a linear-gradient highlight.
+ * ================================================================ */
+
+.cost-glint {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  /* Allow the consumer to pick the text size; we just paint behind. */
+  isolation: isolate;
+}
+
+.cost-glint__value {
+  position: relative;
+  z-index: 1;
+}
+
+.cost-glint::before {
+  content: "";
+  position: absolute;
+  inset: -2px -8px;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.0) 38%,
+    rgba(255, 255, 255, 0.55) 50%,
+    rgba(255, 255, 255, 0.0) 62%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  pointer-events: none;
+  z-index: 2;
+  mix-blend-mode: screen;
+  animation: wotann-norse-glint-sweep var(--norse-glint-period) linear infinite;
+}
+
+.cost-glint[data-paid="false"]::before {
+  display: none;
+}
+
+@keyframes wotann-norse-glint-sweep {
+  /* Most of the period the sheen is offscreen — 0% → ~80%. The sweep
+     itself happens in the last ~18% of the cycle (hue rotate + slide
+     across), then it parks back offscreen for the next loop. */
+  0%   { transform: translateX(-120%); filter: hue-rotate(0deg); }
+  82%  { transform: translateX(-120%); filter: hue-rotate(0deg); }
+  100% { transform: translateX(120%);  filter: hue-rotate(20deg); }
+}
+
+/* ================================================================
+ * Section 8 — Reduced Motion
+ * Drop animations to base form for users who request reduced motion.
+ * ================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-stamp,
+  .sigil-stamp__underline,
+  .sigil-stamp__chevron,
+  .conv-braid__strand--animating,
+  .ravens-flight__bird,
+  .patron-card__inner,
+  .cost-glint::before {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .sigil-stamp__underline { transform: scaleX(1); }
+  .sigil-stamp__chevron   { transform: scale(1); opacity: 1; }
+  .conv-braid__strand--animating { stroke-dashoffset: 0; }
+
+  /* Patron cards still flip on hover, but instantly. */
+  .patron-card:hover .patron-card__inner,
+  .patron-card:focus-visible .patron-card__inner,
+  .patron-card[data-flipped="true"] .patron-card__inner {
+    transition: none;
+  }
+}
