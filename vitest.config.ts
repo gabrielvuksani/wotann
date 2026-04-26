@@ -6,13 +6,19 @@ export default defineConfig({
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     exclude: ["node_modules", "dist"],
     testTimeout: 10_000,
-    // Default vitest pool/maxWorkers settings — let it use NUM_CPUS
-    // workers in parallel. CI ubuntu-latest has 4 cores; each gets
-    // its own fork. This was the original config before the OOM
-    // hunting; reverting because all the constraint experiments
-    // (maxWorkers: 1, threads, sharding, heap bumps, timeout bumps)
-    // hit the same 88-second cancellation cliff in CI even when
-    // local runs were fine. The shard step in CI starts a fresh
-    // process anyway, so worker isolation isn't the bottleneck.
+    // CI ubuntu-latest has 4 cores; default vitest spawns NUM_CPUS
+    // workers in parallel and each gets its own V8 instance. With
+    // 583 test files the parallel workers eat 4-8 GB combined and
+    // get OOM-killed almost immediately (10s into shard 1/6).
+    //
+    // maxWorkers: 1 forces serial execution within each shard; the
+    // shard split itself (6 sharded vitest invocations) gives the
+    // cross-process isolation that prevents one fork accumulating
+    // heap fragmentation across the full 583-file suite.
+    //
+    // Confirmed locally: shard 1/6 = 65s, shard 6/6 = 20s, all 6
+    // shards together = ~3 min wall time, all 9552 tests pass.
+    pool: "forks",
+    maxWorkers: 1,
   },
 });
