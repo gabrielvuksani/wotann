@@ -66,14 +66,20 @@ jobs:
   # runners reintroduce preemption flake, restore `continue-on-error: true`
   # explicitly here AND re-open the regression-visibility tracking issue.
   test:
-    name: Tests (hard gate)
-    runs-on: ubuntu-latest
-    # Bumped from 15 → 30. With 583 test files and the OOM fix forcing
-    # single-fork sequential execution (vitest.config.ts maxWorkers: 1),
-    # CI takes ~3 minutes locally on a fast Mac but the ubuntu-latest
-    # runner is slower per-core. 30 min gives generous headroom for
-    # slow shards without ever hiding a real hang.
-    timeout-minutes: 30
+    name: Tests (shard ${{ matrix.shard }}/6)
+    # MATRIX-PARALLEL APPROACH after web-research found ubuntu-latest
+    # SIGKILLs vitest at ~88s with no error message — known issue
+    # (github actions/runner#2128, vitest-dev/vitest#7288). Splitting
+    # into 6 SEPARATE jobs gives each shard its own runner with its
+    # own 16 GB / 4 CPU budget. No memory accumulation across shards.
+    # Pin to ubuntu-22.04 (was: ubuntu-latest) — multiple reports of
+    # ubuntu-latest pipelines flaking that resolve when pinned to 22.04.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -84,39 +90,15 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
-      - name: Typecheck
+      - name: Typecheck (only on shard 1)
+        if: matrix.shard == 1
         run: npx tsc --noEmit
-      # Split the 583-test-file suite into 6 sharded vitest runs so each
-      # fork stays well below the CI OOM cliff. 3-shard split (~195 files)
-      # still cancelled on ubuntu-latest at ~88 s; 6-shard ~97 files per
-      # shard should clear the cliff. Each shard spawns a fresh Node
-      # process; total wall time ~3-4 min in CI. Use a matrix to also
-      # parallelize across runners for total throughput.
-      - name: Test (shard 1/6)
-        run: npx vitest run --shard=1/6
+      - name: Test (shard ${{ matrix.shard }}/6)
+        run: npx vitest run --shard=${{ matrix.shard }}/6
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-      - name: Test (shard 2/6)
-        run: npx vitest run --shard=2/6
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-      - name: Test (shard 3/6)
-        run: npx vitest run --shard=3/6
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-      - name: Test (shard 4/6)
-        run: npx vitest run --shard=4/6
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-      - name: Test (shard 5/6)
-        run: npx vitest run --shard=5/6
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-      - name: Test (shard 6/6)
-        run: npx vitest run --shard=6/6
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-      - name: Build
+      - name: Build (only on shard 1)
+        if: matrix.shard == 1
         run: npm run build
 
   desktop-typecheck:
