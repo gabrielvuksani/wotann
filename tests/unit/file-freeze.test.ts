@@ -1,11 +1,22 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { FileFreezer } from "../../src/security/file-freeze.js";
 
 describe("File Freeze", () => {
   let freezer: FileFreezer;
+  let WORKDIR: string;
 
   beforeEach(() => {
-    freezer = new FileFreezer("/Users/test/project");
+    // Use a real temp dir + realpath so canonicalizePathForCheck (which
+    // calls realpath internally) returns a stable canonical path on
+    // both macOS (where /var is a symlink to /private/var) and Linux
+    // (where temp paths are direct). Without realpathSync here, focus
+    // mode comparisons fail because the lexical workingDir (/var/...)
+    // doesn't match the canonical check path (/private/var/...).
+    WORKDIR = realpathSync(mkdtempSync(join(tmpdir(), "wotann-freeze-")));
+    freezer = new FileFreezer(WORKDIR);
   });
 
   describe("freeze/unfreeze", () => {
@@ -67,21 +78,21 @@ describe("File Freeze", () => {
   describe("focus mode", () => {
     it("blocks edits outside the focus path", () => {
       freezer.setFocus("src/core");
-      const result = freezer.check("/Users/test/project/src/utils/helper.ts");
+      const result = freezer.check(`${WORKDIR}/src/utils/helper.ts`);
       expect(result.frozen).toBe(true);
       expect(result.rule?.frozenBy).toBe("focus-mode");
     });
 
     it("allows edits inside the focus path", () => {
       freezer.setFocus("src/core");
-      const result = freezer.check("/Users/test/project/src/core/mode-cycling.ts");
+      const result = freezer.check(`${WORKDIR}/src/core/mode-cycling.ts`);
       expect(result.frozen).toBe(false);
     });
 
     it("clears focus mode", () => {
       freezer.setFocus("src/core");
       freezer.clearFocus();
-      const result = freezer.check("/Users/test/project/src/utils/helper.ts");
+      const result = freezer.check(`${WORKDIR}/src/utils/helper.ts`);
       expect(result.frozen).toBe(false);
     });
   });
