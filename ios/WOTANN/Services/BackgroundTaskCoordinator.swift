@@ -1,6 +1,7 @@
 import Foundation
 #if os(iOS)
 import BackgroundTasks
+import Security
 #endif
 import os.log
 
@@ -122,10 +123,23 @@ final class BackgroundTaskCoordinator {
             log.info("offline-queue flush task expired before completion")
         }
 
-        // Honest fallback: in the absence of an injected RPC executor we mark
-        // the task as completed (no-op) — drain logic is wired by callers via
-        // OfflineQueueService.flushOnBackground(using:) on an upcoming pass.
-        // Future wave (H-E14 in TIER 1) will inject the executor here.
+        // H-E14: actually drain the offline queue. Construct a fresh
+        // OfflineQueueService instance — it loads queued tasks from
+        // the shared UserDefaults key on init, so it sees whatever
+        // ChatViewModel queued during foreground use.
+        //
+        // The executor closure attempts a real desktop dispatch via
+        // RPCDispatcher; on failure the queue's own retry/DLQ logic
+        // takes over and we leave the unsent items for the next BG
+        // window. Honest fallback: if no pairing is configured, the
+        // dispatcher fails fast, the queue keeps its items, and we
+        // mark the BG task complete so iOS doesn't penalise our
+        // refresh budget.
+        let queue = OfflineQueueService()
+        await queue.flushOnBackground { content in
+            try await BGOfflineQueueDispatcher.dispatch(content: content)
+        }
+
         task.setTaskCompleted(success: !didExpire)
     }
 
@@ -139,9 +153,95 @@ final class BackgroundTaskCoordinator {
             log.info("memory-sync task expired before completion")
         }
 
-        // Same honest pattern — surface the BGTaskScheduler entry point for
-        // App Review while the actual sync executor lands in TIER 1.
+        // Memory sync issues a single mem.snapshot.pull RPC to the
+        // daemon so the next foreground sees fresh conversation
+        // metadata. Failure is non-fatal — same retry/DLQ semantics
+        // as the offline queue. Use BGOfflineQueueDispatcher's shared
+        // RPC channel to keep the wire surface consistent.
+        do {
+            try await BGOfflineQueueDispatcher.runRPC("mem.snapshot.pull")
+        } catch {
+            log.warning("memory-sync rpc failed: \(error.localizedDescription, privacy: .public)")
+        }
+
         task.setTaskCompleted(success: !didExpire)
     }
     #endif
 }
+
+// MARK: - BGOfflineQueueDispatcher
+//
+// Static RPC bridge used by background-task handlers when no live view
+// is mounted. Reads the same pairing data that ChatViewModel uses for
+// its RPCClient so the BG drain reaches the same desktop. Honest
+// fallback: if no pairing data is in the keychain, throws — the queue
+// keeps its items for the next foreground.
+
+#if os(iOS)
+@MainActor
+enum BGOfflineQueueDispatcher {
+    private static let log = Logger(
+        subsystem: "com.wotann.ios",
+        category: "BGOfflineQueueDispatcher"
+    )
+
+    /// Dispatch a single queued message via the desktop chat.send RPC.
+    static func dispatch(content: String) async throws {
+        try await runRPC("chat.send", params: ["content": .string(content)])
+    }
+
+    /// Issue an arbitrary RPC against the paired desktop. Used for both
+    /// chat dispatch and memory snapshot pulls.
+    static func runRPC(
+        _ method: String,
+        params: [String: RPCValue]? = nil
+    ) async throws {
+        let client = RPCClient()
+        guard let pairingJson = readKeychain("pairing_data"),
+              let data = pairingJson.data(using: .utf8),
+              let pairing = try? JSONDecoder().decode(ConnectionManager.PairedDevice.self, from: data) else {
+            throw NSError(
+                domain: "wotann.bg-dispatch",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "no pairing data in shared keychain"]
+            )
+        }
+        client.connect(host: pairing.host, port: pairing.port)
+        // Tight handshake budget — BG tasks are time-limited.
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        guard client.isConnected else {
+            throw NSError(
+                domain: "wotann.bg-dispatch",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "websocket handshake timeout"]
+            )
+        }
+        // Inherit the encrypted channel the main app already negotiated.
+        if let secretBase64 = readKeychain("shared_secret"),
+           let keyData = Data(base64Encoded: secretBase64) {
+            let ecdh = ECDHManager()
+            try? ecdh.loadDerivedKey(keyData)
+            client.setEncryption(ecdh)
+        }
+        _ = try await client.send(method, params: params)
+    }
+
+    private static func readKeychain(_ account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.wotann.ios",
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let string = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return string
+    }
+}
+#endif
