@@ -32,6 +32,8 @@ import type { AgentMessage, PermissionMode, PermissionDecision } from "../core/t
 // matrix lives in ONE place (src/sandbox/security.ts) instead of being
 // duplicated across middleware/hooks/runtime.
 import { classifyRisk, resolvePermission } from "../sandbox/security.js";
+import type { AuditTrail } from "../telemetry/audit-trail.js";
+import { randomUUID } from "node:crypto";
 
 // -- Risk classification --------------------------------------------------
 
@@ -279,6 +281,25 @@ export class SandboxAuditMiddleware {
  */
 export interface SandboxAuditMiddlewareOptions {
   readonly permissionMode?: PermissionMode;
+  /**
+   * GA-05 (V9_UNIFIED_GAP_MATRIX_2026-04-25) — when supplied, every
+   * emitted SandboxAuditEntry is mirrored into the SQLite audit trail.
+   * pass/warn become success rows (real executions). block becomes a
+   * failure row so reviewers see denials too.
+   */
+  readonly auditTrail?: AuditTrail;
+}
+
+/**
+ * Map a SandboxAudit verdict to the canonical RiskLevel vocabulary
+ * used by AuditTrail / kairos-rpc. Pass/warn/block correspond to
+ * progressively higher risk so trail.query({ riskLevel }) gives
+ * reviewers a meaningful filter.
+ */
+function verdictToRiskLevel(v: AuditVerdict): "low" | "medium" | "high" {
+  if (v === "block") return "high";
+  if (v === "warn") return "medium";
+  return "low";
 }
 
 export function createSandboxAuditMiddleware(
@@ -325,6 +346,40 @@ export function createSandboxAuditMiddleware(
         newEntries.push(entry);
         if (entry.verdict === "block") {
           blockInjections.push(instance.buildBlockMessage(entry));
+        }
+        // GA-05 (V9_UNIFIED_GAP_MATRIX_2026-04-25) — mirror the
+        // SandboxAuditEntry into the SQLite audit trail when the caller
+        // opted in. pass/warn become success rows (the call WAS allowed
+        // through to the sandbox layer); block becomes a failure row so
+        // reviewers see denials when querying the trail.
+        //
+        // QB#6 (honest fallback): the audit-trail mirror MUST NOT fail
+        // the middleware — sandbox-audit is on the critical path for
+        // every tool-use turn. SQLite write errors (lock contention,
+        // disk-full, schema drift) are logged via console.warn and the
+        // pipeline continues with the in-memory entry intact.
+        if (options.auditTrail) {
+          try {
+            options.auditTrail.record({
+              id: randomUUID(),
+              sessionId: ctx.sessionId,
+              timestamp: entry.timestamp,
+              tool: entry.toolName,
+              riskLevel: verdictToRiskLevel(entry.verdict),
+              input: entry.command,
+              ...(entry.rejectionReason !== undefined
+                ? { output: `[blocked] ${entry.rejectionReason}` }
+                : {}),
+              success: entry.verdict !== "block",
+            });
+          } catch (err) {
+            // Honest warn: never silently swallow an audit-trail write
+            // failure. The in-memory `sandboxAuditEntries` buffer still
+            // carries the entry for downstream callers.
+            console.warn(
+              `[SandboxAudit] auditTrail.record failed: ${(err as Error).message}; in-memory entry preserved`,
+            );
+          }
         }
       }
 

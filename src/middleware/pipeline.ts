@@ -67,6 +67,10 @@ import {
   createLLMErrorHandlingMiddleware,
 } from "./llm-error-handling.js";
 import { SandboxAuditMiddleware, createSandboxAuditMiddleware } from "./sandbox-audit.js";
+import { AuditTrail } from "../telemetry/audit-trail.js";
+import { existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { TitleMiddleware, createTitleMiddleware } from "./title.js";
 import {
   DeferredToolFilterMiddleware,
@@ -93,6 +97,39 @@ const defaultGuardrailProviderInstance = new GuardrailProviderMiddleware(new All
 const defaultDanglingToolCallInstance = new DanglingToolCallMiddleware();
 const defaultLLMErrorHandlingInstance = new LLMErrorHandlingMiddleware();
 const defaultSandboxAuditInstance = new SandboxAuditMiddleware();
+
+// GA-05 (V9_UNIFIED_GAP_MATRIX_2026-04-25) — lazy AuditTrail singleton.
+// Constructed on first read (not at module load) so test runs that never
+// touch sandbox-audit don't open a SQLite handle on the user's home
+// directory. Uses the same `~/.wotann/audit.db` path as kairos-rpc
+// (audit.query handler) so daemon-side queries see the writes the
+// SandboxAuditMiddleware mirrors here. Failures during construction
+// (read-only home, corrupt DB) collapse to `null` so the middleware
+// option stays falsy and the pipeline degrades to in-memory-only audit
+// rather than crashing on every turn.
+let cachedAuditTrail: AuditTrail | null | undefined = undefined;
+function getDefaultAuditTrail(): AuditTrail | undefined {
+  if (cachedAuditTrail !== undefined) {
+    return cachedAuditTrail ?? undefined;
+  }
+  try {
+    const wotannDir = join(homedir(), ".wotann");
+    if (!existsSync(wotannDir)) {
+      mkdirSync(wotannDir, { recursive: true });
+    }
+    const dbPath = join(wotannDir, "audit.db");
+    cachedAuditTrail = new AuditTrail(dbPath);
+    return cachedAuditTrail;
+  } catch (err) {
+    // Honest fallback (QB#6): if the audit DB can't be opened, log once
+    // and fall back to in-memory-only audit. Never crash the pipeline.
+    console.warn(
+      `[Pipeline] AuditTrail singleton init failed: ${(err as Error).message}; sandbox audit will be in-memory only`,
+    );
+    cachedAuditTrail = null;
+    return undefined;
+  }
+}
 const defaultTitleInstance = new TitleMiddleware();
 const defaultDeferredToolFilterInstance = new DeferredToolFilterMiddleware();
 
@@ -130,7 +167,9 @@ const PIPELINE: readonly Middleware[] = [
   fileTypeGateMiddleware, // 3.5. Magika file-type classifier + trust boundary
   createDanglingToolCallMiddleware(defaultDanglingToolCallInstance), // 3.7. Lane 2: repair dangling tool_use
   sandboxMiddleware, // 4. Sandbox env
-  createSandboxAuditMiddleware(defaultSandboxAuditInstance), // 4.7. Lane 2: sandbox command audit
+  createSandboxAuditMiddleware(defaultSandboxAuditInstance, {
+    ...(getDefaultAuditTrail() ? { auditTrail: getDefaultAuditTrail()! } : {}),
+  }), // 4.7. Lane 2: sandbox command audit + GA-05 mirror to SQLite trail
   guardrailMiddleware, // 5. Pre-execution auth (keyword heuristic — existing)
   createGuardrailProviderMiddleware(defaultGuardrailProviderInstance), // 5.5. Lane 2: pluggable provider
   createTrifectaGuardMiddleware({
@@ -278,7 +317,9 @@ export function createPipelineWithInstances(
     fileTypeGateMiddleware,
     createDanglingToolCallMiddleware(danglingToolCall),
     sandboxMiddleware,
-    createSandboxAuditMiddleware(sandboxAudit),
+    createSandboxAuditMiddleware(sandboxAudit, {
+      ...(getDefaultAuditTrail() ? { auditTrail: getDefaultAuditTrail()! } : {}),
+    }),
     guardrailMiddleware,
     createGuardrailProviderMiddleware(guardrailProvider),
     toolErrorMiddleware,
