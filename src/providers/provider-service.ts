@@ -49,7 +49,7 @@ export interface ProviderCredential {
   /** Opaque token material — never returned to UI in full. */
   readonly token?: string;
   /** Where the credential was sourced from, for debugging. */
-  readonly source: "env" | "providers.env" | "oauth-file" | "cli" | "keychain";
+  readonly source: "env" | "providers.env" | "oauth-file" | "cli" | "stored-file";
   /** Unix seconds when the credential expires, if applicable. */
   readonly expiresAt?: number;
 }
@@ -352,7 +352,7 @@ const anthropicSpec: ProviderSpec = {
         method: saved.method,
         label: saved.label ?? "Claude Max",
         token: saved.token,
-        source: "keychain",
+        source: "stored-file",
         expiresAt: saved.expiresAt,
       };
     // Legacy oauth-file path removed per V9 T0.1 (WOTANN no longer writes
@@ -437,7 +437,7 @@ const openaiSpec: ProviderSpec = {
         method: saved.method,
         label: saved.label ?? "API Key",
         token: saved.token,
-        source: "keychain",
+        source: "stored-file",
       };
     return null;
   },
@@ -590,7 +590,7 @@ const geminiSpec: ProviderSpec = {
     if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
     const saved = ctx.storedCredentials["gemini"];
     if (saved)
-      return { method: "apiKey", label: "API Key", token: saved.token, source: "keychain" };
+      return { method: "apiKey", label: "API Key", token: saved.token, source: "stored-file" };
     return null;
   },
   async listModels(credential) {
@@ -679,7 +679,7 @@ const groqSpec: ProviderSpec = {
     if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
     const saved = ctx.storedCredentials["groq"];
     if (saved)
-      return { method: "apiKey", label: "API Key", token: saved.token, source: "keychain" };
+      return { method: "apiKey", label: "API Key", token: saved.token, source: "stored-file" };
     return null;
   },
   async listModels(credential) {
@@ -728,7 +728,7 @@ function openAICompatSpec(args: {
       if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
       const saved = ctx.storedCredentials[args.id];
       if (saved)
-        return { method: "apiKey", label: "API Key", token: saved.token, source: "keychain" };
+        return { method: "apiKey", label: "API Key", token: saved.token, source: "stored-file" };
       return null;
     },
     async listModels(credential) {
@@ -788,7 +788,7 @@ const copilotSpec: ProviderSpec = {
         method: saved.method,
         label: saved.label ?? "GitHub Copilot",
         token: saved.token,
-        source: "keychain",
+        source: "stored-file",
       };
     return null;
   },
@@ -1228,7 +1228,7 @@ export class ProviderService extends EventEmitter {
     return this.states.get(providerId) ?? null;
   }
 
-  /** Remove credentials for a provider. Clears providers.env mirror and keychain entry. */
+  /** Remove credentials for a provider. Clears providers.env mirror and stored-file entry. */
   async deleteCredential(providerId: string): Promise<void> {
     const spec = this.specs.get(providerId);
     if (!spec) throw new Error(`Unknown provider: ${providerId}`);
