@@ -219,6 +219,23 @@ struct WatchHomeView: View {
                 }
 
                 // Quick Actions
+                Section("Dispatch") {
+                    // H-E16: Watch dispatch surface — DispatchView lived in
+                    // ios/WOTANNWatch/DispatchView.swift but was never wired
+                    // into WatchHomeView, so the user couldn't reach it
+                    // from the watch app. NavigationLink restores the path.
+                    NavigationLink {
+                        DispatchView()
+                            .environmentObject(phoneSession)
+                    } label: {
+                        HStack {
+                            Image(systemName: "paperplane.fill")
+                                .foregroundColor(WatchColors.primary)
+                            Text("Dispatch Task")
+                        }
+                    }
+                }
+
                 Section("Quick Actions") {
                     NavigationLink {
                         QuickActionsView()
