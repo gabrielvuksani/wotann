@@ -10,16 +10,9 @@
  */
 
 import { randomUUID } from "node:crypto";
-import {
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  readdirSync,
-  unlinkSync,
-  statSync,
-  existsSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, unlinkSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 
 // -- Types -------------------------------------------------------------------
 
@@ -58,9 +51,7 @@ export class AgentWorkspace {
    * Write a message to the workspace.
    * Returns the generated message ID.
    */
-  write(
-    message: Omit<WorkspaceMessage, "id" | "timestamp">,
-  ): string {
+  write(message: Omit<WorkspaceMessage, "id" | "timestamp">): string {
     const id = `msg_${randomUUID().slice(0, 12)}`;
     const timestamp = Date.now();
 
@@ -71,7 +62,10 @@ export class AgentWorkspace {
     };
 
     const filePath = join(this.workspaceDir, `${id}${MESSAGE_EXTENSION}`);
-    writeFileSync(filePath, JSON.stringify(fullMessage, null, 2), "utf-8");
+    // Wave 6.5-UU (H-22) — agent workspace message file. Atomic write so
+    // a crash mid-send doesn't strand a half-written message that
+    // peer agents would then fail to parse.
+    writeFileAtomic(filePath, JSON.stringify(fullMessage, null, 2), { encoding: "utf-8" });
 
     return id;
   }

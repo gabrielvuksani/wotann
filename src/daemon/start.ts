@@ -8,18 +8,11 @@
 
 import { KairosDaemon } from "./kairos.js";
 import { join } from "node:path";
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-  unlinkSync,
-  renameSync,
-  appendFileSync,
-} from "node:fs";
+import { readFileSync, mkdirSync, existsSync, unlinkSync, appendFileSync } from "node:fs";
 import { ensureAllSidecars } from "../utils/sidecar-downloader.js";
 import { resolveWotannHome } from "../utils/wotann-home.js";
 import { installProcessHandlers } from "../utils/process-handlers.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 
 const wotannDir = resolveWotannHome();
 if (!existsSync(wotannDir)) {
@@ -159,23 +152,17 @@ function isProcessAlive(pid: number): boolean {
 }
 
 /**
- * Write a file atomically via tmp + rename. POSIX rename is atomic on
- * the same filesystem, so two concurrent daemon-start invocations either
- * both succeed in writing their own tmp file but only one wins the
- * rename, or one wins and the other fails the rename — never partial.
+ * Write a file atomically via the shared utils/atomic-io helper. Wave 6.5-UU
+ * (H-22) consolidated the per-site atomic-write code into one fsync-aware
+ * implementation; this kept-alive shim preserves the local function name so
+ * existing call sites inside this module don't churn.
  *
  * Closes the "PID write non-atomic" Opus audit finding: previously
  * `writeFileSync(pidPath, ...)` could be observed mid-write by a
  * concurrent reader, and two writers would clobber each other.
  */
 function atomicWrite(targetPath: string, content: string): void {
-  const tmpPath = `${targetPath}.tmp.${process.pid}.${Date.now()}`;
-  writeFileSync(tmpPath, content);
-  // O_EXCL-style: if the target was created by another process between
-  // our existsSync check and now, the rename still atomically replaces
-  // it. We accept "last writer wins" semantics — the alternative
-  // (bail-out via O_EXCL) would race with stale-cleanup paths.
-  renameSync(tmpPath, targetPath);
+  writeFileAtomic(targetPath, content);
 }
 
 if (existsSync(pidPath)) {
@@ -202,7 +189,10 @@ if (existsSync(pidPath)) {
 
 atomicWrite(pidPath, String(process.pid));
 
-writeFileSync(
+// Wave 6.5-UU (H-22) — daemon status file is read by Tauri sidecar +
+// `wotann daemon status`. Atomic write prevents readers from seeing a
+// half-written status JSON during a crash window.
+atomicWrite(
   statusPath,
   JSON.stringify({
     pid: process.pid,
@@ -220,7 +210,7 @@ function cleanupOnExit() {
   } catch {
     /* already removed */
   }
-  writeFileSync(statusPath, JSON.stringify({ pid: process.pid, status: "stopped" }));
+  atomicWrite(statusPath, JSON.stringify({ pid: process.pid, status: "stopped" }));
 }
 
 process.on("SIGTERM", async () => {
@@ -248,7 +238,7 @@ try {
 // Start the daemon
 try {
   await daemon.start();
-  writeFileSync(
+  atomicWrite(
     statusPath,
     JSON.stringify({
       pid: process.pid,
@@ -259,7 +249,7 @@ try {
   console.log(`[KAIROS] Daemon running (PID: ${process.pid})`);
 } catch (err) {
   console.error("[KAIROS] Failed to start:", err);
-  writeFileSync(
+  atomicWrite(
     statusPath,
     JSON.stringify({
       pid: process.pid,

@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ChannelMessage } from "./gateway.js";
 import type { WotannMode } from "../core/mode-cycling.js";
@@ -331,7 +332,8 @@ export class ChannelDispatchManager {
       version: 1,
       routes: [...this.routes.values()],
     };
-    writeFileSync(this.manifestPath, JSON.stringify(manifest, null, 2));
+    // Wave 6.5-UU (H-22) — channel route manifest. Atomic write.
+    writeFileAtomic(this.manifestPath, JSON.stringify(manifest, null, 2));
   }
 
   private persistPolicies(): void {
@@ -340,7 +342,8 @@ export class ChannelDispatchManager {
       version: 1,
       policies: this.getPolicies(),
     };
-    writeFileSync(this.policyPath, JSON.stringify(manifest, null, 2));
+    // Wave 6.5-UU (H-22) — channel policy manifest. Atomic write.
+    writeFileAtomic(this.policyPath, JSON.stringify(manifest, null, 2));
   }
 }
 

@@ -3,9 +3,10 @@
  * Persists interrupted streaming queries so the CLI can continue them later.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentMessage, WotannQueryOptions, ProviderName, SessionState } from "./types.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 
 export type StreamCheckpointStatus = "running" | "interrupted" | "completed" | "resumed";
 
@@ -82,7 +83,12 @@ export class StreamCheckpointStore {
     return checkpoint;
   }
 
-  appendText(id: string, text: string, provider?: ProviderName, model?: string): StreamCheckpoint | null {
+  appendText(
+    id: string,
+    text: string,
+    provider?: ProviderName,
+    model?: string,
+  ): StreamCheckpoint | null {
     const checkpoint = this.get(id);
     if (!checkpoint) return null;
 
@@ -147,7 +153,11 @@ export class StreamCheckpointStore {
     return files[0] ?? null;
   }
 
-  private updateStatus(id: string, status: StreamCheckpointStatus, lastError?: string): StreamCheckpoint | null {
+  private updateStatus(
+    id: string,
+    status: StreamCheckpointStatus,
+    lastError?: string,
+  ): StreamCheckpoint | null {
     const checkpoint = this.get(id);
     if (!checkpoint) return null;
 
@@ -165,7 +175,13 @@ export class StreamCheckpointStore {
     if (!existsSync(this.storageDir)) {
       mkdirSync(this.storageDir, { recursive: true });
     }
-    writeFileSync(
+    // Wave 6.5-UU (H-22) — Tier-1: resume state file IS the resume mechanism.
+    // A non-atomic write here means a crash during checkpoint can leave the
+    // resume file truncated, which then fails to parse on restart and the
+    // user loses the entire interrupted stream. writeFileAtomic uses
+    // tmp + fsync + rename so the previous checkpoint stays valid until
+    // the new one is fully durable on disk.
+    writeFileAtomic(
       join(this.storageDir, `${checkpoint.id}.json`),
       JSON.stringify(checkpoint, null, 2),
     );
@@ -198,7 +214,9 @@ export function buildResumeQuery(checkpoint: StreamCheckpoint): ResumeQuery {
     model: checkpoint.options.model,
     maxTokens: checkpoint.options.maxTokens,
     temperature: checkpoint.options.temperature,
-    systemPrompt: [checkpoint.options.systemPrompt, resumeInstructions].filter(Boolean).join("\n\n"),
+    systemPrompt: [checkpoint.options.systemPrompt, resumeInstructions]
+      .filter(Boolean)
+      .join("\n\n"),
   };
 }
 

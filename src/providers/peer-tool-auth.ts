@@ -20,7 +20,8 @@
  *     thrown. This is defensive because the peer file is not ours.
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProviderName } from "../core/types.js";
@@ -119,7 +120,9 @@ function writeClaudeCodeFile(path: string, cred: PeerCredentialFile): void {
     refreshToken: cred.refreshToken,
     expiresAt: cred.expiresAt,
   };
-  writeFileSync(path, JSON.stringify(payload, null, 2), { mode: 0o600 });
+  // Wave 6.5-UU (H-22) — peer-tool credential file (Claude Code creds).
+  // Atomic write protects against truncated credentials on crash.
+  writeFileAtomic(path, JSON.stringify(payload, null, 2), { mode: 0o600 });
 }
 
 function writeCodexAuthFile(path: string, cred: PeerCredentialFile): void {
@@ -143,7 +146,9 @@ function writeCodexAuthFile(path: string, cred: PeerCredentialFile): void {
       expires_at: cred.expiresAt,
     },
   };
-  writeFileSync(path, JSON.stringify(updated, null, 2), { mode: 0o600 });
+  // Wave 6.5-UU (H-22) — Codex peer-tool credentials. Atomic write so a
+  // partial write doesn't poison the existing tokens block.
+  writeFileAtomic(path, JSON.stringify(updated, null, 2), { mode: 0o600 });
 }
 
 // ── Sidecar ─────────────────────────────────────────────────────────

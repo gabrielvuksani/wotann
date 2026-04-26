@@ -11,7 +11,8 @@
  * Results are cached to ~/.wotann/registry-cache.json
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 // ── Types ──────────────────────────────────────────────
@@ -76,7 +77,9 @@ function loadCache(): RegistryCache {
 function saveCache(cache: RegistryCache): void {
   const dir = resolveWotannHome();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 2));
+  // Wave 6.5-UU (H-22) — registry cache. Atomic write so a crash mid-flush
+  // doesn't break the next boot's "what models do I have" lookup.
+  writeFileAtomic(CACHE_PATH, JSON.stringify(cache, null, 2));
 }
 
 // ── Ollama Model Discovery ─────────────────────────────

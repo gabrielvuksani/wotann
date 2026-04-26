@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { resolveWotannHome } from "../utils/wotann-home.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 
 // ── Trigger Types ──────────────────────────────────────────
 
@@ -317,7 +318,10 @@ export class AutomationEngine {
     if (!fs.existsSync(this.configDir)) {
       fs.mkdirSync(this.configDir, { recursive: true });
     }
-    fs.writeFileSync(this.configPath, JSON.stringify(this.automations, null, 2), "utf-8");
+    // Wave 6.5-UU (H-22) — automations config drives the daemon's trigger
+    // dispatch. Atomic write so a crash mid-save doesn't truncate the
+    // config and disable every automation on next boot.
+    writeFileAtomic(this.configPath, JSON.stringify(this.automations, null, 2));
   }
 
   // ── Lifecycle ──────────────────────────────────────────

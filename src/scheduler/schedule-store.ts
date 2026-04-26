@@ -93,10 +93,15 @@ export class ScheduleStore {
     if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
 
     this.db = new Database(dbPath);
-    // WAL so concurrent readers (CLI `schedule list`) don't block
-    // the scheduler's own tick writes. Matches `cron-store.ts` + memory.
+    // Wave 6.5-UU (H-21) standard PRAGMA bundle. WAL + busy_timeout = 5000
+    // ensures CLI `schedule list` doesn't throw SQLITE_BUSY against the
+    // scheduler tick. synchronous = NORMAL keeps writes durable across
+    // crashes (the tick re-fires on restart for missed schedules).
+    this.db.pragma("busy_timeout = 5000");
     this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");
+    this.db.pragma("user_version"); // read for migration check
     this.initialize();
   }
 

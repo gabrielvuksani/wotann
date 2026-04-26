@@ -11,7 +11,8 @@
  * a "processed" subdirectory.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, renameSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, readdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join } from "node:path";
 import { watch, type FSWatcher } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -78,7 +79,10 @@ export class SteeringServer {
     const fileName = `${fullCommand.id}${FILE_EXTENSION}`;
     const filePath = join(this.pendingDir, fileName);
 
-    writeFileSync(filePath, JSON.stringify(fullCommand, null, 2));
+    // Wave 6.5-UU (H-22) — steering command file. Atomic write so a crash
+    // mid-save doesn't strand a half-written command that the watcher
+    // would then fail to parse.
+    writeFileAtomic(filePath, JSON.stringify(fullCommand, null, 2));
     return fullCommand;
   }
 
@@ -137,10 +141,7 @@ export class SteeringServer {
    * Start watching for new commands via filesystem watcher.
    * Calls the callback whenever a new command file appears.
    */
-  startWatching(
-    onCommand: (cmd: SteeringCommand) => void,
-    options?: SteeringServerOptions,
-  ): void {
+  startWatching(onCommand: (cmd: SteeringCommand) => void, options?: SteeringServerOptions): void {
     if (this.watcher || this.pollTimer) {
       this.stopWatching();
     }
@@ -178,9 +179,7 @@ export class SteeringServer {
     this.pollTimer = setInterval(() => {
       if (!existsSync(this.pendingDir)) return;
 
-      const currentFiles = readdirSync(this.pendingDir).filter((f) =>
-        f.endsWith(FILE_EXTENSION),
-      );
+      const currentFiles = readdirSync(this.pendingDir).filter((f) => f.endsWith(FILE_EXTENSION));
 
       for (const file of currentFiles) {
         if (!knownFiles.has(file)) {

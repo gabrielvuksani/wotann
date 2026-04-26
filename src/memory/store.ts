@@ -380,8 +380,16 @@ export class MemoryStore implements MemoryProvider {
     }
 
     this.db = new Database(dbPath);
+    // Wave 6.5-UU (H-21): standard PRAGMA bundle. busy_timeout = 5000 lets
+    // concurrent writers wait up to 5s for the lock instead of throwing
+    // SQLITE_BUSY immediately (the better-sqlite3 default is 0ms).
+    // synchronous = NORMAL keeps writes durable across app crashes at ~10x
+    // the throughput of FULL. foreign_keys = ON enables CASCADE.
+    this.db.pragma("busy_timeout = 5000");
     this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");
+    this.db.pragma("user_version"); // read for migration check
     this.initializeSchema();
   }
 
@@ -776,7 +784,20 @@ export class MemoryStore implements MemoryProvider {
       .run();
   }
 
-  /** @internal Migration helper — ONLY called with hardcoded literals. */
+  /** @internal Migration helper — ONLY called with hardcoded literals.
+   *
+   * Wave 6.5-UU (H-23) — wrap PRAGMA + ALTER inside an explicit transaction
+   * so a SIGKILL between the existence check and the column add can't
+   * leave the DB half-migrated (column added but no committed marker).
+   * SQLite is internally transactional per-statement, but the *combination*
+   * of PRAGMA table_info + ALTER TABLE is not — without the transaction
+   * wrapper a crash between the two could let the next call see an
+   * already-added column and skip a follow-up step that depends on the
+   * write being committed end-to-end.
+   *
+   * Identifier validation runs BEFORE entering the transaction so a bad
+   * identifier doesn't open and immediately roll back a tx for nothing.
+   */
   private migrateAddColumn(table: string, column: string, definition: string): void {
     // Validate inputs match safe identifier patterns
     const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -788,10 +809,12 @@ export class MemoryStore implements MemoryProvider {
       throw new Error(`Invalid column definition: "${definition}"`);
     }
 
-    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (!cols.some((c) => c.name === column)) {
-      this.db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
-    }
+    this.db.transaction(() => {
+      const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+      if (!cols.some((c) => c.name === column)) {
+        this.db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+      }
+    })();
   }
 
   // ── Layer 1: Auto-Capture ──────────────────────────────────

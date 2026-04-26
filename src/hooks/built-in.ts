@@ -3,9 +3,10 @@
  * Each behavioral guarantee is deterministic code, not a prompt suggestion.
  */
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import type { HookHandler, HookPayload, HookResult } from "./engine.js";
 import { DoomLoopDetector } from "./doom-loop-detector.js";
 import { detectFrustration } from "../middleware/layers.js";
@@ -266,7 +267,11 @@ export const preCompactFlush: HookHandler = {
         tailContent: (payload.content ?? "").slice(0, 8000),
         toolName: payload.toolName ?? null,
       };
-      writeFileSync(walMarkerPath(payload.sessionId), JSON.stringify(state, null, 2), "utf-8");
+      // Wave 6.5-UU (H-22) — WAL marker for compaction recovery. Atomic
+      // write so a crash mid-compact can't strand the recovery hint.
+      writeFileAtomic(walMarkerPath(payload.sessionId), JSON.stringify(state, null, 2), {
+        encoding: "utf-8",
+      });
       return { action: "allow", message: `WAL flushed for session ${state.sessionId}` };
     } catch (err) {
       // Non-fatal — allow the compaction to proceed even if disk write fails.

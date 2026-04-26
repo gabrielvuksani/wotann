@@ -3,7 +3,8 @@
  * Installs plugin packages into .wotann/plugins for local discovery/loading.
  */
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -46,9 +47,7 @@ export class PluginManager {
   install(spec: string): InstalledPlugin {
     mkdirSync(this.pluginsDir, { recursive: true });
 
-    const installed = existsSync(spec)
-      ? this.installFromPath(spec)
-      : this.installFromNpm(spec);
+    const installed = existsSync(spec) ? this.installFromPath(spec) : this.installFromNpm(spec);
 
     this.recordInstall(installed);
     return installed;
@@ -100,7 +99,10 @@ export class PluginManager {
       const tarball = execFileSync("npm", ["pack", spec], {
         cwd: tempDir,
         encoding: "utf-8",
-      }).trim().split("\n").pop();
+      })
+        .trim()
+        .split("\n")
+        .pop();
 
       if (!tarball) {
         throw new Error(`npm pack returned no tarball for ${spec}`);
@@ -128,7 +130,10 @@ export class PluginManager {
     const next: PluginLockfile = {
       installed: [...current, plugin],
     };
-    writeFileSync(this.lockfilePath, JSON.stringify(next, null, 2));
+    // Wave 6.5-UU (H-22) — plugin lockfile is the source of truth for
+    // installed plugins. Atomic write so a crash mid-save can't lose
+    // the install record (forcing re-install).
+    writeFileAtomic(this.lockfilePath, JSON.stringify(next, null, 2));
   }
 }
 
@@ -179,7 +184,7 @@ async function loadPluginModule(plugin: InstalledPlugin): Promise<LoadedPluginMo
   if (!existsSync(entryPath)) return null;
 
   try {
-    const imported = await import(pathToFileURL(entryPath).href) as {
+    const imported = (await import(pathToFileURL(entryPath).href)) as {
       wotannPlugin?: { hooks?: readonly HookHandler[]; panels?: readonly string[] };
       default?: { hooks?: readonly HookHandler[]; panels?: readonly string[] };
     };

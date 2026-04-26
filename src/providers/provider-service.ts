@@ -16,12 +16,13 @@
  * consumer (adapters, router, UI) goes through the service.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { withRetries, defaultRetryPolicy, type RetryPolicy } from "./retry-strategies.js";
 import { CircuitBreaker, withBreaker } from "./circuit-breaker.js";
 import { secureStoreSet, secureStoreGet, secureStoreDelete } from "../auth/secure-store.js";
@@ -407,15 +408,15 @@ export function writeProvidersEnvKey(key: string, value: string, path?: string):
   if (!replaced) newLines.push(`${key}=${value}`);
   // Strip trailing empties
   while (newLines.length > 0 && newLines[newLines.length - 1] === "") newLines.pop();
-  const tmp = `${resolved}.tmp`;
-  writeFileSync(tmp, newLines.join("\n") + "\n", { encoding: "utf-8" });
+  // Wave 6.5-UU (H-22) — refresh tokens are Tier-1: a half-written
+  // providers.env loses credentials. writeFileAtomic uses tmp + fsync +
+  // rename so a crash mid-write leaves the previous file intact.
+  writeFileAtomic(resolved, newLines.join("\n") + "\n", { mode: 0o600 });
   try {
-    chmodSync(tmp, 0o600);
+    chmodSync(resolved, 0o600);
   } catch {
-    /* best effort */
+    /* best effort — chmod again post-rename in case mode arg was lost */
   }
-  const { renameSync } = require("node:fs") as typeof import("node:fs");
-  renameSync(tmp, resolved);
 }
 
 /**
@@ -427,7 +428,9 @@ export function deleteProvidersEnvKey(key: string, path?: string): void {
   const existing = readFileSync(resolved, "utf-8");
   const keyPattern = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=`);
   const lines = existing.split(/\r?\n/).filter((line) => !keyPattern.test(line));
-  writeFileSync(resolved, lines.join("\n"), { encoding: "utf-8" });
+  // Wave 6.5-UU (H-22) — credential file integrity. writeFileAtomic
+  // ensures partial writes can't strand the file in a half-deleted state.
+  writeFileAtomic(resolved, lines.join("\n"), { mode: 0o600 });
   try {
     chmodSync(resolved, 0o600);
   } catch {

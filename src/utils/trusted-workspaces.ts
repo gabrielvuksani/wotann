@@ -26,7 +26,8 @@
  * can extend later without breaking older files.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, realpathSync } from "node:fs";
+import { writeFileAtomic } from "./atomic-io.js";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { resolveWotannHome } from "./wotann-home.js";
@@ -124,7 +125,11 @@ export function saveTrustedSet(hashes: ReadonlySet<string>): void {
     version: 1,
     hashes: [...hashes].sort(),
   };
-  writeFileSync(path, JSON.stringify(file, null, 2) + "\n", "utf-8");
+  // Wave 6.5-UU (H-22) — trusted-workspaces allowlist is the security gate
+  // for instruction-file loading (CVE-2026-33068). Atomic write so a crash
+  // mid-save can't truncate the allowlist and silently re-trust nothing
+  // (or worse, lose the persisted hashes).
+  writeFileAtomic(path, JSON.stringify(file, null, 2) + "\n", { encoding: "utf-8" });
 }
 
 // ── Trust API ───────────────────────────────────────────────

@@ -12,7 +12,6 @@ import {
   readdirSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
@@ -21,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import YAML from "yaml";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { generateManifest, writeManifest, type MarketplaceManifest } from "./manifest.js";
 
 const execFileAsync = promisify(execFile);
@@ -331,7 +331,8 @@ export class MCPRegistry {
       ),
     };
 
-    writeFileSync(out, JSON.stringify(payload, null, 2));
+    // Wave 6.5-UU (H-22) — MCP registry export. Atomic write.
+    writeFileAtomic(out, JSON.stringify(payload, null, 2));
     return out;
   }
 
@@ -576,8 +577,8 @@ export class SkillMarketplace {
       version: String(frontmatter["version"] ?? "0.0.0"),
     };
 
-    // Persist metadata alongside the skill
-    writeFileSync(join(installDir, ".wotann-meta.json"), JSON.stringify(meta, null, 2));
+    // Wave 6.5-UU (H-22) — installed skill metadata. Atomic write.
+    writeFileAtomic(join(installDir, ".wotann-meta.json"), JSON.stringify(meta, null, 2));
 
     return meta;
   }

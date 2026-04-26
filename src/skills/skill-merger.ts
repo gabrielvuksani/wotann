@@ -17,7 +17,8 @@
  * 4. Deduplicate conflicting guidance (prefer WOTANN built-in over external)
  */
 
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -385,7 +386,8 @@ export class SkillMerger {
 
         // Write merged skill
         const filename = `${groupName.replace(/[^a-z0-9-]/g, "-")}.md`;
-        writeFileSync(join(this.mergedPath, filename), result.content);
+        // Wave 6.5-UU (H-22) — merged skill output. Atomic write.
+        writeFileAtomic(join(this.mergedPath, filename), result.content);
         merged++;
       }
     }

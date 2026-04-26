@@ -20,6 +20,7 @@ import { join, dirname, resolve as resolvePath } from "node:path";
 import { homedir } from "node:os";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import type { WotannRuntime } from "../core/runtime.js";
 import type { KairosDaemon } from "./kairos.js";
 import type { QueryExecutor } from "../desktop/prompt-enhancer.js";
@@ -2711,21 +2712,16 @@ export class KairosRPCHandler {
 
       // Return a new config object with the updated key (immutable pattern)
       const updated = { ...config, [key]: value };
-      // Atomic write via tmp + rename. Closes the Opus-audit-flagged
-      // race window where a concurrent reader could see new content
-      // with old (loose) perms during the brief gap between writeFileSync
-      // and chmodSync. The tmp file is created with 0o600 so the rename
-      // brings the correct perms with it atomically.
-      const tmpPath = `${configPath}.tmp.${process.pid}.${Date.now()}`;
-      writeFileSync(tmpPath, yamlStringify(updated), { encoding: "utf-8", mode: 0o600 });
+      // Wave 6.5-UU (H-22) — wotann.yaml is the user's persisted config.
+      // writeFileAtomic uses tmp + fsync + rename so a crash mid-write
+      // doesn't corrupt the YAML and break the next daemon boot.
+      writeFileAtomic(configPath, yamlStringify(updated), { encoding: "utf-8", mode: 0o600 });
       try {
-        chmodSync(tmpPath, 0o600);
+        chmodSync(configPath, 0o600);
       } catch {
-        // best-effort: on FAT/exfat chmod is a no-op; the writeFileSync
+        // best-effort: on FAT/exfat chmod is a no-op; the writeFileAtomic
         // mode arg already set perms at create time.
       }
-      const { renameSync } = await import("node:fs");
-      renameSync(tmpPath, configPath);
       return { success: true, key, value };
     });
 
@@ -3266,7 +3262,11 @@ export class KairosRPCHandler {
           ...channels,
           [connectorType]: { ...config, savedAt: new Date().toISOString() },
         };
-        writeFileSync(configPath, yamlStringify({ ...root, channels: next }), "utf-8");
+        // Wave 6.5-UU (H-22) — channel connector config. Atomic write so
+        // a crash mid-save doesn't corrupt wotann.yaml.
+        writeFileAtomic(configPath, yamlStringify({ ...root, channels: next }), {
+          encoding: "utf-8",
+        });
         return { ok: true, connectorType };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -4436,7 +4436,8 @@ export class KairosRPCHandler {
           [name]: { ...entry, enabled: typeof enabled === "boolean" ? enabled : !entry["enabled"] },
         };
         const updated = { ...config, [key]: next };
-        writeFileSync(configPath, yamlStringify(updated), "utf-8");
+        // Wave 6.5-UU (H-22) — wotann.yaml MCP config. Atomic write.
+        writeFileAtomic(configPath, yamlStringify(updated), { encoding: "utf-8" });
         return { ok: true, name, enabled: next[name]?.["enabled"] };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -4465,7 +4466,8 @@ export class KairosRPCHandler {
           [name]: { command, args, transport, enabled: true },
         };
         const updated = { ...config, [key]: next };
-        writeFileSync(configPath, yamlStringify(updated), "utf-8");
+        // Wave 6.5-UU (H-22) — wotann.yaml MCP add. Atomic write.
+        writeFileAtomic(configPath, yamlStringify(updated), { encoding: "utf-8" });
         return { ok: true, name };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -4668,7 +4670,8 @@ export class KairosRPCHandler {
         const workflowsDir = resolveWotannHomeSubdir("workflows");
         if (!existsSync(workflowsDir)) mkdirSync(workflowsDir, { recursive: true });
         const outPath = join(workflowsDir, `${name}.yaml`);
-        writeFileSync(outPath, yamlStringify(workflow), "utf-8");
+        // Wave 6.5-UU (H-22) — workflow definition. Atomic write.
+        writeFileAtomic(outPath, yamlStringify(workflow), { encoding: "utf-8" });
         return { success: true, name, path: outPath };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -4977,10 +4980,8 @@ export class KairosRPCHandler {
             charsAccepted: day.charsAccepted + safeChars,
           },
         };
-        const tmpPath = `${statsPath}.tmp.${process.pid}.${Date.now()}`;
-        writeFileSync(tmpPath, JSON.stringify(updated, null, 2), { mode: 0o600 });
-        const { renameSync } = await import("node:fs");
-        renameSync(tmpPath, statsPath);
+        // Wave 6.5-UU (H-22) — daily suggestion stats. Atomic write.
+        writeFileAtomic(statsPath, JSON.stringify(updated, null, 2), { mode: 0o600 });
         return {
           ok: true,
           recorded: { id: suggestionId ?? null, characters: safeChars, day: today },
@@ -5363,7 +5364,10 @@ export class KairosRPCHandler {
             stillPasses: fresh.allPassed === true,
           },
         };
-        writeFileSync(reverifiedPath, JSON.stringify(reverifiedBundle, null, 2), "utf-8");
+        // Wave 6.5-UU (H-22) — reverified proof bundle. Atomic write.
+        writeFileAtomic(reverifiedPath, JSON.stringify(reverifiedBundle, null, 2), {
+          encoding: "utf-8",
+        });
         return {
           ok: true,
           id,
@@ -7979,7 +7983,10 @@ export class KairosRPCHandler {
           quietHours: quietHours ?? null,
           updatedAt: Date.now(),
         };
-        writeFileSync(this.notificationPrefsPath, JSON.stringify(prefs, null, 2), { mode: 0o600 });
+        // Wave 6.5-UU (H-22) — iOS notification prefs. Atomic write.
+        writeFileAtomic(this.notificationPrefsPath, JSON.stringify(prefs, null, 2), {
+          mode: 0o600,
+        });
         // Also call service if runtime exposes one
         const notif = ext()?.getNotificationService?.();
         if (notif && typeof notif.configure === "function") {

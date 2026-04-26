@@ -31,7 +31,8 @@
  *       deletePassword(service, account) → Promise<boolean>
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
+import { writeFileAtomic } from "./../utils/atomic-io.js";
 import { join } from "node:path";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
@@ -118,7 +119,10 @@ function readFileStore(path: string): FileStoreShape {
 function writeFileStore(path: string, data: FileStoreShape): void {
   const dir = join(path, "..");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(path, JSON.stringify(data, null, 2), { encoding: "utf-8" });
+  // Wave 6.5-UU (H-22) — secure store holds OAuth/API credentials.
+  // writeFileAtomic prevents a crash mid-write from truncating the
+  // credential file (which would lock the user out of every provider).
+  writeFileAtomic(path, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 0o600 });
   try {
     chmodSync(path, 0o600);
   } catch {

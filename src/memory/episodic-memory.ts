@@ -12,14 +12,26 @@
  * - Task estimation: "Similar tasks took ~30 minutes and $0.50"
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join } from "node:path";
 
 // ── Types ───────────────────────────────────────────────
 
 export interface EpisodeEvent {
   readonly timestamp: number;
-  readonly type: "start" | "plan" | "edit" | "test" | "error" | "fix" | "verify" | "complete" | "abandon" | "decision" | "discovery";
+  readonly type:
+    | "start"
+    | "plan"
+    | "edit"
+    | "test"
+    | "error"
+    | "fix"
+    | "verify"
+    | "complete"
+    | "abandon"
+    | "decision"
+    | "discovery";
   readonly description: string;
   readonly file?: string;
   readonly tokensUsed?: number;
@@ -100,7 +112,8 @@ export class EpisodicMemory {
    */
   startEpisode(taskDescription: string, provider: string, model: string): string {
     const id = `ep_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const title = taskDescription.length > 80 ? taskDescription.slice(0, 77) + "..." : taskDescription;
+    const title =
+      taskDescription.length > 80 ? taskDescription.slice(0, 77) + "..." : taskDescription;
 
     this.currentEpisode = {
       id,
@@ -132,7 +145,12 @@ export class EpisodicMemory {
   recordEvent(
     type: EpisodeEvent["type"],
     description: string,
-    metadata?: { file?: string; tokensUsed?: number; cost?: number; extra?: Record<string, unknown> },
+    metadata?: {
+      file?: string;
+      tokensUsed?: number;
+      cost?: number;
+      extra?: Record<string, unknown>;
+    },
   ): void {
     if (!this.currentEpisode) return;
 
@@ -240,9 +258,7 @@ export class EpisodicMemory {
     }
 
     if (query.tags && query.tags.length > 0) {
-      results = results.filter((e) =>
-        query.tags!.some((tag) => e.tags.includes(tag)),
-      );
+      results = results.filter((e) => query.tags!.some((tag) => e.tags.includes(tag)));
     }
 
     if (query.searchText) {
@@ -297,7 +313,9 @@ export class EpisodicMemory {
   /**
    * Get average cost/time for similar tasks.
    */
-  getEstimateForTask(taskDescription: string): { avgCost: number; avgDuration: number; sampleSize: number } | null {
+  getEstimateForTask(
+    taskDescription: string,
+  ): { avgCost: number; avgDuration: number; sampleSize: number } | null {
     const tags = extractTags(taskDescription);
     const related = this.search({ tags, outcome: "success", maxResults: 10 });
 
@@ -325,11 +343,15 @@ export class EpisodicMemory {
    * strategies, errors, and lessons. Enables multi-hop queries like
    * "What patterns repeat in auth-related tasks?"
    */
-  findPatterns(tags?: readonly string[], minOccurrences: number = 2): readonly CrossEpisodePattern[] {
+  findPatterns(
+    tags?: readonly string[],
+    minOccurrences: number = 2,
+  ): readonly CrossEpisodePattern[] {
     const allEpisodes = this.loadAll();
-    const targetEpisodes = tags && tags.length > 0
-      ? allEpisodes.filter((e) => tags.some((t) => e.tags.includes(t)))
-      : allEpisodes;
+    const targetEpisodes =
+      tags && tags.length > 0
+        ? allEpisodes.filter((e) => tags.some((t) => e.tags.includes(t)))
+        : allEpisodes;
 
     if (targetEpisodes.length < minOccurrences) return [];
 
@@ -339,7 +361,10 @@ export class EpisodicMemory {
     for (const episode of targetEpisodes) {
       for (const strategy of episode.strategies) {
         const normalized = strategy.toLowerCase().trim();
-        const existing = patternCounts.get(`strategy:${normalized}`) ?? { ids: new Set(), count: 0 };
+        const existing = patternCounts.get(`strategy:${normalized}`) ?? {
+          ids: new Set(),
+          count: 0,
+        };
         existing.ids.add(episode.id);
         existing.count++;
         patternCounts.set(`strategy:${normalized}`, existing);
@@ -348,7 +373,11 @@ export class EpisodicMemory {
       // Analyze recurring error types
       for (const error of episode.errorsEncountered) {
         // Normalize errors by extracting the key message (first line, no paths)
-        const normalized = error.split("\n")[0]?.replace(/\/[^\s]+/g, "<path>").trim() ?? "";
+        const normalized =
+          error
+            .split("\n")[0]
+            ?.replace(/\/[^\s]+/g, "<path>")
+            .trim() ?? "";
         if (normalized.length < 5) continue;
         const existing = patternCounts.get(`error:${normalized}`) ?? { ids: new Set(), count: 0 };
         existing.ids.add(episode.id);
@@ -441,8 +470,8 @@ export class EpisodicMemory {
 
         // Follow links to connected episodes
         for (const link of links) {
-          const otherId = link.sourceId === id ? link.targetId :
-            link.targetId === id ? link.sourceId : null;
+          const otherId =
+            link.sourceId === id ? link.targetId : link.targetId === id ? link.sourceId : null;
           if (otherId && !visited.has(otherId)) {
             nextFrontier.push({ id: otherId, hop: hop + 1, tags: [...link.sharedTags] });
           }
@@ -459,7 +488,8 @@ export class EpisodicMemory {
 
   private persist(episode: Episode): void {
     const filePath = join(this.storageDir, `${episode.id}.json`);
-    writeFileSync(filePath, JSON.stringify(episode, null, 2), "utf-8");
+    // Wave 6.5-UU (H-22) — episodic memory record. Atomic write.
+    writeFileAtomic(filePath, JSON.stringify(episode, null, 2), { encoding: "utf-8" });
   }
 
   private loadAll(): Episode[] {

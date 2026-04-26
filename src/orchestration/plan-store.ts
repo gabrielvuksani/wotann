@@ -10,6 +10,7 @@ import Database from "better-sqlite3";
 import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { ensureColumnExists } from "../utils/schema-drift.js";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -17,7 +18,13 @@ export type MilestoneStatus = "pending" | "active" | "completed" | "failed";
 
 export type TaskStatus = "pending" | "active" | "completed" | "failed" | "skipped";
 
-export type TaskLifecycle = "enqueue" | "claimed" | "in_progress" | "blocked" | "complete" | "failed";
+export type TaskLifecycle =
+  | "enqueue"
+  | "claimed"
+  | "in_progress"
+  | "blocked"
+  | "complete"
+  | "failed";
 
 export type TaskPhase = "research" | "plan" | "implement" | "verify" | "commit";
 
@@ -80,24 +87,22 @@ const VALID_MILESTONE_TRANSITIONS: ReadonlyMap<MilestoneStatus, readonly Milesto
     ["failed", ["pending"]],
   ]);
 
-const VALID_TASK_TRANSITIONS: ReadonlyMap<TaskStatus, readonly TaskStatus[]> =
-  new Map([
-    ["pending", ["active", "skipped"]],
-    ["active", ["completed", "failed"]],
-    ["completed", []],
-    ["failed", ["pending"]],
-    ["skipped", ["pending"]],
-  ]);
+const VALID_TASK_TRANSITIONS: ReadonlyMap<TaskStatus, readonly TaskStatus[]> = new Map([
+  ["pending", ["active", "skipped"]],
+  ["active", ["completed", "failed"]],
+  ["completed", []],
+  ["failed", ["pending"]],
+  ["skipped", ["pending"]],
+]);
 
-const VALID_LIFECYCLE_TRANSITIONS: ReadonlyMap<TaskLifecycle, readonly TaskLifecycle[]> =
-  new Map([
-    ["enqueue", ["claimed"]],
-    ["claimed", ["in_progress", "blocked"]],
-    ["in_progress", ["blocked", "complete", "failed"]],
-    ["blocked", ["in_progress", "failed"]],
-    ["complete", []],
-    ["failed", ["enqueue"]],
-  ]);
+const VALID_LIFECYCLE_TRANSITIONS: ReadonlyMap<TaskLifecycle, readonly TaskLifecycle[]> = new Map([
+  ["enqueue", ["claimed"]],
+  ["claimed", ["in_progress", "blocked"]],
+  ["in_progress", ["blocked", "complete", "failed"]],
+  ["blocked", ["in_progress", "failed"]],
+  ["complete", []],
+  ["failed", ["enqueue"]],
+]);
 
 function isValidLifecycleTransition(from: TaskLifecycle, to: TaskLifecycle): boolean {
   return VALID_LIFECYCLE_TRANSITIONS.get(from)?.includes(to) ?? false;
@@ -123,9 +128,34 @@ export class PlanStore {
     }
 
     this.db = new Database(dbPath);
+    // Wave 6.5-UU (H-21) standard PRAGMA bundle. See utils/schema-drift.ts
+    // for the rationale; mirrored inline here so each store stays
+    // self-contained rather than coupled to the helper module's import.
+    this.db.pragma("busy_timeout = 5000");
     this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");
+    this.db.pragma("user_version"); // read for migration check
+    this.migrateLegacy();
     this.initialize();
+  }
+
+  /**
+   * Wave 6.5-UU (SB-12) — migrate legacy plans.db files written by earlier
+   * WOTANN builds that didn't yet have the `lifecycle` column on `tasks`.
+   * Without this, the lifecycle-aware code paths (assignment, claim,
+   * release) HARD CRASH with `no such column: lifecycle`.
+   *
+   * Idempotent: only fires when `tasks` exists (a fresh DB skips migration
+   * because the table will be created by `initialize()` with the column
+   * already in place).
+   */
+  private migrateLegacy(): void {
+    const tableExists = this.db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'")
+      .get() as { name?: string } | undefined;
+    if (!tableExists) return;
+    ensureColumnExists(this.db, "tasks", "lifecycle", "TEXT NOT NULL DEFAULT 'enqueue'");
   }
 
   private initialize(): void {
@@ -179,17 +209,25 @@ export class PlanStore {
 
   createPlan(title: string, description: string): Plan {
     const id = randomUUID();
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO plans (id, title, description) VALUES (?, ?, ?)
-    `).run(id, title, description);
+    `,
+      )
+      .run(id, title, description);
 
     return this.getPlan(id)!;
   }
 
   getPlan(planId: string): Plan | null {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT * FROM plans WHERE id = ?
-    `).get(planId) as Record<string, unknown> | undefined;
+    `,
+      )
+      .get(planId) as Record<string, unknown> | undefined;
 
     if (!row) return null;
 
@@ -207,7 +245,9 @@ export class PlanStore {
   }
 
   listPlans(): readonly PlanSummary[] {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT p.id, p.title, p.status,
         (SELECT COUNT(*) FROM milestones WHERE plan_id = p.id) AS milestone_count,
         (SELECT COUNT(*) FROM tasks t JOIN milestones m ON t.milestone_id = m.id WHERE m.plan_id = p.id) AS task_count,
@@ -215,7 +255,9 @@ export class PlanStore {
         (SELECT COUNT(*) FROM tasks t JOIN milestones m ON t.milestone_id = m.id WHERE m.plan_id = p.id AND t.status = 'failed') AS failed_tasks
       FROM plans p
       ORDER BY p.created_at DESC
-    `).all() as Array<Record<string, unknown>>;
+    `,
+      )
+      .all() as Array<Record<string, unknown>>;
 
     return rows.map((r) => ({
       planId: r["id"] as string,
@@ -240,22 +282,34 @@ export class PlanStore {
   ): PlanMilestone {
     const id = randomUUID();
 
-    const maxOrder = this.db.prepare(`
+    const maxOrder = this.db
+      .prepare(
+        `
       SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM milestones WHERE plan_id = ?
-    `).get(planId) as { max_order: number };
+    `,
+      )
+      .get(planId) as { max_order: number };
 
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO milestones (id, plan_id, title, description, sort_order)
       VALUES (?, ?, ?, ?, ?)
-    `).run(id, planId, milestone.title, milestone.description, maxOrder.max_order + 1);
+    `,
+      )
+      .run(id, planId, milestone.title, milestone.description, maxOrder.max_order + 1);
 
     return this.getMilestone(id)!;
   }
 
   getMilestone(milestoneId: string): PlanMilestone | null {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT * FROM milestones WHERE id = ?
-    `).get(milestoneId) as Record<string, unknown> | undefined;
+    `,
+      )
+      .get(milestoneId) as Record<string, unknown> | undefined;
 
     if (!row) return null;
 
@@ -274,18 +328,26 @@ export class PlanStore {
   }
 
   getActiveMilestone(planId: string): PlanMilestone | null {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT id FROM milestones WHERE plan_id = ? AND status = 'active' ORDER BY sort_order LIMIT 1
-    `).get(planId) as { id: string } | undefined;
+    `,
+      )
+      .get(planId) as { id: string } | undefined;
 
     if (!row) return null;
     return this.getMilestone(row.id);
   }
 
   private getMilestones(planId: string): readonly PlanMilestone[] {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT id FROM milestones WHERE plan_id = ? ORDER BY sort_order
-    `).all(planId) as Array<{ id: string }>;
+    `,
+      )
+      .all(planId) as Array<{ id: string }>;
 
     return rows.map((r) => this.getMilestone(r.id)!).filter(Boolean);
   }
@@ -304,31 +366,43 @@ export class PlanStore {
   ): PlanTask {
     const id = randomUUID();
 
-    const maxOrder = this.db.prepare(`
+    const maxOrder = this.db
+      .prepare(
+        `
       SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM tasks WHERE milestone_id = ?
-    `).get(milestoneId) as { max_order: number };
+    `,
+      )
+      .get(milestoneId) as { max_order: number };
 
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO tasks (id, milestone_id, title, description, phase, dependencies, files, sort_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      milestoneId,
-      task.title,
-      task.description,
-      task.phase ?? "implement",
-      JSON.stringify(task.dependencies ?? []),
-      JSON.stringify(task.files ?? []),
-      maxOrder.max_order + 1,
-    );
+    `,
+      )
+      .run(
+        id,
+        milestoneId,
+        task.title,
+        task.description,
+        task.phase ?? "implement",
+        JSON.stringify(task.dependencies ?? []),
+        JSON.stringify(task.files ?? []),
+        maxOrder.max_order + 1,
+      );
 
     return this.getTask(id)!;
   }
 
   getTask(taskId: string): PlanTask | null {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT * FROM tasks WHERE id = ?
-    `).get(taskId) as Record<string, unknown> | undefined;
+    `,
+      )
+      .get(taskId) as Record<string, unknown> | undefined;
 
     if (!row) return null;
     return this.rowToTask(row);
@@ -343,8 +417,7 @@ export class PlanStore {
     const task = this.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
-    const nextStatus: TaskStatus =
-      task.status === "pending" ? "active" : "completed";
+    const nextStatus: TaskStatus = task.status === "pending" ? "active" : "completed";
 
     if (!isValidTaskTransition(task.status, nextStatus)) {
       throw new Error(
@@ -354,10 +427,14 @@ export class PlanStore {
 
     const transaction = this.db.transaction(() => {
       const completedAt = nextStatus === "completed" ? new Date().toISOString() : null;
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE tasks SET status = ?, result = COALESCE(?, result), completed_at = COALESCE(?, completed_at)
         WHERE id = ?
-      `).run(nextStatus, result ?? null, completedAt, taskId);
+      `,
+        )
+        .run(nextStatus, result ?? null, completedAt, taskId);
 
       // Auto-advance milestone if needed
       if (nextStatus === "active") {
@@ -380,21 +457,27 @@ export class PlanStore {
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
     if (!isValidTaskTransition(task.status, "failed")) {
-      throw new Error(
-        `Invalid task transition: ${task.status} -> failed for task ${taskId}`,
-      );
+      throw new Error(`Invalid task transition: ${task.status} -> failed for task ${taskId}`);
     }
 
     const transaction = this.db.transaction(() => {
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE tasks SET status = 'failed', result = ?, completed_at = ?
         WHERE id = ?
-      `).run(error, new Date().toISOString(), taskId);
+      `,
+        )
+        .run(error, new Date().toISOString(), taskId);
 
       // If a task fails, mark milestone as failed too
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE milestones SET status = 'failed' WHERE id = ?
-      `).run(task.milestoneId);
+      `,
+        )
+        .run(task.milestoneId);
     });
 
     transaction();
@@ -409,14 +492,16 @@ export class PlanStore {
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
     if (!isValidTaskTransition(task.status, "skipped")) {
-      throw new Error(
-        `Invalid task transition: ${task.status} -> skipped for task ${taskId}`,
-      );
+      throw new Error(`Invalid task transition: ${task.status} -> skipped for task ${taskId}`);
     }
 
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE tasks SET status = 'skipped', result = ? WHERE id = ?
-    `).run(reason ?? "Skipped", taskId);
+    `,
+      )
+      .run(reason ?? "Skipped", taskId);
 
     return this.getTask(taskId)!;
   }
@@ -437,10 +522,14 @@ export class PlanStore {
       );
     }
 
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE tasks SET lifecycle = 'claimed', assigned_to = ?, claimed_at = ?
       WHERE id = ?
-    `).run(agentId, new Date().toISOString(), taskId);
+    `,
+      )
+      .run(agentId, new Date().toISOString(), taskId);
 
     return this.getTask(taskId)!;
   }
@@ -460,15 +549,23 @@ export class PlanStore {
     }
 
     const transaction = this.db.transaction(() => {
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE tasks SET lifecycle = 'in_progress' WHERE id = ?
-      `).run(taskId);
+      `,
+        )
+        .run(taskId);
 
       // Auto-advance task status to active if still pending
       if (task.status === "pending" && isValidTaskTransition("pending", "active")) {
-        this.db.prepare(`
+        this.db
+          .prepare(
+            `
           UPDATE tasks SET status = 'active' WHERE id = ?
-        `).run(taskId);
+        `,
+          )
+          .run(taskId);
         this.autoActivateMilestone(task.milestoneId);
       }
     });
@@ -490,10 +587,14 @@ export class PlanStore {
       );
     }
 
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE tasks SET lifecycle = 'blocked', blocked_reason = ?
       WHERE id = ?
-    `).run(reason, taskId);
+    `,
+      )
+      .run(reason, taskId);
 
     return this.getTask(taskId)!;
   }
@@ -514,17 +615,25 @@ export class PlanStore {
 
     const transaction = this.db.transaction(() => {
       const now = new Date().toISOString();
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE tasks SET lifecycle = 'complete', completed_at = COALESCE(completed_at, ?)
         WHERE id = ?
-      `).run(now, taskId);
+      `,
+        )
+        .run(now, taskId);
 
       // Also advance task status to completed if still active
       if (task.status === "active" && isValidTaskTransition("active", "completed")) {
-        this.db.prepare(`
+        this.db
+          .prepare(
+            `
           UPDATE tasks SET status = 'completed', completed_at = ?
           WHERE id = ?
-        `).run(now, taskId);
+        `,
+          )
+          .run(now, taskId);
         this.autoCompleteMilestone(task.milestoneId);
       }
     });
@@ -549,21 +658,33 @@ export class PlanStore {
 
     const transaction = this.db.transaction(() => {
       const now = new Date().toISOString();
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE tasks SET lifecycle = 'failed', blocked_reason = ?, completed_at = ?
         WHERE id = ?
-      `).run(reason, now, taskId);
+      `,
+        )
+        .run(reason, now, taskId);
 
       // Also fail the task status if it was active
       if (task.status === "active" && isValidTaskTransition("active", "failed")) {
-        this.db.prepare(`
+        this.db
+          .prepare(
+            `
           UPDATE tasks SET status = 'failed', result = ?, completed_at = ?
           WHERE id = ?
-        `).run(reason, now, taskId);
+        `,
+          )
+          .run(reason, now, taskId);
 
-        this.db.prepare(`
+        this.db
+          .prepare(
+            `
           UPDATE milestones SET status = 'failed' WHERE id = ?
-        `).run(task.milestoneId);
+        `,
+          )
+          .run(task.milestoneId);
       }
     });
 
@@ -578,9 +699,7 @@ export class PlanStore {
   getNextTasks(planId: string): readonly PlanTask[] {
     const allTasks = this.getAllTasksForPlan(planId);
     const completedOrSkipped = new Set(
-      allTasks
-        .filter((t) => t.status === "completed" || t.status === "skipped")
-        .map((t) => t.id),
+      allTasks.filter((t) => t.status === "completed" || t.status === "skipped").map((t) => t.id),
     );
 
     return allTasks.filter((task) => {
@@ -643,20 +762,28 @@ export class PlanStore {
   // ── Private Helpers ────────────────────────────────────────
 
   private getTasksForMilestone(milestoneId: string): readonly PlanTask[] {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT * FROM tasks WHERE milestone_id = ? ORDER BY sort_order
-    `).all(milestoneId) as Array<Record<string, unknown>>;
+    `,
+      )
+      .all(milestoneId) as Array<Record<string, unknown>>;
 
     return rows.map((r) => this.rowToTask(r));
   }
 
   private getAllTasksForPlan(planId: string): readonly PlanTask[] {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT t.* FROM tasks t
       JOIN milestones m ON t.milestone_id = m.id
       WHERE m.plan_id = ?
       ORDER BY m.sort_order, t.sort_order
-    `).all(planId) as Array<Record<string, unknown>>;
+    `,
+      )
+      .all(planId) as Array<Record<string, unknown>>;
 
     return rows.map((r) => this.rowToTask(r));
   }
@@ -665,30 +792,50 @@ export class PlanStore {
    * Auto-activate a milestone when its first task becomes active.
    */
   private autoActivateMilestone(milestoneId: string): void {
-    const milestone = this.db.prepare(`
+    const milestone = this.db
+      .prepare(
+        `
       SELECT status FROM milestones WHERE id = ?
-    `).get(milestoneId) as { status: string } | undefined;
+    `,
+      )
+      .get(milestoneId) as { status: string } | undefined;
 
     if (milestone?.status === "pending") {
       if (isValidMilestoneTransition("pending", "active")) {
-        this.db.prepare(`
+        this.db
+          .prepare(
+            `
           UPDATE milestones SET status = 'active' WHERE id = ?
-        `).run(milestoneId);
+        `,
+          )
+          .run(milestoneId);
 
         // Also activate the parent plan
-        const planRow = this.db.prepare(`
+        const planRow = this.db
+          .prepare(
+            `
           SELECT plan_id FROM milestones WHERE id = ?
-        `).get(milestoneId) as { plan_id: string } | undefined;
+        `,
+          )
+          .get(milestoneId) as { plan_id: string } | undefined;
 
         if (planRow) {
-          const plan = this.db.prepare(`
+          const plan = this.db
+            .prepare(
+              `
             SELECT status FROM plans WHERE id = ?
-          `).get(planRow.plan_id) as { status: string } | undefined;
+          `,
+            )
+            .get(planRow.plan_id) as { status: string } | undefined;
 
           if (plan?.status === "pending") {
-            this.db.prepare(`
+            this.db
+              .prepare(
+                `
               UPDATE plans SET status = 'active', updated_at = datetime('now') WHERE id = ?
-            `).run(planRow.plan_id);
+            `,
+              )
+              .run(planRow.plan_id);
           }
         }
       }
@@ -699,39 +846,66 @@ export class PlanStore {
    * Auto-complete a milestone when all its tasks are completed or skipped.
    */
   private autoCompleteMilestone(milestoneId: string): void {
-    const remaining = this.db.prepare(`
+    const remaining = this.db
+      .prepare(
+        `
       SELECT COUNT(*) AS count FROM tasks
       WHERE milestone_id = ? AND status NOT IN ('completed', 'skipped')
-    `).get(milestoneId) as { count: number };
+    `,
+      )
+      .get(milestoneId) as { count: number };
 
     if (remaining.count === 0) {
-      const milestone = this.db.prepare(`
+      const milestone = this.db
+        .prepare(
+          `
         SELECT status FROM milestones WHERE id = ?
-      `).get(milestoneId) as { status: string } | undefined;
+      `,
+        )
+        .get(milestoneId) as { status: string } | undefined;
 
-      if (milestone && isValidMilestoneTransition(milestone.status as MilestoneStatus, "completed")) {
-        this.db.prepare(`
+      if (
+        milestone &&
+        isValidMilestoneTransition(milestone.status as MilestoneStatus, "completed")
+      ) {
+        this.db
+          .prepare(
+            `
           UPDATE milestones SET status = 'completed', completed_at = datetime('now')
           WHERE id = ?
-        `).run(milestoneId);
+        `,
+          )
+          .run(milestoneId);
       }
 
       // Check if all milestones in the plan are completed
-      const planRow = this.db.prepare(`
+      const planRow = this.db
+        .prepare(
+          `
         SELECT plan_id FROM milestones WHERE id = ?
-      `).get(milestoneId) as { plan_id: string } | undefined;
+      `,
+        )
+        .get(milestoneId) as { plan_id: string } | undefined;
 
       if (planRow) {
-        const remainingMilestones = this.db.prepare(`
+        const remainingMilestones = this.db
+          .prepare(
+            `
           SELECT COUNT(*) AS count FROM milestones
           WHERE plan_id = ? AND status NOT IN ('completed')
-        `).get(planRow.plan_id) as { count: number };
+        `,
+          )
+          .get(planRow.plan_id) as { count: number };
 
         if (remainingMilestones.count === 0) {
-          this.db.prepare(`
+          this.db
+            .prepare(
+              `
             UPDATE plans SET status = 'completed', updated_at = datetime('now')
             WHERE id = ?
-          `).run(planRow.plan_id);
+          `,
+            )
+            .run(planRow.plan_id);
         }
       }
     }

@@ -25,7 +25,8 @@
  *   via `createFsTodoProvider`. No hidden global state.
  */
 
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join, dirname } from "node:path";
 
 import {
@@ -136,7 +137,8 @@ export function createFsTodoProvider(options: FsTodoProviderOptions = {}): TodoP
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
       }
-      writeFileSync(file, renderTodoMd(state), "utf-8");
+      // Wave 6.5-UU (H-22) — TODO.md state file. Atomic write.
+      writeFileAtomic(file, renderTodoMd(state), { encoding: "utf-8" });
     },
   };
 }

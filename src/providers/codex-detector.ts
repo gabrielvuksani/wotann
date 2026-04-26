@@ -25,7 +25,8 @@
  *   - QB #7 per-call state: no module-level caches of token contents.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
@@ -154,7 +155,9 @@ function pickString(data: Record<string, unknown>, ...keys: readonly string[]): 
 function saveTokens(tokens: CodexTokens): void {
   const dir = resolveWotannHome();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(WOTANN_CODEX_TOKEN_FILE, JSON.stringify(tokens, null, 2), {
+  // Wave 6.5-UU (H-22) — Codex OAuth tokens. Atomic write so crashes
+  // mid-write don't corrupt the token file.
+  writeFileAtomic(WOTANN_CODEX_TOKEN_FILE, JSON.stringify(tokens, null, 2), {
     mode: 0o600,
   });
 }

@@ -4,7 +4,8 @@
  * DeerFlow-inspired dual observability.
  */
 
-import { writeFileSync, existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join } from "node:path";
 import { isTelemetryOptedOut } from "./opt-out.js";
 // V9 T14.1 — W3C Trace Context helpers. Used by the OTLP exporter to
@@ -311,7 +312,10 @@ export class ObservabilityExporter {
       extra: e.metadata,
     }));
     const filePath = join(this.logDir, `langsmith-${Date.now()}.jsonl`);
-    writeFileSync(filePath, formatted.map((f) => JSON.stringify(f)).join("\n") + "\n", "utf-8");
+    // Wave 6.5-UU (H-22) — telemetry export. Atomic write.
+    writeFileAtomic(filePath, formatted.map((f) => JSON.stringify(f)).join("\n") + "\n", {
+      encoding: "utf-8",
+    });
   }
 
   private exportLangfuse(events: readonly TraceEvent[]): void {
@@ -329,7 +333,10 @@ export class ObservabilityExporter {
       metadata: e.metadata,
     }));
     const filePath = join(this.logDir, `langfuse-${Date.now()}.jsonl`);
-    writeFileSync(filePath, formatted.map((f) => JSON.stringify(f)).join("\n") + "\n", "utf-8");
+    // Wave 6.5-UU (H-22) — telemetry export. Atomic write.
+    writeFileAtomic(filePath, formatted.map((f) => JSON.stringify(f)).join("\n") + "\n", {
+      encoding: "utf-8",
+    });
   }
 
   private exportOTLP(events: readonly TraceEvent[]): void {
@@ -430,7 +437,8 @@ export class ObservabilityExporter {
     };
 
     const filePath = join(this.logDir, `otlp-${Date.now()}.json`);
-    writeFileSync(filePath, JSON.stringify(otlpPayload, null, 2), "utf-8");
+    // Wave 6.5-UU (H-22) — telemetry OTLP export. Atomic write.
+    writeFileAtomic(filePath, JSON.stringify(otlpPayload, null, 2), { encoding: "utf-8" });
   }
 }
 

@@ -10,8 +10,9 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import type { Instinct } from "./types.js";
 import type { MemoryStore } from "../memory/store.js";
 
@@ -87,10 +88,7 @@ export class InstinctSystem {
           ...instinct,
           occurrences: instinct.occurrences + 1,
           lastSeen: now,
-          confidence: Math.min(
-            MAX_CONFIDENCE_CEILING,
-            instinct.confidence + 0.02,
-          ),
+          confidence: Math.min(MAX_CONFIDENCE_CEILING, instinct.confidence + 0.02),
         });
 
         updatedInstincts++;
@@ -198,9 +196,7 @@ export class InstinctSystem {
    * Get instincts that have reached skill candidate threshold.
    */
   getSkillCandidates(): readonly Instinct[] {
-    return [...this.instincts.values()].filter(
-      (i) => i.confidence >= SKILL_CANDIDATE_THRESHOLD,
-    );
+    return [...this.instincts.values()].filter((i) => i.confidence >= SKILL_CANDIDATE_THRESHOLD);
   }
 
   /**
@@ -252,7 +248,9 @@ export class InstinctSystem {
       const dir = this.persistPath.replace(/[/\\][^/\\]+$/, "");
       mkdirSync(dir, { recursive: true });
       const data = JSON.stringify([...this.instincts.values()], null, 2);
-      writeFileSync(this.persistPath, data);
+      // Wave 6.5-UU (H-22) — instinct state. Atomic write so a crash
+      // mid-flush can't truncate the learned-instinct database.
+      writeFileAtomic(this.persistPath, data);
     } catch {
       // Best-effort — do not crash if disk write fails
     }
@@ -274,11 +272,7 @@ export class InstinctSystem {
         const summary = highConfidence
           .map((i) => `[${(i.confidence * 100).toFixed(0)}%] ${i.pattern} -> ${i.action}`)
           .join("; ");
-        this.memoryStore.captureEvent(
-          "instinct_sync",
-          summary.slice(0, 2000),
-          "learning",
-        );
+        this.memoryStore.captureEvent("instinct_sync", summary.slice(0, 2000), "learning");
       }
     } catch {
       // Best-effort
@@ -343,8 +337,7 @@ function calculateRelevance(context: string, instinct: Instinct): number {
   if (keywordScore === 0) return 0;
 
   return (
-    keywordScore * RELEVANCE_KEYWORD_WEIGHT
-    + instinct.confidence * RELEVANCE_CONFIDENCE_WEIGHT
+    keywordScore * RELEVANCE_KEYWORD_WEIGHT + instinct.confidence * RELEVANCE_CONFIDENCE_WEIGHT
   );
 }
 

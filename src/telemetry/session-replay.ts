@@ -8,7 +8,8 @@
  * From spec §24: TerminalBench-compatible session recording.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdirSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -190,7 +191,10 @@ export class SessionRecorder {
       },
     };
 
-    writeFileSync(filePath, JSON.stringify(session, null, 2));
+    // Wave 6.5-UU (H-22) — session replay log. Atomic write so a crash
+    // mid-save doesn't strand a half-written replay (which would fail
+    // to load and lose the entire recorded session).
+    writeFileAtomic(filePath, JSON.stringify(session, null, 2));
     return filePath;
   }
 

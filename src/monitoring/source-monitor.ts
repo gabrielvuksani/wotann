@@ -13,7 +13,8 @@
  *   wotann repos sync   — update last_sync dates
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
@@ -87,7 +88,13 @@ export function loadTrackedRepos(configPath: string): readonly TrackedRepo[] {
     if (!inClonedRepos) continue;
 
     // New section at top level ends cloned_repos
-    if (!line.startsWith(" ") && !line.startsWith("\t") && trimmed.endsWith(":") && !trimmed.startsWith("-") && !trimmed.startsWith("#")) {
+    if (
+      !line.startsWith(" ") &&
+      !line.startsWith("\t") &&
+      trimmed.endsWith(":") &&
+      !trimmed.startsWith("-") &&
+      !trimmed.startsWith("#")
+    ) {
       if (currentRepo?.name) {
         repos.push(finalizeRepo(currentRepo, currentListField, currentList));
       }
@@ -115,7 +122,10 @@ export function loadTrackedRepos(configPath: string): readonly TrackedRepo[] {
     } else if (trimmed.startsWith("priority:")) {
       currentRepo = { ...currentRepo, priority: trimmed.replace("priority:", "").trim() };
     } else if (trimmed.startsWith("check_schedule:")) {
-      currentRepo = { ...currentRepo, check_schedule: trimmed.replace("check_schedule:", "").trim() };
+      currentRepo = {
+        ...currentRepo,
+        check_schedule: trimmed.replace("check_schedule:", "").trim(),
+      };
     } else if (trimmed.startsWith("watch_patterns:")) {
       if (currentListField) {
         currentRepo = applyList(currentRepo, currentListField, currentList);
@@ -141,13 +151,18 @@ export function loadTrackedRepos(configPath: string): readonly TrackedRepo[] {
 
 function parseInlineArray(text: string): string[] {
   if (!text.startsWith("[")) return [];
-  return text.replace(/^\[|\]$/g, "")
+  return text
+    .replace(/^\[|\]$/g, "")
     .split(",")
     .map((s) => s.trim().replace(/^["']|["']$/g, ""))
     .filter((s) => s.length > 0);
 }
 
-function applyList(repo: Partial<YamlRepoEntry>, field: string, list: string[]): Partial<YamlRepoEntry> {
+function applyList(
+  repo: Partial<YamlRepoEntry>,
+  field: string,
+  list: string[],
+): Partial<YamlRepoEntry> {
   if (field === "watch_patterns") return { ...repo, watch_patterns: list };
   if (field === "extracted_features") return { ...repo, extracted_features: list };
   return repo;
@@ -189,7 +204,8 @@ function loadSyncState(statePath: string): SyncState {
 }
 
 function saveSyncState(statePath: string, state: SyncState): void {
-  writeFileSync(statePath, JSON.stringify(state, null, 2));
+  // Wave 6.5-UU (H-22) — repo monitor sync state. Atomic write.
+  writeFileAtomic(statePath, JSON.stringify(state, null, 2));
 }
 
 // ── Repo Checking ──────────────────────────────────────────
@@ -197,50 +213,64 @@ function saveSyncState(statePath: string, state: SyncState): void {
 /**
  * Check a single local repo for changes since last sync.
  */
-function checkLocalRepo(
-  repoDir: string,
-  repo: TrackedRepo,
-  lastSync: string,
-): RepoChange | null {
+function checkLocalRepo(repoDir: string, repo: TrackedRepo, lastSync: string): RepoChange | null {
   if (!existsSync(repoDir)) return null;
 
   try {
     // Fetch latest
     execFileSync("git", ["fetch", "--quiet"], {
-      cwd: repoDir, timeout: 30_000, stdio: "pipe",
+      cwd: repoDir,
+      timeout: 30_000,
+      stdio: "pipe",
     });
 
     // Count new commits since last sync
-    const logOutput = execFileSync("git", [
-      "log", `--since=${lastSync}`, "--oneline", `origin/${repo.branch}`,
-    ], { cwd: repoDir, timeout: 10_000, encoding: "utf-8", stdio: "pipe" });
+    const logOutput = execFileSync(
+      "git",
+      ["log", `--since=${lastSync}`, "--oneline", `origin/${repo.branch}`],
+      { cwd: repoDir, timeout: 10_000, encoding: "utf-8", stdio: "pipe" },
+    );
 
-    const commits = logOutput.trim().split("\n").filter((l) => l.length > 0);
+    const commits = logOutput
+      .trim()
+      .split("\n")
+      .filter((l) => l.length > 0);
     if (commits.length === 0) return null;
 
     // Get latest commit info
-    const latestInfo = execFileSync("git", [
-      "log", "-1", "--format=%H|%aI|%s", `origin/${repo.branch}`,
-    ], { cwd: repoDir, timeout: 5_000, encoding: "utf-8", stdio: "pipe" });
+    const latestInfo = execFileSync(
+      "git",
+      ["log", "-1", "--format=%H|%aI|%s", `origin/${repo.branch}`],
+      { cwd: repoDir, timeout: 5_000, encoding: "utf-8", stdio: "pipe" },
+    );
 
     const [hash, date, subject] = latestInfo.trim().split("|");
 
     // Check for changed files matching watch patterns
-    const diffOutput = execFileSync("git", [
-      "diff", "--name-only", `--since=${lastSync}`, `origin/${repo.branch}`,
-    ], { cwd: repoDir, timeout: 10_000, encoding: "utf-8", stdio: "pipe" }).trim();
+    const diffOutput = execFileSync(
+      "git",
+      ["diff", "--name-only", `--since=${lastSync}`, `origin/${repo.branch}`],
+      { cwd: repoDir, timeout: 10_000, encoding: "utf-8", stdio: "pipe" },
+    ).trim();
 
     const changedFiles = diffOutput.split("\n").filter((f) => f.length > 0);
-    const relevantFiles = repo.watchPatterns.length > 0
-      ? changedFiles.filter((f) => repo.watchPatterns.some((p) => matchGlob(f, p)))
-      : changedFiles;
+    const relevantFiles =
+      repo.watchPatterns.length > 0
+        ? changedFiles.filter((f) => repo.watchPatterns.some((p) => matchGlob(f, p)))
+        : changedFiles;
 
     // Check for new tags/releases
-    const tagsOutput = execFileSync("git", [
-      "tag", "--sort=-creatordate", "-l",
-    ], { cwd: repoDir, timeout: 5_000, encoding: "utf-8", stdio: "pipe" });
+    const tagsOutput = execFileSync("git", ["tag", "--sort=-creatordate", "-l"], {
+      cwd: repoDir,
+      timeout: 5_000,
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
 
-    const tags = tagsOutput.trim().split("\n").filter((t) => t.length > 0);
+    const tags = tagsOutput
+      .trim()
+      .split("\n")
+      .filter((t) => t.length > 0);
     const latestTag = tags[0];
 
     return {
@@ -306,10 +336,7 @@ export function checkAllRepos(
 /**
  * Update sync state after checking.
  */
-export function syncAllRepos(
-  configPath: string,
-  statePath: string,
-): void {
+export function syncAllRepos(configPath: string, statePath: string): void {
   const repos = loadTrackedRepos(configPath);
   const syncState = loadSyncState(statePath);
 

@@ -5,7 +5,8 @@
  * and plugins in .wotann/plugins/ for marketplace browsing and installation.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { basename, extname, join } from "node:path";
 import { dirname } from "node:path";
 
@@ -68,10 +69,7 @@ export function loadManifest(path: string): MarketplaceManifest | null {
  * Generate a manifest by scanning the skills and plugins directories.
  * Reads package.json for plugins and SKILL.md/frontmatter for skills.
  */
-export function generateManifest(
-  skillsDir: string,
-  pluginsDir: string,
-): MarketplaceManifest {
+export function generateManifest(skillsDir: string, pluginsDir: string): MarketplaceManifest {
   const skills = scanSkills(skillsDir);
   const plugins = scanPlugins(pluginsDir);
 
@@ -91,7 +89,9 @@ export function writeManifest(manifest: MarketplaceManifest, path: string): void
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  writeFileSync(path, JSON.stringify(manifest, null, 2));
+  // Wave 6.5-UU (H-22) — marketplace manifest (skill/plugin index).
+  // Atomic write so a crash mid-save can't truncate it and break discovery.
+  writeFileAtomic(path, JSON.stringify(manifest, null, 2));
 }
 
 // ── Internal Scanners ──────────────────────────────────────────
@@ -120,9 +120,8 @@ function scanPlugins(pluginsDir: string): readonly PluginEntry[] {
 
       try {
         const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as PluginPackageJson;
-        const authorName = typeof pkg.author === "string"
-          ? pkg.author
-          : pkg.author?.name ?? "unknown";
+        const authorName =
+          typeof pkg.author === "string" ? pkg.author : (pkg.author?.name ?? "unknown");
 
         entries.push({
           id: dirent.name,
@@ -158,9 +157,7 @@ function scanSkills(skillsDir: string): readonly SkillEntry[] {
 
       if (!isMarkdown && !isDirectory) continue;
 
-      const skillId = isMarkdown
-        ? basename(dirent.name, ".md")
-        : dirent.name;
+      const skillId = isMarkdown ? basename(dirent.name, ".md") : dirent.name;
 
       const contentPath = isDirectory
         ? join(skillsDir, dirent.name, "SKILL.md")
@@ -225,7 +222,11 @@ function extractSkillFrontmatter(content: string): SkillFrontmatter {
       const value = kv[2]!.trim();
       // Handle array values like "tags: [a, b, c]"
       if (value.startsWith("[") && value.endsWith("]")) {
-        result[key] = value.slice(1, -1).split(",").map((t) => t.trim()).filter(Boolean);
+        result[key] = value
+          .slice(1, -1)
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
       } else {
         result[key] = value.replace(/^["']|["']$/g, "");
       }

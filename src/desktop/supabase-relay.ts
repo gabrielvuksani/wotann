@@ -10,7 +10,8 @@
  * Free tier: 500MB database, 2GB bandwidth, unlimited real-time connections
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join } from "node:path";
 import { resolveWotannHome } from "../utils/wotann-home.js";
 import WebSocket from "ws";
@@ -114,7 +115,9 @@ export class SupabaseRelay {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(this.configPath, JSON.stringify(config, null, 2));
+    // Wave 6.5-UU (H-22) — Supabase relay credentials. Atomic write so
+    // a crash mid-save doesn't break iOS relay on next start.
+    writeFileAtomic(this.configPath, JSON.stringify(config, null, 2));
     this.config = config;
     return config;
   }

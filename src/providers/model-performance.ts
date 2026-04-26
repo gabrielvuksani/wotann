@@ -3,7 +3,8 @@
  * Stores local outcomes so routing decisions can adapt to the current repo.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { dirname } from "node:path";
 import type { ProviderName } from "../core/types.js";
 
@@ -62,7 +63,11 @@ export class RepoModelPerformanceStore {
       model: outcome.model,
       successes,
       failures,
-      avgLatencyMs: rollingAverage(current?.avgLatencyMs ?? outcome.durationMs, outcome.durationMs, nextRuns),
+      avgLatencyMs: rollingAverage(
+        current?.avgLatencyMs ?? outcome.durationMs,
+        outcome.durationMs,
+        nextRuns,
+      ),
       avgCostUsd: rollingAverage(current?.avgCostUsd ?? outcome.costUsd, outcome.costUsd, nextRuns),
       totalTokens: (current?.totalTokens ?? 0) + outcome.tokensUsed,
       lastUsedAt: new Date().toISOString(),
@@ -73,12 +78,14 @@ export class RepoModelPerformanceStore {
     );
 
     mkdirSync(dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, JSON.stringify(next, null, 2));
+    // Wave 6.5-UU (H-22) — model perf history feeds the cost-aware router.
+    // Atomic write so a crash mid-flush doesn't trash routing telemetry.
+    writeFileAtomic(this.filePath, JSON.stringify(next, null, 2));
     return next;
   }
 }
 
 function rollingAverage(previous: number, nextValue: number, runCount: number): number {
   if (runCount <= 1) return nextValue;
-  return ((previous * (runCount - 1)) + nextValue) / runCount;
+  return (previous * (runCount - 1) + nextValue) / runCount;
 }

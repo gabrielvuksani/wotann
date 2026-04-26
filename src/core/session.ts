@@ -3,10 +3,11 @@
  * Immutable state updates — each mutation returns a new session.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentMessage, ProviderName, SessionState } from "./types.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 
 export function createSession(
   provider: ProviderName,
@@ -26,10 +27,7 @@ export function createSession(
   };
 }
 
-export function addMessage(
-  session: SessionState,
-  message: AgentMessage,
-): SessionState {
+export function addMessage(session: SessionState, message: AgentMessage): SessionState {
   return {
     ...session,
     messages: [...session.messages, message],
@@ -81,10 +79,7 @@ interface SerializedSession {
 /**
  * Save session state to disk for resume.
  */
-export function saveSession(
-  session: SessionState,
-  sessionDir: string,
-): string {
+export function saveSession(session: SessionState, sessionDir: string): string {
   if (!existsSync(sessionDir)) {
     mkdirSync(sessionDir, { recursive: true });
   }
@@ -103,7 +98,10 @@ export function saveSession(
   };
 
   const filePath = join(sessionDir, `${session.id}.json`);
-  writeFileSync(filePath, JSON.stringify(serialized, null, 2));
+  // Wave 6.5-UU (H-22) — Tier-1: session state survival across crashes.
+  // writeFileAtomic prevents a crash mid-write from truncating the session
+  // file (which would otherwise lose the entire conversation history).
+  writeFileAtomic(filePath, JSON.stringify(serialized, null, 2));
   return filePath;
 }
 

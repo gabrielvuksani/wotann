@@ -5,15 +5,40 @@
 
 import Database from "better-sqlite3";
 import type { TranscriptSegment, MeetingState } from "./meeting-pipeline.js";
+import { ensureColumnExists } from "../utils/schema-drift.js";
 
 export class MeetingStore {
   private readonly db: Database.Database;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
+    // Wave 6.5-UU (H-21) standard PRAGMA bundle. busy_timeout = 5000
+    // protects against SQLITE_BUSY when the meeting writer overlaps with a
+    // CLI reader (`wotann meetings list`). synchronous = NORMAL is durable
+    // across crashes; transcripts can re-flow on resume.
+    this.db.pragma("busy_timeout = 5000");
     this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");
+    this.db.pragma("user_version"); // read for migration check
     this.migrate();
+    // Wave 6.5-UU (SB-12) — pre-summary `meetings.db` files (created by
+    // earlier WOTANN builds) lack the `summary` column on `meetings` and
+    // would HARD CRASH inside saveSummary() with `no such column: summary`.
+    // Migrate after the base table is created so the ALTER targets a known
+    // schema even on a fresh DB (idempotent: ensureColumnExists no-ops when
+    // the column already exists).
+    this.migrateLegacy();
+  }
+
+  /**
+   * Forward-only migration for legacy meetings.db files. Runs after
+   * `migrate()` so on a fresh DB the column already exists and this is a
+   * no-op; on a legacy DB this adds the missing column before the first
+   * saveSummary() can crash.
+   */
+  private migrateLegacy(): void {
+    ensureColumnExists(this.db, "meetings", "summary", "TEXT");
   }
 
   private migrate(): void {
@@ -65,25 +90,42 @@ export class MeetingStore {
   }
 
   saveMeeting(meeting: MeetingState): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT OR REPLACE INTO meetings (id, status, platform, started_at, ended_at, duration_ms, participants)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      meeting.id,
-      meeting.status,
-      meeting.platform,
-      meeting.startedAt,
-      meeting.endedAt,
-      meeting.durationMs,
-      JSON.stringify(meeting.participants),
-    );
+    `,
+      )
+      .run(
+        meeting.id,
+        meeting.status,
+        meeting.platform,
+        meeting.startedAt,
+        meeting.endedAt,
+        meeting.durationMs,
+        JSON.stringify(meeting.participants),
+      );
   }
 
   saveSegment(meetingId: string, segment: TranscriptSegment): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT OR REPLACE INTO transcript_segments (id, meeting_id, speaker, text, start_ms, end_ms, confidence, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(segment.id, meetingId, segment.speaker, segment.text, segment.startMs, segment.endMs, segment.confidence, segment.timestamp);
+    `,
+      )
+      .run(
+        segment.id,
+        meetingId,
+        segment.speaker,
+        segment.text,
+        segment.startMs,
+        segment.endMs,
+        segment.confidence,
+        segment.timestamp,
+      );
   }
 
   saveSummary(meetingId: string, summary: string): void {
@@ -91,30 +133,58 @@ export class MeetingStore {
   }
 
   saveActionItem(meetingId: string, content: string, assignee?: string, dueDate?: string): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO action_items (meeting_id, content, assignee, due_date) VALUES (?, ?, ?, ?)
-    `).run(meetingId, content, assignee ?? null, dueDate ?? null);
+    `,
+      )
+      .run(meetingId, content, assignee ?? null, dueDate ?? null);
   }
 
-  searchTranscripts(query: string, limit: number = 20): readonly { meetingId: string; text: string; speaker: string; timestamp: string }[] {
-    return this.db.prepare(`
+  searchTranscripts(
+    query: string,
+    limit: number = 20,
+  ): readonly { meetingId: string; text: string; speaker: string; timestamp: string }[] {
+    return this.db
+      .prepare(
+        `
       SELECT ts.meeting_id as meetingId, ts.text, ts.speaker, ts.timestamp
       FROM transcript_fts fts
       JOIN transcript_segments ts ON fts.rowid = ts.rowid
       WHERE transcript_fts MATCH ?
       ORDER BY ts.timestamp DESC
       LIMIT ?
-    `).all(query, limit) as { meetingId: string; text: string; speaker: string; timestamp: string }[];
+    `,
+      )
+      .all(query, limit) as {
+      meetingId: string;
+      text: string;
+      speaker: string;
+      timestamp: string;
+    }[];
   }
 
   listMeetings(limit: number = 50): readonly MeetingState[] {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT id, status, platform, started_at as startedAt, ended_at as endedAt,
              duration_ms as durationMs, participants
       FROM meetings ORDER BY created_at DESC LIMIT ?
-    `).all(limit) as { id: string; status: string; platform: string; startedAt: string; endedAt: string; durationMs: number; participants: string }[];
+    `,
+      )
+      .all(limit) as {
+      id: string;
+      status: string;
+      platform: string;
+      startedAt: string;
+      endedAt: string;
+      durationMs: number;
+      participants: string;
+    }[];
 
-    return rows.map(r => ({
+    return rows.map((r) => ({
       ...r,
       status: r.status as MeetingState["status"],
       platform: r.platform as MeetingState["platform"],
@@ -124,16 +194,31 @@ export class MeetingStore {
   }
 
   getTranscript(meetingId: string): readonly TranscriptSegment[] {
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT id, speaker, text, start_ms as startMs, end_ms as endMs, confidence, timestamp
       FROM transcript_segments WHERE meeting_id = ? ORDER BY start_ms
-    `).all(meetingId) as TranscriptSegment[];
+    `,
+      )
+      .all(meetingId) as TranscriptSegment[];
   }
 
-  getActionItems(meetingId: string): readonly { id: number; content: string; assignee: string | null; completed: boolean }[] {
-    return this.db.prepare(`
+  getActionItems(
+    meetingId: string,
+  ): readonly { id: number; content: string; assignee: string | null; completed: boolean }[] {
+    return this.db
+      .prepare(
+        `
       SELECT id, content, assignee, completed FROM action_items WHERE meeting_id = ? ORDER BY id
-    `).all(meetingId) as { id: number; content: string; assignee: string | null; completed: boolean }[];
+    `,
+      )
+      .all(meetingId) as {
+      id: number;
+      content: string;
+      assignee: string | null;
+      completed: boolean;
+    }[];
   }
 
   close(): void {

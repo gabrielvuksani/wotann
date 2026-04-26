@@ -33,7 +33,8 @@
  *   "sepia" or custom themes that keep warmer accents.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { dirname } from "node:path";
 
 import {
@@ -516,7 +517,9 @@ export class ThemeManager {
     const current = readPersistedUIState(this.storagePath);
     const merged = { ...current, ...next };
     mkdirSync(dirname(this.storagePath), { recursive: true });
-    writeFileSync(this.storagePath, JSON.stringify(merged, null, 2));
+    // Wave 6.5-UU (H-22) — atomic write so a crash mid-persist doesn't
+    // truncate the user's UI preferences file (theme, layout, etc.).
+    writeFileAtomic(this.storagePath, JSON.stringify(merged, null, 2));
   }
 }
 

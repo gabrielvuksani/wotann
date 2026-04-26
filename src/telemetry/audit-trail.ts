@@ -9,6 +9,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import type { ProviderName, RiskLevel } from "../core/types.js";
+import { ensureColumnExists } from "../utils/schema-drift.js";
 
 export interface AuditEntry {
   readonly id: string;
@@ -72,16 +73,39 @@ export class AuditTrail {
     }
 
     this.db = new Database(dbPath);
+    // Wave 6.5-UU (H-21) standard PRAGMA bundle. busy_timeout = 5000 lets
+    // concurrent CLI readers wait instead of throwing SQLITE_BUSY against
+    // the daemon's audit writer. synchronous = NORMAL is durable across
+    // process crashes (the audit chain detects tampering, not power loss
+    // — that's an explicit non-goal here).
+    this.db.pragma("busy_timeout = 5000");
     this.db.pragma("journal_mode = WAL");
-    // Wave 6.5-UU TODO (deferred): consider the additional integrity
-    // PRAGMAs once the rollout is gated:
-    //   PRAGMA synchronous = FULL;        — flush every commit (slower)
-    //   PRAGMA secure_delete = ON;        — overwrite freed pages
-    //   PRAGMA cell_size_check = ON;      — corruption canary
-    // These are NOT enabled here so Wave 4-V stays scoped to the
-    // hash-chain change; the verify-chain method below catches tampering
-    // even without them.
+    this.db.pragma("synchronous = NORMAL");
+    this.db.pragma("foreign_keys = ON");
+    this.db.pragma("user_version"); // read for migration check
+    // Wave 6.5-UU (SB-12) — legacy audit_trail.db files (pre-Wave 4-V) are
+    // missing the `content_hash` column and would HARD CRASH on every
+    // record() with `no such column: content_hash`. Migrate before the
+    // table is touched. Idempotent — only fires when the table exists.
+    this.migrateLegacy();
     this.initialize();
+  }
+
+  /**
+   * Forward-only migration for legacy audit_trail.db files that pre-date
+   * the Wave 4-V hash chain. Runs only when `audit_trail` already exists;
+   * fresh DBs get the column from `initialize()` and skip this entirely.
+   *
+   * Choice of default: empty string. Real entries will overwrite on next
+   * record(); the empty string is recognisable in `verifyChain` as a
+   * legacy row vs a tampered hash.
+   */
+  private migrateLegacy(): void {
+    const tableExists = this.db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='audit_trail'")
+      .get() as { name?: string } | undefined;
+    if (!tableExists) return;
+    ensureColumnExists(this.db, "audit_trail", "content_hash", "TEXT NOT NULL DEFAULT ''");
   }
 
   private initialize(): void {

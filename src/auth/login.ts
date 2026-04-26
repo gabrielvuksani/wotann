@@ -13,7 +13,8 @@
  * the browser flow falls back to device code flow automatically.
  */
 
-import { existsSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, chmodSync } from "node:fs";
+import { writeFileAtomic } from "./../utils/atomic-io.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
@@ -62,7 +63,9 @@ export function persistAuthModeConfig(
 ): string {
   const dir = join(configPath, "..");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  // Wave 6.5-UU (H-22) — auth config holds the active mode + provider
+  // selection. writeFileAtomic survives crashes mid-write.
+  writeFileAtomic(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
   // Defensive chmod — writeFileSync's mode arg only applies on file
   // *creation*, so an overwrite of an existing file with looser perms
   // would silently keep the looser bits. Re-set explicitly.
@@ -253,7 +256,12 @@ async function loginCopilot(): Promise<LoginResult> {
     saved_at: new Date().toISOString(),
   };
 
-  writeFileSync(join(wotannConfigDir, "copilot-token.json"), JSON.stringify(tokenData, null, 2));
+  // Wave 6.5-UU (H-22) — Copilot OAuth tokens. Atomic write so a crash
+  // mid-write doesn't leave the user with a corrupt token file (forcing
+  // a full re-auth instead of a normal session restart).
+  writeFileAtomic(join(wotannConfigDir, "copilot-token.json"), JSON.stringify(tokenData, null, 2), {
+    mode: 0o600,
+  });
 
   return {
     provider: "copilot",

@@ -18,7 +18,8 @@
  *   - Share knowledge between agents/sessions
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -75,8 +76,25 @@ export interface MemvidImportResult {
 const MEMVID_VERSION = 1;
 const MIN_TOKEN_LENGTH = 2;
 const STOP_WORDS = new Set([
-  "the", "a", "an", "and", "or", "but", "in", "on", "at", "to",
-  "for", "of", "with", "by", "is", "it", "this", "that", "was",
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "but",
+  "in",
+  "on",
+  "at",
+  "to",
+  "for",
+  "of",
+  "with",
+  "by",
+  "is",
+  "it",
+  "this",
+  "that",
+  "was",
 ]);
 
 // ── Memvid Backend ──────────────────────────────────────
@@ -164,9 +182,7 @@ export class MemvidBackend {
       });
     }
 
-    return results
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+    return results.sort((a, b) => b.score - a.score).slice(0, limit);
   }
 
   /**
@@ -215,9 +231,7 @@ export class MemvidBackend {
 
     if (filter?.tags && filter.tags.length > 0) {
       const filterTags = new Set(filter.tags);
-      results = results.filter((e) =>
-        e.tags.some((t) => filterTags.has(t)),
-      );
+      results = results.filter((e) => e.tags.some((t) => filterTags.has(t)));
     }
 
     if (filter?.minConfidence !== undefined) {
@@ -249,9 +263,7 @@ export class MemvidBackend {
     // Build serializable index
     const index: Record<string, string[]> = {};
     for (const [token, ids] of this.invertedIndex) {
-      const filteredIds = [...ids].filter((id) =>
-        entries.some((e) => e.id === id),
-      );
+      const filteredIds = [...ids].filter((id) => entries.some((e) => e.id === id));
       if (filteredIds.length > 0) {
         index[token] = filteredIds;
       }
@@ -357,7 +369,8 @@ export class MemvidBackend {
     }
 
     const file = this.export();
-    writeFileSync(this.filePath, JSON.stringify(file, null, 2), "utf-8");
+    // Wave 6.5-UU (H-22) — memvid backend file. Atomic write.
+    writeFileAtomic(this.filePath, JSON.stringify(file, null, 2), { encoding: "utf-8" });
   }
 
   private loadFromDisk(): void {

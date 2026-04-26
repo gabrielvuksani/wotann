@@ -19,7 +19,8 @@
  * Session-10 P10-5 port.
  */
 
-import { readdirSync, readFileSync, statSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { createHash } from "node:crypto";
 import { join, basename, extname, resolve } from "node:path";
 import {
@@ -184,11 +185,13 @@ export function exportToAgentSkills(
     // after the skill) — that's the most portable form.
     const dir = join(outRoot, record.skill.name);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "SKILL.md"), record.sourceBytes, "utf8");
+    // Wave 6.5-UU (H-22) — exported skill file. Atomic write.
+    writeFileAtomic(join(dir, "SKILL.md"), record.sourceBytes, { encoding: "utf8" });
   }
   const manifest = buildManifest(records, options);
   const manifestPath = join(outRoot, AGENTSKILLS_MANIFEST_FILENAME);
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  // Wave 6.5-UU (H-22) — agentskills manifest. Atomic write.
+  writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8" });
   return { skillsWritten: records.length, errors, manifestPath };
 }
 

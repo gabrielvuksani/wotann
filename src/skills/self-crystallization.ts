@@ -25,7 +25,8 @@
  * skill-review UI (session-7 work).
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
@@ -160,7 +161,8 @@ export function crystallizeSuccess(input: CrystallizationInput): Crystallization
 
   try {
     if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
-    writeFileSync(filepath, renderAgentSkillFile(skill), { mode: 0o600 });
+    // Wave 6.5-UU (H-22) — crystallized agent skill file. Atomic write.
+    writeFileAtomic(filepath, renderAgentSkillFile(skill), { mode: 0o600 });
     return { skill, written: true, path: filepath, problems };
   } catch (err) {
     return {

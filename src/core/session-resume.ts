@@ -11,16 +11,10 @@
  * WOTANN preserves EVERYTHING.
  */
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-  readdirSync,
-  unlinkSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { buildRecap, renderRecap } from "./session-recap.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 
 // ── Types ───────────────────────────────────────────────
 
@@ -91,7 +85,9 @@ export class SessionStore {
       savedAt: Date.now(),
     };
 
-    writeFileSync(filePath, JSON.stringify(toSave, null, 2), "utf-8");
+    // Wave 6.5-UU (H-22) — session-resume snapshot. Atomic write so a
+    // crash mid-save doesn't strand a half-written resume file.
+    writeFileAtomic(filePath, JSON.stringify(toSave, null, 2), { encoding: "utf-8" });
     this.enforceMaxSessions();
     return filePath;
   }

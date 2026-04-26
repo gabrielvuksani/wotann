@@ -11,7 +11,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join } from "node:path";
 import type { MemoryStore } from "../memory/store.js";
 
@@ -184,17 +185,19 @@ export class SkillForge {
     // Promote qualifying patterns to candidates
     for (const pattern of this.patterns.values()) {
       if (
-        pattern.frequency >= MIN_PATTERN_FREQUENCY
-        && pattern.successRate >= MIN_PATTERN_SUCCESS_RATE
+        pattern.frequency >= MIN_PATTERN_FREQUENCY &&
+        pattern.successRate >= MIN_PATTERN_SUCCESS_RATE
       ) {
         const existingCandidate = findCandidateByPatternKey(
           this.candidates,
-          buildPatternKey(pattern.actions.map((a) => ({
-            type: a.type,
-            tool: a.tool,
-            success: true,
-            timestamp: 0,
-          }))),
+          buildPatternKey(
+            pattern.actions.map((a) => ({
+              type: a.type,
+              tool: a.tool,
+              success: true,
+              timestamp: 0,
+            })),
+          ),
         );
 
         if (!existingCandidate) {
@@ -314,9 +317,10 @@ export class SkillForge {
       ? candidate.failureReasons
       : [...candidate.failureReasons, reason ?? "unspecified"];
 
-    const newStatus = updatedConfidence <= REJECTION_CONFIDENCE_THRESHOLD
-      ? "rejected" as const
-      : candidate.status;
+    const newStatus =
+      updatedConfidence <= REJECTION_CONFIDENCE_THRESHOLD
+        ? ("rejected" as const)
+        : candidate.status;
 
     this.candidates.set(id, {
       ...candidate,
@@ -335,9 +339,7 @@ export class SkillForge {
    */
   getPromotableCandidates(): readonly SkillCandidate[] {
     return [...this.candidates.values()].filter(
-      (c) =>
-        c.status === "candidate"
-        && c.confidence >= PROMOTION_CONFIDENCE_THRESHOLD,
+      (c) => c.status === "candidate" && c.confidence >= PROMOTION_CONFIDENCE_THRESHOLD,
     );
   }
 
@@ -390,7 +392,8 @@ export class SkillForge {
       mkdirSync(this.skillsDir, { recursive: true });
       const fileName = `draft-${name}.md`;
       const filePath = join(this.skillsDir, fileName);
-      writeFileSync(filePath, content);
+      // Wave 6.5-UU (H-22) — draft skill file. Atomic write.
+      writeFileAtomic(filePath, content);
     } catch {
       // Best-effort -- do not crash if disk write fails
     }
@@ -444,7 +447,9 @@ export class SkillForge {
         patterns: [...this.patterns.values()],
         candidates: [...this.candidates.values()],
       };
-      writeFileSync(this.persistPath, JSON.stringify(state, null, 2));
+      // Wave 6.5-UU (H-22) — skill-forge state (patterns + candidates).
+      // Atomic write so a crash mid-flush doesn't lose accumulated patterns.
+      writeFileAtomic(this.persistPath, JSON.stringify(state, null, 2));
     } catch {
       // Best-effort — do not crash if disk write fails
     }
@@ -464,11 +469,7 @@ export class SkillForge {
         .map((p) => `${p.trigger} (${p.frequency}x, ${(p.successRate * 100).toFixed(0)}% success)`)
         .join("; ");
       if (summary.length > 0) {
-        this.memoryStore.captureEvent(
-          "skill_patterns",
-          summary.slice(0, 2000),
-          "learning",
-        );
+        this.memoryStore.captureEvent("skill_patterns", summary.slice(0, 2000), "learning");
       }
     } catch {
       // Best-effort
@@ -506,10 +507,12 @@ export class SkillForge {
       const state = JSON.parse(raw) as PersistedState;
       if (state.patterns && Array.isArray(state.patterns)) {
         for (const pattern of state.patterns) {
-          const key = buildPatternKey(pattern.actions.map((a: { type: string; tool: string }) => ({
-            type: a.type,
-            tool: a.tool,
-          })));
+          const key = buildPatternKey(
+            pattern.actions.map((a: { type: string; tool: string }) => ({
+              type: a.type,
+              tool: a.tool,
+            })),
+          );
           this.patterns.set(key, pattern);
         }
       }
@@ -533,7 +536,8 @@ export class SkillForge {
       mkdirSync(this.skillsDir, { recursive: true });
       const fileName = `${definition.name}.md`;
       const filePath = join(this.skillsDir, fileName);
-      writeFileSync(filePath, definition.content);
+      // Wave 6.5-UU (H-22) — promoted skill file. Atomic write.
+      writeFileAtomic(filePath, definition.content);
     } catch {
       // Best-effort — do not crash if disk write fails
     }
@@ -582,9 +586,7 @@ function recalculateSuccessRate(
 }
 
 function inferDomain(actions: readonly SessionAction[]): string {
-  const domains = actions
-    .map((a) => a.domain)
-    .filter((d): d is string => d !== undefined);
+  const domains = actions.map((a) => a.domain).filter((d): d is string => d !== undefined);
 
   if (domains.length === 0) return "general";
 
@@ -634,9 +636,7 @@ function createCandidate(pattern: SkillPattern): SkillCandidate {
 }
 
 function generateSkillName(pattern: SkillPattern): string {
-  const tools = pattern.actions
-    .map((a) => a.tool)
-    .filter((t): t is string => t !== undefined);
+  const tools = pattern.actions.map((a) => a.tool).filter((t): t is string => t !== undefined);
 
   const uniqueTools = [...new Set(tools)];
   const toolPart = uniqueTools.length > 0 ? uniqueTools.join("-") : "auto";
@@ -646,9 +646,7 @@ function generateSkillName(pattern: SkillPattern): string {
 
 function generateSkillDescription(pattern: SkillPattern): string {
   const actionCount = pattern.actions.length;
-  const tools = pattern.actions
-    .map((a) => a.tool)
-    .filter((t): t is string => t !== undefined);
+  const tools = pattern.actions.map((a) => a.tool).filter((t): t is string => t !== undefined);
 
   const uniqueTools = [...new Set(tools)];
   const toolPart = uniqueTools.length > 0 ? ` using ${uniqueTools.join(", ")}` : "";

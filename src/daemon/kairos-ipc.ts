@@ -8,10 +8,11 @@
  */
 
 import { createConnection, createServer, type Server, type Socket } from "node:net";
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { KairosRPCHandler, type RPCResponse, type RPCStreamEvent } from "./kairos-rpc.js";
 
 // ── Session Token (B1) ───────────────────────────────────
@@ -102,7 +103,10 @@ export function writeSessionToken(path: string = SESSION_TOKEN_PATH): string {
     createdAt: Date.now(),
     pid: process.pid,
   };
-  writeFileSync(path, JSON.stringify(payload), { mode: 0o600 });
+  // Wave 6.5-UU (H-22) — daemon session token is the bearer credential for
+  // every IPC/RPC call. Atomic write so a crash mid-write doesn't leave
+  // CLI clients with a half-written token they can't authenticate with.
+  writeFileAtomic(path, JSON.stringify(payload), { mode: 0o600 });
   // writeFileSync's mode is only applied on creation; chmod again so the
   // permissions survive when we overwrite an existing file.
   try {

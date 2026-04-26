@@ -4,9 +4,10 @@
  */
 
 import type { ProviderName } from "../core/types.js";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DailyCostStore } from "./daily-cost-store.js";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 
 interface CostEntry {
   readonly timestamp: Date;
@@ -833,7 +834,11 @@ export class CostTracker {
         })),
         budgetUsd: this.budgetUsd,
       };
-      writeFileSync(this.storagePath, JSON.stringify(serialized, null, 2));
+      // Wave 6.5-UU (H-22) — money state is Tier-1: a half-written
+      // cost-state file would lose budget tracking. writeFileAtomic uses
+      // tmp + fsync + rename so a crash mid-write leaves the previous
+      // state intact rather than truncating the file.
+      writeFileAtomic(this.storagePath, JSON.stringify(serialized, null, 2));
     } catch {
       // Best-effort persistence only.
     }

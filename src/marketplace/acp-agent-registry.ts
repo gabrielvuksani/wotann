@@ -35,7 +35,8 @@
  *     with `status: "BLOCKED-NOT-INSTALLED"` rather than faking success.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
@@ -556,7 +557,8 @@ export class AcpAgentRegistry {
   private persistRecord(record: InstalledAcpAgent): InstalledAcpAgent {
     mkdirSync(this.storeDir, { recursive: true });
     const file = join(this.storeDir, `${sanitizeName(record.name)}.json`);
-    writeFileSync(file, JSON.stringify(record, null, 2));
+    // Wave 6.5-UU (H-22) — installed ACP agent record. Atomic write.
+    writeFileAtomic(file, JSON.stringify(record, null, 2));
     return record;
   }
 }

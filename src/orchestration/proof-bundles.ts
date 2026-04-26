@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import type { AutonomousResult } from "./autonomous.js";
 import type { RuntimeStatus } from "../core/runtime.js";
 import type { ContextBudget, ContextCapabilityProfile } from "../context/window-intelligence.js";
@@ -90,31 +91,37 @@ export function writeAutonomousProofBundle(input: AutonomousProofBundleInput): s
       providerOverride: input.providerOverride,
       modelOverride: input.modelOverride,
     },
-    runtime: input.runtimeStatus ? {
-      sessionId: input.runtimeStatus.sessionId,
-      activeProvider: input.runtimeStatus.activeProvider ?? undefined,
-      currentMode: input.runtimeStatus.currentMode,
-      hookCount: input.runtimeStatus.hookCount,
-      middlewareLayers: input.runtimeStatus.middlewareLayers,
-      memoryEnabled: input.runtimeStatus.memoryEnabled,
-      traceEntries: input.runtimeStatus.traceEntries,
-      skillCount: input.runtimeStatus.skillCount,
-    } : undefined,
-    context: input.contextBudget ? {
-      usagePercent: input.contextBudget.usagePercent,
-      totalTokens: input.contextBudget.totalTokens,
-      documentedMaxTokens: input.contextCapability?.documentedMaxTokens,
-      activationMode: input.contextCapability?.activationMode,
-      pressureLevel: input.contextBudget.pressureLevel,
-    } : undefined,
+    runtime: input.runtimeStatus
+      ? {
+          sessionId: input.runtimeStatus.sessionId,
+          activeProvider: input.runtimeStatus.activeProvider ?? undefined,
+          currentMode: input.runtimeStatus.currentMode,
+          hookCount: input.runtimeStatus.hookCount,
+          middlewareLayers: input.runtimeStatus.middlewareLayers,
+          memoryEnabled: input.runtimeStatus.memoryEnabled,
+          traceEntries: input.runtimeStatus.traceEntries,
+          skillCount: input.runtimeStatus.skillCount,
+        }
+      : undefined,
+    context: input.contextBudget
+      ? {
+          usagePercent: input.contextBudget.usagePercent,
+          totalTokens: input.contextBudget.totalTokens,
+          documentedMaxTokens: input.contextCapability?.documentedMaxTokens,
+          activationMode: input.contextCapability?.activationMode,
+          pressureLevel: input.contextBudget.pressureLevel,
+        }
+      : undefined,
     verification: {
       visualVerificationEnabled: input.visualVerificationEnabled ?? false,
       visualExpectation: input.visualExpectation,
-      finalChecks: lastCycle ? {
-        testsPass: lastCycle.testsPass,
-        typecheckPass: lastCycle.typecheckPass,
-        lintPass: lastCycle.lintPass,
-      } : null,
+      finalChecks: lastCycle
+        ? {
+            testsPass: lastCycle.testsPass,
+            typecheckPass: lastCycle.typecheckPass,
+            lintPass: lastCycle.lintPass,
+          }
+        : null,
     },
     cycles: input.result.cycles.map((cycle) => ({
       cycle: cycle.cycle,
@@ -133,6 +140,7 @@ export function writeAutonomousProofBundle(input: AutonomousProofBundleInput): s
   };
 
   const filePath = join(proofDir, `autonomous-${Date.now()}.json`);
-  writeFileSync(filePath, JSON.stringify(bundle, null, 2));
+  // Wave 6.5-UU (H-22) — autonomous proof bundle. Atomic write.
+  writeFileAtomic(filePath, JSON.stringify(bundle, null, 2));
   return filePath;
 }

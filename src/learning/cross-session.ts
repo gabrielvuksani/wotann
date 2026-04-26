@@ -13,7 +13,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import type { MemoryStore } from "../memory/store.js";
 
 export interface Learning {
@@ -147,7 +148,9 @@ export class CrossSessionLearner {
     try {
       const dir = this.persistPath.replace(/[/\\][^/\\]+$/, "");
       mkdirSync(dir, { recursive: true });
-      writeFileSync(this.persistPath, this.serialize());
+      // Wave 6.5-UU (H-22) — cross-session learnings. Atomic write so a
+      // crash mid-persist doesn't lose accumulated session state.
+      writeFileAtomic(this.persistPath, this.serialize());
     } catch {
       // Best-effort — do not crash if disk write fails
     }
@@ -167,7 +170,7 @@ export class CrossSessionLearner {
       })
       .sort((a, b) => {
         // Sort by relevance: frequency × confidence
-        return (b.frequency * b.confidence) - (a.frequency * a.confidence);
+        return b.frequency * b.confidence - a.frequency * a.confidence;
       })
       .slice(0, limit);
   }
@@ -179,13 +182,12 @@ export class CrossSessionLearner {
     const relevant = this.getRelevantLearnings(taskDescription);
     if (relevant.length === 0) return "";
 
-    const lines = [
-      "## Learnings from Previous Sessions",
-      "",
-    ];
+    const lines = ["## Learnings from Previous Sessions", ""];
 
     for (const learning of relevant) {
-      lines.push(`- **${learning.type}** (seen ${learning.frequency}x, confidence ${(learning.confidence * 100).toFixed(0)}%): ${learning.content}`);
+      lines.push(
+        `- **${learning.type}** (seen ${learning.frequency}x, confidence ${(learning.confidence * 100).toFixed(0)}%): ${learning.content}`,
+      );
     }
 
     return lines.join("\n");
@@ -340,9 +342,12 @@ export class CrossSessionLearner {
       const snakeMatches = content.match(/[a-z]+_[a-z]+/g);
       const kebabMatches = content.match(/[a-z]+-[a-z]+/g);
 
-      if (camelMatches) conventions.set("camelCase", (conventions.get("camelCase") ?? 0) + camelMatches.length);
-      if (snakeMatches) conventions.set("snake_case", (conventions.get("snake_case") ?? 0) + snakeMatches.length);
-      if (kebabMatches) conventions.set("kebab-case", (conventions.get("kebab-case") ?? 0) + kebabMatches.length);
+      if (camelMatches)
+        conventions.set("camelCase", (conventions.get("camelCase") ?? 0) + camelMatches.length);
+      if (snakeMatches)
+        conventions.set("snake_case", (conventions.get("snake_case") ?? 0) + snakeMatches.length);
+      if (kebabMatches)
+        conventions.set("kebab-case", (conventions.get("kebab-case") ?? 0) + kebabMatches.length);
     }
 
     // Report the dominant convention
@@ -444,10 +449,10 @@ export class CrossSessionLearner {
       for (let j = i + 1; j < Math.min(i + 4, actions.length); j++) {
         const correction = actions[j]!;
         if (
-          correction.success
-          && correction.type === action.type
-          && correction.input !== action.input
-          && correction.input
+          correction.success &&
+          correction.type === action.type &&
+          correction.input !== action.input &&
+          correction.input
         ) {
           learnings.push({
             id: randomUUID(),
@@ -474,14 +479,8 @@ export class CrossSessionLearner {
   private persistToMemoryStore(extracted: readonly Learning[]): void {
     if (!this.memoryStore || extracted.length === 0) return;
     try {
-      const summary = extracted
-        .map((l) => `[${l.type}] ${l.content.slice(0, 150)}`)
-        .join("; ");
-      this.memoryStore.captureEvent(
-        "cross_session_extraction",
-        summary.slice(0, 2000),
-        "learning",
-      );
+      const summary = extracted.map((l) => `[${l.type}] ${l.content.slice(0, 150)}`).join("; ");
+      this.memoryStore.captureEvent("cross_session_extraction", summary.slice(0, 2000), "learning");
     } catch {
       // Best-effort
     }

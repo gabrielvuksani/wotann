@@ -3032,13 +3032,13 @@ export class KairosDaemon {
     };
 
     try {
-      // Atomic write via tmp + rename so concurrent readers never see
-      // a partial file. Reuses the same pattern as
-      // `src/daemon/start.ts::atomicWrite`.
-      const tmpPath = `${this.statusJsonPath}.tmp.${process.pid}.${now.getTime()}`;
-      const { writeFileSync, renameSync } = require("node:fs") as typeof import("node:fs");
-      writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2));
-      renameSync(tmpPath, this.statusJsonPath);
+      // Wave 6.5-UU (H-22) — atomic write via shared utils/atomic-io helper.
+      // Replaces the inline tmp + rename block; the helper additionally
+      // fsyncs the tmp file before rename so the snapshot survives a
+      // power-loss window the previous version did not cover.
+      const { writeFileAtomic } =
+        require("../utils/atomic-io.js") as typeof import("../utils/atomic-io.js");
+      writeFileAtomic(this.statusJsonPath, JSON.stringify(snapshot, null, 2));
     } catch {
       // Telemetry failure must never crash the daemon.
     }

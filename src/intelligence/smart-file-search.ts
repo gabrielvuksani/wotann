@@ -11,7 +11,8 @@
  * Zero external dependencies — uses built-in Node.js APIs.
  */
 
-import { readdirSync, statSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readdirSync, statSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join, relative, basename, extname } from "node:path";
 import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
@@ -304,7 +305,10 @@ export class SmartFileSearch {
       const dir = resolveWotannHome();
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const obj = Object.fromEntries(this.frecencyDb);
-      writeFileSync(this.dbPath, JSON.stringify(obj));
+      // Wave 6.5-UU (H-22) — frecency DB. Atomic write so a crash mid-flush
+      // can't strand a corrupted database (which the loader would then
+      // discard, throwing away all access history).
+      writeFileAtomic(this.dbPath, JSON.stringify(obj));
     } catch {
       // Best effort
     }

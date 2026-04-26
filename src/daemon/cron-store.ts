@@ -115,10 +115,15 @@ export class CronStore {
     }
 
     this.db = new Database(dbPath);
-    // WAL journal mode matches PlanStore + memory.db. Same rationale:
-    // concurrent readers (CLI `cron list`) never block a writer tick.
+    // Wave 6.5-UU (H-21) standard PRAGMA bundle. WAL + busy_timeout = 5000
+    // ensures CLI `cron list` doesn't throw SQLITE_BUSY against the
+    // daemon's writer tick. synchronous = NORMAL keeps writes durable
+    // across daemon crashes (the cron tick is idempotent on re-fire).
+    this.db.pragma("busy_timeout = 5000");
     this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");
+    this.db.pragma("user_version"); // read for migration check
     this.initialize();
   }
 

@@ -14,7 +14,8 @@
  * No model training required. No GPU. Immediate benefit.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join } from "node:path";
 import { resolveWotannHome } from "../utils/wotann-home.js";
 
@@ -206,7 +207,8 @@ export class PatternCrystallizer {
       "",
     ].join("\n");
 
-    writeFileSync(skillPath, skillContent);
+    // Wave 6.5-UU (H-22) — crystallized skill file. Atomic write.
+    writeFileAtomic(skillPath, skillContent);
 
     // Update pattern as crystallized
     this.patterns.set(pattern.id, {
@@ -298,6 +300,7 @@ export class PatternCrystallizer {
 
   private savePatterns(): void {
     const data = [...this.patterns.values()];
-    writeFileSync(this.dataPath, JSON.stringify(data, null, 2));
+    // Wave 6.5-UU (H-22) — pattern store. Atomic write.
+    writeFileAtomic(this.dataPath, JSON.stringify(data, null, 2));
   }
 }

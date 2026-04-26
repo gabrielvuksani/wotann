@@ -21,7 +21,8 @@
  *   every call; internal arrays are not exposed directly.
  */
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, existsSync } from "node:fs";
+import { writeFileAtomic } from "../utils/atomic-io.js";
 import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -300,7 +301,8 @@ export class TodoTracker {
     if (!this.persist || !this.todoPath) return;
     const dir = dirname(this.todoPath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(this.todoPath, renderTodoMd(this.state()), "utf-8");
+    // Wave 6.5-UU (H-22) — todo-tracker persistence. Atomic write.
+    writeFileAtomic(this.todoPath, renderTodoMd(this.state()), { encoding: "utf-8" });
   }
 }
 
