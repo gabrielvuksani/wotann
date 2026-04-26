@@ -20,10 +20,15 @@
  *   - initialize
  *   - tools/list
  *   - tools/call
- *   - prompts/list — NOT advertised. Capability dropped from `initialize`
- *     so spec-compliant clients won't ask. A defensive `prompts/list`
- *     handler still returns `[]` for misbehaving clients (V9 Wave 3-N
- *     audit fix per QB#6: don't advertise capabilities you can't honor).
+ *   - prompts/list — when a SkillRegistry is wired into the server,
+ *     this returns the user-invocable subset of WOTANN's 142 skills as
+ *     MCP prompt definitions (Wave 6.9-AG follow-up). Without a
+ *     registry, the handler returns `[]` and the capability is NOT
+ *     advertised in `initialize` per QB#6 (don't advertise capabilities
+ *     you can't honor). See skills-as-prompts.ts for the mapping.
+ *   - prompts/get — renders a single skill body, interpolating any
+ *     `{{argument}}` placeholders, as an MCP prompt result. Same
+ *     SkillRegistry-required gating as prompts/list.
  *   - resources/list (V9 T4.1 — returns WOTANN's MCP Apps UI resources)
  *   - resources/read (V9 T4.1 — returns rendered HTML for ui://wotann/* URIs)
  *   - shutdown
@@ -52,6 +57,12 @@ import {
   type ElicitationRegistry,
   type ElicitationRequest,
 } from "./elicitation.js";
+// Wave 6.9-AG follow-up: skill -> MCP prompt mapping. Imported as a
+// module — the SkillRegistry instance itself is supplied by the
+// composition root via McpServerOptions.skillRegistry (QB#7 stateless,
+// QB#6 honest fallback when not wired).
+import { skillsToMcpPrompts, getSkillAsMcpPrompt } from "./skills-as-prompts.js";
+import type { SkillRegistry } from "../skills/loader.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -172,6 +183,18 @@ export interface McpServerOptions {
    * is active. Defaults to `DEFAULT_TIERED_TOOLS` inside the loader.
    */
   readonly tieredRegistry?: readonly TieredTool[];
+  /**
+   * Optional WOTANN SkillRegistry. When supplied, the server advertises
+   * the `prompts` capability and exposes the user-invocable skill subset
+   * via `prompts/list` + `prompts/get` (Wave 6.9-AG follow-up). When
+   * omitted, the capability is NOT advertised (QB#6 — don't advertise
+   * what you can't honor) and `prompts/list` returns `[]` defensively
+   * for misbehaving clients.
+   *
+   * The registry reference is held read-only — the server never mutates
+   * it, so callers can share one registry across multiple servers.
+   */
+  readonly skillRegistry?: SkillRegistry;
 }
 
 // ── JSON-RPC envelope ─────────────────────────────────
@@ -222,6 +245,13 @@ export class WotannMcpServer {
    * lookup against `options` after the fact. `null` when not wired.
    */
   private readonly onMcpToolCall: McpToolHookCallback | null;
+  /**
+   * Wave 6.9-AG follow-up: optional SkillRegistry. Drives the
+   * `prompts/*` surface when supplied. `null` means the capability is
+   * neither advertised nor honored — the defensive `prompts/list`
+   * fallback still returns `[]` so misbehaving clients don't crash.
+   */
+  private readonly skillRegistry: SkillRegistry | null;
 
   constructor(options: McpServerOptions) {
     this.info = options.info;
@@ -230,6 +260,7 @@ export class WotannMcpServer {
     this.stdout = options.stdout ?? process.stdout;
     this.stderr = options.stderr ?? process.stderr;
     this.onMcpToolCall = options.onMcpToolCall ?? null;
+    this.skillRegistry = options.skillRegistry ?? null;
 
     // Tier resolution — explicit option wins, then WOTANN_MCP_TIER env,
     // then null (legacy: expose full adapter catalogue). We only build
@@ -405,14 +436,17 @@ export class WotannMcpServer {
         if (this.elicitationRegistry.count() > 0) {
           capabilities["elicitation"] = {};
         }
+        // Wave 6.9-AG follow-up: advertise `prompts` ONLY when a
+        // SkillRegistry is wired. Without one we'd dead-letter spec-
+        // compliant clients into a perpetually-empty prompts/list (the
+        // exact failure Wave 6.9-AG removed). With one, the catalogue is
+        // real — every user-invocable skill is a prompt, every
+        // {{argument}} site is a parameter.
+        if (this.skillRegistry !== null) {
+          capabilities["prompts"] = {};
+        }
         return {
           protocolVersion: negotiated,
-          // V9 Wave 3-N audit fix (QB#6 honest behavior): only advertise
-          // capabilities we actually honor. `prompts` was previously
-          // advertised but the handler always returned `[]`, dead-lettering
-          // any client that called `prompts/list`. Until WOTANN skills are
-          // mapped to MCP prompt schemas (with arguments + templates), the
-          // capability is omitted so spec-compliant clients won't ask.
           capabilities,
           serverInfo: this.info,
         };
@@ -472,12 +506,38 @@ export class WotannMcpServer {
         return result;
       }
       case "prompts/list":
-        // Defensive fallback only — the `prompts` capability is NOT
-        // advertised in the `initialize` response (see capabilities
-        // block above). A spec-compliant client should never reach
-        // this case. Returning an empty list (rather than throwing
-        // `method not implemented`) keeps misbehaving clients quiet.
-        return { prompts: [] };
+        // Wave 6.9-AG follow-up: when a SkillRegistry is wired, return
+        // the user-invocable skill subset as MCP prompt definitions.
+        // Without a registry, fall back to the empty-list defensive
+        // behavior — capability isn't advertised, so a spec-compliant
+        // client shouldn't reach this branch (QB#6 honest fallback for
+        // misbehaving clients).
+        if (this.skillRegistry === null) return { prompts: [] };
+        return { prompts: skillsToMcpPrompts(this.skillRegistry) };
+      case "prompts/get": {
+        // Wave 6.9-AG follow-up: render a single skill's body as the
+        // prompt result. Honors {{argument}} interpolation. Without a
+        // SkillRegistry the method honestly errors instead of
+        // fabricating an empty prompt (QB#6 — the client asked for a
+        // named prompt by id; "[]" is a lie).
+        if (this.skillRegistry === null) {
+          throw new Error("prompts/get: prompts capability not enabled (no SkillRegistry wired)");
+        }
+        const p = (params ?? {}) as { name?: unknown; arguments?: unknown };
+        if (typeof p.name !== "string" || p.name.length === 0) {
+          throw new Error("prompts/get: params.name (string) required");
+        }
+        // Coerce arguments to Record<string,string>. The MCP spec says
+        // `arguments` is a string-map; we discard non-string values
+        // rather than throwing so a host sending a stray `null` doesn't
+        // brick the call (QB#6 graceful degradation).
+        const rawArgs = (p.arguments ?? {}) as Record<string, unknown>;
+        const args: Record<string, string> = {};
+        for (const [k, v] of Object.entries(rawArgs)) {
+          if (typeof v === "string") args[k] = v;
+        }
+        return getSkillAsMcpPrompt(p.name, args, this.skillRegistry, this.stderr);
+      }
       case "resources/list":
         // V9 T4.1 — expose WOTANN's native UI resources (memory
         // browser, cost preview, editor diff) per MCP Apps spec

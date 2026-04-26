@@ -9,6 +9,10 @@ import {
   type ToolProvider,
 } from "../../src/mcp/mcp-server.js";
 import { PassThrough } from "node:stream";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SkillRegistry } from "../../src/skills/loader.js";
 
 function makeAdapter(overrides: Partial<ToolHostAdapter> = {}): ToolHostAdapter {
   return {
@@ -45,16 +49,16 @@ describe("WotannMcpServer — initialize", () => {
     expect(server.isInitialized).toBe(true);
   });
 
-  it("advertises tools + resources capabilities (prompts dropped, elicitation conditional)", async () => {
-    // Wave 5-DD (V9 GA): MCP server now advertises capabilities HONESTLY.
-    // - `tools` + `resources`: always advertised (server provides them)
-    // - `prompts`: NOT advertised — Wave 6.9-AG dropped the empty stub per
-    //   QB#6 because no skill→prompt mapping exists; advertising would
-    //   mislead spec-compliant clients into asking for prompts/list and
-    //   getting empty arrays back.
-    // - `elicitation`: conditionally advertised only when an elicitation
-    //   handler is registered (Wave 5-DD's stronger QB#6). No handler
-    //   here, so it stays absent.
+  it("advertises tools + resources, prompts/elicitation conditional on wiring", async () => {
+    // Wave 5-DD + Wave 6.9-AG follow-up: MCP server advertises
+    // capabilities HONESTLY (QB#6).
+    // - `tools` + `resources`: always advertised (server provides them).
+    // - `prompts`: now advertised when a SkillRegistry is wired (this
+    //   test makes a server WITHOUT a registry, so it stays absent —
+    //   the wired-with-registry case is covered in the prompts/* suite).
+    // - `elicitation`: conditionally advertised only when an
+    //   elicitation handler is registered (Wave 5-DD's stronger QB#6).
+    //   No handler here, so it stays absent.
     const { server } = makeServer(makeAdapter());
     const response = await server.handleRequest(
       JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
@@ -64,6 +68,29 @@ describe("WotannMcpServer — initialize", () => {
     expect(parsed.result.capabilities.resources).toBeDefined();
     expect(parsed.result.capabilities.prompts).toBeUndefined();
     expect(parsed.result.capabilities.elicitation).toBeUndefined();
+  });
+
+  it("advertises prompts capability when a SkillRegistry is wired", async () => {
+    // Wave 6.9-AG follow-up: with a registry the prompts surface is
+    // genuine, so the capability appears in initialize. Spec-compliant
+    // clients (Claude Desktop, Cursor, Cline, etc.) can now discover
+    // and invoke WOTANN's skill catalogue via prompts/list + prompts/get.
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const server = new WotannMcpServer({
+      info: { name: "wotann-test", version: "0.1.0" },
+      adapter: makeAdapter(),
+      stdin,
+      stdout,
+      stderr,
+      skillRegistry: new SkillRegistry(),
+    });
+    const response = await server.handleRequest(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.result.capabilities.prompts).toBeDefined();
   });
 });
 
@@ -417,4 +444,229 @@ describe("WotannMcpServer — tier-scoped tools/list (WOTANN_MCP_TIER)", () => {
     expect(parsed.error).toBeUndefined();
     expect(parsed.result.content[0].text).toBe("invoked");
   });
+});
+
+// ── prompts/* — Wave 6.9-AG follow-up (skills as MCP prompts) ─
+
+describe("WotannMcpServer — prompts/list + prompts/get (skills as prompts)", () => {
+  /**
+   * Build a temp skills directory with a couple of well-formed skill
+   * files so the SkillRegistry has something to surface. We avoid
+   * pointing at the real `skills/` tree because the registry would
+   * also pick up the SkillsGuard rejections from random fixture files
+   * in the repo and turn this into an end-to-end test.
+   */
+  function makeRegistryWithFixtures(): SkillRegistry {
+    const dir = mkdtempSync(join(tmpdir(), "wotann-prompts-"));
+    writeFileSync(
+      join(dir, "summarize.md"),
+      [
+        "---",
+        "name: summarize",
+        "description: Summarize the supplied text in 3 bullets",
+        "context: fork",
+        "paths: []",
+        "---",
+        "",
+        "# Summarize",
+        "",
+        "Summarize this text in 3 bullet points: {{text}}",
+        "",
+        "Audience: {{audience}}",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(dir, "review-pr.md"),
+      [
+        "---",
+        "name: review-pr",
+        "description: Review the open pull request and produce findings",
+        "context: fork",
+        "paths: []",
+        "---",
+        "",
+        "# Review PR",
+        "",
+        "Walk through every changed file and surface CRIT/HIGH/MED/LOW findings.",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(dir, "ambient-guard.md"),
+      [
+        "---",
+        "name: ambient-guard",
+        "description: Always-on safety reminder",
+        "context: fork",
+        "paths: []",
+        "always: true",
+        "---",
+        "",
+        "Be careful with destructive commands.",
+      ].join("\n"),
+    );
+    return SkillRegistry.createWithDefaults(dir);
+  }
+
+  function makeServerWithRegistry(registry: SkillRegistry): {
+    server: WotannMcpServer;
+    err: PassThrough;
+  } {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const server = new WotannMcpServer({
+      info: { name: "wotann-test", version: "0.1.0" },
+      adapter: makeAdapter(),
+      stdin,
+      stdout,
+      stderr,
+      skillRegistry: registry,
+    });
+    return { server, err: stderr };
+  }
+
+  it("prompts/list returns a non-empty array for a registry with skills", async () => {
+    const registry = makeRegistryWithFixtures();
+    const { server } = makeServerWithRegistry(registry);
+    const response = await server.handleRequest(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompts/list" }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.result).toBeDefined();
+    expect(Array.isArray(parsed.result.prompts)).toBe(true);
+    // At least the two non-`always` fixtures + several built-ins that
+    // are also non-`always`. The exact count drifts as built-ins evolve;
+    // we assert the contract (non-empty + contains our fixtures).
+    expect(parsed.result.prompts.length).toBeGreaterThan(0);
+    const names = parsed.result.prompts.map((p: { name: string }) => p.name);
+    expect(names).toContain("summarize");
+    expect(names).toContain("review-pr");
+    // `always: true` skill must NOT appear — it's passive ambient surface.
+    expect(names).not.toContain("ambient-guard");
+    // Catalogue is sorted alphabetically by name (deterministic for hosts).
+    const sorted = [...names].sort();
+    expect(names).toEqual(sorted);
+    // Skills with {{vars}} should advertise arguments inferred from the body.
+    const summarizeEntry = parsed.result.prompts.find(
+      (p: { name: string }) => p.name === "summarize",
+    );
+    expect(summarizeEntry.arguments).toBeDefined();
+    const argNames = summarizeEntry.arguments.map((a: { name: string }) => a.name).sort();
+    expect(argNames).toEqual(["audience", "text"]);
+  });
+
+  it("prompts/get returns the interpolated body for a known skill", async () => {
+    const registry = makeRegistryWithFixtures();
+    const { server } = makeServerWithRegistry(registry);
+    const response = await server.handleRequest(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "prompts/get",
+        params: {
+          name: "summarize",
+          arguments: { text: "The cat sat on the mat.", audience: "5-year-olds" },
+        },
+      }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.result.description).toContain("Summarize");
+    expect(parsed.result.messages).toHaveLength(1);
+    const message = parsed.result.messages[0];
+    expect(message.role).toBe("user");
+    expect(message.content.type).toBe("text");
+    expect(message.content.text).toContain("The cat sat on the mat.");
+    expect(message.content.text).toContain("5-year-olds");
+    // The frontmatter fence must be stripped — the host shouldn't see
+    // YAML metadata in the prompt body.
+    expect(message.content.text).not.toContain("---");
+    expect(message.content.text).not.toContain("name: summarize");
+  });
+
+  it("prompts/get throws a clear error when the skill does not exist", async () => {
+    const registry = makeRegistryWithFixtures();
+    const { server } = makeServerWithRegistry(registry);
+    const response = await server.handleRequest(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "prompts/get",
+        params: { name: "definitely-not-a-real-skill-xyz", arguments: {} },
+      }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.error).toBeDefined();
+    expect(parsed.error.message).toContain("not found");
+    // Hint to the caller about how to discover available prompts.
+    expect(parsed.error.message).toContain("prompts/list");
+  });
+
+  it("prompts/get with missing arguments interpolates empty + warns to stderr", async () => {
+    // QB#6 honest fallback: missing args do NOT silently fabricate
+    // values — they interpolate to "" AND log a warn.
+    const registry = makeRegistryWithFixtures();
+    const { server, err } = makeServerWithRegistry(registry);
+    const warnings: string[] = [];
+    err.on("data", (chunk: Buffer) => warnings.push(chunk.toString("utf8")));
+    const response = await server.handleRequest(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "prompts/get",
+        params: {
+          name: "summarize",
+          // Deliberately omit `text` and `audience` — both are required
+          // to fully interpolate the body.
+          arguments: {},
+        },
+      }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.error).toBeUndefined();
+    const text = parsed.result.messages[0].content.text;
+    // The placeholders should be substituted with empty strings, not
+    // left as literal `{{text}}` (that would be silent failure).
+    expect(text).not.toContain("{{text}}");
+    expect(text).not.toContain("{{audience}}");
+    // And we must have warned the operator about the missing args.
+    const allWarnings = warnings.join("");
+    expect(allWarnings).toContain("missing arguments");
+    expect(allWarnings).toContain("audience");
+    expect(allWarnings).toContain("text");
+  });
+
+  it("prompts/list returns [] when no SkillRegistry is wired (defensive fallback)", async () => {
+    // Regression guard for QB#6 honest behavior: without a registry,
+    // the capability is NOT advertised, so a spec-compliant client
+    // shouldn't reach this branch — but a misbehaving one that calls
+    // prompts/list anyway must get a clean empty list, not a crash.
+    const { server } = makeServer(makeAdapter());
+    const response = await server.handleRequest(
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "prompts/list" }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.result.prompts).toEqual([]);
+  });
+
+  it("prompts/get errors honestly when no SkillRegistry is wired", async () => {
+    // A client that tries prompts/get without the capability gets a
+    // real error envelope (QB#6) instead of a fabricated empty prompt.
+    const { server } = makeServer(makeAdapter());
+    const response = await server.handleRequest(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "prompts/get",
+        params: { name: "anything", arguments: {} },
+      }),
+    );
+    const parsed = JSON.parse(response!);
+    expect(parsed.error).toBeDefined();
+    expect(parsed.error.message).toContain("not enabled");
+  });
+
+  // Avoid an unused-import warning on `mkdirSync` while leaving it
+  // available for a future fixture that uses bundle-style skills.
+  void mkdirSync;
 });
