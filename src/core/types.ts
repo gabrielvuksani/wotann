@@ -171,6 +171,13 @@ export type HookEvent =
   | "PostCompact"
   | "SessionStart"
   | "SessionEnd"
+  // ── Fired by src/mcp/mcp-server.ts ──
+  // mcp_tool — fired when an MCP server tool is invoked, distinguishing
+  // from native tools. Lets hook configs apply different policies (auto-
+  // approval, audit, redaction) to MCP-sourced tool calls without
+  // affecting native PreToolUse semantics. Mirrors Claude Code v2.1.118
+  // / V14.43 hook taxonomy. Producer wire is in mcp-server.ts tools/call.
+  | "mcp_tool"
   // ── ADVISORY ONLY — no producer wired; handlers never fire ──
   // Session-10 audit dead-letter list. Keep the variants so external
   // plugins typecheck, but do not treat as real event surfaces.

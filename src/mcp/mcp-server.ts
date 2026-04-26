@@ -438,6 +438,36 @@ export class WotannMcpServer {
             `tools/call: tool "${p.name}" not available at tier "${this.activeTier ?? "unknown"}"`,
           );
         }
+        // V9 Wave 5-II — fire the `mcp_tool` hook before dispatch.
+        // Mirrors Claude Code v2.1.118 / V14.43 hook taxonomy where MCP
+        // tool calls are distinguishable from native tool calls. The
+        // callback is fire-and-forget (notification, not gate) — its
+        // return value is ignored and any thrown error is swallowed +
+        // logged so a misbehaving hook never breaks the actual tool
+        // call (QB #6). Stateless: nothing is retained between fires
+        // beyond what the callback chooses to persist.
+        if (this.onMcpToolCall !== null) {
+          try {
+            const maybePromise = this.onMcpToolCall({
+              event: "mcp_tool",
+              toolName: p.name,
+              toolInput: p.arguments ?? {},
+              tier: this.activeTier,
+              timestamp: Date.now(),
+            });
+            // If the callback is async, swallow rejections too — we
+            // don't want to surface hook failures into the JSON-RPC
+            // tools/call envelope. Callers that care about hook
+            // observability should log inside the callback itself.
+            if (maybePromise instanceof Promise) {
+              maybePromise.catch((err) => {
+                this.log("mcp_tool hook error", err);
+              });
+            }
+          } catch (err) {
+            this.log("mcp_tool hook error", err);
+          }
+        }
         const result = await this.adapter.callTool(p.name, p.arguments ?? {});
         return result;
       }
