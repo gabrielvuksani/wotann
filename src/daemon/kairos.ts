@@ -288,6 +288,13 @@ export class KairosDaemon {
   private heartbeatTickCounter = 0;
   private lastDreamDate: string | null = null;
   private lastSkillOptDate: string | null = null;
+  // Wave 4-Y: daily prune state (per-instance per QB#7).
+  // pruneAutoCaptures is a MemoryStore method (src/memory/store.ts:3945),
+  // pruneOlderThan is on AuditTrail (src/telemetry/audit-trail.ts:166).
+  // Both default to 30 days; we override AuditTrail to 90 days to retain
+  // a longer compliance window for tool-call audit while bounding growth.
+  private lastAutoCapturesPruneDay: string | null = null;
+  private lastAuditTrailPruneDay: string | null = null;
 
   // PWR cycle: discuss→plan→implement→review→uat→ship phase transitions
   private readonly pwrEngine = new PWREngine();
@@ -1948,6 +1955,15 @@ export class KairosDaemon {
       this.checkAndRunSkillOptimization(now);
     }
 
+    // Wave 4-Y: nightly retention prune — runs in the same 02:00-04:00 UTC
+    // window so SQLite contention overlaps the existing dream-pipeline
+    // window instead of opening a second I/O hot zone. Both helpers
+    // self-gate via lastXxxPruneDay so per-tick re-entry is a no-op.
+    if (now.getUTCHours() >= 2 && now.getUTCHours() < 4) {
+      void this.pruneAutoCapturesIfDue(now);
+      void this.pruneAuditTrailIfDue(now);
+    }
+
     // Living Spec divergence check — every 100th tick (~25 minutes at 15s intervals)
     this.specTickCounter++;
     if (this.specTickCounter % 100 === 0) {
@@ -2259,6 +2275,93 @@ export class KairosDaemon {
       this.appendLog({
         type: "error",
         message: `Skill optimization failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  /**
+   * Wave 4-Y: nightly auto_capture retention prune.
+   *
+   * QB#15 note: the audit task referenced `pruneAutoCaptures in
+   * src/learning/autodream.ts`, but that helper actually lives on
+   * `MemoryStore` in `src/memory/store.ts:3945`. We wire the real one;
+   * autodream has no equivalent. The auto_capture table grows ~one row
+   * per tool call and was uncapped before this wire.
+   *
+   * Default retention: 30 days (matches the helper's own default and the
+   * memory.db growth profile documented at store.ts:3936-3941).
+   *
+   * QB#6: any DB error (locked file, missing column from older schema,
+   * etc.) is caught and logged; we never crash the daemon. The day-stamp
+   * is set BEFORE the call, so a failed prune doesn't keep retrying every
+   * tick — it'll re-attempt tomorrow.
+   */
+  private async pruneAutoCapturesIfDue(now: Date): Promise<void> {
+    const today = now.toISOString().slice(0, 10);
+    if (this.lastAutoCapturesPruneDay === today) return;
+    this.lastAutoCapturesPruneDay = today;
+    try {
+      const dbPath = join(homedir(), ".wotann", "memory.db");
+      if (!existsSync(dbPath)) return; // no DB yet — nothing to prune
+      const { MemoryStore } = await import("../memory/store.js");
+      const store = new MemoryStore(dbPath);
+      try {
+        const removed = store.pruneAutoCaptures(30);
+        if (removed > 0) {
+          this.appendLog({
+            type: "heartbeat",
+            message: `auto_capture prune: removed ${removed} rows older than 30 days`,
+            data: { removed, retentionDays: 30 },
+          });
+        }
+      } finally {
+        store.close();
+      }
+    } catch (err) {
+      this.appendLog({
+        type: "error",
+        message: `auto_capture prune failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  /**
+   * Wave 4-Y: nightly audit_trail retention prune.
+   *
+   * Default retention: 90 days. The audit_trail is the tool-call audit
+   * surface (see src/telemetry/audit-trail.ts:157-165) — a longer
+   * retention than auto_capture is appropriate for compliance/debugging,
+   * but it must be bounded or the table grows unboundedly (43k+ rows per
+   * 30-day session per the helper's own docs).
+   *
+   * Targets the canonical singleton DB at `~/.wotann/audit.db` (matches
+   * `pipeline.ts:120` and `kairos-rpc.ts:4466`).
+   */
+  private async pruneAuditTrailIfDue(now: Date): Promise<void> {
+    const today = now.toISOString().slice(0, 10);
+    if (this.lastAuditTrailPruneDay === today) return;
+    this.lastAuditTrailPruneDay = today;
+    try {
+      const dbPath = join(homedir(), ".wotann", "audit.db");
+      if (!existsSync(dbPath)) return; // no audit DB — nothing to prune
+      const { AuditTrail } = await import("../telemetry/audit-trail.js");
+      const trail = new AuditTrail(dbPath);
+      try {
+        const removed = trail.pruneOlderThan(90);
+        if (removed > 0) {
+          this.appendLog({
+            type: "heartbeat",
+            message: `audit_trail prune: removed ${removed} rows older than 90 days`,
+            data: { removed, retentionDays: 90 },
+          });
+        }
+      } finally {
+        trail.close();
+      }
+    } catch (err) {
+      this.appendLog({
+        type: "error",
+        message: `audit_trail prune failed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
   }
