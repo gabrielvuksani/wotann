@@ -45,15 +45,25 @@ describe("WotannMcpServer — initialize", () => {
     expect(server.isInitialized).toBe(true);
   });
 
-  it("advertises tools + prompts + resources capabilities", async () => {
+  it("advertises tools + resources capabilities (prompts dropped, elicitation conditional)", async () => {
+    // Wave 5-DD (V9 GA): MCP server now advertises capabilities HONESTLY.
+    // - `tools` + `resources`: always advertised (server provides them)
+    // - `prompts`: NOT advertised — Wave 6.9-AG dropped the empty stub per
+    //   QB#6 because no skill→prompt mapping exists; advertising would
+    //   mislead spec-compliant clients into asking for prompts/list and
+    //   getting empty arrays back.
+    // - `elicitation`: conditionally advertised only when an elicitation
+    //   handler is registered (Wave 5-DD's stronger QB#6). No handler
+    //   here, so it stays absent.
     const { server } = makeServer(makeAdapter());
     const response = await server.handleRequest(
       JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
     );
     const parsed = JSON.parse(response!);
     expect(parsed.result.capabilities.tools).toBeDefined();
-    expect(parsed.result.capabilities.prompts).toBeDefined();
     expect(parsed.result.capabilities.resources).toBeDefined();
+    expect(parsed.result.capabilities.prompts).toBeUndefined();
+    expect(parsed.result.capabilities.elicitation).toBeUndefined();
   });
 });
 

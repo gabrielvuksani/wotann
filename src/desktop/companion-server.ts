@@ -266,12 +266,13 @@ export class PairingManager {
   constructor(maxDevices: number = 3, persistPath?: string) {
     this.maxDevices = maxDevices;
     this.secureAuth = new SecureAuthManager();
-    // H-24: rehydrate paired devices from disk. We deliberately default
-    // the path to ~/.wotann/companion-devices.db when the caller doesn't
-    // override — every CompanionServer in production wants persistence,
-    // and tests that need pure-memory behavior pass an explicit ":memory:"
-    // path to keep their isolation.
-    const resolvedPath = persistPath ?? resolveWotannHomeSubdir("companion-devices.db");
+    // H-24: rehydrate paired devices from disk. Default to in-memory
+    // (":memory:") when caller doesn't override — bare `new PairingManager()`
+    // (used by tests) gets test-isolated state instead of polluting the
+    // user's real ~/.wotann/companion-devices.db. Production callers
+    // (CompanionServer) MUST pass the explicit home-dir path to opt in
+    // to persistence — see CompanionServer constructor at line ~822.
+    const resolvedPath = persistPath ?? ":memory:";
     const store = createSqliteKvStore(resolvedPath, "devices");
     this.persistence = store.usable ? store : null;
     if (this.persistence) {
@@ -819,7 +820,14 @@ export class CompanionServer {
       );
     }
 
-    this.pairingManager = new PairingManager(this.config.maxDevices);
+    // Wave 6-KK + integrator fix: pass explicit home-dir path so
+    // production gets persistent paired-devices state. Bare
+    // `new PairingManager()` (used by tests) defaults to ":memory:" so
+    // test instances stay isolated from the user's real DB.
+    this.pairingManager = new PairingManager(
+      this.config.maxDevices,
+      resolveWotannHomeSubdir("companion-devices.db"),
+    );
     this.rpcHandler = new CompanionRPCHandler();
     this.secureAuth = new SecureAuthManager(this.config.sessionTimeoutMs);
     this.authTokens = new AuthTokenStore(this.config.sessionTimeoutMs);
