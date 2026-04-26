@@ -302,7 +302,9 @@ program
         const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
         const shellDir = resolveWotannHomeSubdir("shell");
         if (!existsSync(shellDir)) {
-          mkdirSync(shellDir, { recursive: true });
+          // TIER 4 fix: 0o700 perms — shell init scripts may contain
+          // secrets (env-var exports, sourced credentials).
+          mkdirSync(shellDir, { recursive: true, mode: 0o700 });
         }
         const outPath = join(shellDir, init.filename);
         writeFileSync(outPath, init.script, "utf-8");
@@ -1588,7 +1590,10 @@ daemonCmd
     const heartbeatPath = join(projectWotannDir, "HEARTBEAT.md");
 
     if (!existsSync(daemonDir)) {
-      mkdirSync(daemonDir, { recursive: true });
+      // TIER 4 fix: 0o700 perms — daemon dir holds pid files, status, and
+      // socket. Other-user-readable perms could leak which projects are
+      // running which agents.
+      mkdirSync(daemonDir, { recursive: true, mode: 0o700 });
     }
 
     // SB-11: stale-pidfile check. The `wotann daemon worker` entry was
@@ -1673,7 +1678,9 @@ daemonCmd
     const { existsSync, mkdirSync, readFileSync } = await import("node:fs");
     const { pidPath } = getDaemonPaths();
     const wotannDir = join(process.cwd(), ".wotann");
-    if (!existsSync(wotannDir)) mkdirSync(wotannDir, { recursive: true });
+    // TIER 4 fix: 0o700 perms — .wotann/ holds memory DBs, conversation cache,
+    // potentially OAuth tokens. Other-user-readable could leak credentials.
+    if (!existsSync(wotannDir)) mkdirSync(wotannDir, { recursive: true, mode: 0o700 });
 
     if (existsSync(pidPath)) {
       const existingPid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
@@ -1807,7 +1814,9 @@ engineCmd
     const { existsSync, mkdirSync, readFileSync } = await import("node:fs");
     const { pidPath } = getDaemonPaths();
     const wotannDir = join(process.cwd(), ".wotann");
-    if (!existsSync(wotannDir)) mkdirSync(wotannDir, { recursive: true });
+    // TIER 4 fix: 0o700 perms — .wotann/ holds memory DBs, conversation cache,
+    // potentially OAuth tokens. Other-user-readable could leak credentials.
+    if (!existsSync(wotannDir)) mkdirSync(wotannDir, { recursive: true, mode: 0o700 });
 
     if (existsSync(pidPath)) {
       const existingPid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);

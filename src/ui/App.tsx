@@ -3063,6 +3063,95 @@ export function WotannApp({
           return true;
         }
 
+        // PHASE G — TUI slash commands for cross-surface parity with CLI.
+        // Closes the gap where /trust, /export, /delete, /login were
+        // CLI-only — power users in the TUI shouldn't have to drop to CLI.
+        case "/trust": {
+          if (!arg) {
+            sysMsg("Usage: /trust [path]  (defaults to cwd)");
+            return true;
+          }
+          (async () => {
+            try {
+              const { trustWorkspace } = await import("../utils/trusted-workspaces.js");
+              const targetPath = arg === "." || arg === "" ? process.cwd() : arg;
+              const added = trustWorkspace(targetPath);
+              sysMsg(added ? `Trusted: ${targetPath}` : `Already trusted: ${targetPath}`);
+            } catch (err) {
+              sysMsg(`error: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          })();
+          return true;
+        }
+
+        case "/export": {
+          (async () => {
+            try {
+              const { resolveWotannHome } = await import("../utils/wotann-home.js");
+              const wotannHome = resolveWotannHome();
+              const fs = await import("node:fs");
+              if (!fs.existsSync(wotannHome)) {
+                sysMsg(`No WOTANN home at ${wotannHome} — nothing to export.`);
+                return;
+              }
+              const ts = new Date().toISOString().replace(/[:.]/g, "-");
+              const path = await import("node:path");
+              const outPath = path.join(process.cwd(), `wotann-export-${ts}.tar.gz`);
+              const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
+              const result = await execFileNoThrow("tar", [
+                "-czf",
+                outPath,
+                "-C",
+                path.dirname(wotannHome),
+                path.basename(wotannHome),
+              ]);
+              sysMsg(
+                result.exitCode === 0
+                  ? `Exported ${wotannHome} → ${outPath} (GDPR Article 20)`
+                  : `Export failed: ${result.stderr.trim()}`,
+              );
+            } catch (err) {
+              sysMsg(`error: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          })();
+          return true;
+        }
+
+        case "/delete": {
+          if (arg !== "--yes") {
+            sysMsg(
+              "Refusing without `--yes` confirmation. Run `/delete --yes` to wipe ~/.wotann (destructive — no recovery; run /export first to back up).",
+            );
+            return true;
+          }
+          (async () => {
+            try {
+              const { resolveWotannHome } = await import("../utils/wotann-home.js");
+              const wotannHome = resolveWotannHome();
+              const fs = await import("node:fs/promises");
+              const fsSync = await import("node:fs");
+              if (!fsSync.existsSync(wotannHome)) {
+                sysMsg(`No WOTANN home at ${wotannHome} — nothing to delete.`);
+                return;
+              }
+              await fs.rm(wotannHome, { recursive: true, force: true });
+              sysMsg(
+                `Deleted ${wotannHome} (GDPR Article 17). Re-run \`wotann init\` to start fresh.`,
+              );
+            } catch (err) {
+              sysMsg(`error: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          })();
+          return true;
+        }
+
+        case "/login": {
+          sysMsg(
+            "Run `wotann login [provider]` from your shell. Supported: anthropic, openai, codex, copilot, gemini, ollama, deepseek, etc.",
+          );
+          return true;
+        }
+
         default:
           if (cmd.startsWith("/")) {
             sysMsg(`Unknown command: ${cmd}\nType /help for available commands.`);
