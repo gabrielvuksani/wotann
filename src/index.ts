@@ -3669,9 +3669,18 @@ program
             },
             onMultiModelVerify: async (output) => {
               try {
+                // H-11 fix (Wave 6.5-WW): resolve verifier model from active
+                // session provider via PROVIDER_DEFAULTS instead of hardcoding
+                // a Claude-specific id. Falls back to canonical-default Sonnet
+                // tier when no provider context is available.
+                const { resolveAgentModel } = await import("./orchestration/agent-registry.js");
+                const status = runtime.getStatus();
+                const resolvedVerifierModel = resolveAgentModel("balanced", {
+                  ...(status.activeProvider ? { providerHint: status.activeProvider } : {}),
+                });
                 const verifyResult = await runRuntimeQuery(runtime, {
                   prompt: `Review the following autonomous agent output. Reply with APPROVED if the work is correct and complete, or REJECTED with specific feedback:\n\n${output.slice(0, 4000)}`,
-                  model: "claude-sonnet-4-6",
+                  model: resolvedVerifierModel.model,
                 });
                 const text = verifyResult.output ?? "";
                 const approved = /\bAPPROVED\b/i.test(text);
@@ -5468,8 +5477,27 @@ program
   .description("Classify a prompt and show the recommended model")
   .action(async (prompt: string) => {
     const { TaskSemanticRouter } = await import("./intelligence/task-semantic-router.js");
+    // H-11 fix (Wave 6.5-WW): build the available-models list from
+    // PROVIDER_DEFAULTS using the user's actually-configured provider.
+    // Falls back to the canonical-default Sonnet tier only when no
+    // provider context is available — never hardcodes a single Claude id.
+    const { resolveDefaultProvider } = await import("./core/default-provider.js");
+    const { PROVIDER_DEFAULTS } = await import("./providers/model-defaults.js");
+    const { resolveAgentModel } = await import("./orchestration/agent-registry.js");
+    const detected = resolveDefaultProvider();
+    const availableModels: string[] = (() => {
+      if (detected?.provider && PROVIDER_DEFAULTS[detected.provider]) {
+        const d = PROVIDER_DEFAULTS[detected.provider]!;
+        // Order matters: classifier picks first match for tier intent.
+        return [d.defaultModel, d.workerModel, d.oracleModel].filter(
+          (m, i, a) => m && a.indexOf(m) === i,
+        );
+      }
+      const balanced = resolveAgentModel("balanced");
+      return [balanced.model];
+    })();
     const router = new TaskSemanticRouter();
-    const classification = router.classify(prompt, ["claude-sonnet-4-6"]);
+    const classification = router.classify(prompt, availableModels);
 
     console.log(chalk.bold("\nWOTANN Prompt Router\n"));
     console.log(chalk.dim(`  Prompt: "${prompt.slice(0, 100)}"`));
@@ -6636,8 +6664,7 @@ program
   )
   .option(
     "--provider <id>",
-    "Cloud provider: anthropic-managed | fly-sprites | cloudflare-agents",
-    "anthropic-managed",
+    "Cloud provider: anthropic-managed | fly-sprites | cloudflare-agents (auto-detected from env)",
   )
   .option("--budget <usd>", "Max USD spend for this session", (v) => Number(v))
   .option("--max-duration <ms>", "Hard cap on session duration in milliseconds", (v) => Number(v))
@@ -6659,7 +6686,36 @@ program
         process.stderr.write(chalk.red("error: a task description is required\n"));
         process.exit(2);
       }
-      const provider = opts.provider ?? "anthropic-managed";
+      // H-12 fix (Wave 6.5-WW): default-provider selection is
+      // environment-aware instead of hardwired to "anthropic-managed".
+      // Detection order: explicit --provider > WOTANN_OFFLOAD_PROVIDER env >
+      // first cloud provider whose credentials are present > error.
+      // Each provider keeps its own credential check below; this only picks
+      // which provider we *try* first when the user did not say.
+      const detectCloudProvider = (): string | null => {
+        if (process.env["ANTHROPIC_API_KEY"]) return "anthropic-managed";
+        if (
+          process.env["CLOUDFLARE_API_TOKEN"] &&
+          process.env["CLOUDFLARE_ACCOUNT_ID"] &&
+          process.env["CLOUDFLARE_AGENTS_NAMESPACE_ID"]
+        ) {
+          return "cloudflare-agents";
+        }
+        if (process.env["FLY_API_TOKEN"] && process.env["FLY_ORG_SLUG"]) return "fly-sprites";
+        return null;
+      };
+      const envProvider = process.env["WOTANN_OFFLOAD_PROVIDER"];
+      const provider = opts.provider ?? envProvider ?? detectCloudProvider();
+      if (!provider) {
+        process.stderr.write(
+          chalk.red(
+            "error: --provider not set and no cloud-offload credentials found in env. " +
+              "Set ANTHROPIC_API_KEY (anthropic-managed), CLOUDFLARE_API_TOKEN+CLOUDFLARE_ACCOUNT_ID+CLOUDFLARE_AGENTS_NAMESPACE_ID (cloudflare-agents), or FLY_API_TOKEN+FLY_ORG_SLUG (fly-sprites), " +
+              "or pass --provider explicitly.\n",
+          ),
+        );
+        process.exit(2);
+      }
       const apiKey =
         opts.apiKey ??
         process.env["WOTANN_OFFLOAD_API_KEY"] ??

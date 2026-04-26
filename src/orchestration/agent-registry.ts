@@ -1,14 +1,21 @@
 /**
  * Centralized Agent Registry: 14 specialist agent definitions.
  *
- * Maps agent ID -> AgentDefinition with model tier, tools, prompts, and limits.
+ * Maps agent ID -> AgentDefinition with capability tier, tools, prompts, and limits.
  * Used by AgentBridge for spawning, and by the fleet dashboard for status display.
  *
- * Agent tiers (from AGENTS_ROSTER.md):
- *   - opus:   Architecture & Planning (planner, architect, critic, reviewer, workflow-architect)
- *   - sonnet: Implementation (executor, test-engineer, debugger, security-reviewer, build-resolver)
- *   - haiku:  Utility (analyst, simplifier, verifier)
- *   - sonnet: Specialist on-demand (computer-use)
+ * Agent tiers (from AGENTS_ROSTER.md) — capability names, NOT vendor model names:
+ *   - strong:   Architecture & Planning (planner, architect, critic, reviewer, workflow-architect)
+ *   - balanced: Implementation (executor, test-engineer, debugger, security-reviewer, build-resolver,
+ *               computer-use)
+ *   - fast:     Utility (analyst, simplifier, verifier)
+ *   - local:    Locally hosted models (Ollama / OpenAI-compatible)
+ *
+ * Wave 6.5-WW (H-13): renamed from "opus|sonnet|haiku|local" to provider-neutral
+ * tier names. The runtime resolves a capability tier to a concrete provider+model
+ * via {@link resolveAgentModel}, which honours user env overrides
+ * (WOTANN_AGENT_MODEL_STRONG / _BALANCED / _FAST / _LOCAL) and falls back to the
+ * single-source-of-truth PROVIDER_DEFAULTS table.
  */
 
 import { requiredReadingHook } from "../runtime-hooks/dead-code-hooks.js";
@@ -20,8 +27,14 @@ import {
   type HandoffResult,
 } from "../core/handoff.js";
 import type { RequiredReadingItem } from "../agents/required-reading.js";
+import { PROVIDER_DEFAULTS } from "../providers/model-defaults.js";
 
-export type AgentModel = "opus" | "sonnet" | "haiku" | "local";
+/**
+ * Capability tier — provider-neutral name describing the *role* of the model
+ * rather than a vendor's product line. Resolves to a concrete model via
+ * {@link resolveAgentModel}.
+ */
+export type AgentModel = "strong" | "balanced" | "fast" | "local";
 
 export type AgentTier = "planning" | "implementation" | "utility" | "specialist";
 
@@ -117,12 +130,12 @@ function defineAgent(partial: {
   };
 }
 
-// ── Architecture & Planning (Opus-tier) ────────────────────────
+// ── Architecture & Planning (strong tier) ──────────────────────
 
 const planner = defineAgent({
   id: "planner",
   name: "Planner",
-  model: "opus",
+  model: "strong",
   systemPrompt:
     "You are a planning agent. Create implementation plans. Generate 2-3 approaches, " +
     "evaluate tradeoffs, and pick the best. Output a structured plan with phases, " +
@@ -141,7 +154,7 @@ const planner = defineAgent({
 const architect = defineAgent({
   id: "architect",
   name: "Architect",
-  model: "opus",
+  model: "strong",
   systemPrompt:
     "You are a system architecture agent. Design system architecture. Evaluate " +
     "tradeoffs between approaches. Produce Architecture Decision Records (ADRs). " +
@@ -154,7 +167,7 @@ const architect = defineAgent({
 const critic = defineAgent({
   id: "critic",
   name: "Critic",
-  model: "opus",
+  model: "strong",
   systemPrompt:
     "You are an adversarial reviewer. Review plans and designs skeptically. " +
     "Find flaws, gaps, risks, and unstated assumptions. Challenge every decision. " +
@@ -167,7 +180,7 @@ const critic = defineAgent({
 const reviewer = defineAgent({
   id: "reviewer",
   name: "Reviewer",
-  model: "opus",
+  model: "strong",
   systemPrompt:
     "You are a code review agent. Review code for correctness, performance, " +
     "security, and maintainability. Report findings by severity: CRITICAL, HIGH, " +
@@ -180,7 +193,7 @@ const reviewer = defineAgent({
 const workflowArchitect = defineAgent({
   id: "workflow-architect",
   name: "Workflow Architect",
-  model: "opus",
+  model: "strong",
   systemPrompt:
     "You are a workflow architecture agent. Map every path through a system. " +
     "Identify decision nodes, failure modes, and recovery strategies. Produce " +
@@ -190,12 +203,12 @@ const workflowArchitect = defineAgent({
   availableSkills: ["research", "spec-driven-workflow"],
 });
 
-// ── Implementation (Sonnet-tier) ───────────────────────────────
+// ── Implementation (balanced tier) ─────────────────────────────
 
 const executor = defineAgent({
   id: "executor",
   name: "Executor",
-  model: "sonnet",
+  model: "balanced",
   systemPrompt:
     "You are an implementation agent. Implement code per spec. Write tests first " +
     "(TDD). Verify after implementation. Follow existing codebase patterns. Keep " +
@@ -207,7 +220,7 @@ const executor = defineAgent({
 const testEngineer = defineAgent({
   id: "test-engineer",
   name: "Test Engineer",
-  model: "sonnet",
+  model: "balanced",
   systemPrompt:
     "You are a test engineering agent. Write tests using RED-GREEN-REFACTOR. " +
     "Target 80% minimum coverage. Write unit, integration, and e2e tests. " +
@@ -220,7 +233,7 @@ const testEngineer = defineAgent({
 const debugger_ = defineAgent({
   id: "debugger",
   name: "Debugger",
-  model: "sonnet",
+  model: "balanced",
   systemPrompt:
     "You are a debugging agent. Investigate bugs using hypothesis-driven " +
     "methodology. Form hypotheses, design experiments to test them, and report " +
@@ -233,7 +246,7 @@ const debugger_ = defineAgent({
 const securityReviewer = defineAgent({
   id: "security-reviewer",
   name: "Security Reviewer",
-  model: "sonnet",
+  model: "balanced",
   systemPrompt:
     "You are a security review agent. Scan for OWASP Top 10 vulnerabilities, " +
     "hardcoded secrets, injection attacks, XSS, CSRF, and auth bypass. " +
@@ -245,7 +258,7 @@ const securityReviewer = defineAgent({
 const buildResolver = defineAgent({
   id: "build-resolver",
   name: "Build Resolver",
-  model: "sonnet",
+  model: "balanced",
   systemPrompt:
     "You are a build error resolution agent. Fix build and type errors with " +
     "minimal diffs. No refactoring — only fix what's broken. Verify the fix " +
@@ -254,12 +267,12 @@ const buildResolver = defineAgent({
   availableSkills: ["systematic-debugging", "focused-fix"],
 });
 
-// ── Utility (Haiku/Local-tier) ─────────────────────────────────
+// ── Utility (fast / local tier) ────────────────────────────────
 
 const analyst = defineAgent({
   id: "analyst",
   name: "Analyst",
-  model: "haiku",
+  model: "fast",
   systemPrompt:
     "You are a requirements analysis agent. Analyze requirements and convert " +
     "ambiguous scope into specific acceptance criteria. Identify missing " +
@@ -272,7 +285,7 @@ const analyst = defineAgent({
 const simplifier = defineAgent({
   id: "simplifier",
   name: "Simplifier",
-  model: "haiku",
+  model: "fast",
   systemPrompt:
     "You are a code simplification agent. Simplify code by removing unnecessary " +
     "complexity. Preserve all existing behavior. Reduce nesting, extract helpers, " +
@@ -285,7 +298,7 @@ const simplifier = defineAgent({
 const verifier = defineAgent({
   id: "verifier",
   name: "Verifier",
-  model: "haiku",
+  model: "fast",
   systemPrompt:
     "You are a verification agent. Verify that work is complete by running tests, " +
     "checking types, and reviewing output. Provide evidence of completion. " +
@@ -300,7 +313,7 @@ const verifier = defineAgent({
 const computerUse = defineAgent({
   id: "computer-use",
   name: "Computer Use",
-  model: "sonnet",
+  model: "balanced",
   systemPrompt:
     "You are a computer use agent. Control the computer to complete tasks. " +
     "Prefer API/CLI first, accessibility tree second, screenshot last. " +
@@ -312,14 +325,133 @@ const computerUse = defineAgent({
   timeout: 1_800_000, // 30 min — CU tasks tend to be longer
 });
 
-// ── Model → Tier Mapping ───────────────────────────────────────
+// ── Capability Tier → Workflow Tier Mapping ────────────────────
 
 const MODEL_TO_TIER: ReadonlyMap<AgentModel, AgentTier> = new Map<AgentModel, AgentTier>([
-  ["opus", "planning"],
-  ["sonnet", "implementation"],
-  ["haiku", "utility"],
+  ["strong", "planning"],
+  ["balanced", "implementation"],
+  ["fast", "utility"],
   ["local", "utility"],
 ]);
+
+// ── Capability Tier → Concrete Provider/Model Resolver ─────────
+//
+// The resolver is the single read-side bridge between abstract capability
+// names (`strong | balanced | fast | local`) and concrete provider+model
+// strings. It honours user env overrides, falls back to the active session's
+// provider via PROVIDER_DEFAULTS, and finally to canonical Anthropic IDs as
+// the last-resort default (only when no provider context is supplied).
+//
+// Wave 6.5-WW (H-13): introduced to remove vendor lock-in from agent
+// definitions. Agents declare a *role* (strong/balanced/fast/local); the
+// runtime decides which concrete model satisfies that role at dispatch time.
+
+/** Resolved model assignment for a given capability tier. */
+export interface ResolvedAgentModel {
+  /** Concrete provider name (e.g. "anthropic", "openai", "ollama"). */
+  readonly provider: string;
+  /** Concrete model id understood by that provider's adapter. */
+  readonly model: string;
+  /** Human-readable provenance — useful for cost preview / fleet status. */
+  readonly source: "env-override" | "provider-default" | "canonical-fallback";
+}
+
+/**
+ * Canonical fallback table — only consulted when neither an env override
+ * nor a session-provider hint is available. Values are intentionally
+ * Anthropic since the fallback is *deterministic*, not preferential: any
+ * caller that ships with a provider context (the runtime always does) will
+ * use that provider's PROVIDER_DEFAULTS instead.
+ *
+ * QB#7: declared `as const` so the table is structurally immutable; the
+ * exported type narrows to the literal record.
+ */
+const CANONICAL_FALLBACK: Readonly<Record<AgentModel, { provider: string; model: string }>> = {
+  strong: { provider: "anthropic", model: "claude-opus-4-7" },
+  balanced: { provider: "anthropic", model: "claude-sonnet-4-7" },
+  fast: { provider: "anthropic", model: "claude-haiku-4-5" },
+  local: { provider: "ollama", model: "gemma4:e4b" },
+} as const;
+
+/**
+ * Per-tier env override knob. Users can pin a specific provider+model for
+ * a tier without editing code:
+ *
+ *   WOTANN_AGENT_MODEL_STRONG="openai:gpt-5"
+ *   WOTANN_AGENT_MODEL_BALANCED="anthropic:claude-sonnet-4-7"
+ *   WOTANN_AGENT_MODEL_FAST="ollama:llama-4-3b"
+ *   WOTANN_AGENT_MODEL_LOCAL="ollama:gemma4:e4b"
+ *
+ * Format is `provider:model`. Invalid values fall back with a stderr warn.
+ */
+const ENV_OVERRIDE_KEY: Readonly<Record<AgentModel, string>> = {
+  strong: "WOTANN_AGENT_MODEL_STRONG",
+  balanced: "WOTANN_AGENT_MODEL_BALANCED",
+  fast: "WOTANN_AGENT_MODEL_FAST",
+  local: "WOTANN_AGENT_MODEL_LOCAL",
+} as const;
+
+/**
+ * Resolve a capability tier to a concrete provider+model.
+ *
+ * Resolution order (first hit wins):
+ *   1. `WOTANN_AGENT_MODEL_<TIER>` env var (`provider:model` shape)
+ *   2. PROVIDER_DEFAULTS for the supplied `providerHint` —
+ *      `strong → oracleModel`, `balanced → defaultModel`, `fast → workerModel`
+ *   3. CANONICAL_FALLBACK (Anthropic-shaped defaults, only when no hint)
+ *
+ * Honest contract (QB#6): if an env override is malformed, we warn on
+ * stderr and continue with the next resolution step rather than crashing.
+ * The result is always a valid {@link ResolvedAgentModel}.
+ */
+export function resolveAgentModel(
+  tier: AgentModel,
+  options?: {
+    /**
+     * Active session provider — when present, the resolver maps the tier
+     * onto that provider's PROVIDER_DEFAULTS triple (oracle/default/worker).
+     * When absent, the canonical fallback is used.
+     */
+    readonly providerHint?: string;
+    /** Optional process-env handle for testability; defaults to process.env. */
+    readonly env?: NodeJS.ProcessEnv;
+  },
+): ResolvedAgentModel {
+  const env = options?.env ?? process.env;
+
+  // 1. Per-tier env override (`provider:model`).
+  const overrideRaw = env[ENV_OVERRIDE_KEY[tier]];
+  if (overrideRaw) {
+    const colonAt = overrideRaw.indexOf(":");
+    if (colonAt > 0 && colonAt < overrideRaw.length - 1) {
+      const provider = overrideRaw.slice(0, colonAt).trim();
+      const model = overrideRaw.slice(colonAt + 1).trim();
+      if (provider && model) {
+        return { provider, model, source: "env-override" };
+      }
+    }
+    // Malformed override — warn and fall through (QB#6 honest fallback).
+    process.stderr.write(
+      `[agent-registry] ignoring malformed ${ENV_OVERRIDE_KEY[tier]}="${overrideRaw}" — expected "provider:model"\n`,
+    );
+  }
+
+  // 2. Provider-hint-driven mapping via PROVIDER_DEFAULTS.
+  if (options?.providerHint && PROVIDER_DEFAULTS[options.providerHint]) {
+    const defaults = PROVIDER_DEFAULTS[options.providerHint]!;
+    const model =
+      tier === "strong"
+        ? defaults.oracleModel
+        : tier === "fast"
+          ? defaults.workerModel
+          : defaults.defaultModel; // balanced + local both map to defaultModel
+    return { provider: options.providerHint, model, source: "provider-default" };
+  }
+
+  // 3. Canonical fallback — only reached when no provider context exists.
+  const canon = CANONICAL_FALLBACK[tier];
+  return { provider: canon.provider, model: canon.model, source: "canonical-fallback" };
+}
 
 // ── Registry ───────────────────────────────────────────────────
 
