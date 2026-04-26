@@ -31,8 +31,8 @@
 | CI | `gh run list --limit 3` | **GREEN on c7d64a9** (fix committed today) |
 | Supabase key | `git cat-file -e dbaf1225 && echo still-reachable` | **STILL REACHABLE from 7 refs** (Tier: FINAL) |
 | runtime.ts LOC | `wc -l src/core/runtime.ts` | **6939** (Tier: FINAL) |
-| kairos-rpc.ts LOC | `wc -l src/daemon/kairos-rpc.ts` | **7629** (Tier: FINAL) |
-| index.ts LOC | `wc -l src/index.ts` | **7234** (Tier: FINAL, drifted from 6158 baseline as V9 verbs landed: browse/sop/recipe/pr-check/agentless + offload completion) |
+| kairos-rpc.ts LOC | `wc -l src/daemon/kairos-rpc.ts` | **8223** (Tier: FINAL — V9 GA wave deltas: cursor.record bridge + creations.watch + 13 stream discriminator emit sites + JWKS prune + subscription sweep) |
+| index.ts LOC | `wc -l src/index.ts` | **7784** (Tier: FINAL — V9 GA wave deltas: review/compare/workshop/relay verbs + Commander exitOverride + bare-wotann fallback + AgentModel resolver + WOTANN_MAX_DAILY_SPEND guard) |
 | App.tsx LOC | `wc -l src/ui/App.tsx` | **3352** (Tier: FINAL, drifted from 3185 as TUI Norse-signature design system + 8 primitives landed) |
 
 **Critical correction from wire-audit (2026-04-21)**: ~45% of audited modules are genuinely WIRED. ~20% are FATAL orphans (getter-only, zero external callers). Pattern to grep for: `getX()` method with zero callers outside same-file + lib.ts + tests. See Tier 1 for the 14 FATAL orphans uncovered.
