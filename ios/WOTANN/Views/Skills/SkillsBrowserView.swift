@@ -103,9 +103,12 @@ struct SkillsBrowserView: View {
 
         Task {
             do {
+                // Provider neutrality fix: was hardcoded "anthropic" — broke
+                // skill invocation for Ollama-only / OpenAI-only / Gemini-only
+                // users. Now omits the provider key so the daemon resolves
+                // from the active session's provider.
                 let response = try await connectionManager.rpcClient.send("chat.send", params: [
                     "message": .string("/\(skill.name) \(prompt)"),
-                    "provider": .string("anthropic"),
                 ])
                 await MainActor.run {
                     invokeResult = response.result?.stringValue

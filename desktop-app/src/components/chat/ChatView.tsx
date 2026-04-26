@@ -80,8 +80,11 @@ function WelcomeScreen() {
         title,
         preview: "",
         updatedAt: Date.now(),
-        provider: currentProvider || "anthropic",
-        model: currentModel || "claude-opus-4-6",
+        // Provider neutrality fix: empty string is the codebase's
+        // "no provider configured" sentinel — onboarding flow handles redirect.
+        // No implicit anthropic / claude-opus-4-6 default that biases Ollama-only users.
+        provider: currentProvider || "",
+        model: currentModel || "",
         cost: 0,
         messageCount: 0,
       });

@@ -8307,6 +8307,97 @@ export class KairosRPCHandler {
         return { error: err instanceof Error ? err.message : String(err) };
       }
     });
+
+    // ── PHASE C — GDPR + workspace.trust* RPC handlers ──
+    //
+    // Cross-surface coverage: iOS/macOS Settings now have UI buttons that
+    // call these handlers, mirroring the CLI commands `wotann export`,
+    // `wotann delete`, `wotann trust`. App Store gating fix.
+
+    this.handlers.set("gdpr.export", async (_params) => {
+      try {
+        const wotannHome = resolveWotannHome();
+        const fs = await import("node:fs/promises");
+        const fsSync = await import("node:fs");
+        if (!fsSync.existsSync(wotannHome)) {
+          return { ok: true, empty: true, message: "no WOTANN home — nothing to export" };
+        }
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        const outDir = process.env["TMPDIR"] ?? "/tmp";
+        const path = await import("node:path");
+        const outPath = path.join(outDir, `wotann-export-${ts}.tar.gz`);
+        const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
+        const result = await execFileNoThrow("tar", [
+          "-czf",
+          outPath,
+          "-C",
+          path.dirname(wotannHome),
+          path.basename(wotannHome),
+        ]);
+        if (result.exitCode !== 0) {
+          return { error: `tar exited ${result.exitCode}: ${result.stderr.trim()}` };
+        }
+        const stat = await fs.stat(outPath);
+        return { ok: true, path: outPath, sizeBytes: stat.size };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("gdpr.delete", async (params) => {
+      try {
+        const { confirm } = (params ?? {}) as { confirm?: boolean };
+        if (confirm !== true) {
+          return { error: "confirm: true required (destructive — no recovery)" };
+        }
+        const wotannHome = resolveWotannHome();
+        const fs = await import("node:fs/promises");
+        const fsSync = await import("node:fs");
+        if (!fsSync.existsSync(wotannHome)) {
+          return { ok: true, empty: true, message: "no WOTANN home — nothing to delete" };
+        }
+        await fs.rm(wotannHome, { recursive: true, force: true });
+        return { ok: true, deleted: wotannHome };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("workspace.trust", async (params) => {
+      try {
+        const { path: workspacePath } = (params ?? {}) as { path?: string };
+        if (!workspacePath) return { error: "path required" };
+        const { trustWorkspace, isWorkspaceTrusted } =
+          await import("../utils/trusted-workspaces.js");
+        const added = trustWorkspace(workspacePath);
+        const status = isWorkspaceTrusted(workspacePath);
+        return { ok: true, added, hash: status.hash, path: workspacePath };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("workspace.untrust", async (params) => {
+      try {
+        const { path: workspacePath } = (params ?? {}) as { path?: string };
+        if (!workspacePath) return { error: "path required" };
+        const { untrustWorkspace } = await import("../utils/trusted-workspaces.js");
+        const removed = untrustWorkspace(workspacePath);
+        return { ok: true, removed, path: workspacePath };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("workspace.trust.list", async () => {
+      try {
+        const { listTrustedHashes } = await import("../utils/trusted-workspaces.js");
+        const hashes = listTrustedHashes();
+        return { ok: true, hashes };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
   }
 
   private errorResponse(id: string | number | null, code: number, message: string): RPCResponse {

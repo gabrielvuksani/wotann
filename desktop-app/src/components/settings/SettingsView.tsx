@@ -1510,6 +1510,45 @@ function AdvancedSection() {
               Clear All
             </button>
           </SettingRow>
+          {/* PHASE C — GDPR Article 20 + 17. The Tauri side currently lacks
+              a generic RPC bridge; for now these buttons document the path
+              clearly + open Terminal with the daemon-CLI fallback so users
+              still have a discoverable surface. TIER 1 follow-up wires a
+              proper Tauri rpc_call command bridging React → daemon. */}
+          <SettingRow label="Export My Data (GDPR Article 20)" description="Run `wotann export` in your terminal, OR call gdpr.export via the daemon. Bundles ~/.wotann into a tar.gz.">
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText("wotann export");
+                alert("Copied `wotann export` to clipboard. Paste in Terminal to bundle ~/.wotann.");
+              }}
+              style={{ fontSize: "var(--font-size-xs)", padding: "4px 12px", borderRadius: "var(--radius-md)", background: "var(--surface-2)", border: "1px solid var(--border-subtle)", color: "var(--color-text-secondary)", cursor: "pointer" }}
+            >
+              Copy command
+            </button>
+          </SettingRow>
+          <SettingRow label="Delete Everything (GDPR Article 17)" description="Run `wotann delete --yes` in your terminal, OR call gdpr.delete via the daemon. Wipes ~/.wotann.">
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText("wotann delete --yes");
+                alert("Copied `wotann delete --yes` to clipboard. Paste in Terminal — destructive!");
+              }}
+              className="btn-danger"
+              style={{ fontSize: "var(--font-size-xs)", padding: "4px 12px" }}
+            >
+              Copy command
+            </button>
+          </SettingRow>
+          <SettingRow label="Trusted Workspaces" description="Run `wotann trust --list` to view, `wotann trust [path]` to add. Daemon RPC: workspace.trust*.">
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText("wotann trust --list");
+                alert("Copied `wotann trust --list` to clipboard.");
+              }}
+              style={{ fontSize: "var(--font-size-xs)", padding: "4px 12px", borderRadius: "var(--radius-md)", background: "var(--surface-2)", border: "1px solid var(--border-subtle)", color: "var(--color-text-secondary)", cursor: "pointer" }}
+            >
+              Copy command
+            </button>
+          </SettingRow>
         </div>
       </div>
 

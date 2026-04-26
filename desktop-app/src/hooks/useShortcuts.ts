@@ -45,8 +45,9 @@ export function useShortcuts() {
       title: "New conversation",
       preview: "",
       updatedAt: Date.now(),
-      provider: currentProvider || "anthropic",
-      model: currentModel || "claude-opus-4-6",
+      // Provider neutrality fix (no anthropic default — empty signals not-configured).
+      provider: currentProvider || "",
+      model: currentModel || "",
       cost: 0,
       messageCount: 0,
     });

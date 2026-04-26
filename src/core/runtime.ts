@@ -178,7 +178,7 @@ import {
 import { HASH_ANCHORED_EDIT_TOOL_SCHEMA } from "../tools/hash-anchored-edit.js";
 import { ImageGenRouter } from "../tools/image-gen-router.js";
 import { compileAmbientContext, type AmbientContext } from "../intelligence/ambient-awareness.js";
-import { generateFakeTools } from "../security/anti-distillation.js";
+// PHASE E: anti-distillation module deleted (open-source contradiction).
 import { assembleClaudeBridgeDeps } from "../claude/bridge-deps.js";
 import { UnifiedDispatchPlane } from "../channels/unified-dispatch.js";
 import { writeAutonomousProofBundle } from "../orchestration/proof-bundles.js";
@@ -2967,21 +2967,12 @@ export class WotannRuntime {
       // `WOTANN_ANTI_DISTILLATION=1` env var as an opt-in alongside the
       // config flag. Env-var opt-in lets operators enable distillation
       // defence without rebuilding config, matching the pattern used by
-      // other security-posture env vars (WOTANN_ALLOW_DESTRUCTIVE,
-      // WOTANN_UNIFIED_EXEC_ALLOW_BARE, etc.).
-      const antiDistillEnabled =
-        this.config.enableAntiDistillation === true ||
-        process.env["WOTANN_ANTI_DISTILLATION"] === "1";
-      if (antiDistillEnabled) {
-        const fakeTools = generateFakeTools(2);
-        for (const fake of fakeTools) {
-          effectiveTools.push({
-            name: fake.name,
-            description: fake.description,
-            inputSchema: fake.inputSchema,
-          });
-        }
-      }
+      // PHASE E: anti-distillation removed entirely. WOTANN is open source —
+      // watermarking output and injecting fake-tool decoys are theatrical
+      // safeguards in that context (the source itself is published). Per
+      // user directive: no safeguards against model misuse. Decoy code paths
+      // also degrade legitimate tool-call schemas (extra entries in
+      // effectiveTools confuse models that don't recognize them).
 
       // ── Step 6.9: Provider arbitrage — find cheapest provider meeting capability ──
       const taskType = classifyTaskType(options.prompt);

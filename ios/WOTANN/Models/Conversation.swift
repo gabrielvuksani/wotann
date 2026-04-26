@@ -33,8 +33,10 @@ struct Conversation: Identifiable, Codable, Hashable {
         id: UUID = UUID(),
         title: String,
         messages: [Message] = [],
-        provider: String = "anthropic",
-        model: String = "claude-opus-4-6",
+        // Provider neutrality fix: empty default — caller must supply or
+        // daemon resolves from session. No anthropic / claude-opus-4-6 bias.
+        provider: String = "",
+        model: String = "",
         isIncognito: Bool = false,
         isStarred: Bool = false,
         isArchived: Bool = false,

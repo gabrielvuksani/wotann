@@ -18,10 +18,15 @@ import Observation
 // - #11 (sibling-site scan): this file is the SINGLE site on iOS
 //   subscribing to `council.*` RPCs.
 
-private let defaultProviders = ["anthropic", "openai", "gemini"]
+// Provider neutrality fix: was hardcoded ["anthropic", "openai", "gemini"]
+// — Ollama-only / DeepSeek-only / xAI-only users got an empty council.
+// Now starts empty and onAppear populates from the user's actually-discovered
+// providers via appState.availableProviders.
+private let defaultProviders: [String] = []
 
 struct CouncilView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
+    @EnvironmentObject var appState: AppState
     @State private var viewModel = CouncilViewModel()
     @State private var prompt: String = ""
     @State private var selectedProviders: Set<String> = Set(defaultProviders)

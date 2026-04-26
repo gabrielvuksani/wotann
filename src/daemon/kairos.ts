@@ -436,6 +436,25 @@ export class KairosDaemon {
       startedAt: new Date(),
     };
 
+    // PHASE D — H-K4 OAuth rotator wire-up. The rotator sweeps every
+    // sweepIntervalMs and refreshes any credential whose expiresAt is
+    // within windowMs (5 min default). The listCredentials callback
+    // currently returns an empty array because the credential pool's
+    // expiresAt surface isn't yet exposed to the daemon — when the
+    // pool gains a public listExpiringCredentials() method (TIER 1
+    // follow-up tracked separately), wire it here.
+    void import("../auth/oauth-rotator.js").then(({ startOAuthRotator }) => {
+      startOAuthRotator({
+        listCredentials: () => [],
+        refresh: async () => {
+          /* no-op until pool exposes refresh hook */
+        },
+        log: (level, msg) => {
+          this.appendLog({ type: level === "error" ? "error" : "heartbeat", message: msg });
+        },
+      });
+    });
+
     // Phase B Bug #2 fix: sweep orphan .tmp.* + stranded WAL/SHM from the
     // last crashed run BEFORE opening any new SQLite connections. Running
     // the sweep pre-runtime means the fresh SQLite instance doesn't get

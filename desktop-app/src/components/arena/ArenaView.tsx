@@ -41,10 +41,10 @@ export function ArenaView() {
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const providers = useStore((s) => s.providers);
-  const [selectedModels, setSelectedModels] = useState<readonly string[]>([
-    "claude-opus-4-6",
-    "gpt-5.4",
-  ]);
+  // Provider neutrality fix: was hardcoded ["claude-opus-4-6", "gpt-5.4"] —
+  // Ollama-only / Gemini-only users got Arena suggestions they couldn't run.
+  // Now starts empty; the model picker populates from discovered providers.
+  const [selectedModels, setSelectedModels] = useState<readonly string[]>([]);
 
   const allModels = providers.flatMap((p) =>
     p.models.map((m) => ({ ...m, provider: p.name, providerId: p.id })),

@@ -230,27 +230,60 @@ struct WOTANNApp: App {
         case .background:
             ConversationStore.shared.saveConversations(appState.conversations)
             isUnlocked = false
+            // SB-N6 fix companion: submit the BGProcessingTask the FIRST time
+            // we go to background. The handler self-reschedules on subsequent
+            // fires, but without this initial submit the OS never schedules
+            // the task and the offline queue stays stranded.
+            BackgroundTaskCoordinator.shared.scheduleOfflineQueueFlush()
+            BackgroundTaskCoordinator.shared.scheduleMemorySync()
         case .active:
             if biometricLockEnabled {
                 // Re-lock was already handled by isUnlocked state
             }
             // V9 T7.6 — play the 6-note Wotann sting once per launch on
             // first scene activation, AFTER any biometric unlock has been
-            // resolved (so the cue lands on the user's first sight of the
-            // app, not on a locked screen they can't dismiss).
+            // resolved.
             if !biometricLockEnabled || isUnlocked {
                 if #available(iOS 16.0, *) {
                     WotannStingService.shared.playIfFirstUnlock(sessionId: stingSessionId)
                 }
             }
-            // H-J1 fix: drain the share-extension queue on EVERY foreground,
-            // not just on first ContentView mount. Previously a user dropping
-            // in a share while the app was at the PairingView/DaemonOfflineView
-            // got their share stranded until the next cold start.
+            // H-J1 fix: drain the share-extension queue on EVERY foreground.
             processPendingShares()
+            // SB-N4 fix companion: route the 4 deep-link intent UserDefaults
+            // keys (Ask/Rewrite/Summarize/Expand) stamped by AppShortcuts.
+            // Without this read, the 4 new shortcuts silently no-opped.
+            processControlIntentRequests()
         default:
             break
         }
+    }
+
+    /// SB-N4 fix: route the 4 control intent requests stamped via UserDefaults
+    /// while backgrounded. Each call site clears the key it just consumed so
+    /// repeated foregrounds don't re-fire the action.
+    private func processControlIntentRequests() {
+        guard let defaults = UserDefaults(suiteName: "group.com.wotann.shared") else { return }
+        if defaults.object(forKey: "control.ask.requestedAt") != nil {
+            defaults.removeObject(forKey: "control.ask.requestedAt")
+            appState.activeTab = 0  // Conversations tab
+            appState.deepLinkDestination = "ask"
+        }
+        if defaults.object(forKey: "control.rewrite.requestedAt") != nil {
+            defaults.removeObject(forKey: "control.rewrite.requestedAt")
+            appState.deepLinkDestination = "rewrite"
+        }
+        if defaults.object(forKey: "control.summarize.requestedAt") != nil {
+            defaults.removeObject(forKey: "control.summarize.requestedAt")
+            appState.deepLinkDestination = "summarize"
+        }
+        if defaults.object(forKey: "control.expand.requestedAt") != nil {
+            defaults.removeObject(forKey: "control.expand.requestedAt")
+            appState.deepLinkDestination = "expand"
+        }
+        // The pre-existing voice/relay/cost handlers also live in this file's
+        // legacy scene-activation reader if any. Adding the 4 new keys here
+        // closes the SB-N4 wiring loop.
     }
 
     private var resolvedColorScheme: ColorScheme? {

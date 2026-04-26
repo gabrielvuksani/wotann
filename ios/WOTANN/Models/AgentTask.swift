@@ -37,8 +37,10 @@ struct AgentTask: Identifiable, Codable, Hashable {
         title: String,
         status: TaskState = .queued,
         progress: Double = 0,
-        provider: String = "anthropic",
-        model: String = "claude-opus-4-6",
+        // Provider neutrality fix: empty default. Caller MUST supply real values
+        // from the user's selected provider — no anthropic / claude-opus bias.
+        provider: String = "",
+        model: String = "",
         cost: Double = 0,
         startedAt: Date = .now,
         completedAt: Date? = nil,

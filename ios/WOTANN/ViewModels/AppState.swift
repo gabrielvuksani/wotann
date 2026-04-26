@@ -30,8 +30,11 @@ final class AppState: ObservableObject {
     @Published var costSnapshot: CostSnapshot = .empty
     @Published var availableProviders: [ProviderInfo] = []
     @Published var isLoading = false
-    @Published var currentProvider = "anthropic"
-    @Published var currentModel = "claude-opus-4-6"
+    // Provider neutrality fix: empty string is the "not configured" sentinel.
+    // First-pair onboarding populates these from the user's actual configured
+    // provider/model. No implicit anthropic / claude-opus-4-6 bias.
+    @Published var currentProvider = ""
+    @Published var currentModel = ""
     @Published var activeTab: Int = 0
     @Published var showMeetModeSheet = false
     @Published var deepLinkAgentId: UUID?

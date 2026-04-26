@@ -14,6 +14,9 @@ struct SettingsView: View {
     @State private var showDispatchFromDeepLink = false
     @State private var healthKitService = HealthKitService()
     @State private var localSendService = LocalSendService()
+    // PHASE C — GDPR + Trust UI state
+    @State private var gdprExportMessage: String?
+    @State private var gdprDeleteConfirmShowing = false
 
     var body: some View {
         NavigationStack {
@@ -503,6 +506,77 @@ struct SettingsView: View {
                 Text(cacheSize)
                     .font(.wotannScaled(size: 14, design: .monospaced))
                     .foregroundColor(WTheme.Colors.textSecondary)
+            }
+
+            // PHASE C — GDPR Article 20 (Data Portability) — calls daemon
+            // gdpr.export RPC which bundles ~/.wotann into a tar.gz on the
+            // paired desktop and reports the artifact path. App Store
+            // expects this entry to be reachable from inside the app.
+            Button {
+                Task { @MainActor in
+                    do {
+                        let response = try await connectionManager.rpcClient.send(
+                            "gdpr.export", params: [:]
+                        )
+                        if let path = response.result?.objectValue?["path"]?.stringValue {
+                            gdprExportMessage = "Exported to: \(path)"
+                        } else {
+                            gdprExportMessage = "Export failed — check daemon logs"
+                        }
+                    } catch {
+                        gdprExportMessage = "Error: \(error.localizedDescription)"
+                    }
+                }
+                HapticService.shared.trigger(.buttonTap)
+            } label: {
+                Label("Export My Data (GDPR Article 20)", systemImage: "square.and.arrow.up.on.square")
+                    .foregroundColor(WTheme.Colors.textPrimary)
+                    .frame(minHeight: 44)
+            }
+            if let msg = gdprExportMessage {
+                Text(msg)
+                    .font(.wotannScaled(size: 12))
+                    .foregroundColor(WTheme.Colors.textSecondary)
+            }
+
+            // PHASE C — GDPR Article 17 (Right to Erasure) — destructive.
+            Button(role: .destructive) {
+                gdprDeleteConfirmShowing = true
+            } label: {
+                Label("Delete Everything (GDPR Article 17)", systemImage: "trash.slash")
+                    .frame(minHeight: 44)
+            }
+            .alert("Delete all WOTANN data?", isPresented: $gdprDeleteConfirmShowing) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    Task { @MainActor in
+                        do {
+                            let response = try await connectionManager.rpcClient.send(
+                                "gdpr.delete", params: ["confirm": .bool(true)]
+                            )
+                            if response.result?.objectValue?["ok"]?.boolValue == true {
+                                gdprExportMessage = "Deleted: ~/.wotann"
+                                ConversationStore.shared.clearAll()
+                            } else {
+                                gdprExportMessage = "Delete failed — check daemon logs"
+                            }
+                        } catch {
+                            gdprExportMessage = "Error: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            } message: {
+                Text("Removes ~/.wotann (memory, cache, credentials) on the paired desktop. No recovery. Run Export first if you want a backup.")
+            }
+
+            // PHASE C — Workspace Trust (SB-N1 lift to UI surface).
+            NavigationLink {
+                WorkspaceTrustView()
+                    .environmentObject(connectionManager)
+            } label: {
+                Label("Trusted Workspaces", systemImage: "checkmark.shield")
+                    .foregroundColor(WTheme.Colors.textPrimary)
+                    .frame(minHeight: 44)
             }
         } header: {
             Text("Data")

@@ -149,8 +149,9 @@ export function Sidebar() {
       title: "New conversation",
       preview: "",
       updatedAt: Date.now(),
-      provider: currentProvider || "anthropic",
-      model: currentModel || "claude-opus-4-6",
+      // Provider neutrality fix (empty sentinel; onboarding handles unset state).
+      provider: currentProvider || "",
+      model: currentModel || "",
       cost: 0,
       messageCount: 0,
     });

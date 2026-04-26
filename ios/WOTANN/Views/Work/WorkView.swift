@@ -265,7 +265,9 @@ struct WorkView: View {
             if let idx = models.firstIndex(of: agent.model) {
                 return models[(idx + 1) % models.count]
             }
-            return models.first ?? "claude-opus-4-6"
+            // Provider neutrality fix: empty fallback (no claude-opus-4-6 bias).
+            // Empty model defers to daemon session default for that provider.
+            return models.first ?? ""
         }()
 
         let clone = AgentTask(

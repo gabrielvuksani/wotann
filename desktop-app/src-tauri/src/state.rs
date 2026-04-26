@@ -33,8 +33,11 @@ impl Default for AppState {
         Self {
             sidecar: SidecarManager::new(),
             engine_running: Mutex::new(false),
-            provider: Mutex::new("anthropic".into()),
-            model: Mutex::new("claude-opus-4-6".into()),
+            // Provider neutrality fix: empty string is the "not configured"
+            // sentinel. Daemon handshake populates these via FFI on first
+            // sidecar event so we don't bias Ollama-only / OpenAI-only users.
+            provider: Mutex::new(String::new()),
+            model: Mutex::new(String::new()),
             session_id: Mutex::new(format!(
                 "session-{}",
                 std::time::SystemTime::now()

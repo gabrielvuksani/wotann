@@ -310,7 +310,10 @@ final class RPCClient: ObservableObject {
                 id: stableUUID(from: rawId),
                 title: rpcString(object, ["title", "name"]) ?? "Conversation",
                 messages: [],
-                provider: rpcString(object, ["provider"]) ?? "anthropic",
+                // Provider neutrality fix: pass through whatever the daemon
+                // reported. Empty string + "auto" model are the codebase's
+                // "not configured" sentinels — no anthropic bias.
+                provider: rpcString(object, ["provider"]) ?? "",
                 model: rpcString(object, ["model"]) ?? "auto",
                 isIncognito: object["incognito"]?.boolValue ?? false,
                 isStarred: object["pinned"]?.boolValue ?? false,
@@ -355,7 +358,8 @@ final class RPCClient: ObservableObject {
                 title: rpcString(object, ["title", "task", "name"]) ?? "Task",
                 status: status,
                 progress: normalizedProgress,
-                provider: rpcString(object, ["provider"]) ?? "anthropic",
+                // Provider neutrality fix: pass through daemon-reported provider.
+                provider: rpcString(object, ["provider"]) ?? "",
                 model: rpcString(object, ["model"]) ?? "auto",
                 cost: rpcDouble(object, ["cost"]) ?? 0,
                 startedAt: rpcDate(from: object["startedAt"] ?? object["createdAt"]),
@@ -440,11 +444,18 @@ final class RPCClient: ObservableObject {
     }
 
     func dispatchTask(_ request: DispatchRequest) async throws -> AgentTask {
-        let params: [String: RPCValue] = [
+        // Provider neutrality fix: only include provider/model in params when
+        // the caller explicitly set them. Daemon resolves from session default
+        // when omitted (no anthropic / claude-opus-4-6 hardcode).
+        var params: [String: RPCValue] = [
             "prompt": .string(request.prompt),
-            "provider": .string(request.provider ?? "anthropic"),
-            "model": .string(request.model ?? "claude-opus-4-6"),
         ]
+        if let provider = request.provider, !provider.isEmpty {
+            params["provider"] = .string(provider)
+        }
+        if let model = request.model, !model.isEmpty {
+            params["model"] = .string(model)
+        }
         let response = try await send("task.dispatch", params: params)
         guard let object = response.result?.objectValue else {
             throw RPCError(code: -1, message: "No result from task dispatch")
@@ -457,7 +468,7 @@ final class RPCClient: ObservableObject {
             title: rpcString(object, ["title", "task", "name"]) ?? request.prompt,
             status: status,
             progress: 0,
-            provider: request.provider ?? "anthropic",
+            provider: request.provider ?? "",
             model: request.model ?? "auto",
             cost: 0,
             startedAt: .now,

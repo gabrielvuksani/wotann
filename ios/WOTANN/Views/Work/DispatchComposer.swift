@@ -17,14 +17,11 @@ struct DispatchComposer: View {
     @State private var selectedModel: String?
     @FocusState private var isFocused: Bool
 
-    /// Default models the composer can cycle through when the desktop
-    /// hasn't reported its own list (offline / not paired).
-    private static let fallbackModels: [String] = [
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
-        "gpt-4o",
-        "o1",
-    ]
+    /// Provider neutrality fix: was hardcoded ["claude-opus-4-6", ...] —
+    /// Ollama-only / Gemini-only users got Anthropic suggestions they
+    /// couldn't use. Now empty until AppState reports the active provider's
+    /// actual model list (resolved at view appear via .task).
+    private static let fallbackModels: [String] = []
 
     /// Resolved ordered list of models the chip can cycle through. Prefers
     /// the active provider's model list from `AppState`, falling back to a

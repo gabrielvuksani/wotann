@@ -51,6 +51,9 @@
 		2AF95C23E99CE01ECD83D6DB /* CheckCostIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97B03ED4AEC0513C072A328F /* CheckCostIntent.swift */; };
 		2BF360D4F96D6E7196BA5F0E /* WHaptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB696B240B6E51844DACAD3C /* WHaptics.swift */; };
 		2CF108523D67FA7C4C9983F9 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050C9F8CBB29129367DC8BF4 /* AboutView.swift */; };
+		7C5FB11813A541C78F937F36 /* WorkspaceTrustView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035D3BE91A3F4D1BA4B80C8F /* WorkspaceTrustView.swift */; };
+		5825856D270643BCBF484DB6 /* OpenSourceLicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C181F0178E8446E8D4D7A5D /* OpenSourceLicensesView.swift */; };
+		924E11509EA7407B866FBBCB /* BackgroundTaskCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7F330FF7A2C403D8248DC86 /* BackgroundTaskCoordinator.swift */; };
 		2F0CB4588FA1E43FAF9BF67E /* A11y.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B475C2E6798FCE2B6B9024 /* A11y.swift */; };
 		2F5B8EAFD4FABDEE033D5493 /* ConversationRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 595256C0E55C3A3725A6466F /* ConversationRow.swift */; };
 		30087462EAC5BC14E4B612D0 /* WOTANNShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EE06820BB3F570376F5A8042 /* WOTANNShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -281,6 +284,9 @@
 		013C9CBA475179EC47B20361 /* EditorLanguages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorLanguages.swift; sourceTree = "<group>"; };
 		0179DCE406DE010D855EF594 /* CodePlaygroundView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodePlaygroundView.swift; sourceTree = "<group>"; };
 		050C9F8CBB29129367DC8BF4 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		035D3BE91A3F4D1BA4B80C8F /* WorkspaceTrustView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTrustView.swift; sourceTree = "<group>"; };
+		1C181F0178E8446E8D4D7A5D /* OpenSourceLicensesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSourceLicensesView.swift; sourceTree = "<group>"; };
+		B7F330FF7A2C403D8248DC86 /* BackgroundTaskCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskCoordinator.swift; sourceTree = "<group>"; };
 		0625D6594E4FEF9E54366AA6 /* SmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmokeTests.swift; sourceTree = "<group>"; };
 		06A6206442D42B7BB2585617 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		06D515E59F6AC80EB168385F /* EditorDiffGutterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDiffGutterView.swift; sourceTree = "<group>"; };
@@ -638,6 +644,7 @@
 				36E5C03AEA8B07FACAC501D6 /* HealthKitService.swift */,
 				827060EA745218457ACB003B /* IntentDonationService.swift */,
 				80FEAB65125D51F4349D403B /* LiveActivityManager.swift */,
+				B7F330FF7A2C403D8248DC86 /* BackgroundTaskCoordinator.swift */,
 				0B71A549F1B1CF80DA2FCC16 /* LocalSendService.swift */,
 				310AB0D5FB3641506FFCB027 /* NFCPairingService.swift */,
 				B2901E175D942A163F3E0637 /* NodeCapabilityService.swift */,
@@ -905,6 +912,8 @@
 			isa = PBXGroup;
 			children = (
 				050C9F8CBB29129367DC8BF4 /* AboutView.swift */,
+				035D3BE91A3F4D1BA4B80C8F /* WorkspaceTrustView.swift */,
+				1C181F0178E8446E8D4D7A5D /* OpenSourceLicensesView.swift */,
 				EEDEFF86ED0D1D206C647A00 /* AppearanceSettings.swift */,
 				CB9A981F573E85D37732C2E8 /* HealthInsightsSettingsView.swift */,
 				A70B0D67B2B376870737B3A1 /* NotificationSettings.swift */,
@@ -1412,6 +1421,9 @@
 			files = (
 				2F0CB4588FA1E43FAF9BF67E /* A11y.swift in Sources */,
 				2CF108523D67FA7C4C9983F9 /* AboutView.swift in Sources */,
+				7C5FB11813A541C78F937F36 /* WorkspaceTrustView.swift in Sources */,
+				5825856D270643BCBF484DB6 /* OpenSourceLicensesView.swift in Sources */,
+				924E11509EA7407B866FBBCB /* BackgroundTaskCoordinator.swift in Sources */,
 				1E7D23BB279777C85830341B /* ActiveWorkStrip.swift in Sources */,
 				1B889BCE6A9F558698678104 /* AgentDetailView.swift in Sources */,
 				3105B95658BA9F1860F8EC6C /* AgentListView.swift in Sources */,

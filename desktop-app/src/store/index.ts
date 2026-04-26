@@ -385,7 +385,9 @@ export const useStore = create<DesktopState>((set) => ({
         title: `Fork: ${sourceConv?.title ?? "conversation"}`,
         preview: forkedMessages[forkedMessages.length - 1]?.content.slice(0, 80) ?? "",
         updatedAt: Date.now(),
-        provider: sourceConv?.provider ?? "anthropic",
+        // Provider neutrality fix: fork inherits the source's provider.
+        // If source had no provider, leave empty (don't bias to anthropic).
+        provider: sourceConv?.provider ?? "",
         model: sourceConv?.model ?? "",
         cost: 0,
         messageCount: forkedMessages.length,

@@ -436,6 +436,7 @@ export class CostTracker {
     inputTokens: number,
     outputTokens: number,
     cacheTokens?: { cacheReadTokens?: number; cacheWriteTokens?: number },
+    provider?: string,
   ): number {
     // Session-5: Groq free-tier honors WOTANN_GROQ_FREE=1 across the
     // three Groq-hosted llama models. Groq's free plan has generous
@@ -446,7 +447,24 @@ export class CostTracker {
     if (isGroqFreeTierModel(model) && process.env["WOTANN_GROQ_FREE"] === "1") {
       return 0;
     }
-    const rates = COST_TABLE[model];
+    // SB-NEW-8 fix companion: lookup tries direct match first, then
+    // provider-prefixed variants (azure/gpt-5, bedrock/anthropic.claude-opus-4-7,
+    // sambanova/llama-3.3-70b, cerebras/llama-3.3-70b). The COST_TABLE entries
+    // for those 4 providers are stored with the prefix so cost RECORDING (not
+    // just prediction) works for users on hosted-OpenAI-clone providers.
+    let rates = COST_TABLE[model];
+    if (!rates && provider) {
+      const prefixed = `${provider}/${model}`;
+      rates = COST_TABLE[prefixed];
+      // For Bedrock: try the bedrock/<vendor>.<model> shape (e.g. bedrock/anthropic.claude-opus-4-7).
+      if (!rates && provider === "bedrock") {
+        const bedrockKey = `bedrock/anthropic.${model}`;
+        rates =
+          COST_TABLE[bedrockKey] ??
+          COST_TABLE[`bedrock/meta.${model}`] ??
+          COST_TABLE[`bedrock/mistral.${model}`];
+      }
+    }
     if (!rates) return 0;
 
     const cacheReadTokens = cacheTokens?.cacheReadTokens ?? 0;
@@ -475,7 +493,9 @@ export class CostTracker {
     // can diagnose.
     // Wave 4-W: pass cache tokens through so estimateCost() can apply the
     // 10% read discount + 125% write premium per Anthropic API pricing.
-    const cost = this.estimateCost(model, inputTokens, outputTokens, cacheTokens);
+    // SB-NEW-8 fix: pass provider so prefixed lookups resolve for hosted-
+    // OpenAI clones (azure/bedrock/sambanova/cerebras).
+    const cost = this.estimateCost(model, inputTokens, outputTokens, cacheTokens, provider);
     const entry: CostEntry = {
       timestamp: new Date(),
       provider,

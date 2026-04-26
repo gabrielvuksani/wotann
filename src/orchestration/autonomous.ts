@@ -949,7 +949,10 @@ export class AutonomousExecutor {
               taskId: this.modeState?.task ?? `autonomous-cycle-${cycle}`,
               taskDescription: task,
               workingDir: process.cwd(),
-              provider: (this.config.oracleProvider ?? "anthropic") as never,
+              // Provider neutrality fix: cast to allow any provider name; was
+              // hardcoded "anthropic" — broke recovery for non-Anthropic users.
+              // Empty string defers to runtime's session-default provider.
+              provider: (this.config.oracleProvider ?? "") as never,
               model: policyModels.workerModel,
             });
             if (recovery.output && recovery.output.length > 0) {

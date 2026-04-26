@@ -158,8 +158,11 @@ export function parseCheckMarkdown(text: string, filename: string): ParseOk | Pa
   }
   const severity: PrCheckSeverity = severityRaw;
 
-  const provider = fm["provider"] ?? "anthropic";
-  const model = fm["model"] ?? "sonnet";
+  // Provider neutrality fix: PR-check frontmatter without an explicit
+  // provider falls through to the runtime default (was hardcoded "anthropic"
+  // / "sonnet" — broke PR check execution for users on other providers).
+  const provider = fm["provider"] ?? "";
+  const model = fm["model"] ?? "";
 
   if (body.trim() === "") {
     return { ok: false, error: `${filename} has empty body — body is the system prompt` };

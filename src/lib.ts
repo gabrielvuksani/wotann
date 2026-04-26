@@ -1062,7 +1062,11 @@ export {
 export { ResponseCache, type CacheStats } from "./middleware/response-cache.js";
 
 // ── Security (Phase 1A — newly wired) ──
-export { generateFakeTools, embedWatermark } from "./security/anti-distillation.js";
+// PHASE E: anti-distillation module removed entirely (open-source
+// contradiction + user directive against model-misuse safeguards).
+// Watermarking output degraded text quality without defensive value
+// in OSS context. Honeypot fake-tool decoys polluted legitimate
+// tool-call schemas without a wired detection path.
 
 // ── Intelligence (Phase 0 — accuracy techniques) ──
 export {
