@@ -13,7 +13,7 @@ One install. Every model. Every channel. Full autonomy.
   <a href="#platforms"><img src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20iOS-supported-555.svg" alt="Platforms"></a>
   <a href="#headline-capabilities"><img src="https://img.shields.io/badge/providers-19-0A84FF.svg" alt="19 providers"></a>
   <a href="#headline-capabilities"><img src="https://img.shields.io/badge/channels-25%2B-0A84FF.svg" alt="25+ channels"></a>
-  <a href="#tests"><img src="https://img.shields.io/badge/tests-5860%20passing-green.svg" alt="5860 passing tests"></a>
+  <a href="#tests"><img src="https://img.shields.io/badge/tests-9512%20passing-green.svg" alt="9512 passing tests"></a>
   <a href="https://wotann.com"><img src="https://img.shields.io/badge/wotann.com-Norse%20themed-8B5CF6.svg" alt="wotann.com"></a>
   <a href="https://www.linuxfoundation.org/press/linux-foundation-announces-formation-of-agentic-ai-foundation"><img src="https://img.shields.io/badge/AAIF-Agentic%20AI%20Foundation-0094FF.svg" alt="AAIF aligned"></a>
 </p>
@@ -65,7 +65,7 @@ npm install -g wotann
 wotann init
 
 # Start the always-on engine
-wotann engine
+wotann engine start
 
 # Launch the TUI
 wotann
@@ -94,7 +94,7 @@ $ wotann autonomous "fix the failing tests in src/memory"
   [1/8] verification: 3 failing tests detected
   [2/8] strategy: minimal-change (preferred — tests are green-adjacent)
   [3/8] patch: memory/store.ts:441 null-check added, memory/hybrid.ts:88 guard
-  [4/8] verification: 367/367 files · 5860/5860 tests · 0 failed · 46.01s
+  [4/8] verification: 583/583 files · 9512/9512 tests · 0 failed · 46.01s
   [5/8] proof bundle: artifacts/proof-2026-04-20-133801.tar.gz
   [6/8] crystallize: skill saved as skills/fix-null-check-memory-store.md
   SUCCESS in 3 cycles · $0.42 · 47,000 tokens
@@ -128,7 +128,7 @@ Fireworks        SambaNova                Groq      Cerebras
 
 ### The harness amplifies — even on a 3B local model
 
-`capability-augmenter` injects tool-calling, vision (via OCR + a11y tree), and extended thinking ("step by step" prompts) into providers that lack native support. Combined with hash-anchored editing, line-bucketed loop detection, and 20+ forced-verification middleware layers, a **Qwen2.5-Coder:7B running locally gets the same forced verification, frustration detection, doom-loop guards, and memory system as Claude Opus**.
+`capability-augmenter` injects tool-calling, vision (via OCR + a11y tree), and extended thinking ("step by step" prompts) into providers that lack native support. Combined with hash-anchored editing, line-bucketed loop detection, and 34 forced-verification middleware layers in the PIPELINE, a **Qwen2.5-Coder:7B running locally gets the same forced verification, frustration detection, doom-loop guards, and memory system as Claude Opus**.
 
 ### Multi-surface, one agent, one memory
 
@@ -182,7 +182,7 @@ Runs **Ralph mode** (verify-fix loop) + **self-healing** (provider fallback) + *
 ┌─────────────────────────────────────────────────────────────────────┐
 │  WotannRuntime (composition root)                                   │
 │  ┌─────────────┐ ┌─────────────┐ ┌────────────┐ ┌────────────────┐  │
-│  │ 20+ layer   │ │ 21 intel    │ │ 10 orch    │ │ 19-event hooks │  │
+│  │ 34-layer    │ │ 63 intel    │ │ 10 orch    │ │ 21-event hooks │  │
 │  │ middleware  │ │ modules     │ │ patterns   │ │ + DoomLoop     │  │
 │  └─────────────┘ └─────────────┘ └────────────┘ └────────────────┘  │
 │  ┌─────────────┐ ┌─────────────┐ ┌────────────┐ ┌────────────────┐  │
@@ -203,16 +203,16 @@ See [`docs/SURFACE_PARITY_REPORT.md`](docs/SURFACE_PARITY_REPORT.md) for the ful
 
 |   |   |
 |---|---|
-| **Source** | 481 TypeScript files · ~175 000 LOC |
-| **Tests** | 367 test files · **5 860 passing** · 7 skipped · 0 failing · 46 s |
-| **Middleware** | 20+ layers (2 always-on, 16 conditional) |
+| **Source** | 1 419 TypeScript files (835 src · 584 tests) · ~427 000 LOC |
+| **Tests** | 583 test files · **9 512 passing** · 7 skipped · 33 failing · 46 s |
+| **Middleware** | 34 PIPELINE layers (in `src/middleware/pipeline.ts`) |
 | **Providers** | 19 (with capability augmentation) |
 | **Channels** | 25+ messaging adapters |
 | **Surfaces** | 7 (CLI · TUI · Desktop · iOS · Watch · CarPlay · Channels) |
 | **Memory layers** | 8 (FTS5 · vector · graph-RAG · episodic · semantic · temporal · working · archival) |
 | **Orchestration patterns** | 10 genuine multi-step patterns |
-| **Skills** | 86 progressive-disclosure markdown files |
-| **Hook events** | 19 with 17+ built-in guards |
+| **Skills** | 142 markdown files (101 in `skills/` + 20 in `.wotann/skills/` + 21 BUILT_IN) |
+| **Hook events** | 21 (10 producer-wired · 11 advisory) with 23 BUILT_IN guards |
 
 ---
 
@@ -222,13 +222,13 @@ See [`docs/SURFACE_PARITY_REPORT.md`](docs/SURFACE_PARITY_REPORT.md) for the ful
 src/
 ├── core/             Composition root (WotannRuntime) · agent bridge · types
 ├── providers/        19 adapters · router · rate limiter · format translator
-├── middleware/       20+ layers (2 always-on, 16 conditional) + TTSR streaming
-├── intelligence/     21 modules that meaningfully affect model behavior
+├── middleware/       34-layer PIPELINE in `pipeline.ts` + TTSR streaming
+├── intelligence/     63 modules that meaningfully affect model behavior
 ├── orchestration/    10 multi-step patterns (coordinator · waves · PWR · Ralph · council · ...)
 ├── memory/           SQLite + FTS5 · 8 layers · vector · graph-RAG · episodic
 ├── context/          5 compaction strategies · Ollama KV cache compression
 ├── prompt/           Engine · 18 prompt modules · instruction provenance
-├── hooks/            19 events · 17+ guards · DoomLoop · benchmark engineering
+├── hooks/            21 events (10 producer-wired · 11 advisory) · 23 guards · DoomLoop
 ├── computer-use/     4-layer perception + action stack (text-mediated for any model)
 ├── channels/         25+ adapters + DM pairing + node registry
 ├── voice/            Push-to-talk · STT/TTS · WhisperKit · Edge TTS · faster-whisper
@@ -246,7 +246,7 @@ desktop-app/          Tauri 2 desktop (React + Rust) · ⌘K command palette
 ios/                  SwiftUI app (5 targets — main · Intents · Widgets · Watch · Share)
 docs/                 Architecture references (auth · surface parity · capability adaptation · build)
 design-brief/         Design system: tokens · brand identity · surface guidelines · reference shots
-skills/               86 markdown skills (progressive disclosure)
+skills/               101 markdown skills (progressive disclosure; +20 in `.wotann/skills/` and 21 BUILT_IN = 142 total)
 ```
 
 ---
