@@ -6,13 +6,13 @@ export default defineConfig({
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     exclude: ["node_modules", "dist"],
     testTimeout: 10_000,
-    // pool: "threads" was tried but broke local runs (some test
-    // files mutate process-globals on import that don't tolerate
-    // shared V8 contexts). Back to forks. CI uses --shard splitting
-    // to avoid the OOM cliff that single-fork hit at ~146 s — see
-    // .github/workflows/ci.yml `Test` step.
-    pool: "forks",
-    maxWorkers: 1,
-    fileParallelism: false,
+    // Default vitest pool/maxWorkers settings — let it use NUM_CPUS
+    // workers in parallel. CI ubuntu-latest has 4 cores; each gets
+    // its own fork. This was the original config before the OOM
+    // hunting; reverting because all the constraint experiments
+    // (maxWorkers: 1, threads, sharding, heap bumps, timeout bumps)
+    // hit the same 88-second cancellation cliff in CI even when
+    // local runs were fine. The shard step in CI starts a fresh
+    // process anyway, so worker isolation isn't the bottleneck.
   },
 });
