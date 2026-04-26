@@ -105,7 +105,10 @@ jobs:
         if: matrix.shard == 1
         run: npx tsc --noEmit
       - name: Test (shard ${{ matrix.shard }}/6)
-        run: npx vitest run --shard=${{ matrix.shard }}/6
+        # --reporter=verbose lets us see LOAD progress, not just test
+        # completion — useful for diagnosing the shard 4 hang where a
+        # file fails to finish loading.
+        run: npx vitest run --shard=${{ matrix.shard }}/6 --reporter=verbose
         env:
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Build (only on shard 1)
