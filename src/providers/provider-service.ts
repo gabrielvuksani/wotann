@@ -471,8 +471,8 @@ function pickEnv(
 
 const ANTHROPIC_FALLBACK: readonly ProviderModel[] = [
   {
-    id: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
+    id: "claude-opus-4-7",
+    name: "Claude Opus 4.7",
     contextWindow: 200_000,
     costPerMTokInput: 15,
     costPerMTokOutput: 75,
@@ -481,8 +481,8 @@ const ANTHROPIC_FALLBACK: readonly ProviderModel[] = [
     supportsThinking: true,
   },
   {
-    id: "claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6",
+    id: "claude-sonnet-4-7",
+    name: "Claude Sonnet 4.7",
     contextWindow: 200_000,
     costPerMTokInput: 3,
     costPerMTokOutput: 15,

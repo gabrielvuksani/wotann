@@ -37,16 +37,16 @@ export interface ProviderDefault {
  */
 export const PROVIDER_DEFAULTS: Readonly<Record<string, ProviderDefault>> = {
   anthropic: {
-    defaultModel: "claude-sonnet-4-6",
-    workerModel: "claude-sonnet-4-6",
-    oracleModel: "claude-opus-4-6",
+    defaultModel: "claude-sonnet-4-7",
+    workerModel: "claude-sonnet-4-7",
+    oracleModel: "claude-opus-4-7",
     envKeys: ["ANTHROPIC_API_KEY"],
     label: "Anthropic",
   },
   "anthropic-cli": {
-    defaultModel: "claude-sonnet-4-6",
-    workerModel: "claude-sonnet-4-6",
-    oracleModel: "claude-opus-4-6",
+    defaultModel: "claude-sonnet-4-7",
+    workerModel: "claude-sonnet-4-7",
+    oracleModel: "claude-opus-4-7",
     envKeys: [],
     label: "Claude (subscription)",
   },
@@ -156,9 +156,9 @@ export const PROVIDER_DEFAULTS: Readonly<Record<string, ProviderDefault>> = {
     label: "Azure OpenAI",
   },
   bedrock: {
-    defaultModel: "anthropic.claude-sonnet-4-6",
-    workerModel: "anthropic.claude-sonnet-4-6",
-    oracleModel: "anthropic.claude-opus-4-6",
+    defaultModel: "anthropic.claude-sonnet-4-7",
+    workerModel: "anthropic.claude-sonnet-4-7",
+    oracleModel: "anthropic.claude-opus-4-7",
     envKeys: ["AWS_ACCESS_KEY_ID"],
     label: "AWS Bedrock",
   },

@@ -55,16 +55,86 @@ interface ProviderCapability {
 // ── Cost table ────────────────────────────────────────────
 
 const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
-  { provider: "anthropic", model: "claude-opus-4-6", costPer1kInput: 0.015, costPer1kOutput: 0.075, capabilityTier: "extreme", avgLatencyMs: 3000 },
-  { provider: "anthropic", model: "claude-sonnet-4-6", costPer1kInput: 0.003, costPer1kOutput: 0.015, capabilityTier: "high", avgLatencyMs: 1500 },
-  { provider: "anthropic", model: "claude-haiku-4-5", costPer1kInput: 0.001, costPer1kOutput: 0.005, capabilityTier: "medium", avgLatencyMs: 500 },
-  { provider: "openai", model: "gpt-5.4", costPer1kInput: 0.010, costPer1kOutput: 0.030, capabilityTier: "extreme", avgLatencyMs: 2500 },
-  { provider: "openai", model: "gpt-5.3-codex", costPer1kInput: 0.003, costPer1kOutput: 0.012, capabilityTier: "high", avgLatencyMs: 1200 },
-  { provider: "openai", model: "gpt-4.1", costPer1kInput: 0.002, costPer1kOutput: 0.008, capabilityTier: "medium", avgLatencyMs: 800 },
-  { provider: "gemini", model: "gemini-2.5-pro", costPer1kInput: 0.007, costPer1kOutput: 0.021, capabilityTier: "high", avgLatencyMs: 2000 },
-  { provider: "gemini", model: "gemini-2.5-flash", costPer1kInput: 0.0005, costPer1kOutput: 0.002, capabilityTier: "medium", avgLatencyMs: 400 },
-  { provider: "ollama", model: "llama-3.3-70b", costPer1kInput: 0, costPer1kOutput: 0, capabilityTier: "medium", avgLatencyMs: 5000 },
-  { provider: "free", model: "free-tier", costPer1kInput: 0, costPer1kOutput: 0, capabilityTier: "low", avgLatencyMs: 8000 },
+  {
+    provider: "anthropic",
+    model: "claude-opus-4-7",
+    costPer1kInput: 0.015,
+    costPer1kOutput: 0.075,
+    capabilityTier: "extreme",
+    avgLatencyMs: 3000,
+  },
+  {
+    provider: "anthropic",
+    model: "claude-sonnet-4-7",
+    costPer1kInput: 0.003,
+    costPer1kOutput: 0.015,
+    capabilityTier: "high",
+    avgLatencyMs: 1500,
+  },
+  {
+    provider: "anthropic",
+    model: "claude-haiku-4-5",
+    costPer1kInput: 0.001,
+    costPer1kOutput: 0.005,
+    capabilityTier: "medium",
+    avgLatencyMs: 500,
+  },
+  {
+    provider: "openai",
+    model: "gpt-5.4",
+    costPer1kInput: 0.01,
+    costPer1kOutput: 0.03,
+    capabilityTier: "extreme",
+    avgLatencyMs: 2500,
+  },
+  {
+    provider: "openai",
+    model: "gpt-5.3-codex",
+    costPer1kInput: 0.003,
+    costPer1kOutput: 0.012,
+    capabilityTier: "high",
+    avgLatencyMs: 1200,
+  },
+  {
+    provider: "openai",
+    model: "gpt-4.1",
+    costPer1kInput: 0.002,
+    costPer1kOutput: 0.008,
+    capabilityTier: "medium",
+    avgLatencyMs: 800,
+  },
+  {
+    provider: "gemini",
+    model: "gemini-2.5-pro",
+    costPer1kInput: 0.007,
+    costPer1kOutput: 0.021,
+    capabilityTier: "high",
+    avgLatencyMs: 2000,
+  },
+  {
+    provider: "gemini",
+    model: "gemini-2.5-flash",
+    costPer1kInput: 0.0005,
+    costPer1kOutput: 0.002,
+    capabilityTier: "medium",
+    avgLatencyMs: 400,
+  },
+  {
+    provider: "ollama",
+    model: "llama-3.3-70b",
+    costPer1kInput: 0,
+    costPer1kOutput: 0,
+    capabilityTier: "medium",
+    avgLatencyMs: 5000,
+  },
+  {
+    provider: "free",
+    model: "free-tier",
+    costPer1kInput: 0,
+    costPer1kOutput: 0,
+    capabilityTier: "low",
+    avgLatencyMs: 8000,
+  },
 ];
 
 const CAPABILITY_ORDER: Record<string, number> = {
@@ -82,10 +152,7 @@ export class ProviderArbitrageEngine {
   /**
    * Find the cheapest provider/model route that meets minimum capability.
    */
-  findCheapestRoute(
-    task: string,
-    minCapability: string,
-  ): ArbitrageRoute {
+  findCheapestRoute(task: string, minCapability: string): ArbitrageRoute {
     const minTier = CAPABILITY_ORDER[minCapability] ?? 0;
 
     const eligible = PROVIDER_CAPABILITIES.filter(
@@ -95,7 +162,7 @@ export class ProviderArbitrageEngine {
     if (eligible.length === 0) {
       return {
         provider: "anthropic",
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-4-7",
         estimatedCostPer1kTokens: 0.009,
         qualityScore: 0.85,
         latencyMs: 1500,
@@ -129,12 +196,7 @@ export class ProviderArbitrageEngine {
   /**
    * Record an outcome for cost-per-quality tracking.
    */
-  recordOutcome(
-    provider: ProviderName,
-    model: string,
-    cost: number,
-    quality: number,
-  ): void {
+  recordOutcome(provider: ProviderName, model: string, cost: number, quality: number): void {
     this.outcomes.push({
       provider,
       model,
@@ -168,8 +230,7 @@ export class ProviderArbitrageEngine {
     const breakdown: ProviderCostSummary[] = [];
     for (const [provider, records] of byProvider) {
       const totalCost = records.reduce((sum, r) => sum + r.cost, 0);
-      const avgQuality =
-        records.reduce((sum, r) => sum + r.quality, 0) / records.length;
+      const avgQuality = records.reduce((sum, r) => sum + r.quality, 0) / records.length;
       breakdown.push({
         provider,
         totalCost,
@@ -182,13 +243,14 @@ export class ProviderArbitrageEngine {
     const totalSpent = breakdown.reduce((sum, b) => sum + b.totalCost, 0);
 
     // Best value = highest quality/cost ratio
-    const bestValue = breakdown.length > 0
-      ? [...breakdown].sort((a, b) => {
-          const ratioA = a.totalCost > 0 ? a.avgQuality / a.totalCost : a.avgQuality;
-          const ratioB = b.totalCost > 0 ? b.avgQuality / b.totalCost : b.avgQuality;
-          return ratioB - ratioA;
-        })[0]?.provider ?? null
-      : null;
+    const bestValue =
+      breakdown.length > 0
+        ? ([...breakdown].sort((a, b) => {
+            const ratioA = a.totalCost > 0 ? a.avgQuality / a.totalCost : a.avgQuality;
+            const ratioB = b.totalCost > 0 ? b.avgQuality / b.totalCost : b.avgQuality;
+            return ratioB - ratioA;
+          })[0]?.provider ?? null)
+        : null;
 
     // Estimate savings vs always using the most expensive option
     const maxCostPerRequest = Math.max(...this.outcomes.map((o) => o.cost), 0);
@@ -207,13 +269,8 @@ export class ProviderArbitrageEngine {
   /**
    * Get historical average quality for a provider/model combo.
    */
-  private getHistoricalQuality(
-    provider: ProviderName,
-    model: string,
-  ): number {
-    const relevant = this.outcomes.filter(
-      (o) => o.provider === provider && o.model === model,
-    );
+  private getHistoricalQuality(provider: ProviderName, model: string): number {
+    const relevant = this.outcomes.filter((o) => o.provider === provider && o.model === model);
 
     if (relevant.length === 0) return 0.7; // Default assumption
 

@@ -45,14 +45,62 @@ interface ModelPricing {
 }
 
 const PRICING_TABLE: readonly ModelPricing[] = [
-  { provider: "anthropic", model: "claude-opus-4-6", inputPer1k: 0.015, outputPer1k: 0.075, thinkingPer1k: 0.015 },
-  { provider: "anthropic", model: "claude-sonnet-4-6", inputPer1k: 0.003, outputPer1k: 0.015, thinkingPer1k: 0.003 },
-  { provider: "anthropic", model: "claude-haiku-4-5", inputPer1k: 0.001, outputPer1k: 0.005, thinkingPer1k: 0.001 },
-  { provider: "openai", model: "gpt-5.4", inputPer1k: 0.010, outputPer1k: 0.030, thinkingPer1k: 0.010 },
-  { provider: "openai", model: "gpt-5.3-codex", inputPer1k: 0.003, outputPer1k: 0.012, thinkingPer1k: 0.003 },
-  { provider: "openai", model: "gpt-4.1", inputPer1k: 0.002, outputPer1k: 0.008, thinkingPer1k: 0.002 },
-  { provider: "gemini", model: "gemini-2.5-pro", inputPer1k: 0.007, outputPer1k: 0.021, thinkingPer1k: 0.007 },
-  { provider: "gemini", model: "gemini-2.5-flash", inputPer1k: 0.0005, outputPer1k: 0.002, thinkingPer1k: 0.0005 },
+  {
+    provider: "anthropic",
+    model: "claude-opus-4-7",
+    inputPer1k: 0.015,
+    outputPer1k: 0.075,
+    thinkingPer1k: 0.015,
+  },
+  {
+    provider: "anthropic",
+    model: "claude-sonnet-4-7",
+    inputPer1k: 0.003,
+    outputPer1k: 0.015,
+    thinkingPer1k: 0.003,
+  },
+  {
+    provider: "anthropic",
+    model: "claude-haiku-4-5",
+    inputPer1k: 0.001,
+    outputPer1k: 0.005,
+    thinkingPer1k: 0.001,
+  },
+  {
+    provider: "openai",
+    model: "gpt-5.4",
+    inputPer1k: 0.01,
+    outputPer1k: 0.03,
+    thinkingPer1k: 0.01,
+  },
+  {
+    provider: "openai",
+    model: "gpt-5.3-codex",
+    inputPer1k: 0.003,
+    outputPer1k: 0.012,
+    thinkingPer1k: 0.003,
+  },
+  {
+    provider: "openai",
+    model: "gpt-4.1",
+    inputPer1k: 0.002,
+    outputPer1k: 0.008,
+    thinkingPer1k: 0.002,
+  },
+  {
+    provider: "gemini",
+    model: "gemini-2.5-pro",
+    inputPer1k: 0.007,
+    outputPer1k: 0.021,
+    thinkingPer1k: 0.007,
+  },
+  {
+    provider: "gemini",
+    model: "gemini-2.5-flash",
+    inputPer1k: 0.0005,
+    outputPer1k: 0.002,
+    thinkingPer1k: 0.0005,
+  },
   { provider: "ollama", model: "llama-3.3-70b", inputPer1k: 0, outputPer1k: 0, thinkingPer1k: 0 },
   { provider: "free", model: "free-tier", inputPer1k: 0, outputPer1k: 0, thinkingPer1k: 0 },
 ];
@@ -115,15 +163,9 @@ export class CostOracle {
   /**
    * Estimate cost of a task for a specific provider/model.
    */
-  estimateTaskCost(
-    task: string,
-    provider: ProviderName,
-    model: string,
-  ): CostEstimate {
+  estimateTaskCost(task: string, provider: ProviderName, model: string): CostEstimate {
     const profile = profileTask(task);
-    const pricing = PRICING_TABLE.find(
-      (p) => p.provider === provider && p.model === model,
-    );
+    const pricing = PRICING_TABLE.find((p) => p.provider === provider && p.model === model);
 
     if (!pricing) {
       return {
@@ -142,12 +184,9 @@ export class CostOracle {
       };
     }
 
-    const inputCost =
-      (profile.estimatedInputTokens / 1000) * pricing.inputPer1k;
-    const outputCost =
-      (profile.estimatedOutputTokens / 1000) * pricing.outputPer1k;
-    const thinkingCost =
-      (profile.estimatedThinkingTokens / 1000) * pricing.thinkingPer1k;
+    const inputCost = (profile.estimatedInputTokens / 1000) * pricing.inputPer1k;
+    const outputCost = (profile.estimatedOutputTokens / 1000) * pricing.outputPer1k;
+    const thinkingCost = (profile.estimatedThinkingTokens / 1000) * pricing.thinkingPer1k;
     const totalCost = inputCost + outputCost + thinkingCost;
 
     return {
@@ -169,16 +208,9 @@ export class CostOracle {
   /**
    * Estimate cost of an autonomous run (multiple turns).
    */
-  estimateAutonomousCost(
-    task: string,
-    maxCycles: number,
-  ): CostEstimate {
+  estimateAutonomousCost(task: string, maxCycles: number): CostEstimate {
     // Autonomous runs use the default model (Sonnet)
-    const singleEstimate = this.estimateTaskCost(
-      task,
-      "anthropic",
-      "claude-sonnet-4-6",
-    );
+    const singleEstimate = this.estimateTaskCost(task, "anthropic", "claude-sonnet-4-7");
 
     // Each cycle roughly doubles context (previous turns become input)
     // Use a growth factor of 1.3x per cycle (input accumulates)
@@ -190,35 +222,25 @@ export class CostOracle {
       const scale = Math.pow(1.3, cycle);
       totalInput += singleEstimate.estimatedInputTokens * scale;
       totalOutput += singleEstimate.estimatedOutputTokens;
-      totalThinking += singleEstimate.breakdown.thinkingCost > 0
-        ? singleEstimate.estimatedOutputTokens * 0.5
-        : 0;
+      totalThinking +=
+        singleEstimate.breakdown.thinkingCost > 0 ? singleEstimate.estimatedOutputTokens * 0.5 : 0;
     }
 
     const pricing = PRICING_TABLE.find(
-      (p) => p.provider === "anthropic" && p.model === "claude-sonnet-4-6",
+      (p) => p.provider === "anthropic" && p.model === "claude-sonnet-4-7",
     );
 
-    const inputCost = pricing
-      ? (totalInput / 1000) * pricing.inputPer1k
-      : 0;
-    const outputCost = pricing
-      ? (totalOutput / 1000) * pricing.outputPer1k
-      : 0;
-    const thinkingCost = pricing
-      ? (totalThinking / 1000) * pricing.thinkingPer1k
-      : 0;
+    const inputCost = pricing ? (totalInput / 1000) * pricing.inputPer1k : 0;
+    const outputCost = pricing ? (totalOutput / 1000) * pricing.outputPer1k : 0;
+    const thinkingCost = pricing ? (totalThinking / 1000) * pricing.thinkingPer1k : 0;
 
     return {
       provider: "anthropic",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-7",
       estimatedInputTokens: Math.round(totalInput),
       estimatedOutputTokens: Math.round(totalOutput),
       estimatedCostUsd: inputCost + outputCost + thinkingCost,
-      confidencePercent: Math.max(
-        10,
-        singleEstimate.confidencePercent - maxCycles * 5,
-      ),
+      confidencePercent: Math.max(10, singleEstimate.confidencePercent - maxCycles * 5),
       breakdown: {
         inputCost,
         outputCost,
@@ -232,9 +254,7 @@ export class CostOracle {
    * Compare costs across all known providers.
    */
   compareCosts(task: string): readonly ProviderCostComparison[] {
-    const estimates = PRICING_TABLE.map((p) =>
-      this.estimateTaskCost(task, p.provider, p.model),
-    );
+    const estimates = PRICING_TABLE.map((p) => this.estimateTaskCost(task, p.provider, p.model));
 
     const minCost = Math.min(...estimates.map((e) => e.estimatedCostUsd));
 
@@ -242,8 +262,7 @@ export class CostOracle {
       provider: e.provider,
       model: e.model,
       estimatedCostUsd: e.estimatedCostUsd,
-      relativeCost:
-        minCost > 0 ? e.estimatedCostUsd / minCost : e.estimatedCostUsd === 0 ? 0 : 1,
+      relativeCost: minCost > 0 ? e.estimatedCostUsd / minCost : e.estimatedCostUsd === 0 ? 0 : 1,
       isCheapest: e.estimatedCostUsd === minCost,
     }));
   }

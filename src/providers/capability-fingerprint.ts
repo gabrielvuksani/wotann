@@ -66,7 +66,8 @@ const CAPABILITY_PROBES: readonly CapabilityProbe[] = [
   {
     id: "structured-output",
     name: "Structured Output (JSON)",
-    testPrompt: "Return only a JSON object with keys 'name' (string) and 'age' (number). No other text.",
+    testPrompt:
+      "Return only a JSON object with keys 'name' (string) and 'age' (number). No other text.",
     expectedPattern: /\{[^}]*"name"\s*:\s*"[^"]*"\s*,\s*"age"\s*:\s*\d+[^}]*\}/,
     timeoutMs: 10_000,
   },
@@ -89,30 +90,69 @@ const CAPABILITY_PROBES: readonly CapabilityProbe[] = [
 // ── Static Capabilities (known from docs, no probing needed) ──
 
 const STATIC_CAPABILITIES: Record<string, readonly CapabilityId[]> = {
-  "anthropic:claude-opus-4-6": [
-    "tool-calling", "vision", "extended-thinking", "computer-use",
-    "prompt-caching", "streaming", "system-prompt", "temperature-control",
-    "stop-sequences", "parallel-tool-calls", "multi-modal",
+  "anthropic:claude-opus-4-7": [
+    "tool-calling",
+    "vision",
+    "extended-thinking",
+    "computer-use",
+    "prompt-caching",
+    "streaming",
+    "system-prompt",
+    "temperature-control",
+    "stop-sequences",
+    "parallel-tool-calls",
+    "multi-modal",
   ],
-  "anthropic:claude-sonnet-4-6": [
-    "tool-calling", "vision", "extended-thinking", "computer-use",
-    "prompt-caching", "streaming", "system-prompt", "temperature-control",
-    "stop-sequences", "parallel-tool-calls", "multi-modal",
+  "anthropic:claude-sonnet-4-7": [
+    "tool-calling",
+    "vision",
+    "extended-thinking",
+    "computer-use",
+    "prompt-caching",
+    "streaming",
+    "system-prompt",
+    "temperature-control",
+    "stop-sequences",
+    "parallel-tool-calls",
+    "multi-modal",
   ],
   "openai:gpt-5.4": [
-    "structured-output", "tool-calling", "vision", "streaming",
-    "json-mode", "code-execution", "web-search", "function-calling",
-    "multi-modal", "audio-input", "audio-output", "system-prompt",
-    "temperature-control", "stop-sequences", "logprobs", "parallel-tool-calls",
-    "embeddings", "fine-tuning",
+    "structured-output",
+    "tool-calling",
+    "vision",
+    "streaming",
+    "json-mode",
+    "code-execution",
+    "web-search",
+    "function-calling",
+    "multi-modal",
+    "audio-input",
+    "audio-output",
+    "system-prompt",
+    "temperature-control",
+    "stop-sequences",
+    "logprobs",
+    "parallel-tool-calls",
+    "embeddings",
+    "fine-tuning",
   ],
   "gemini:gemini-2.5-pro": [
-    "structured-output", "tool-calling", "vision", "streaming",
-    "json-mode", "code-execution", "multi-modal", "system-prompt",
-    "temperature-control", "prompt-caching",
+    "structured-output",
+    "tool-calling",
+    "vision",
+    "streaming",
+    "json-mode",
+    "code-execution",
+    "multi-modal",
+    "system-prompt",
+    "temperature-control",
+    "prompt-caching",
   ],
   "ollama:qwen3-coder-next": [
-    "tool-calling", "streaming", "system-prompt", "temperature-control",
+    "tool-calling",
+    "streaming",
+    "system-prompt",
+    "temperature-control",
     "stop-sequences",
   ],
 };
@@ -174,14 +214,22 @@ export class CapabilityFingerprinter {
   ): Promise<CapabilityResult> {
     const probe = CAPABILITY_PROBES.find((p) => p.id === capabilityId);
     if (!probe) {
-      return { id: capabilityId, supported: false, confidence: 0, latencyMs: 0, notes: "No probe defined" };
+      return {
+        id: capabilityId,
+        supported: false,
+        confidence: 0,
+        latencyMs: 0,
+        notes: "No probe defined",
+      };
     }
 
     const start = Date.now();
     try {
       const response = await Promise.race([
         executor(probe.testPrompt),
-        new Promise<string>((_, reject) => setTimeout(() => reject(new Error("timeout")), probe.timeoutMs)),
+        new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), probe.timeoutMs),
+        ),
       ]);
 
       const latencyMs = Date.now() - start;

@@ -52,11 +52,12 @@ export interface OpusAvailability {
  * Documented limits reflect the upper bound published by providers.
  */
 const MODEL_CONTEXT_MAP: readonly ModelContextConfig[] = [
-  // Anthropic: Both Opus 4.6 and Sonnet 4.6 — 1M context GA since March 13, 2026.
+  // Anthropic: Both Opus 4.7 and Sonnet 4.7 — 1M context GA since March 13, 2026.
   // No beta header needed. Standard pricing, no surcharge. The old context-1m-2025-08-07
-  // header is being retired April 30, 2026.
+  // header is being retired April 30, 2026. Bumped 4-6 → 4-7 (V14.1+V14.3): 4-6 retires
+  // June 15, 2026 — pre-emptive migration avoids hardcoded-string deathmarch.
   {
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     provider: "anthropic",
     maxContextTokens: 1_000_000,
     documentedMaxContextTokens: 1_000_000,
@@ -69,7 +70,7 @@ const MODEL_CONTEXT_MAP: readonly ModelContextConfig[] = [
     notes: "1M context GA since March 13, 2026. No surcharge. Prompt caching: 75% savings.",
   },
   {
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-4-7",
     provider: "anthropic",
     maxContextTokens: 1_000_000,
     documentedMaxContextTokens: 1_000_000,
@@ -106,7 +107,8 @@ const MODEL_CONTEXT_MAP: readonly ModelContextConfig[] = [
     inputCostPer1K: 0.0025,
     cachedInputCostPer1K: 0.0025,
     activationMode: "default",
-    notes: "GPT-5.4 supports 1M context and 128K output per OpenAI docs (Apr 2026). Pricing: $2.50/M in, $15/M out.",
+    notes:
+      "GPT-5.4 supports 1M context and 128K output per OpenAI docs (Apr 2026). Pricing: $2.50/M in, $15/M out.",
   },
   {
     model: "gpt-5.3-codex",
@@ -186,7 +188,10 @@ const MODEL_CONTEXT_MAP: readonly ModelContextConfig[] = [
     activationMode: "provider-managed",
   },
   {
-    model: "claude-sonnet-4",
+    // V14.3: bumped from "claude-sonnet-4" (retires June 15, 2026) to current GA
+    // Copilot variant. Copilot model namespace uses dot-notation; the underlying
+    // RLHF/context window unchanged.
+    model: "claude-sonnet-4.7",
     provider: "copilot",
     maxContextTokens: 128_000,
     documentedMaxContextTokens: 128_000,
@@ -246,7 +251,8 @@ const MODEL_CONTEXT_MAP: readonly ModelContextConfig[] = [
     inputCostPer1K: 0,
     cachedInputCostPer1K: 0,
     activationMode: "default",
-    notes: "Deprecated by Google in favor of Gemini 2.5 Flash. Retained for backward compatibility.",
+    notes:
+      "Deprecated by Google in favor of Gemini 2.5 Flash. Retained for backward compatibility.",
   },
   {
     model: "gemini-3.1-pro-preview",
@@ -259,7 +265,8 @@ const MODEL_CONTEXT_MAP: readonly ModelContextConfig[] = [
     inputCostPer1K: 0.00125,
     cachedInputCostPer1K: 0.000315,
     activationMode: "default",
-    notes: "Google's latest Gemini 3.1 Pro Preview. 1M+ context, native tool calling, computer use support.",
+    notes:
+      "Google's latest Gemini 3.1 Pro Preview. 1M+ context, native tool calling, computer use support.",
   },
 
   // Ollama / local
@@ -599,18 +606,19 @@ export function getModelContextConfig(
     },
   };
 
-  const base = exact ?? (modelMatch ? { ...modelMatch, provider } : defaults[provider]) ?? {
-    model: normalizedModel,
-    provider,
-    maxContextTokens: 128_000,
-    documentedMaxContextTokens: 128_000,
-    defaultMaxOutputTokens: 4_096,
-    supportsExtendedContext: false,
-    supportsPromptCaching: false,
-    inputCostPer1K: 0.01,
-    cachedInputCostPer1K: 0.01,
-    activationMode: "default" as const,
-  };
+  const base = exact ??
+    (modelMatch ? { ...modelMatch, provider } : defaults[provider]) ?? {
+      model: normalizedModel,
+      provider,
+      maxContextTokens: 128_000,
+      documentedMaxContextTokens: 128_000,
+      defaultMaxOutputTokens: 4_096,
+      supportsExtendedContext: false,
+      supportsPromptCaching: false,
+      inputCostPer1K: 0.01,
+      cachedInputCostPer1K: 0.01,
+      activationMode: "default" as const,
+    };
 
   if (base.supportsExtendedContext && wantsExtended) {
     return {
@@ -646,9 +654,7 @@ export function getMaxAvailableContext(
 /**
  * Get the maximum documented context across all available providers.
  */
-export function getMaxDocumentedContext(
-  providers: ReadonlySet<string>,
-): number {
+export function getMaxDocumentedContext(providers: ReadonlySet<string>): number {
   let maxContext = 0;
 
   for (const config of MODEL_CONTEXT_MAP) {
@@ -683,31 +689,33 @@ export function isOpus1MAvailable(
   providers: ReadonlySet<string>,
   options: ContextResolutionOptions = {},
 ): OpusAvailability {
-  const configs = MODEL_CONTEXT_MAP
-    .filter((entry) =>
-      entry.provider === "anthropic"
-      && entry.documentedMaxContextTokens >= 1_000_000
-      && providers.has(entry.provider),
-    )
-    .map((entry) => getModelContextConfig(entry.model, entry.provider, options));
+  const configs = MODEL_CONTEXT_MAP.filter(
+    (entry) =>
+      entry.provider === "anthropic" &&
+      entry.documentedMaxContextTokens >= 1_000_000 &&
+      providers.has(entry.provider),
+  ).map((entry) => getModelContextConfig(entry.model, entry.provider, options));
 
   const best = configs.reduce<ModelContextConfig | null>(
     (currentBest, current) =>
-      !currentBest || current.maxContextTokens > currentBest.maxContextTokens ? current : currentBest,
+      !currentBest || current.maxContextTokens > currentBest.maxContextTokens
+        ? current
+        : currentBest,
     null,
   );
 
-  const documentedBest = MODEL_CONTEXT_MAP
-    .filter((entry) =>
-      entry.provider === "anthropic"
-      && entry.documentedMaxContextTokens >= 1_000_000
-      && providers.has(entry.provider),
-    )
-    .reduce<ModelContextConfig | null>(
-      (currentBest, current) =>
-        !currentBest || current.documentedMaxContextTokens > currentBest.documentedMaxContextTokens ? current : currentBest,
-      null,
-    );
+  const documentedBest = MODEL_CONTEXT_MAP.filter(
+    (entry) =>
+      entry.provider === "anthropic" &&
+      entry.documentedMaxContextTokens >= 1_000_000 &&
+      providers.has(entry.provider),
+  ).reduce<ModelContextConfig | null>(
+    (currentBest, current) =>
+      !currentBest || current.documentedMaxContextTokens > currentBest.documentedMaxContextTokens
+        ? current
+        : currentBest,
+    null,
+  );
 
   return {
     available: best !== null && best.maxContextTokens >= 1_000_000,

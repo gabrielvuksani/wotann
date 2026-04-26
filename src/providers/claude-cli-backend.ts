@@ -539,7 +539,7 @@ export async function startAnthropicLogin(): Promise<AnthropicCliLoginResult> {
  *   - error        per terminal `result` message (subtype != "success") or parse failure
  */
 export function createAnthropicCliAdapter(): ProviderAdapter {
-  const defaultConfig = getModelContextConfig("claude-sonnet-4-6", "anthropic");
+  const defaultConfig = getModelContextConfig("claude-sonnet-4-7", "anthropic");
   const capabilities: ProviderCapabilities = {
     supportsComputerUse: true,
     supportsToolCalling: true,
@@ -704,7 +704,7 @@ export function createAnthropicCliAdapter(): ProviderAdapter {
     transport: "anthropic",
     capabilities,
     query,
-    listModels: async () => ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+    listModels: async () => ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
     isAvailable: async () => isClaudeCliAvailable(),
   };
 }

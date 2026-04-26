@@ -64,12 +64,12 @@ const MODEL_PAIRS: ReadonlyArray<{
   label: string;
 }> = [
   {
-    architect: { provider: "anthropic", model: "claude-opus-4-6" },
-    editor: { provider: "anthropic", model: "claude-sonnet-4-6" },
+    architect: { provider: "anthropic", model: "claude-opus-4-7" },
+    editor: { provider: "anthropic", model: "claude-sonnet-4-7" },
     label: "Claude Opus→Sonnet (highest quality)",
   },
   {
-    architect: { provider: "anthropic", model: "claude-sonnet-4-6" },
+    architect: { provider: "anthropic", model: "claude-sonnet-4-7" },
     editor: { provider: "gemini", model: "gemini-2.5-flash" },
     label: "Claude Sonnet→Gemini Flash (cost-effective)",
   },

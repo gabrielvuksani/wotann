@@ -117,7 +117,7 @@ export function getAnthropicCacheTracker(): CacheHitTracker {
 }
 
 export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
-  const defaultConfig = getModelContextConfig("claude-sonnet-4-6", "anthropic");
+  const defaultConfig = getModelContextConfig("claude-sonnet-4-7", "anthropic");
   const capabilities: ProviderCapabilities = {
     supportsComputerUse: true,
     supportsToolCalling: true,
@@ -132,7 +132,7 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
   }
 
   async function* query(options: UnifiedQueryOptions): AsyncGenerator<StreamChunk> {
-    const model = options.model ?? "claude-sonnet-4-6";
+    const model = options.model ?? "claude-sonnet-4-7";
     const maxTokens = options.maxTokens ?? 4096;
     // V9 Wave 6-MM: track the active token so a mid-stream 401 can flag
     // it as expired (and key rotation can avoid handing back the same
@@ -474,7 +474,7 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
   }
 
   async function listModels(): Promise<readonly string[]> {
-    return ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"];
+    return ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"];
   }
 
   async function isAvailable(): Promise<boolean> {

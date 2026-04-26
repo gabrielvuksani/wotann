@@ -306,7 +306,7 @@ export async function discoverProviders(
       label: "Claude Subscription",
       priority: 1,
       transport: "anthropic",
-      models: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+      models: ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
     });
   }
 
@@ -321,7 +321,7 @@ export async function discoverProviders(
       label: "Claude API",
       priority: oauthToken ? 2 : 1,
       transport: "anthropic",
-      models: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+      models: ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
     });
   }
 
@@ -380,6 +380,7 @@ export async function discoverProviders(
       transport: "chat_completions",
       // Dynamic model list — the adapter fetches actual models from the API at runtime.
       // This static list covers GA models across Copilot Free/Pro/Pro+ tiers.
+      // V14.3: dropped bare "claude-sonnet-4" (retires June 15, 2026); bumped 4.6 → 4.7.
       models: [
         "gpt-4.1",
         "gpt-4.1-mini",
@@ -387,9 +388,8 @@ export async function discoverProviders(
         "gpt-5.4",
         "o4-mini",
         "o3",
-        "claude-sonnet-4",
-        "claude-sonnet-4.6",
-        "claude-opus-4.6",
+        "claude-sonnet-4.7",
+        "claude-opus-4.7",
         "claude-haiku-4.5",
         "gemini-2.5-pro",
         "gemini-2.5-flash",
@@ -509,7 +509,7 @@ export async function discoverProviders(
       billing: "api-key",
       label: "AWS Bedrock",
       transport: "chat_completions",
-      models: ["anthropic.claude-sonnet-4-6", "anthropic.claude-haiku-4-5"],
+      models: ["anthropic.claude-sonnet-4-7", "anthropic.claude-haiku-4-5"],
     });
   }
 
@@ -524,7 +524,7 @@ export async function discoverProviders(
       billing: "api-key",
       label: "Google Vertex AI",
       transport: "chat_completions",
-      models: ["claude-sonnet-4-6", "gemini-2.5-pro"],
+      models: ["claude-sonnet-4-7", "gemini-2.5-pro"],
     });
   }
 

@@ -503,9 +503,9 @@ export interface ModelBypassProfile {
 export function getModelBypassProfile(provider: string, model: string): ModelBypassProfile {
   const profiles: Record<string, ModelBypassProfile> = {
     // ── Anthropic ──
-    "anthropic:claude-opus-4-6": {
+    "anthropic:claude-opus-4-7": {
       provider: "anthropic",
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-7",
       capability: "partial",
       notes:
         "System prompt framing effective for code analysis. Constitutional Classifiers++ block 95.6% of jailbreaks. For unrestricted output, use Ollama with abliterated model.",
@@ -612,22 +612,22 @@ export function getModelBypassProfile(provider: string, model: string): ModelByp
       fallbackSuggestion: "free:llama-3.3-70b-versatile",
     },
     // ── Bedrock ──
-    "bedrock:anthropic.claude-sonnet-4-6-v1:0": {
+    "bedrock:anthropic.claude-sonnet-4-7-v1:0": {
       provider: "bedrock",
-      model: "anthropic.claude-sonnet-4-6-v1:0",
+      model: "anthropic.claude-sonnet-4-7-v1:0",
       capability: "partial",
       notes:
         "Bedrock guardrails can be disabled via API config. Model-level RLHF blocks remain. CYBER_RISK_INSTRUCTION clearing via system prompt.",
-      fallbackSuggestion: "anthropic:claude-opus-4-6",
+      fallbackSuggestion: "anthropic:claude-opus-4-7",
     },
     // ── Vertex ──
-    "vertex:claude-sonnet-4-6": {
+    "vertex:claude-sonnet-4-7": {
       provider: "vertex",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-7",
       capability: "partial",
       notes:
         "Vertex runs Claude via Google Cloud. Google's content filtering layer applies on top of Anthropic's RLHF. Both CYBER_RISK_INSTRUCTION and Vertex harm blocks must be cleared.",
-      fallbackSuggestion: "anthropic:claude-opus-4-6",
+      fallbackSuggestion: "anthropic:claude-opus-4-7",
     },
   };
 

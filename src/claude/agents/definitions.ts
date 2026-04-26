@@ -156,7 +156,7 @@ export function buildAgentsConfig(opts: AgentsConfigOptions = {}): AgentsConfig 
     prompt: COUNCIL_MEMBER_PROMPT,
     tools: [],
     disallowedTools: ["Bash", "Edit", "Write", "MultiEdit"],
-    model: "claude-sonnet-4-6", // Cheaper for many parallel voters
+    model: "claude-sonnet-4-7", // Cheaper for many parallel voters
     permissionMode: "dontAsk",
     maxTurns: 1,
     mcpServers: [],

@@ -2389,14 +2389,14 @@ export class KairosRPCHandler {
         if (anthropicModels.length === 0) {
           anthropicModels = [
             {
-              id: "claude-opus-4-6",
-              name: "Claude Opus 4.6",
+              id: "claude-opus-4-7",
+              name: "Claude Opus 4.7",
               contextWindow: 200000,
               costPerMTok: 15,
             },
             {
-              id: "claude-sonnet-4-6",
-              name: "Claude Sonnet 4.6",
+              id: "claude-sonnet-4-7",
+              name: "Claude Sonnet 4.7",
               contextWindow: 200000,
               costPerMTok: 3,
             },
@@ -3072,7 +3072,7 @@ export class KairosRPCHandler {
         costUsd: number;
         durationMs: number;
       }[] = [];
-      const targetModels = models ?? ["claude-opus-4-6", "gpt-5.4"];
+      const targetModels = models ?? ["claude-opus-4-7", "gpt-5.4"];
       for (const model of targetModels) {
         const start = Date.now();
         try {

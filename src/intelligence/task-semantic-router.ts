@@ -184,27 +184,28 @@ type ModelPreferenceList = readonly string[];
 const MODEL_PREFERENCES: ReadonlyMap<TaskType, ModelPreferenceList> = new Map([
   [
     "code-generation",
-    ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-5.4", "gpt-5", "gemini-3.1-pro", "gemma4:e4b"],
+    ["claude-opus-4-7", "claude-sonnet-4-7", "gpt-5.4", "gpt-5", "gemini-3.1-pro", "gemma4:e4b"],
   ],
-  ["code-review", ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-5.4", "gemini-3.1-pro"]],
-  ["debugging", ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-5.4", "gemini-3.1-pro"]],
-  ["research", ["gemini-3.1-pro", "gpt-5.4", "claude-opus-4-6", "claude-sonnet-4-6"]],
-  ["creative-writing", ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-5.4", "gemini-3.1-pro"]],
-  ["data-analysis", ["gpt-5.4", "claude-sonnet-4-6", "gemini-3.1-pro", "claude-opus-4-6"]],
-  ["conversation", ["claude-sonnet-4-6", "gpt-5", "gemini-2.5-flash", "gemma4:e4b"]],
-  ["math-reasoning", ["claude-opus-4-6", "gpt-5.4", "claude-sonnet-4-6", "gemini-3.1-pro"]],
-  ["document-processing", ["gemini-3.1-pro", "claude-sonnet-4-6", "gpt-5", "gemma4:e4b"]],
-  ["image-understanding", ["claude-sonnet-4-6", "gpt-5", "gemini-3.1-pro"]],
+  ["code-review", ["claude-opus-4-7", "claude-sonnet-4-7", "gpt-5.4", "gemini-3.1-pro"]],
+  ["debugging", ["claude-opus-4-7", "claude-sonnet-4-7", "gpt-5.4", "gemini-3.1-pro"]],
+  ["research", ["gemini-3.1-pro", "gpt-5.4", "claude-opus-4-7", "claude-sonnet-4-7"]],
+  ["creative-writing", ["claude-sonnet-4-7", "claude-opus-4-7", "gpt-5.4", "gemini-3.1-pro"]],
+  ["data-analysis", ["gpt-5.4", "claude-sonnet-4-7", "gemini-3.1-pro", "claude-opus-4-7"]],
+  ["conversation", ["claude-sonnet-4-7", "gpt-5", "gemini-2.5-flash", "gemma4:e4b"]],
+  ["math-reasoning", ["claude-opus-4-7", "gpt-5.4", "claude-sonnet-4-7", "gemini-3.1-pro"]],
+  ["document-processing", ["gemini-3.1-pro", "claude-sonnet-4-7", "gpt-5", "gemma4:e4b"]],
+  ["image-understanding", ["claude-sonnet-4-7", "gpt-5", "gemini-3.1-pro"]],
 ]);
 
 /** Cheap models for trivial tasks -- cost optimization. Sonnet, not Haiku. */
-const TRIVIAL_MODELS: readonly string[] = ["gemma4:e4b", "gemini-2.5-flash", "claude-sonnet-4-6"];
+const TRIVIAL_MODELS: readonly string[] = ["gemma4:e4b", "gemini-2.5-flash", "claude-sonnet-4-7"];
 
 // -- Cost estimates (USD per 1M tokens, rough averages) ---------------------
+// V14.1+V14.3: bumped 4-6 → 4-7 (4-6 retires June 15, 2026). Pricing unchanged.
 
 const COST_PER_1K_TOKENS: ReadonlyMap<string, number> = new Map([
-  ["claude-opus-4-6", 0.015], // $15 / 1M input
-  ["claude-sonnet-4-6", 0.003], // $3 / 1M input
+  ["claude-opus-4-7", 0.015], // $15 / 1M input
+  ["claude-sonnet-4-7", 0.003], // $3 / 1M input
   ["gpt-5.4", 0.01],
   ["gpt-5", 0.003],
   ["gemini-3.1-pro", 0.002],

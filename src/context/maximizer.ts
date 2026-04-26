@@ -190,12 +190,12 @@ export function maximizeAllProviders(
 
   // Known models per provider
   const providerModels: Record<string, readonly string[]> = {
-    anthropic: ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"],
+    anthropic: ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
     openai: ["gpt-5.4", "gpt-5.3-codex", "gpt-4.1"],
     codex: ["codexplan", "codexspark", "codexmini"],
     gemini: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.1-pro-preview"],
     ollama: ["qwen3-coder-next", "qwen3.5:27b", "devstral:24b"],
-    copilot: ["gpt-4.1", "claude-sonnet-4", "gpt-5"],
+    copilot: ["gpt-4.1", "claude-sonnet-4.7", "gpt-5"],
     deepseek: ["deepseek-r1", "deepseek-coder-v3"],
     mistral: ["codestral-2501", "mistral-large-2"],
     xai: ["grok-3", "grok-3-mini"],

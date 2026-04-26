@@ -59,9 +59,9 @@ export const BUILT_IN_PROFILES: Record<string, HarnessProfile> = {
   "max-quality": {
     name: "max-quality",
     description:
-      "Opus 4.6 + 128k thinking — use when the task is ambiguous, architectural, or mission-critical.",
+      "Opus 4.7 + 128k thinking — use when the task is ambiguous, architectural, or mission-critical.",
     provider: "anthropic",
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     tags: ["smart", "expensive", "deep-reasoning"],
     thinkingTokens: 128_000,
     temperature: 0.3,
@@ -91,7 +91,7 @@ export const BUILT_IN_PROFILES: Record<string, HarnessProfile> = {
     model: "sonar-pro",
     tags: ["web-search", "citations", "research"],
     temperature: 0.2,
-    fallbacks: [{ provider: "anthropic", model: "claude-sonnet-4-6" }],
+    fallbacks: [{ provider: "anthropic", model: "claude-sonnet-4-7" }],
     toolScope: "read-only",
   },
 
@@ -130,7 +130,7 @@ export const BUILT_IN_PROFILES: Record<string, HarnessProfile> = {
     description:
       "Read-only Opus — analyse but cannot mutate. For code review, audit, or exploring unfamiliar code.",
     provider: "anthropic",
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     tags: ["safe", "read-only", "audit"],
     temperature: 0.2,
     toolScope: "read-only",
@@ -141,7 +141,7 @@ export const BUILT_IN_PROFILES: Record<string, HarnessProfile> = {
     description:
       "Offensive-security profile — MITRE ATT&CK prompts, no tool limits, requires explicit --exploit flag.",
     provider: "anthropic",
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     tags: ["security", "offensive", "ctf"],
     temperature: 0.3,
     toolScope: "full",

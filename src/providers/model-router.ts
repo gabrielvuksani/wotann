@@ -251,7 +251,7 @@ export class ModelRouter {
     // Computer use → Claude Sonnet (only Claude supports native CU)
     if (task.requiresComputerUse) {
       return this.findBestAvailable([
-        { provider: "anthropic", model: "claude-sonnet-4-6", tier: 2 },
+        { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
         { provider: "copilot", model: "claude-sonnet-4-copilot", tier: 2 },
       ]);
     }
@@ -263,7 +263,7 @@ export class ModelRouter {
       return this.findBestAvailable([
         { provider: "gemini", model: "gemini-3.1-pro", tier: 1 },
         { provider: "vertex", model: "gemini-3.1-pro", tier: 1 },
-        { provider: "anthropic", model: "claude-sonnet-4-6", tier: 2 },
+        { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
         { provider: "openai", model: "gpt-5.4", tier: 2 },
         { provider: "ollama", model: "qwen3.5", tier: 1 },
       ]);
@@ -276,14 +276,14 @@ export class ModelRouter {
       return this.findBestAvailable([
         { provider: "gemini", model: "gemini-3.1-pro", tier: 1 },
         { provider: "vertex", model: "gemini-3.1-pro", tier: 1 },
-        { provider: "anthropic", model: "claude-sonnet-4-6", tier: 2 },
+        { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
       ]);
     }
 
     // Tier 2: Fast frontier for coding/execution
     if (task.priority === "latency" || task.category === "code") {
       return this.findBestAvailable([
-        { provider: "anthropic", model: "claude-sonnet-4-6", tier: 2 },
+        { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
         { provider: "copilot", model: "claude-sonnet-4-copilot", tier: 2 },
         { provider: "openai", model: "gpt-5.3-codex", tier: 2 },
         { provider: "ollama", model: "qwen3-coder-next", tier: 1 },
@@ -293,7 +293,7 @@ export class ModelRouter {
     // Tier 3: Deep frontier for planning/review
     if (task.category === "plan" || task.category === "review") {
       return this.findBestAvailable([
-        { provider: "anthropic", model: "claude-opus-4-6", tier: 3 },
+        { provider: "anthropic", model: "claude-opus-4-7", tier: 3 },
         { provider: "openai", model: "gpt-5.4", tier: 3 },
         { provider: "copilot", model: "gpt-5-copilot", tier: 3 },
       ]);
@@ -301,7 +301,7 @@ export class ModelRouter {
 
     // Default: balanced selection
     return this.findBestAvailable([
-      { provider: "anthropic", model: "claude-sonnet-4-6", tier: 2 },
+      { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
       { provider: "openai", model: "gpt-4.1", tier: 2 },
       { provider: "copilot", model: "claude-sonnet-4-copilot", tier: 2 },
       { provider: "gemini", model: "gemini-2.5-flash", tier: 2 },

@@ -270,12 +270,14 @@ const FALLBACK_MODELS: readonly string[] = [
   "o4-mini",
   "o3",
   "o3-mini",
-  // Anthropic models (via Copilot)
-  "claude-sonnet-4",
+  // Anthropic models (via Copilot). V14.3: dropped bare "claude-sonnet-4"
+  // (retires June 15, 2026); kept 4.5/4.6 for backward compat; added 4.7.
   "claude-sonnet-4.5",
   "claude-sonnet-4.6",
+  "claude-sonnet-4.7",
   "claude-opus-4.5",
   "claude-opus-4.6",
+  "claude-opus-4.7",
   "claude-haiku-4.5",
   // Google models (via Copilot)
   "gemini-2.5-pro",

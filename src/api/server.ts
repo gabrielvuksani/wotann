@@ -304,8 +304,8 @@ export class WotannAPIServer {
   private handleListModels(res: ServerResponse): void {
     const models = [
       { id: "wotann-harness", object: "model", created: Date.now(), owned_by: "wotann" },
-      { id: "claude-opus-4-6", object: "model", created: Date.now(), owned_by: "anthropic" },
-      { id: "claude-sonnet-4-6", object: "model", created: Date.now(), owned_by: "anthropic" },
+      { id: "claude-opus-4-7", object: "model", created: Date.now(), owned_by: "anthropic" },
+      { id: "claude-sonnet-4-7", object: "model", created: Date.now(), owned_by: "anthropic" },
       { id: "gpt-5.4", object: "model", created: Date.now(), owned_by: "openai" },
       { id: "gemini-2.5-pro", object: "model", created: Date.now(), owned_by: "google" },
     ];

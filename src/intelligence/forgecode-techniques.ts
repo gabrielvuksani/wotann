@@ -22,13 +22,8 @@ import { join, extname } from "node:path";
  * Sort properties alphabetically; strip empty descriptions.
  * Reduces tool-call errors by ~15% (ForgeCode finding).
  */
-export function optimizeToolSchema(
-  schema: Record<string, unknown>,
-): Record<string, unknown> {
-  const properties = (schema["properties"] ?? {}) as Record<
-    string,
-    Record<string, unknown>
-  >;
+export function optimizeToolSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const properties = (schema["properties"] ?? {}) as Record<string, Record<string, unknown>>;
   const required = (schema["required"] ?? []) as readonly string[];
 
   // Sort property keys alphabetically
@@ -40,10 +35,7 @@ export function optimizeToolSchema(
     if (!prop) continue;
     const cleaned = { ...prop };
     // Remove empty descriptions
-    if (
-      typeof cleaned["description"] === "string" &&
-      cleaned["description"].trim() === ""
-    ) {
+    if (typeof cleaned["description"] === "string" && cleaned["description"].trim() === "") {
       const { description: _, ...rest } = cleaned;
       sortedProperties[key] = rest;
     } else {
@@ -92,10 +84,7 @@ export class DoomLoopFingerprinter {
    * Track the last N fingerprints.
    * If 3+ identical consecutive fingerprints, flag as doom loop.
    */
-  record(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): DoomLoopCheck {
+  record(toolName: string, args: Record<string, unknown>): DoomLoopCheck {
     const payload = JSON.stringify({ tool: toolName, args });
     const fingerprint = createHash("md5").update(payload).digest("hex");
 
@@ -155,9 +144,9 @@ export interface ModelHarnessProfile {
 
 const MODEL_PROFILES: ReadonlyMap<string, ModelHarnessProfile> = new Map([
   [
-    "anthropic/claude-opus-4-6",
+    "anthropic/claude-opus-4-7",
     {
-      model: "claude-opus-4-6",
+      model: "claude-opus-4-7",
       provider: "anthropic",
       promptStyle: "xml" as const,
       toolCallFormat: "native" as const,
@@ -169,9 +158,9 @@ const MODEL_PROFILES: ReadonlyMap<string, ModelHarnessProfile> = new Map([
     },
   ],
   [
-    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-sonnet-4-7",
     {
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-7",
       provider: "anthropic",
       promptStyle: "xml" as const,
       toolCallFormat: "native" as const,
@@ -238,10 +227,7 @@ const DEFAULT_PROFILE: ModelHarnessProfile = {
   strengthAdjustments: [],
 };
 
-export function getModelProfile(
-  provider: string,
-  model: string,
-): ModelHarnessProfile {
+export function getModelProfile(provider: string, model: string): ModelHarnessProfile {
   const key = `${provider}/${model}`;
   return MODEL_PROFILES.get(key) ?? { ...DEFAULT_PROFILE, model, provider };
 }
@@ -315,11 +301,7 @@ export function correctToolCallArgs(
       // Strip trailing whitespace
       normalizedValue = value.trimEnd();
       // Normalize path separators (backslash to forward slash)
-      if (
-        correctKey.includes("path") ||
-        correctKey.includes("file") ||
-        correctKey === "dir"
-      ) {
+      if (correctKey.includes("path") || correctKey.includes("file") || correctKey === "dir") {
         normalizedValue = (normalizedValue as string).replace(/\\/g, "/");
       }
     }
@@ -487,10 +469,7 @@ function checkNoStubs(workingDir: string): ChecklistItem {
   }
 }
 
-function checkMatchesSpec(
-  originalTask: string,
-  workingDir: string,
-): ChecklistItem {
+function checkMatchesSpec(originalTask: string, workingDir: string): ChecklistItem {
   const taskKeywords = originalTask
     .toLowerCase()
     .split(/\s+/)
@@ -499,14 +478,9 @@ function checkMatchesSpec(
   try {
     const files = listSourceFiles(workingDir);
     const fileNames = files.map((f) => f.toLowerCase());
-    const matchedKeywords = taskKeywords.filter((kw) =>
-      fileNames.some((f) => f.includes(kw)),
-    );
+    const matchedKeywords = taskKeywords.filter((kw) => fileNames.some((f) => f.includes(kw)));
 
-    const coverage =
-      taskKeywords.length > 0
-        ? matchedKeywords.length / taskKeywords.length
-        : 0;
+    const coverage = taskKeywords.length > 0 ? matchedKeywords.length / taskKeywords.length : 0;
 
     return {
       description: "Files match task specification keywords",
@@ -528,45 +502,21 @@ function checkMatchesSpec(
 
 export interface EntryPoint {
   readonly file: string;
-  readonly type:
-    | "main"
-    | "index"
-    | "app"
-    | "server"
-    | "cli"
-    | "test-runner"
-    | "config";
+  readonly type: "main" | "index" | "app" | "server" | "cli" | "test-runner" | "config";
   readonly exports: readonly string[];
   readonly confidence: number;
 }
 
-const ENTRY_POINT_PATTERNS: ReadonlyMap<
-  EntryPoint["type"],
-  readonly RegExp[]
-> = new Map([
+const ENTRY_POINT_PATTERNS: ReadonlyMap<EntryPoint["type"], readonly RegExp[]> = new Map([
   ["main", [/^main\.[tj]sx?$/, /^src\/main\.[tj]sx?$/]],
-  [
-    "index",
-    [/^index\.[tj]sx?$/, /^src\/index\.[tj]sx?$/, /^lib\/index\.[tj]sx?$/],
-  ],
-  [
-    "app",
-    [/^app\.[tj]sx?$/, /^src\/app\.[tj]sx?$/, /^src\/App\.[tj]sx?$/],
-  ],
-  [
-    "server",
-    [/^server\.[tj]sx?$/, /^src\/server\.[tj]sx?$/, /^src\/api\/server\.[tj]sx?$/],
-  ],
+  ["index", [/^index\.[tj]sx?$/, /^src\/index\.[tj]sx?$/, /^lib\/index\.[tj]sx?$/]],
+  ["app", [/^app\.[tj]sx?$/, /^src\/app\.[tj]sx?$/, /^src\/App\.[tj]sx?$/]],
+  ["server", [/^server\.[tj]sx?$/, /^src\/server\.[tj]sx?$/, /^src\/api\/server\.[tj]sx?$/]],
   ["cli", [/^cli\.[tj]sx?$/, /^src\/cli\.[tj]sx?$/, /^bin\/.*\.[tj]sx?$/]],
   ["test-runner", [/^jest\.config\.[tj]s$/, /^vitest\.config\.[tj]s$/]],
   [
     "config",
-    [
-      /^tsconfig\.json$/,
-      /^package\.json$/,
-      /^next\.config\.[tj]s$/,
-      /^vite\.config\.[tj]s$/,
-    ],
+    [/^tsconfig\.json$/, /^package\.json$/, /^next\.config\.[tj]s$/, /^vite\.config\.[tj]s$/],
   ],
 ]);
 
@@ -574,9 +524,7 @@ const ENTRY_POINT_PATTERNS: ReadonlyMap<
  * Discover entry-point files in a project directory.
  * Returns files sorted by confidence (highest first).
  */
-export function discoverEntryPoints(
-  projectDir: string,
-): readonly EntryPoint[] {
+export function discoverEntryPoints(projectDir: string): readonly EntryPoint[] {
   const entryPoints: EntryPoint[] = [];
 
   try {
@@ -622,12 +570,7 @@ function collectFilesShallow(
         files.push(relativePath);
       } else if (entry.isDirectory()) {
         files.push(
-          ...collectFilesShallow(
-            join(dir, entry.name),
-            maxDepth,
-            currentDepth + 1,
-            relativePath,
-          ),
+          ...collectFilesShallow(join(dir, entry.name), maxDepth, currentDepth + 1, relativePath),
         );
       }
     }
@@ -641,7 +584,8 @@ function collectFilesShallow(
 function extractExports(projectDir: string, file: string): readonly string[] {
   try {
     const content = readFileSync(join(projectDir, file), "utf-8");
-    const exportPattern = /export\s+(?:default\s+)?(?:function|class|const|let|type|interface)\s+(\w+)/g;
+    const exportPattern =
+      /export\s+(?:default\s+)?(?:function|class|const|let|type|interface)\s+(\w+)/g;
     const exports: string[] = [];
     let match: RegExpExecArray | null = exportPattern.exec(content);
     while (match !== null) {
@@ -654,10 +598,7 @@ function extractExports(projectDir: string, file: string): readonly string[] {
   }
 }
 
-function computeEntryPointConfidence(
-  type: EntryPoint["type"],
-  exportCount: number,
-): number {
+function computeEntryPointConfidence(type: EntryPoint["type"], exportCount: number): number {
   const baseConfidence: Record<EntryPoint["type"], number> = {
     main: 0.95,
     index: 0.9,
@@ -709,12 +650,7 @@ export function allocateReasoningBudget(
     medium: {
       thinkingTokens: 8192,
       maxTurns: 15,
-      strategies: [
-        "direct-edit",
-        "single-file",
-        "multi-file",
-        "search-then-edit",
-      ],
+      strategies: ["direct-edit", "single-file", "multi-file", "search-then-edit"],
     },
     high: {
       thinkingTokens: 32768,
@@ -745,8 +681,7 @@ export function allocateReasoningBudget(
   const budget = budgets[complexity];
 
   // Scale thinking tokens down if context is running low
-  const contextScaleFactor =
-    contextPercent > 70 ? 0.5 : contextPercent > 50 ? 0.75 : 1.0;
+  const contextScaleFactor = contextPercent > 70 ? 0.5 : contextPercent > 50 ? 0.75 : 1.0;
 
   // Scale based on model capability
   const capabilityFactor =
@@ -754,41 +689,31 @@ export function allocateReasoningBudget(
 
   return {
     taskComplexity: complexity,
-    thinkingTokenBudget: Math.round(
-      budget.thinkingTokens * contextScaleFactor * capabilityFactor,
-    ),
+    thinkingTokenBudget: Math.round(budget.thinkingTokens * contextScaleFactor * capabilityFactor),
     maxTurns: Math.round(budget.maxTurns * contextScaleFactor),
     allowedStrategies: budget.strategies,
   };
 }
 
-function classifyTaskComplexity(
-  task: string,
-): ReasoningBudget["taskComplexity"] {
+function classifyTaskComplexity(task: string): ReasoningBudget["taskComplexity"] {
   const lower = task.toLowerCase();
   const wordCount = task.split(/\s+/).length;
 
   if (
-    /\b(architect|migrate|redesign|distributed|system[\s-]design|full[\s-]rewrite)\b/.test(
-      lower,
-    )
+    /\b(architect|migrate|redesign|distributed|system[\s-]design|full[\s-]rewrite)\b/.test(lower)
   ) {
     return "extreme";
   }
 
   if (
-    /\b(feature|implement|integrate|refactor|debug[\s-]complex|multi[\s-]file)\b/.test(
-      lower,
-    ) ||
+    /\b(feature|implement|integrate|refactor|debug[\s-]complex|multi[\s-]file)\b/.test(lower) ||
     wordCount > 50
   ) {
     return "high";
   }
 
   if (
-    /\b(typo|rename|format|fix[\s-]import|update[\s-]version|add[\s-]comment)\b/.test(
-      lower,
-    ) ||
+    /\b(typo|rename|format|fix[\s-]import|update[\s-]version|add[\s-]comment)\b/.test(lower) ||
     wordCount < 10
   ) {
     return "low";
@@ -824,10 +749,7 @@ const DEP_ERROR_PATTERNS: readonly DepErrorPattern[] = [
   {
     pattern: /env: (\S+): No such file or directory/i,
     extractName: (m) => m[1] ?? "",
-    suggestInstall: (name) => [
-      `brew install ${name}`,
-      `apt-get install ${name}`,
-    ],
+    suggestInstall: (name) => [`brew install ${name}`, `apt-get install ${name}`],
   },
   // Node.js "Cannot find module"
   {
@@ -856,10 +778,7 @@ const DEP_ERROR_PATTERNS: readonly DepErrorPattern[] = [
       const raw = m[1] ?? "";
       return raw.split(".")[0] ?? raw;
     },
-    suggestInstall: (name) => [
-      `pip install ${name}`,
-      `pip3 install ${name}`,
-    ],
+    suggestInstall: (name) => [`pip install ${name}`, `pip3 install ${name}`],
   },
   // Python "ImportError"
   {
@@ -868,10 +787,7 @@ const DEP_ERROR_PATTERNS: readonly DepErrorPattern[] = [
       const raw = m[1] ?? "";
       return raw.split(".")[0] ?? raw;
     },
-    suggestInstall: (name) => [
-      `pip install ${name}`,
-      `pip3 install ${name}`,
-    ],
+    suggestInstall: (name) => [`pip install ${name}`, `pip3 install ${name}`],
   },
   // Ruby "cannot load such file"
   {
@@ -889,10 +805,7 @@ const DEP_ERROR_PATTERNS: readonly DepErrorPattern[] = [
   {
     pattern: /(\S+) is not (?:installed|recognized|found)/i,
     extractName: (m) => m[1] ?? "",
-    suggestInstall: (name) => [
-      `brew install ${name}`,
-      `npm install -g ${name}`,
-    ],
+    suggestInstall: (name) => [`brew install ${name}`, `npm install -g ${name}`],
   },
 ];
 
@@ -937,7 +850,11 @@ const LONG_TIMEOUT_PATTERNS: readonly {
   { pattern: /\b(?:webpack|next\s+build|vite\s+build|turbopack)\b/i, timeout: 300_000 },
 
   // 2 minutes: tests, installs, medium builds
-  { pattern: /\b(?:npm\s+(?:install|ci|test|run\s+build)|yarn\s+(?:install|test)|pnpm\s+(?:install|test))\b/i, timeout: 120_000 },
+  {
+    pattern:
+      /\b(?:npm\s+(?:install|ci|test|run\s+build)|yarn\s+(?:install|test)|pnpm\s+(?:install|test))\b/i,
+    timeout: 120_000,
+  },
   { pattern: /\b(?:pip\s+install|pip3\s+install)\b/i, timeout: 120_000 },
   { pattern: /\b(?:brew\s+install|apt-get\s+install|apt\s+install)\b/i, timeout: 120_000 },
   { pattern: /\b(?:pytest|jest|vitest|mocha|go\s+test)\b/i, timeout: 120_000 },
@@ -998,7 +915,7 @@ export class StaleReadTracker {
     if (lastRead === undefined) {
       return false;
     }
-    return (currentTurn - lastRead) > this.staleTurnThreshold;
+    return currentTurn - lastRead > this.staleTurnThreshold;
   }
 
   /**
@@ -1022,7 +939,7 @@ export class StaleReadTracker {
   getStaleFiles(currentTurn: number): readonly string[] {
     const stale: string[] = [];
     for (const [path, lastRead] of this.readTimes) {
-      if ((currentTurn - lastRead) > this.staleTurnThreshold) {
+      if (currentTurn - lastRead > this.staleTurnThreshold) {
         stale.push(path);
       }
     }
@@ -1047,28 +964,16 @@ export class StaleReadTracker {
 // ── Shared utilities ──────────────────────────────────────
 
 function listSourceFiles(dir: string): readonly string[] {
-  const sourceExtensions = new Set([
-    ".ts",
-    ".tsx",
-    ".js",
-    ".jsx",
-    ".py",
-    ".rs",
-    ".go",
-  ]);
+  const sourceExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go"]);
 
   try {
-    return readdirSync(dir)
-      .filter((f) => {
-        try {
-          return (
-            statSync(join(dir, f)).isFile() &&
-            sourceExtensions.has(extname(f))
-          );
-        } catch {
-          return false;
-        }
-      });
+    return readdirSync(dir).filter((f) => {
+      try {
+        return statSync(join(dir, f)).isFile() && sourceExtensions.has(extname(f));
+      } catch {
+        return false;
+      }
+    });
   } catch {
     return [];
   }

@@ -78,7 +78,7 @@
     "zod": "^4.3.6"
   },
   "peerDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.90"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.119"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
@@ -92,7 +92,7 @@
     "sqlite-vec": "^0.1.9"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.90",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.119",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",

@@ -67,16 +67,26 @@ export interface CapabilityGap {
 // ── Known Model Capabilities ────────────────────────────────
 
 const PROFILES: readonly ModelCapabilityProfile[] = [
-  // Claude Opus 4.6
+  // Claude Opus 4.7
   {
-    provider: "anthropic", model: "claude-opus-4-6",
+    provider: "anthropic",
+    model: "claude-opus-4-7",
     capabilities: [
       { capability: "tool_use", status: "native" },
       { capability: "vision", status: "native" },
       { capability: "thinking", status: "native" },
-      { capability: "extended_thinking", status: "native", maxParameter: 128_000, notes: "Budget tokens for thinking" },
+      {
+        capability: "extended_thinking",
+        status: "native",
+        maxParameter: 128_000,
+        notes: "Budget tokens for thinking",
+      },
       { capability: "extended_context", status: "native", maxParameter: 1_000_000 },
-      { capability: "json_mode", status: "emulated", emulationStrategy: "JSON extraction from response" },
+      {
+        capability: "json_mode",
+        status: "emulated",
+        emulationStrategy: "JSON extraction from response",
+      },
       { capability: "function_calling", status: "native", notes: "Via tool_use" },
       { capability: "streaming", status: "native" },
       { capability: "prompt_caching", status: "native" },
@@ -101,7 +111,8 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // GPT-5.4
   {
-    provider: "openai", model: "gpt-5.4",
+    provider: "openai",
+    model: "gpt-5.4",
     capabilities: [
       { capability: "tool_use", status: "native", notes: "Via function calling" },
       { capability: "vision", status: "native" },
@@ -133,7 +144,8 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // Gemini 2.5 Pro
   {
-    provider: "gemini", model: "gemini-2.5-pro",
+    provider: "gemini",
+    model: "gemini-2.5-pro",
     capabilities: [
       { capability: "tool_use", status: "native" },
       { capability: "vision", status: "native" },
@@ -165,7 +177,8 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // Ollama local
   {
-    provider: "ollama", model: "qwen3-coder-next",
+    provider: "ollama",
+    model: "qwen3-coder-next",
     capabilities: [
       { capability: "tool_use", status: "native" },
       { capability: "vision", status: "unavailable" },
@@ -197,7 +210,8 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // Copilot (GitHub Copilot / Codex CLI — runs OpenAI models with code focus)
   {
-    provider: "copilot", model: "codex-cli",
+    provider: "copilot",
+    model: "codex-cli",
     capabilities: [
       { capability: "tool_use", status: "native", notes: "Native tool/function calling" },
       { capability: "vision", status: "unavailable" },
@@ -229,7 +243,8 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // DeepSeek R1
   {
-    provider: "deepseek", model: "deepseek-r1",
+    provider: "deepseek",
+    model: "deepseek-r1",
     capabilities: [
       { capability: "tool_use", status: "native" },
       { capability: "vision", status: "native" },
@@ -261,11 +276,16 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // Mistral Large Latest
   {
-    provider: "mistral", model: "mistral-large-latest",
+    provider: "mistral",
+    model: "mistral-large-latest",
     capabilities: [
       { capability: "tool_use", status: "native" },
       { capability: "vision", status: "native" },
-      { capability: "thinking", status: "emulated", emulationStrategy: "Chain-of-thought prompting" },
+      {
+        capability: "thinking",
+        status: "emulated",
+        emulationStrategy: "Chain-of-thought prompting",
+      },
       { capability: "extended_thinking", status: "unavailable" },
       { capability: "extended_context", status: "native", maxParameter: 128_000 },
       { capability: "json_mode", status: "native" },
@@ -293,7 +313,8 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // xAI Grok-3
   {
-    provider: "xai", model: "grok-3",
+    provider: "xai",
+    model: "grok-3",
     capabilities: [
       { capability: "tool_use", status: "native" },
       { capability: "vision", status: "native" },
@@ -325,7 +346,8 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // Azure OpenAI (runs OpenAI models — same capabilities as OpenAI)
   {
-    provider: "azure", model: "gpt-5.4",
+    provider: "azure",
+    model: "gpt-5.4",
     capabilities: [
       { capability: "tool_use", status: "native", notes: "Via function calling" },
       { capability: "vision", status: "native" },
@@ -357,14 +379,24 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // Bedrock (runs Claude models — same capabilities as Anthropic)
   {
-    provider: "bedrock", model: "claude-opus-4-6",
+    provider: "bedrock",
+    model: "claude-opus-4-7",
     capabilities: [
       { capability: "tool_use", status: "native" },
       { capability: "vision", status: "native" },
       { capability: "thinking", status: "native" },
-      { capability: "extended_thinking", status: "native", maxParameter: 128_000, notes: "Budget tokens for thinking" },
+      {
+        capability: "extended_thinking",
+        status: "native",
+        maxParameter: 128_000,
+        notes: "Budget tokens for thinking",
+      },
       { capability: "extended_context", status: "native", maxParameter: 1_000_000 },
-      { capability: "json_mode", status: "emulated", emulationStrategy: "JSON extraction from response" },
+      {
+        capability: "json_mode",
+        status: "emulated",
+        emulationStrategy: "JSON extraction from response",
+      },
       { capability: "function_calling", status: "native", notes: "Via tool_use" },
       { capability: "streaming", status: "native" },
       { capability: "prompt_caching", status: "native" },
@@ -389,15 +421,36 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
 
   // HuggingFace (open models — most capabilities emulated)
   {
-    provider: "huggingface", model: "meta-llama-4-70b",
+    provider: "huggingface",
+    model: "meta-llama-4-70b",
     capabilities: [
-      { capability: "tool_use", status: "emulated", emulationStrategy: "Tool-call prompting with structured output parsing" },
-      { capability: "vision", status: "emulated", emulationStrategy: "Multimodal model variant required" },
-      { capability: "thinking", status: "emulated", emulationStrategy: "Chain-of-thought prompting" },
+      {
+        capability: "tool_use",
+        status: "emulated",
+        emulationStrategy: "Tool-call prompting with structured output parsing",
+      },
+      {
+        capability: "vision",
+        status: "emulated",
+        emulationStrategy: "Multimodal model variant required",
+      },
+      {
+        capability: "thinking",
+        status: "emulated",
+        emulationStrategy: "Chain-of-thought prompting",
+      },
       { capability: "extended_thinking", status: "unavailable" },
       { capability: "extended_context", status: "native", maxParameter: 128_000 },
-      { capability: "json_mode", status: "emulated", emulationStrategy: "JSON instruction in system prompt" },
-      { capability: "function_calling", status: "emulated", emulationStrategy: "Structured output parsing" },
+      {
+        capability: "json_mode",
+        status: "emulated",
+        emulationStrategy: "JSON instruction in system prompt",
+      },
+      {
+        capability: "function_calling",
+        status: "emulated",
+        emulationStrategy: "Structured output parsing",
+      },
       { capability: "streaming", status: "native" },
       { capability: "prompt_caching", status: "unavailable" },
       { capability: "computer_use", status: "unavailable" },
@@ -412,7 +465,11 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
       { capability: "stop_sequences", status: "native" },
       { capability: "logprobs", status: "native" },
       { capability: "seed", status: "native" },
-      { capability: "response_format", status: "emulated", emulationStrategy: "Grammar-constrained generation" },
+      {
+        capability: "response_format",
+        status: "emulated",
+        emulationStrategy: "Grammar-constrained generation",
+      },
       { capability: "parallel_tool_calls", status: "unavailable" },
       { capability: "mcp", status: "unavailable" },
       { capability: "batch_api", status: "unavailable" },
@@ -469,7 +526,9 @@ export class CapabilityEqualizer {
     for (const sourceCap of sourceProfile.capabilities) {
       if (sourceCap.status === "unavailable") continue; // Can't lose what you don't have
 
-      const targetCap = targetProfile.capabilities.find((c) => c.capability === sourceCap.capability);
+      const targetCap = targetProfile.capabilities.find(
+        (c) => c.capability === sourceCap.capability,
+      );
       const targetStatus = targetCap?.status ?? "unavailable";
 
       if (targetStatus !== sourceCap.status) {
@@ -541,7 +600,11 @@ function getImpactLevel(
   if (targetStatus === "degraded") return "medium";
 
   const highImpactCaps: readonly CapabilityName[] = [
-    "tool_use", "thinking", "multi_turn", "system_prompt", "streaming",
+    "tool_use",
+    "thinking",
+    "multi_turn",
+    "system_prompt",
+    "streaming",
   ];
 
   return highImpactCaps.includes(capability) ? "high" : "medium";
