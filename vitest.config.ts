@@ -6,13 +6,13 @@ export default defineConfig({
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     exclude: ["node_modules", "dist"],
     testTimeout: 10_000,
-    // pool: "forks" — required because tests use `process.chdir()` and
-    // `process.exit()` which throw "not supported in workers" under
-    // pool: "threads". The CI flake (vitest-dev/vitest#8861) is then
-    // mitigated at the WORKFLOW level via matrix-parallel shards in
-    // .github/workflows/ci.yml — each shard gets its own runner with
-    // its own clean V8 heap.
-    pool: "forks",
+    // pool: "forks" hits vitest 4 known issue (#8861) of IPC stalls in
+    // CI that look like SIGKILL. pool: "threads" doesn't work because
+    // tests use process.chdir/exit (not supported in true workers).
+    // pool: "vmThreads" is the third option — uses Node vm contexts
+    // inside threads, gets thread-like perf without thread isolation
+    // restrictions, supports process.chdir/exit.
+    pool: "vmThreads",
     maxWorkers: 1,
     fileParallelism: false,
   },
