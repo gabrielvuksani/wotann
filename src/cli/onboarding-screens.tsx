@@ -46,7 +46,7 @@ import type {
   ProviderRung,
   ProviderRungCategory,
 } from "../providers/provider-ladder.js";
-import { PROVIDER_LADDER } from "../providers/provider-ladder.js";
+import { PROVIDER_LADDER, selectFirstAvailable } from "../providers/provider-ladder.js";
 import type { FirstRunQueryRunner } from "./first-run-success.js";
 import type { MigrationPlan } from "../core/config-migration.js";
 import { FirstRunScreen } from "./onboarding-screens/first-run-screen.js";
@@ -63,6 +63,11 @@ import type { AuthMode } from "../auth/auth-mode.js";
  * between. Each strategy maps to one or more ladder categories — the
  * wizard's screen 3 then shows the top rungs from those categories.
  *
+ *   "auto"    — Wave 1-F: walk the canonical provider ladder and pick
+ *               the first available rung. If a rung resolves we
+ *               short-circuit to confirm; otherwise the wizard falls
+ *               through to the manual pick screen (showing the full
+ *               ladder so the user can install/select a fallback).
  *   "app"     — subscriptions via detected CLIs (Claude Code / Codex)
  *   "byok"    — paste an API key they already have
  *   "free"    — sign up for a 30-second free tier
@@ -72,7 +77,7 @@ import type { AuthMode } from "../auth/auth-mode.js";
  * The mapping lives in `categoriesForStrategy()` so screen 3 can just
  * call `filterLadder({categories})` against the ladder.
  */
-export type OnboardingStrategy = "app" | "byok" | "free" | "local" | "later";
+export type OnboardingStrategy = "auto" | "app" | "byok" | "free" | "local" | "later";
 
 export interface StrategyChoice {
   readonly key: OnboardingStrategy;
@@ -134,6 +139,11 @@ export function categoriesForStrategy(
   strategy: OnboardingStrategy,
 ): readonly ProviderRungCategory[] {
   switch (strategy) {
+    case "auto":
+      // Wave 1-F: when auto-resolution fails the wizard drops the user
+      // on the pick screen with strategy=auto. Show the full ladder
+      // (every non-empty category) so they can hand-pick anything.
+      return ["subscription", "free-tier", "free-aggregator", "byok", "local", "advanced"];
     case "app":
       return ["subscription"];
     case "byok":
@@ -174,10 +184,20 @@ export function formatHardwareSummary(profile: HardwareProfile): string {
 }
 
 /**
- * Strategy list shown on screen 2. Order matches the V9 mock-up so
- * keyboard muscle-memory matches the plan's numbering (1..5).
+ * Strategy list shown on screen 2.
+ *
+ * Wave 1-F (GA-03 closure): the "auto" choice is now first so the
+ * fast-path keyboard muscle-memory is "Enter, Enter" — pick auto,
+ * confirm whatever the ladder resolved. The remaining 5 strategies
+ * preserve their previous V9 ordering for users who want explicit
+ * control.
  */
 export const STRATEGY_CHOICES: readonly StrategyChoice[] = [
+  {
+    key: "auto",
+    label: "Auto-pick the best available provider",
+    hint: "Walks the canonical ladder (subscription -> free -> BYOK -> local) and picks the first that works",
+  },
   {
     key: "app",
     label: "Connect an official AI app I already have",
@@ -196,7 +216,7 @@ export const STRATEGY_CHOICES: readonly StrategyChoice[] = [
   {
     key: "local",
     label: "Run a local model (fully private)",
-    hint: "Ollama or LM Studio — on-device, no data leaves machine",
+    hint: "Ollama or any OpenAI-compatible local server — on-device, no data leaves machine",
   },
   {
     key: "later",
@@ -234,7 +254,19 @@ export type WizardStep =
 
 export type WizardAction =
   | { readonly type: "next-from-welcome" }
-  | { readonly type: "pick-strategy"; readonly strategy: OnboardingStrategy }
+  | {
+      readonly type: "pick-strategy";
+      readonly strategy: OnboardingStrategy;
+      /**
+       * Wave 1-F: when strategy === "auto", callers pre-resolve the
+       * canonical ladder (via `selectFirstAvailable`) and pass the
+       * winning rung here. A non-null rung short-circuits to confirm;
+       * `null` means auto failed and the wizard falls through to the
+       * manual pick screen so the user can install/configure a
+       * provider. Other strategies ignore this field.
+       */
+      readonly autoResolvedRung?: ProviderRung | null;
+    }
   | { readonly type: "pick-rung"; readonly rung: ProviderRung | null }
   | { readonly type: "confirm" }
   | {
@@ -256,6 +288,20 @@ export function reduceWizard(state: WizardStep, action: WizardAction): WizardSte
     case "pick-strategy":
       if (action.strategy === "later") {
         return { kind: "done", strategy: "later", rung: null, reason: "skip" };
+      }
+      // Wave 1-F: "auto" strategy short-circuits when the caller has
+      // already resolved a rung via the canonical ladder. A null
+      // resolved rung (no provider available) falls through to the
+      // manual pick screen so the user can install something.
+      if (action.strategy === "auto" && action.autoResolvedRung !== undefined) {
+        if (action.autoResolvedRung !== null) {
+          return {
+            kind: "confirm",
+            strategy: "auto",
+            rung: action.autoResolvedRung,
+          };
+        }
+        return { kind: "pick", strategy: "auto" };
       }
       return { kind: "pick", strategy: action.strategy };
     case "pick-rung":
@@ -367,6 +413,7 @@ function StrategyScreen({ availability, onPick, onBack }: StrategyScreenProps): 
 
   const strategyHasAny = React.useMemo(() => {
     const map: Record<OnboardingStrategy, boolean> = {
+      auto: false,
       app: false,
       byok: false,
       free: false,
@@ -375,6 +422,8 @@ function StrategyScreen({ availability, onPick, onBack }: StrategyScreenProps): 
     };
     for (const rung of PROVIDER_LADDER) {
       if (availability[rung.probe]) {
+        // Wave 1-F: any available rung makes "auto" eligible.
+        map.auto = true;
         if (rung.category === "subscription") map.app = true;
         else if (rung.category === "byok") map.byok = true;
         else if (rung.category === "free-tier") map.free = true;
@@ -433,7 +482,7 @@ function StrategyScreen({ availability, onPick, onBack }: StrategyScreenProps): 
         })}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>↑/↓ to move · Enter to select · 1-5 to jump · Esc to go back</Text>
+        <Text dimColor>↑/↓ to move · Enter to select · 1-6 to jump · Esc to go back</Text>
       </Box>
     </Box>
   );
@@ -468,6 +517,7 @@ function ProviderPickScreen({
   });
 
   const strategyTitles: Record<OnboardingStrategy, string> = {
+    auto: "Auto-pick — manual fallback",
     app: "Subscriptions",
     byok: "Bring your own API key",
     free: "Free-tier cloud APIs",
@@ -683,7 +733,17 @@ export function OnboardingApp(props: OnboardingAppProps): React.ReactElement {
         <StrategyScreen
           hardware={props.hardware}
           availability={props.availability}
-          onPick={(strategy) => dispatch({ type: "pick-strategy", strategy })}
+          onPick={(strategy) => {
+            // Wave 1-F: when the user picks "auto", resolve the
+            // canonical ladder up-front and pass the winner (or null)
+            // to the reducer so it can short-circuit to confirm.
+            if (strategy === "auto") {
+              const autoResolvedRung = selectFirstAvailable(props.availability);
+              dispatch({ type: "pick-strategy", strategy, autoResolvedRung });
+            } else {
+              dispatch({ type: "pick-strategy", strategy });
+            }
+          }}
           onBack={() => dispatch({ type: "back" })}
         />
       );

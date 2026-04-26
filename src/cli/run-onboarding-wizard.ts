@@ -24,9 +24,17 @@
 
 import React from "react";
 import { render } from "ink";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { stringify as stringifyYaml } from "yaml";
 import { OnboardingApp } from "./onboarding-screens.js";
 import { detectHardware } from "../core/hardware-detect.js";
-import { PROVIDER_LADDER, type ProviderAvailability } from "../providers/provider-ladder.js";
+import {
+  PROVIDER_LADDER,
+  selectFirstAvailable,
+  type ProviderAvailability,
+  type ProviderRung,
+} from "../providers/provider-ladder.js";
 import { planMigration } from "../core/config-migration.js";
 import { discoverProviders } from "../providers/discovery.js";
 import type { FirstRunQueryRunner } from "./first-run-success.js";
@@ -118,4 +126,69 @@ export async function runOnboardingWizard(opts: RunWizardOptions = {}): Promise<
     );
     instance.waitUntilExit().then(() => resolve());
   });
+}
+
+// ── Non-interactive auto-pick (CI / non-TTY) ────────────────
+
+export interface RunNonInteractiveAutoPickOptions {
+  /**
+   * Override the provider availability snapshot. Default: live
+   * discovery via `discoverProviders()`. Tests inject a fixed map so
+   * the ladder walk is deterministic.
+   */
+  readonly availabilityOverride?: ProviderAvailability;
+  /**
+   * Workspace root where `.wotann/wotann.yaml` is written. Defaults
+   * to `process.cwd()`. Tests pass a temp dir to keep the filesystem
+   * sandbox isolated.
+   */
+  readonly workingDir?: string;
+}
+
+/**
+ * Wave 1-F (GA-03 closure): non-interactive auto-pick used when WOTANN
+ * runs without a TTY (CI, scripts, headless containers). Walks the
+ * canonical provider ladder via `selectFirstAvailable`, writes a
+ * minimal `.wotann/wotann.yaml` with the resolved rung, and returns
+ * that rung. If no rung is available, returns `null` and writes
+ * nothing — honest failure per QB #6.
+ *
+ * The YAML schema written here is intentionally minimal:
+ *   defaultProvider: <rung.id>
+ *   selectedRung:
+ *     probe: <rung.probe>
+ *     rank: <rung.rank>
+ *     category: <rung.category>
+ *
+ * The full config gets richer fields when the user runs `wotann init`
+ * with the wizard or via the legacy chalk flow; this auto-pick exists
+ * specifically to bootstrap CI pipelines where any working provider
+ * is acceptable.
+ */
+export async function runNonInteractiveAutoPick(
+  opts: RunNonInteractiveAutoPickOptions = {},
+): Promise<ProviderRung | null> {
+  const availability = opts.availabilityOverride ?? (await buildAvailabilityFromDiscovery());
+  const workingDir = opts.workingDir ?? process.cwd();
+
+  const picked = selectFirstAvailable(availability);
+  if (picked === null) {
+    // QB #6 honest failure: no rung resolves, return null + write
+    // nothing so the caller can surface install instructions.
+    return null;
+  }
+
+  const wotannDir = join(workingDir, ".wotann");
+  mkdirSync(wotannDir, { recursive: true });
+  const yamlPath = join(wotannDir, "wotann.yaml");
+  const yamlBody = stringifyYaml({
+    defaultProvider: picked.id,
+    selectedRung: {
+      probe: picked.probe,
+      rank: picked.rank,
+      category: picked.category,
+    },
+  });
+  writeFileSync(yamlPath, yamlBody, "utf-8");
+  return picked;
 }
