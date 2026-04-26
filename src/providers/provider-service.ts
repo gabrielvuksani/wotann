@@ -24,6 +24,7 @@ import { execFileSync } from "node:child_process";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { withRetries, defaultRetryPolicy, type RetryPolicy } from "./retry-strategies.js";
 import { CircuitBreaker, withBreaker } from "./circuit-breaker.js";
+import { secureStoreSet, secureStoreGet, secureStoreDelete } from "../auth/secure-store.js";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -49,8 +50,18 @@ export interface ProviderCredential {
   readonly label: string;
   /** Opaque token material — never returned to UI in full. */
   readonly token?: string;
-  /** Where the credential was sourced from, for debugging. */
-  readonly source: "env" | "providers.env" | "oauth-file" | "cli" | "stored-file";
+  /**
+   * Where the credential was sourced from, for debugging.
+   *
+   * - "env"           — process.env (shell export, launchd, etc.)
+   * - "providers.env" — ~/.wotann/providers.env file
+   * - "oauth-file"    — third-party auth file (e.g. ~/.codex/auth.json)
+   * - "cli"           — vendor CLI binary on PATH (no token visible)
+   * - "stored-file"   — Wave 6-QQ file fallback at ~/.wotann/credentials.json
+   * - "keychain"      — Wave 6-QQ OS keyring (macOS Keychain, libsecret,
+   *                     or Credential Vault) when keytar succeeds
+   */
+  readonly source: "env" | "providers.env" | "oauth-file" | "cli" | "stored-file" | "keychain";
   /** Unix seconds when the credential expires, if applicable. */
   readonly expiresAt?: number;
 }
@@ -110,71 +121,228 @@ export interface SavedCredential {
   readonly expiresAt?: number;
   readonly label?: string;
   readonly savedAt: number;
+  /**
+   * Wave 6-QQ — physical backend that produced the credential at load
+   * time. Populated by `CredentialStore.load()` after consulting the
+   * secure-store. NOT persisted (the OS keychain is the source of truth
+   * on subsequent loads). Detect callsites use this to set the
+   * `ProviderCredential.source` tag honestly ("keychain" vs "stored-file")
+   * rather than the hardcoded "stored-file" Wave 3-P shipped.
+   */
+  readonly _storedAt?: "keychain" | "file";
+}
+
+// ── V9 Wave 6-MM — shared auth-expired error message ──────────
+
+/**
+ * Single source of truth for the user-facing "key expired mid-stream"
+ * message. Adapters call this so the wording (and the `wotann login
+ * <provider>` hint) stays identical across Anthropic, OpenAI-compat,
+ * Gemini, Codex, Copilot, and any future stream provider.
+ *
+ * QB#6: clear, actionable error — never a cryptic "stream closed".
+ */
+export function authExpiredMessage(provider: string): string {
+  return `Authentication expired. Re-authenticate with \`wotann login ${provider}\`.`;
 }
 
 // ── Credential Store ───────────────────────────────────────────
 
 /**
- * Unified credential store. Writes to ~/.wotann/credentials.json with 0600
- * permissions. Env vars always win over stored creds (to honour user intent
- * when they explicitly export a key in their shell).
+ * Unified credential store.
+ *
+ * Wave 3-P (pre-6-QQ): wrote a flat `~/.wotann/credentials.json` file with
+ * mode 0600 and labelled every cred `source: "stored-file"`.
+ *
+ * Wave 6-QQ: routes through `secureStoreSet/Get/Delete`, which prefer the
+ * OS keyring (macOS Keychain / Linux libsecret / Windows Credential Vault)
+ * via the optional `keytar` native dep, and fall back to the same
+ * `~/.wotann/credentials.json` file when keytar is unavailable. The detect
+ * callsites consult `_storedAt` on the returned `SavedCredential` to label
+ * the `ProviderCredential.source` honestly ("keychain" vs "stored-file").
+ *
+ * Only the JSON envelope of a `SavedCredential` (method/token/label/
+ * expiresAt/savedAt) goes into the keyring — one keyring entry per provider.
+ *
+ * Env vars still win over stored creds at the detect layer (callers honour
+ * user intent when they explicitly export a key in their shell).
+ *
+ * Migration safety: a pre-Wave-6-QQ install wrote raw `SavedCredential`
+ * objects (not JSON strings) into the file. `decodeLegacyEntry` accepts
+ * both shapes so the upgrade is transparent.
  */
 export class CredentialStore {
   private readonly path: string;
   private cache: Record<string, SavedCredential> | null = null;
+  /**
+   * Provider IDs known to live in the secure-store. Populated from the
+   * legacy file scan AND every save(); drives the `load()` keychain
+   * round-trip. Per-process state, never persisted (QB#7).
+   */
+  private knownAccounts: Set<string> = new Set();
 
   constructor(path?: string) {
     this.path = path ?? resolveWotannHomeSubdir("credentials.json");
   }
 
-  load(): Record<string, SavedCredential> {
+  /**
+   * Load all known credentials. Asks `secureStoreGet` for every previously
+   * seen account; falls back to whatever the legacy credentials.json file
+   * holds so a fresh process bootstrapping after a Wave 3-P install still
+   * finds its tokens.
+   */
+  async load(): Promise<Record<string, SavedCredential>> {
     if (this.cache) return this.cache;
-    if (!existsSync(this.path)) {
-      this.cache = {};
-      return this.cache;
+
+    const merged: Record<string, SavedCredential> = {};
+
+    // 1. Legacy file scan — surfaces any cred saved by a pre-Wave-6-QQ
+    //    install. New writes also flow through the file backend when
+    //    keytar is unavailable, so this is the always-correct floor.
+    if (existsSync(this.path)) {
+      try {
+        const raw = readFileSync(this.path, "utf-8");
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        for (const [providerId, value] of Object.entries(parsed)) {
+          const decoded = decodeLegacyEntry(value);
+          if (decoded) {
+            merged[providerId] = { ...decoded, _storedAt: "file" };
+            this.knownAccounts.add(providerId);
+          }
+        }
+      } catch {
+        /* malformed legacy file — fall through to keychain probe */
+      }
     }
-    try {
-      const raw = readFileSync(this.path, "utf-8");
-      const parsed = JSON.parse(raw) as Record<string, SavedCredential>;
-      this.cache = parsed;
-      return parsed;
-    } catch {
-      this.cache = {};
-      return this.cache;
+
+    // 2. Keychain re-probe — for every known account, ask the secure
+    //    store. If keytar has a value it WINS over the legacy file
+    //    entry (new saves write keychain-first when available; the file
+    //    copy may be stale).
+    for (const account of this.knownAccounts) {
+      try {
+        const got = await secureStoreGet(account);
+        if (got.password !== null && got.source === "keychain") {
+          const envelope = decodeEnvelope(got.password);
+          if (envelope) {
+            merged[account] = { ...envelope, _storedAt: "keychain" };
+          }
+        }
+      } catch {
+        /* keychain miss — keep the file copy already in `merged` */
+      }
     }
+
+    this.cache = merged;
+    return merged;
   }
 
-  save(providerId: string, credential: SavedCredential): void {
-    const current = this.load();
-    this.cache = { ...current, [providerId]: credential };
-    this.persist();
+  /**
+   * Persist a credential. Routes through `secureStoreSet` which decides
+   * keychain vs file at runtime. Updates the in-memory cache with the
+   * physical backend that won so detect callsites read the truth.
+   */
+  async save(providerId: string, credential: SavedCredential): Promise<void> {
+    const envelope = encodeEnvelope(credential);
+    const result = await secureStoreSet(providerId, envelope);
+    if (result.error) {
+      // QB#6 honest fallback: log the keytar failure but continue — the
+      // file backend already absorbed the write. Without this the user
+      // would never know their install is missing libsecret.
+      console.warn(
+        `[providers] keychain unavailable for ${providerId}, fell back to file: ${result.error}`,
+      );
+    }
+    const current = await this.load();
+    this.cache = {
+      ...current,
+      [providerId]: { ...credential, _storedAt: result.stored },
+    };
+    this.knownAccounts.add(providerId);
   }
 
-  delete(providerId: string): void {
-    const current = this.load();
+  /**
+   * Remove a credential from BOTH backends. `secureStoreDelete` handles
+   * the dual delete; we just refresh the in-memory cache.
+   */
+  async delete(providerId: string): Promise<void> {
+    await secureStoreDelete(providerId);
+    const current = await this.load();
     const { [providerId]: _removed, ...rest } = current;
     this.cache = rest;
-    this.persist();
+    this.knownAccounts.delete(providerId);
   }
 
-  get(providerId: string): SavedCredential | undefined {
-    return this.load()[providerId];
+  async get(providerId: string): Promise<SavedCredential | undefined> {
+    return (await this.load())[providerId];
   }
 
-  all(): Readonly<Record<string, SavedCredential>> {
+  /**
+   * Synchronous cache peek for hot-path callers that need the last-known
+   * credential without awaiting (e.g. `getAlternateCredential` runs inside
+   * a sync re-auth callback). Returns undefined when the cache is unwarmed
+   * — caller must have already triggered an async `load()` once.
+   */
+  peekCache(providerId: string): SavedCredential | undefined {
+    return this.cache?.[providerId];
+  }
+
+  async all(): Promise<Readonly<Record<string, SavedCredential>>> {
     return this.load();
   }
 
-  private persist(): void {
-    const dir = join(this.path, "..");
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(this.path, JSON.stringify(this.cache, null, 2), { encoding: "utf-8" });
-    try {
-      chmodSync(this.path, 0o600);
-    } catch {
-      /* best effort on FSes without chmod */
-    }
+  /** Drop the in-memory cache so the next `load()` re-probes the backends. */
+  invalidate(): void {
+    this.cache = null;
   }
+}
+
+/**
+ * Wrap a `SavedCredential` for storage in a single keyring entry.
+ * Strips the transient `_storedAt` marker (which describes WHERE the
+ * credential lives, not WHAT it is). Round-trips cleanly through
+ * `getPassword(service, account)` / `setPassword(service, account, value)`.
+ */
+function encodeEnvelope(cred: SavedCredential): string {
+  const { _storedAt: _ignored, ...rest } = cred;
+  void _ignored; // explicit no-op so TS strict-unused doesn't complain
+  return JSON.stringify(rest);
+}
+
+/** Inverse of `encodeEnvelope`. */
+function decodeEnvelope(raw: string): SavedCredential | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return validateSavedCredential(parsed);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decode a legacy `~/.wotann/credentials.json` entry. Pre-Wave-6-QQ that
+ * file held `Record<providerId, SavedCredential>` (object value); the
+ * Wave-6-QQ file fallback writes JSON-string envelopes via
+ * `secureStoreSet`. Accept both for migration safety.
+ */
+function decodeLegacyEntry(value: unknown): SavedCredential | null {
+  if (typeof value === "string") return decodeEnvelope(value);
+  return validateSavedCredential(value);
+}
+
+function validateSavedCredential(value: unknown): SavedCredential | null {
+  if (!value || typeof value !== "object") return null;
+  const obj = value as Record<string, unknown>;
+  if (typeof obj["method"] !== "string") return null;
+  if (typeof obj["token"] !== "string") return null;
+  if (typeof obj["savedAt"] !== "number") return null;
+  return {
+    method: obj["method"] as AuthMethod,
+    token: obj["token"],
+    savedAt: obj["savedAt"],
+    ...(typeof obj["expiresAt"] === "number" ? { expiresAt: obj["expiresAt"] } : {}),
+    ...(typeof obj["label"] === "string" ? { label: obj["label"] } : {}),
+  };
 }
 
 // ── providers.env loader ───────────────────────────────────────
@@ -353,7 +521,7 @@ const anthropicSpec: ProviderSpec = {
         method: saved.method,
         label: saved.label ?? "Claude Max",
         token: saved.token,
-        source: "stored-file",
+        source: saved._storedAt === "keychain" ? "keychain" : "stored-file",
         expiresAt: saved.expiresAt,
       };
     // Legacy oauth-file path removed per V9 T0.1 (WOTANN no longer writes
@@ -438,7 +606,7 @@ const openaiSpec: ProviderSpec = {
         method: saved.method,
         label: saved.label ?? "API Key",
         token: saved.token,
-        source: "stored-file",
+        source: saved._storedAt === "keychain" ? "keychain" : "stored-file",
       };
     return null;
   },
@@ -591,7 +759,12 @@ const geminiSpec: ProviderSpec = {
     if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
     const saved = ctx.storedCredentials["gemini"];
     if (saved)
-      return { method: "apiKey", label: "API Key", token: saved.token, source: "stored-file" };
+      return {
+        method: "apiKey",
+        label: "API Key",
+        token: saved.token,
+        source: saved._storedAt === "keychain" ? "keychain" : "stored-file",
+      };
     return null;
   },
   async listModels(credential) {
@@ -680,7 +853,12 @@ const groqSpec: ProviderSpec = {
     if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
     const saved = ctx.storedCredentials["groq"];
     if (saved)
-      return { method: "apiKey", label: "API Key", token: saved.token, source: "stored-file" };
+      return {
+        method: "apiKey",
+        label: "API Key",
+        token: saved.token,
+        source: saved._storedAt === "keychain" ? "keychain" : "stored-file",
+      };
     return null;
   },
   async listModels(credential) {
@@ -729,7 +907,12 @@ function openAICompatSpec(args: {
       if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
       const saved = ctx.storedCredentials[args.id];
       if (saved)
-        return { method: "apiKey", label: "API Key", token: saved.token, source: "stored-file" };
+        return {
+          method: "apiKey",
+          label: "API Key",
+          token: saved.token,
+          source: saved._storedAt === "keychain" ? "keychain" : "stored-file",
+        };
       return null;
     },
     async listModels(credential) {
@@ -789,7 +972,7 @@ const copilotSpec: ProviderSpec = {
         method: saved.method,
         label: saved.label ?? "GitHub Copilot",
         token: saved.token,
-        source: "stored-file",
+        source: saved._storedAt === "keychain" ? "keychain" : "stored-file",
       };
     return null;
   },
@@ -1035,7 +1218,12 @@ export const PROVIDER_SPECS: readonly ProviderSpec[] = [
  *   - "activeChanged"  — the active provider+model changed
  *   - "refreshed"      — a discovery pass completed
  */
-export type ProviderEvent = "changed" | "credential" | "activeChanged" | "refreshed";
+export type ProviderEvent =
+  | "changed"
+  | "credential"
+  | "activeChanged"
+  | "refreshed"
+  | "credentialExpired";
 
 export interface ProviderSnapshot {
   readonly providers: readonly ProviderState[];
@@ -1061,6 +1249,19 @@ export class ProviderService extends EventEmitter {
   // than fail-fast back to the UI.
   private readonly breakers: Map<string, CircuitBreaker> = new Map();
   private readonly retryPolicy: RetryPolicy;
+
+  // ── V9 Wave 6-MM: per-session expired-token tracker.
+  //
+  // When a provider stream returns 401 mid-flight (key rotated /
+  // revoked / expired in-flight), the adapter calls
+  // `markCredentialExpired(providerId, token)` and we remember the
+  // token here so the next `detectCredential` pass can refuse to
+  // re-emit it without a manual re-login. Cleared by
+  // `clearExpiredCredential` after a successful save / delete.
+  //
+  // QB#7: per-instance Map (NOT module-global) so parallel
+  // ProviderService instances in tests don't bleed expired state.
+  private readonly expiredTokens: Map<string, Set<string>> = new Map();
 
   constructor(options: { cacheTtlMs?: number; credentialStorePath?: string } = {}) {
     super();
@@ -1140,7 +1341,7 @@ export class ProviderService extends EventEmitter {
       if (!process.env[key]) process.env[key] = value;
     }
 
-    const storedCredentials = this.store.all();
+    const storedCredentials = await this.store.all();
     const ctx: DetectContext = { env: process.env, storedCredentials };
 
     const tasks = [...this.specs.values()].map(async (spec) => {
@@ -1205,7 +1406,7 @@ export class ProviderService extends EventEmitter {
       ...(params.label !== undefined ? { label: params.label } : {}),
       savedAt: Date.now(),
     };
-    this.store.save(providerId, cred);
+    await this.store.save(providerId, cred);
 
     // For API keys, also mirror into providers.env so shell / launchd can see it
     if (params.method === "apiKey") {
@@ -1224,16 +1425,23 @@ export class ProviderService extends EventEmitter {
       }
     }
 
+    // V9 Wave 6-MM: a fresh save means the user re-authenticated, so
+    // any token previously flagged as expired by markCredentialExpired
+    // is no longer guaranteed to be the same as the new one. Clear the
+    // expired set entirely — if the new token coincidentally matches a
+    // formerly-expired one, the next live request will tell us.
+    this.expiredTokens.delete(providerId);
+
     this.emit("credential", { providerId, action: "save" });
     await this.refresh();
     return this.states.get(providerId) ?? null;
   }
 
-  /** Remove credentials for a provider. Clears providers.env mirror and stored-file entry. */
+  /** Remove credentials for a provider. Clears providers.env mirror, keychain, and file entry. */
   async deleteCredential(providerId: string): Promise<void> {
     const spec = this.specs.get(providerId);
     if (!spec) throw new Error(`Unknown provider: ${providerId}`);
-    this.store.delete(providerId);
+    await this.store.delete(providerId);
     for (const key of spec.envKeys) {
       try {
         deleteProvidersEnvKey(key);
@@ -1242,8 +1450,112 @@ export class ProviderService extends EventEmitter {
         /* best effort */
       }
     }
+    // V9 Wave 6-MM: drop the expired-token set when credentials are
+    // deleted — there's nothing left to compare against.
+    this.expiredTokens.delete(providerId);
     this.emit("credential", { providerId, action: "delete" });
     await this.refresh();
+  }
+
+  /**
+   * V9 Wave 6-MM — mid-stream 401 hook.
+   *
+   * Called by adapters when a streaming request returns 401 (key
+   * rotated, revoked, or expired in-flight). The token is remembered
+   * for this process so subsequent calls to `getCurrentCredential` and
+   * `getAlternateCredential` can refuse to re-emit it without a manual
+   * re-login.
+   *
+   * The credential's stored row is NOT deleted automatically — the
+   * user may have multiple keys for the same provider (env + stored,
+   * or a fallback shell export). Deletion is reserved for explicit
+   * `deleteCredential` calls so a transient 401 (e.g. clock skew on
+   * an OAuth check) can recover when the user re-runs `wotann login`.
+   *
+   * QB#6: emits `credentialExpired` so the UI can surface a clear
+   * "Re-authenticate via wotann login {provider}" prompt instead of
+   * burying the failure inside a stream error.
+   *
+   * @param providerId provider id (e.g. "anthropic", "openai", "groq")
+   * @param token the bearer that 401'd; pass empty string when unknown
+   * @returns true if the provider exists; false otherwise
+   */
+  markCredentialExpired(providerId: string, token: string): boolean {
+    const spec = this.specs.get(providerId);
+    if (!spec) return false;
+    const set = this.expiredTokens.get(providerId) ?? new Set<string>();
+    if (token) set.add(token);
+    this.expiredTokens.set(providerId, set);
+    this.emit("credentialExpired", { providerId, hadToken: !!token });
+    this.emit("changed");
+    return true;
+  }
+
+  /** True if the given token has been flagged as expired this process. */
+  isCredentialExpired(providerId: string, token: string): boolean {
+    if (!token) return false;
+    const set = this.expiredTokens.get(providerId);
+    return !!set?.has(token);
+  }
+
+  /** Drop the expired flag for a provider — used after a successful re-login. */
+  clearExpiredCredential(providerId: string): void {
+    this.expiredTokens.delete(providerId);
+  }
+
+  /**
+   * V9 Wave 6-MM — basic key rotation.
+   *
+   * Returns an alternate credential for the provider when one exists
+   * and `WOTANN_KEY_ROTATION=1` is set. The current implementation
+   * walks the spec's env keys (the priority list provider-service
+   * already maintains) plus the stored-file token, returning the first
+   * usable token whose value differs from `currentToken` and which has
+   * NOT been marked expired this process. When rotation is disabled or
+   * no alternate exists, returns null and the caller surfaces the
+   * standard "auth_expired" error.
+   *
+   * Opt-in by env (off by default — explicit, per the task brief): if
+   * `WOTANN_KEY_ROTATION` is unset, falsy, or `0`, this returns null
+   * even when alternates exist.
+   *
+   * @param providerId provider id
+   * @param currentToken token that just 401'd; excluded from results
+   * @param env env snapshot (defaults to process.env, override for tests)
+   */
+  getAlternateCredential(
+    providerId: string,
+    currentToken: string,
+    env: Readonly<Record<string, string | undefined>> = process.env,
+  ): { token: string; source: "env" | "stored-file" | "keychain" } | null {
+    const flag = env["WOTANN_KEY_ROTATION"];
+    if (flag !== "1") return null;
+    const spec = this.specs.get(providerId);
+    if (!spec) return null;
+
+    // Walk env keys first — explicit shell exports win in this codebase.
+    for (const envKey of spec.envKeys) {
+      const value = env[envKey];
+      if (!value) continue;
+      if (value === currentToken) continue;
+      if (this.isCredentialExpired(providerId, value)) continue;
+      return { token: value, source: "env" };
+    }
+
+    // Fall through to the stored credential when env didn't yield an alt.
+    // peekCache() is sync — getAlternateCredential is called from sync
+    // re-auth callbacks inside provider adapters. The cache is warmed by
+    // doRefresh() at startup, so a miss here means rotation simply
+    // returns null (the same outcome as Wave 3-P).
+    const stored = this.store.peekCache(providerId);
+    if (stored?.token && stored.token !== currentToken) {
+      if (!this.isCredentialExpired(providerId, stored.token)) {
+        const source = stored._storedAt === "keychain" ? "keychain" : "stored-file";
+        return { token: stored.token, source };
+      }
+    }
+
+    return null;
   }
 
   /** Ping the provider's API with the current credential to validate. */

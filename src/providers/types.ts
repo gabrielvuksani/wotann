@@ -108,6 +108,15 @@ export interface StreamChunk {
     readonly cacheReadTokens?: number;
     readonly cacheWriteTokens?: number;
   };
+  /**
+   * V9 Wave 6-MM — machine-readable error class.
+   * Set by adapters on `error` chunks so downstream code can branch on
+   * structured error categories instead of parsing the human-readable
+   * `content` string. Currently used for `auth_expired` (mid-stream 401)
+   * but reserved for future categories ("rate_limited", "quota_exceeded",
+   * etc.) without re-shaping the chunk schema.
+   */
+  readonly code?: "auth_expired" | "rate_limited" | "quota_exceeded" | "context_overflow";
 }
 
 export interface ProviderAdapter {

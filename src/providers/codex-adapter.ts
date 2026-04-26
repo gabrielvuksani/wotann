@@ -27,6 +27,7 @@ import type {
 } from "./types.js";
 import { getModelContextConfig } from "../context/limits.js";
 import { toCodexTools } from "./tool-serializer.js";
+import { getProviderService } from "./provider-service.js";
 
 // ── Auth Types ──────────────────────────────────────────────
 
@@ -280,15 +281,36 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
         const errorText = await response.text();
 
         if (response.status === 401) {
+          // V9 Wave 6-MM — flag the failed bearer as expired so the
+          // rest of the harness (UI badge, fallback chain) can react
+          // BEFORE we attempt the on-disk re-read fallback.
+          try {
+            getProviderService().markCredentialExpired("codex", creds.token);
+          } catch {
+            /* provider-service init is best-effort */
+          }
+
           // Re-read the on-disk auth file — if the Codex CLI rotated
           // the token out-of-band, we'll see a newer value. WOTANN no
           // longer performs OAuth refresh itself (V9 T0.2).
+          //
+          // QB#9: this re-read path stays so that the existing test
+          // codifying "Codex CLI rotated the token out-of-band" still
+          // passes; we just additionally call markCredentialExpired.
           const fresh = rereadAuthFromDisk();
           if (
             fresh?.tokens.access_token &&
             fresh.tokens.access_token !== auth!.tokens.access_token
           ) {
             auth = fresh;
+            // V9 Wave 6-MM — drop the expired flag on a fresh on-disk
+            // token so subsequent requests don't see a stale "expired"
+            // marker for what is now a valid credential.
+            try {
+              getProviderService().clearExpiredCredential("codex");
+            } catch {
+              /* best effort */
+            }
             yield {
               type: "error",
               content: "Token refreshed by Codex CLI — please retry the request.",
@@ -296,12 +318,19 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
               provider: "codex",
             };
           } else {
+            // Codex needs the upstream `codex login` CLI flow to refresh
+            // tokens — `wotann login codex` then re-imports the file.
+            // Kept verbatim so existing UX docs / muscle memory survive,
+            // but tagged with auth_expired so structured error consumers
+            // (router, fallback chain) treat it like any other 401.
             yield {
               type: "error",
               content:
-                "Codex session expired. Re-authenticate by running `codex login` in a shell, then retry.",
+                "Codex session expired. Re-authenticate by running `codex login` in a shell, then `wotann login codex`.",
+              code: "auth_expired",
               model: inputModel,
               provider: "codex",
+              stopReason: "error",
             };
           }
           return;

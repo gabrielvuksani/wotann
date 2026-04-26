@@ -31,6 +31,7 @@ import type {
 } from "./types.js";
 import { getModelContextConfig } from "../context/limits.js";
 import { toGeminiFunctionDeclarations } from "./tool-serializer.js";
+import { authExpiredMessage, getProviderService } from "./provider-service.js";
 
 // ── Wire types (subset of the Gemini REST schema we use) ────────────
 
@@ -327,186 +328,237 @@ export function createGeminiNativeAdapter(
 
     const url = `${baseUrl}/models/${model}:streamGenerateContent?alt=sse`;
 
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": authToken,
-        },
-        body: JSON.stringify(body),
-      });
+    // V9 Wave 6-MM — rotation-aware request loop. Mark the bearer
+    // expired on 401, optionally rotate to an alternate credential,
+    // then surface auth_expired with a clear re-login hint. The loop
+    // never re-runs after the SSE body has begun streaming so partial
+    // chunks are never duplicated.
+    let currentToken = authToken;
+    let attempt = 0;
+    rotationLoop: while (true) {
+      attempt++;
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": currentToken,
+          },
+          body: JSON.stringify(body),
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
+        if (response.status === 401) {
+          try {
+            await response.text();
+          } catch {
+            /* socket already closed */
+          }
+
+          try {
+            getProviderService().markCredentialExpired("gemini", currentToken);
+          } catch {
+            /* provider-service init is best-effort */
+          }
+
+          if (attempt === 1) {
+            const alt = (() => {
+              try {
+                return getProviderService().getAlternateCredential("gemini", currentToken);
+              } catch {
+                return null;
+              }
+            })();
+            if (alt) {
+              currentToken = alt.token;
+              continue rotationLoop;
+            }
+          }
+
+          yield {
+            type: "error",
+            content: authExpiredMessage("gemini"),
+            code: "auth_expired",
+            model,
+            provider: "gemini",
+            stopReason: "error",
+          };
+          return;
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          yield {
+            type: "error",
+            content: `Gemini API error (${response.status}): ${errorText.slice(0, 400)}`,
+            model,
+            provider: "gemini",
+          };
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          yield { type: "error", content: "No response body", model, provider: "gemini" };
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let totalTokens = 0;
+        let thoughtsTokens = 0;
+        let promptTokens = 0;
+        let candidatesTokens = 0;
+        let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data: ")) continue;
+            const data = trimmed.slice(6);
+            if (data === "[DONE]") continue;
+
+            let chunk: GeminiStreamChunk;
+            try {
+              chunk = JSON.parse(data) as GeminiStreamChunk;
+            } catch {
+              continue; // malformed SSE fragment
+            }
+
+            // Surface prompt-level blocks (no candidate produced — Gemini
+            // returns promptFeedback.blockReason instead). Prior behavior
+            // dropped this silently and emitted a normal "stop" — making
+            // SAFETY blocks indistinguishable from natural completion.
+            if (chunk.promptFeedback?.blockReason) {
+              const reason = chunk.promptFeedback.blockReason;
+              stopReason = "content_filter";
+              yield {
+                type: "error",
+                content: `Gemini prompt blocked: ${reason}`,
+                model,
+                provider: "gemini",
+                stopReason: "content_filter",
+              };
+              // Continue draining the stream — there may still be a usage
+              // chunk or graceful close — but don't expect candidate text.
+              continue;
+            }
+
+            const candidate = chunk.candidates?.[0];
+            const parts = candidate?.content?.parts ?? [];
+            for (const part of parts) {
+              if ("thought" in part) {
+                yield {
+                  type: "thinking",
+                  content: part.text,
+                  model,
+                  provider: "gemini",
+                };
+              } else if ("text" in part) {
+                yield {
+                  type: "text",
+                  content: part.text,
+                  model,
+                  provider: "gemini",
+                };
+              } else if ("functionCall" in part) {
+                yield {
+                  type: "tool_use",
+                  content: JSON.stringify(part.functionCall.args),
+                  toolName: part.functionCall.name,
+                  toolInput: part.functionCall.args,
+                  model,
+                  provider: "gemini",
+                  stopReason: "tool_calls",
+                };
+                stopReason = "tool_calls";
+              } else if ("executableCode" in part) {
+                // Gemini's native code_execution — surface the code as a
+                // tool_use for the built-in pseudo-tool so the UI can
+                // display it like any other tool call.
+                yield {
+                  type: "tool_use",
+                  content: part.executableCode.code,
+                  toolName: "code_execution",
+                  toolInput: {
+                    language: part.executableCode.language,
+                    code: part.executableCode.code,
+                  },
+                  model,
+                  provider: "gemini",
+                };
+              } else if ("codeExecutionResult" in part) {
+                yield {
+                  type: "text",
+                  content: `[code_execution ${part.codeExecutionResult.outcome}]\n${part.codeExecutionResult.output ?? ""}`,
+                  model,
+                  provider: "gemini",
+                };
+              }
+            }
+
+            if (candidate?.finishReason) {
+              stopReason = mapFinishReason(candidate.finishReason);
+            }
+
+            if (chunk.usageMetadata?.totalTokenCount) {
+              totalTokens = chunk.usageMetadata.totalTokenCount;
+            }
+            if (chunk.usageMetadata?.thoughtsTokenCount) {
+              thoughtsTokens = chunk.usageMetadata.thoughtsTokenCount;
+            }
+            if (chunk.usageMetadata?.promptTokenCount && chunk.usageMetadata.promptTokenCount > 0) {
+              promptTokens = chunk.usageMetadata.promptTokenCount;
+            }
+            if (
+              chunk.usageMetadata?.candidatesTokenCount &&
+              chunk.usageMetadata.candidatesTokenCount > 0
+            ) {
+              candidatesTokens = chunk.usageMetadata.candidatesTokenCount;
+            }
+          }
+        }
+
+        // Wave 4G: surface split usage for honest cost attribution.
+        // Thoughts tokens are billed as output tokens by Google, so include
+        // them on the output side when candidatesTokens doesn't already cover.
+        const finalInput = promptTokens > 0 ? promptTokens : Math.floor(totalTokens / 2);
+        const rawOutput =
+          candidatesTokens > 0
+            ? candidatesTokens + thoughtsTokens
+            : Math.max(0, totalTokens - finalInput);
+        const finalOutput = rawOutput > 0 ? rawOutput : Math.max(0, totalTokens - finalInput);
+        yield {
+          type: "done",
+          content: thoughtsTokens > 0 ? `[thoughts: ${thoughtsTokens} tokens]` : "",
+          model,
+          provider: "gemini",
+          tokensUsed: totalTokens,
+          usage: {
+            inputTokens: finalInput,
+            outputTokens: finalOutput,
+          },
+          stopReason,
+        };
+        // Successful drain — exit rotation loop.
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
         yield {
           type: "error",
-          content: `Gemini API error (${response.status}): ${errorText.slice(0, 400)}`,
+          content: `Gemini error: ${message}`,
           model,
           provider: "gemini",
         };
         return;
       }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        yield { type: "error", content: "No response body", model, provider: "gemini" };
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let totalTokens = 0;
-      let thoughtsTokens = 0;
-      let promptTokens = 0;
-      let candidatesTokens = 0;
-      let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data: ")) continue;
-          const data = trimmed.slice(6);
-          if (data === "[DONE]") continue;
-
-          let chunk: GeminiStreamChunk;
-          try {
-            chunk = JSON.parse(data) as GeminiStreamChunk;
-          } catch {
-            continue; // malformed SSE fragment
-          }
-
-          // Surface prompt-level blocks (no candidate produced — Gemini
-          // returns promptFeedback.blockReason instead). Prior behavior
-          // dropped this silently and emitted a normal "stop" — making
-          // SAFETY blocks indistinguishable from natural completion.
-          if (chunk.promptFeedback?.blockReason) {
-            const reason = chunk.promptFeedback.blockReason;
-            stopReason = "content_filter";
-            yield {
-              type: "error",
-              content: `Gemini prompt blocked: ${reason}`,
-              model,
-              provider: "gemini",
-              stopReason: "content_filter",
-            };
-            // Continue draining the stream — there may still be a usage
-            // chunk or graceful close — but don't expect candidate text.
-            continue;
-          }
-
-          const candidate = chunk.candidates?.[0];
-          const parts = candidate?.content?.parts ?? [];
-          for (const part of parts) {
-            if ("thought" in part) {
-              yield {
-                type: "thinking",
-                content: part.text,
-                model,
-                provider: "gemini",
-              };
-            } else if ("text" in part) {
-              yield {
-                type: "text",
-                content: part.text,
-                model,
-                provider: "gemini",
-              };
-            } else if ("functionCall" in part) {
-              yield {
-                type: "tool_use",
-                content: JSON.stringify(part.functionCall.args),
-                toolName: part.functionCall.name,
-                toolInput: part.functionCall.args,
-                model,
-                provider: "gemini",
-                stopReason: "tool_calls",
-              };
-              stopReason = "tool_calls";
-            } else if ("executableCode" in part) {
-              // Gemini's native code_execution — surface the code as a
-              // tool_use for the built-in pseudo-tool so the UI can
-              // display it like any other tool call.
-              yield {
-                type: "tool_use",
-                content: part.executableCode.code,
-                toolName: "code_execution",
-                toolInput: {
-                  language: part.executableCode.language,
-                  code: part.executableCode.code,
-                },
-                model,
-                provider: "gemini",
-              };
-            } else if ("codeExecutionResult" in part) {
-              yield {
-                type: "text",
-                content: `[code_execution ${part.codeExecutionResult.outcome}]\n${part.codeExecutionResult.output ?? ""}`,
-                model,
-                provider: "gemini",
-              };
-            }
-          }
-
-          if (candidate?.finishReason) {
-            stopReason = mapFinishReason(candidate.finishReason);
-          }
-
-          if (chunk.usageMetadata?.totalTokenCount) {
-            totalTokens = chunk.usageMetadata.totalTokenCount;
-          }
-          if (chunk.usageMetadata?.thoughtsTokenCount) {
-            thoughtsTokens = chunk.usageMetadata.thoughtsTokenCount;
-          }
-          if (chunk.usageMetadata?.promptTokenCount && chunk.usageMetadata.promptTokenCount > 0) {
-            promptTokens = chunk.usageMetadata.promptTokenCount;
-          }
-          if (
-            chunk.usageMetadata?.candidatesTokenCount &&
-            chunk.usageMetadata.candidatesTokenCount > 0
-          ) {
-            candidatesTokens = chunk.usageMetadata.candidatesTokenCount;
-          }
-        }
-      }
-
-      // Wave 4G: surface split usage for honest cost attribution.
-      // Thoughts tokens are billed as output tokens by Google, so include
-      // them on the output side when candidatesTokens doesn't already cover.
-      const finalInput = promptTokens > 0 ? promptTokens : Math.floor(totalTokens / 2);
-      const rawOutput =
-        candidatesTokens > 0
-          ? candidatesTokens + thoughtsTokens
-          : Math.max(0, totalTokens - finalInput);
-      const finalOutput = rawOutput > 0 ? rawOutput : Math.max(0, totalTokens - finalInput);
-      yield {
-        type: "done",
-        content: thoughtsTokens > 0 ? `[thoughts: ${thoughtsTokens} tokens]` : "",
-        model,
-        provider: "gemini",
-        tokensUsed: totalTokens,
-        usage: {
-          inputTokens: finalInput,
-          outputTokens: finalOutput,
-        },
-        stopReason,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      yield {
-        type: "error",
-        content: `Gemini error: ${message}`,
-        model,
-        provider: "gemini",
-      };
-    }
+    } // end rotationLoop
   }
 
   async function listModels(): Promise<readonly string[]> {

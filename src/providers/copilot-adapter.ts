@@ -54,6 +54,7 @@ import type {
 } from "./types.js";
 import { anthropicToOpenAI } from "./format-translator.js";
 import { toCopilotTools } from "./tool-serializer.js";
+import { authExpiredMessage, getProviderService } from "./provider-service.js";
 
 interface CopilotTokenResponse {
   readonly token: string;
@@ -413,13 +414,32 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
 
       if (!response.ok) {
         const errorText = await response.text();
-        const hint =
-          response.status === 401
-            ? " (token refresh also failed — check GH_TOKEN has active Copilot entitlement)"
-            : "";
+        if (response.status === 401) {
+          // V9 Wave 6-MM — both the original token AND the refreshed
+          // Copilot token returned 401, so the underlying GH_TOKEN is
+          // expired or has lost its Copilot entitlement. Mark BOTH
+          // tokens expired so neither survives in the cache, then
+          // surface auth_expired with the GitHub-side re-auth hint.
+          try {
+            const svc = getProviderService();
+            svc.markCredentialExpired("copilot", ghToken);
+            svc.markCredentialExpired("copilot", currentAuth.token);
+          } catch {
+            /* provider-service init is best-effort */
+          }
+          yield {
+            type: "error",
+            content: `${authExpiredMessage("copilot")} (GH_TOKEN refresh also failed — re-auth at github.com or rotate GH_TOKEN with active Copilot entitlement.)`,
+            code: "auth_expired",
+            model,
+            provider: "copilot",
+            stopReason: "error",
+          };
+          return;
+        }
         yield {
           type: "error",
-          content: `Copilot error (${response.status}): ${errorText.slice(0, 300)}${hint}`,
+          content: `Copilot error (${response.status}): ${errorText.slice(0, 300)}`,
           model,
           provider: "copilot",
         };

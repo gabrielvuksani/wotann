@@ -13,6 +13,7 @@ import type {
 import { anthropicToOpenAI } from "./format-translator.js";
 import { getModelContextConfig } from "../context/limits.js";
 import { toOpenAITools } from "./tool-serializer.js";
+import { authExpiredMessage, getProviderService } from "./provider-service.js";
 
 interface OpenAICompatConfig {
   readonly provider: ProviderName;
@@ -158,187 +159,244 @@ export function createOpenAICompatAdapter(config: OpenAICompatConfig): ProviderA
       ...(openAITools ? { tools: openAITools, tool_choice: "auto" } : {}),
     };
 
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
-          ...config.headers,
-        },
-        body: JSON.stringify(body),
-      });
+    // V9 Wave 6-MM — wrap request in a rotation-aware loop. We call
+    // out to provider-service to mark the bearer expired on 401 and
+    // (when WOTANN_KEY_ROTATION=1) retry once with an alternate
+    // credential before surfacing auth_expired. The loop never runs
+    // after the response body has begun streaming, so partial output
+    // is never duplicated.
+    let currentToken = authToken;
+    let attempt = 0;
+    rotationLoop: while (true) {
+      attempt++;
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${currentToken}`,
+            ...config.headers,
+          },
+          body: JSON.stringify(body),
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        yield {
-          type: "error",
-          content: `${config.provider} API error (${response.status}): ${errorText}`,
-          model,
-          provider: config.provider,
-        };
-        return;
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        yield { type: "error", content: "No response body", model, provider: config.provider };
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let totalTokens = 0;
-      let promptTokens = 0;
-      let completionTokens = 0;
-      let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
-
-      // S1-22: accumulate tool-call fragments across chunks keyed by index.
-      // OpenAI/compat streams tool_calls as a sparse array where each chunk
-      // carries partial fields — name on one chunk, arguments JSON spread
-      // across many. We reassemble before emitting a structured tool_use.
-      const toolCallState = new Map<
-        number,
-        { id: string; name: string; args: string; emitted: boolean }
-      >();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data: ")) continue;
-          const data = trimmed.slice(6);
-          if (data === "[DONE]") continue;
+        if (response.status === 401) {
+          // V9 Wave 6-MM — mid-flight auth failure (key rotated /
+          // revoked / expired). Drain the body so the socket is freed
+          // before we attempt rotation; the body content is the
+          // provider's verbose error JSON which we do NOT surface to
+          // the user (would leak their request id).
+          try {
+            await response.text();
+          } catch {
+            /* socket already closed */
+          }
 
           try {
-            const chunk = JSON.parse(data) as ChatCompletionChunk;
-            const delta = chunk.choices?.[0]?.delta;
-            const content = delta?.content;
-            if (content) {
-              yield {
-                type: "text",
-                content,
-                model,
-                provider: config.provider,
-              };
-            }
-
-            // Reasoning / thinking content — some OpenAI-compat providers
-            // (DeepSeek, Gemini 3 via compat) surface CoT under `reasoning`
-            // or `reasoning_content`. Forward as thinking chunks.
-            const thinking = delta?.reasoning ?? delta?.reasoning_content;
-            if (thinking) {
-              yield {
-                type: "thinking",
-                content: thinking,
-                model,
-                provider: config.provider,
-              };
-            }
-
-            // Tool call fragments
-            if (delta?.tool_calls) {
-              for (const tc of delta.tool_calls) {
-                const idx = tc.index ?? 0;
-                const existing = toolCallState.get(idx) ?? {
-                  id: "",
-                  name: "",
-                  args: "",
-                  emitted: false,
-                };
-                if (tc.id) existing.id = tc.id;
-                if (tc.function?.name) existing.name = tc.function.name;
-                if (tc.function?.arguments) existing.args += tc.function.arguments;
-                toolCallState.set(idx, existing);
-              }
-            }
-
-            const finish = chunk.choices?.[0]?.finish_reason;
-            if (finish) {
-              stopReason = mapOpenAIFinishReason(finish);
-            }
-
-            if (chunk.usage?.total_tokens) {
-              totalTokens = chunk.usage.total_tokens;
-            }
-            if (chunk.usage?.prompt_tokens && chunk.usage.prompt_tokens > 0) {
-              promptTokens = chunk.usage.prompt_tokens;
-            }
-            if (chunk.usage?.completion_tokens && chunk.usage.completion_tokens > 0) {
-              completionTokens = chunk.usage.completion_tokens;
-            }
+            getProviderService().markCredentialExpired(config.provider, currentToken);
           } catch {
-            // Skip malformed SSE chunks
+            /* provider-service init is best-effort */
           }
-        }
-      }
 
-      // Emit accumulated tool calls after the stream completes.
-      for (const [, state] of toolCallState) {
-        if (state.emitted) continue;
-        if (!state.name) continue;
-        let parsedArgs: Record<string, unknown> = {};
-        try {
-          parsedArgs = state.args ? (JSON.parse(state.args) as Record<string, unknown>) : {};
-        } catch {
+          if (attempt === 1) {
+            const alt = (() => {
+              try {
+                return getProviderService().getAlternateCredential(config.provider, currentToken);
+              } catch {
+                return null;
+              }
+            })();
+            if (alt) {
+              currentToken = alt.token;
+              continue rotationLoop;
+            }
+          }
+
           yield {
             type: "error",
-            content: `${config.provider}: malformed tool arguments for ${state.name}`,
+            content: authExpiredMessage(config.provider),
+            code: "auth_expired",
+            model,
+            provider: config.provider,
+            stopReason: "error",
+          };
+          return;
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          yield {
+            type: "error",
+            content: `${config.provider} API error (${response.status}): ${errorText}`,
             model,
             provider: config.provider,
           };
-          state.emitted = true;
-          continue;
+          return;
         }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          yield { type: "error", content: "No response body", model, provider: config.provider };
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let totalTokens = 0;
+        let promptTokens = 0;
+        let completionTokens = 0;
+        let stopReason: "stop" | "tool_calls" | "max_tokens" | "content_filter" = "stop";
+
+        // S1-22: accumulate tool-call fragments across chunks keyed by index.
+        // OpenAI/compat streams tool_calls as a sparse array where each chunk
+        // carries partial fields — name on one chunk, arguments JSON spread
+        // across many. We reassemble before emitting a structured tool_use.
+        const toolCallState = new Map<
+          number,
+          { id: string; name: string; args: string; emitted: boolean }
+        >();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data: ")) continue;
+            const data = trimmed.slice(6);
+            if (data === "[DONE]") continue;
+
+            try {
+              const chunk = JSON.parse(data) as ChatCompletionChunk;
+              const delta = chunk.choices?.[0]?.delta;
+              const content = delta?.content;
+              if (content) {
+                yield {
+                  type: "text",
+                  content,
+                  model,
+                  provider: config.provider,
+                };
+              }
+
+              // Reasoning / thinking content — some OpenAI-compat providers
+              // (DeepSeek, Gemini 3 via compat) surface CoT under `reasoning`
+              // or `reasoning_content`. Forward as thinking chunks.
+              const thinking = delta?.reasoning ?? delta?.reasoning_content;
+              if (thinking) {
+                yield {
+                  type: "thinking",
+                  content: thinking,
+                  model,
+                  provider: config.provider,
+                };
+              }
+
+              // Tool call fragments
+              if (delta?.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  const idx = tc.index ?? 0;
+                  const existing = toolCallState.get(idx) ?? {
+                    id: "",
+                    name: "",
+                    args: "",
+                    emitted: false,
+                  };
+                  if (tc.id) existing.id = tc.id;
+                  if (tc.function?.name) existing.name = tc.function.name;
+                  if (tc.function?.arguments) existing.args += tc.function.arguments;
+                  toolCallState.set(idx, existing);
+                }
+              }
+
+              const finish = chunk.choices?.[0]?.finish_reason;
+              if (finish) {
+                stopReason = mapOpenAIFinishReason(finish);
+              }
+
+              if (chunk.usage?.total_tokens) {
+                totalTokens = chunk.usage.total_tokens;
+              }
+              if (chunk.usage?.prompt_tokens && chunk.usage.prompt_tokens > 0) {
+                promptTokens = chunk.usage.prompt_tokens;
+              }
+              if (chunk.usage?.completion_tokens && chunk.usage.completion_tokens > 0) {
+                completionTokens = chunk.usage.completion_tokens;
+              }
+            } catch {
+              // Skip malformed SSE chunks
+            }
+          }
+        }
+
+        // Emit accumulated tool calls after the stream completes.
+        for (const [, state] of toolCallState) {
+          if (state.emitted) continue;
+          if (!state.name) continue;
+          let parsedArgs: Record<string, unknown> = {};
+          try {
+            parsedArgs = state.args ? (JSON.parse(state.args) as Record<string, unknown>) : {};
+          } catch {
+            yield {
+              type: "error",
+              content: `${config.provider}: malformed tool arguments for ${state.name}`,
+              model,
+              provider: config.provider,
+            };
+            state.emitted = true;
+            continue;
+          }
+          yield {
+            type: "tool_use",
+            content: state.args,
+            toolName: state.name,
+            toolCallId: state.id,
+            toolInput: parsedArgs,
+            model,
+            provider: config.provider,
+            stopReason: "tool_calls",
+          };
+          state.emitted = true;
+          stopReason = "tool_calls";
+        }
+
+        // Wave 4G: surface split usage on the final chunk so cost-tracker can
+        // attribute cost accurately instead of falling back to the 50/50 heuristic.
+        // `include_usage: true` returns prompt_tokens + completion_tokens on every
+        // compliant provider; we trust those when positive, else synthesise from
+        // the 50/50 split derived from total_tokens to keep downstream code honest.
+        const finalInput = promptTokens > 0 ? promptTokens : Math.floor(totalTokens / 2);
+        const finalOutput =
+          completionTokens > 0 ? completionTokens : Math.max(0, totalTokens - finalInput);
         yield {
-          type: "tool_use",
-          content: state.args,
-          toolName: state.name,
-          toolCallId: state.id,
-          toolInput: parsedArgs,
+          type: "done",
+          content: "",
           model,
           provider: config.provider,
-          stopReason: "tool_calls",
+          tokensUsed: totalTokens,
+          usage: {
+            inputTokens: finalInput,
+            outputTokens: finalOutput,
+          },
+          stopReason,
         };
-        state.emitted = true;
-        stopReason = "tool_calls";
+        // Successful drain — exit rotationLoop.
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        yield {
+          type: "error",
+          content: `${config.provider} error: ${message}`,
+          model,
+          provider: config.provider,
+        };
+        return;
       }
-
-      // Wave 4G: surface split usage on the final chunk so cost-tracker can
-      // attribute cost accurately instead of falling back to the 50/50 heuristic.
-      // `include_usage: true` returns prompt_tokens + completion_tokens on every
-      // compliant provider; we trust those when positive, else synthesise from
-      // the 50/50 split derived from total_tokens to keep downstream code honest.
-      const finalInput = promptTokens > 0 ? promptTokens : Math.floor(totalTokens / 2);
-      const finalOutput =
-        completionTokens > 0 ? completionTokens : Math.max(0, totalTokens - finalInput);
-      yield {
-        type: "done",
-        content: "",
-        model,
-        provider: config.provider,
-        tokensUsed: totalTokens,
-        usage: {
-          inputTokens: finalInput,
-          outputTokens: finalOutput,
-        },
-        stopReason,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      yield {
-        type: "error",
-        content: `${config.provider} error: ${message}`,
-        model,
-        provider: config.provider,
-      };
-    }
+    } // end rotationLoop
   }
 
   async function listModels(): Promise<readonly string[]> {
