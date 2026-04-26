@@ -1095,6 +1095,22 @@ export class KairosDaemon {
       this.scheduleStore.close();
       this.scheduleStore = null;
     }
+    // Wave 4-Z: dream-pipeline lifecycle hook. close() is a no-op today
+    // (DreamPipeline only holds a shared MemoryStore reference + path
+    // string), but we call it for symmetry — future revisions adding a
+    // worker pool / interval / preparedStatement won't need to touch
+    // this stop() body.
+    if (this.dreamPipeline) {
+      try {
+        this.dreamPipeline.close();
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `Dream pipeline close failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+      this.dreamPipeline = null;
+    }
     // GA-09 / V9 T11.2 — tear down sleep-time agent + consumer. The
     // agent's taskExecutor closure captured `this.runtime`, which is
     // now closed (above at L1036-1039); any future task would receive

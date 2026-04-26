@@ -217,6 +217,16 @@ const GROQ_FREE_TIER_MODELS = new Set<string>([
   "llama-4-scout-17b-16e",
 ]);
 
+/**
+ * Wave 4-Z: in-memory entries-array cap. A long-running daemon (months
+ * of uptime, hundreds of queries/day) accumulates a 6-figure entries
+ * array — pure memory waste because the live array is only used for
+ * session aggregates; weekly/monthly aggregates already route through
+ * dailyStore (bucket-based, capped). 10000 entries ≈ a quarter of usage
+ * for power users, plenty of headroom for session-cost queries.
+ */
+const MAX_ENTRIES_HISTORY = 10000;
+
 function isGroqFreeTierModel(model: string): boolean {
   return GROQ_FREE_TIER_MODELS.has(model);
 }
@@ -257,7 +267,8 @@ export function shouldZeroForSubscription(provider: string, billing?: string): b
 export class CostTracker {
   private readonly entries: CostEntry[] = [];
   private readonly storagePath?: string;
-  private readonly sessionStartIndex: number;
+  // Wave 4-Z: mutable so the entries-cap splice can shift it down.
+  private sessionStartIndex: number;
   private budgetUsd: number | null = null;
   private readonly dailyStore: DailyCostStore;
   /**
@@ -424,6 +435,18 @@ export class CostTracker {
         : {}),
     };
     this.entries.push(entry);
+    // Wave 4-Z: cap in-memory entries at MAX_HISTORY (10000) so a
+    // long-running daemon doesn't grow unbounded. Persisted entries on
+    // disk are unaffected — the cap is only on the live array used for
+    // session-level aggregates. Aggregates over older entries remain
+    // correct via dailyStore (weekly/monthly bucket-based).
+    if (this.entries.length > MAX_ENTRIES_HISTORY) {
+      const overflow = this.entries.length - MAX_ENTRIES_HISTORY;
+      this.entries.splice(0, overflow);
+      // Compensate sessionStartIndex so getSessionCost() still references
+      // the same logical session boundary after the splice shifted indices.
+      this.sessionStartIndex = Math.max(0, this.sessionStartIndex - overflow);
+    }
     this.save();
     // Mirror into the per-day store so weekly/monthly aggregates stay accurate.
     if (cost > 0) {

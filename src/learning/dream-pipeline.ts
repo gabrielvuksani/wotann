@@ -90,11 +90,11 @@ const JACCARD_THRESHOLD = 0.8;
 const HOURS_24_MS = 24 * 60 * 60 * 1000;
 
 const SIGNAL_WEIGHTS = {
-  relevance: 0.30,
+  relevance: 0.3,
   frequency: 0.24,
   queryDiversity: 0.15,
   recency: 0.15,
-  consolidation: 0.10,
+  consolidation: 0.1,
   conceptualRichness: 0.06,
 } as const;
 
@@ -107,7 +107,10 @@ const PROMOTION_GATES = {
 // ── Trigram Utilities ────────────────────────────────────
 
 function extractTrigrams(text: string): ReadonlySet<string> {
-  const normalized = text.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+  const normalized = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim();
   const trigrams = new Set<string>();
   for (let i = 0; i <= normalized.length - 3; i++) {
     trigrams.add(normalized.slice(i, i + 3));
@@ -128,11 +131,55 @@ function jaccardSimilarity(a: ReadonlySet<string>, b: ReadonlySet<string>): numb
 // ── Keyword Extraction ───────────────────────────────────
 
 const STOP_WORDS = new Set([
-  "the", "a", "an", "is", "are", "was", "were", "be", "been", "have", "has",
-  "had", "do", "does", "did", "will", "would", "could", "should", "may",
-  "might", "shall", "can", "to", "of", "in", "for", "on", "with", "at",
-  "by", "from", "as", "into", "through", "during", "and", "but", "or",
-  "not", "no", "if", "then", "this", "that", "it", "its", "my", "your",
+  "the",
+  "a",
+  "an",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "shall",
+  "can",
+  "to",
+  "of",
+  "in",
+  "for",
+  "on",
+  "with",
+  "at",
+  "by",
+  "from",
+  "as",
+  "into",
+  "through",
+  "during",
+  "and",
+  "but",
+  "or",
+  "not",
+  "no",
+  "if",
+  "then",
+  "this",
+  "that",
+  "it",
+  "its",
+  "my",
+  "your",
 ]);
 
 function extractKeywords(text: string): readonly string[] {
@@ -178,6 +225,23 @@ export class DreamPipeline {
   constructor(memoryStore: MemoryStore, dreamsDir: string) {
     this.memoryStore = memoryStore;
     this.dreamsDir = dreamsDir;
+  }
+
+  /**
+   * Wave 4-Z: explicit close method for daemon lifecycle symmetry.
+   *
+   * DreamPipeline currently holds NO internal resources beyond a
+   * shared MemoryStore reference + a dreamsDir path string — neither
+   * needs disposal. close() is therefore a no-op TODAY. Callers
+   * (KairosDaemon.stop()) invoke it anyway so the lifecycle contract
+   * stays explicit: if a future revision adds a worker pool, an
+   * interval, or a cached SQL preparedStatement, the close() body
+   * is the honest place to dispose it without changing every caller.
+   *
+   * Idempotent. Safe to call multiple times.
+   */
+  close(): void {
+    // No internal disposable resources today — see method docstring.
   }
 
   /**
@@ -270,7 +334,10 @@ export class DreamPipeline {
   // ── REM Phase (Reflection) ─────────────────────────────
 
   private remPhase(lightResult: LightPhaseResult): REMPhaseResult {
-    const domainGroups = new Map<string, Array<{ candidate: LightCandidate; keywords: readonly string[] }>>();
+    const domainGroups = new Map<
+      string,
+      Array<{ candidate: LightCandidate; keywords: readonly string[] }>
+    >();
 
     for (const candidate of lightResult.candidates) {
       const keywords = extractKeywords(candidate.value);
@@ -349,23 +416,26 @@ export class DreamPipeline {
 
       // Score each signal
       const searchResults = this.safeSearch(lightCandidate.key, 10);
-      const avgRetrievalScore = searchResults.length > 0
-        ? searchResults.reduce((sum, r) => sum + Math.abs(r.score), 0) / searchResults.length
-        : 0;
+      const avgRetrievalScore =
+        searchResults.length > 0
+          ? searchResults.reduce((sum, r) => sum + Math.abs(r.score), 0) / searchResults.length
+          : 0;
       const relevanceScore = Math.min(1, avgRetrievalScore / 10);
       const frequencyScore = Math.min(1, signal.recallCount / 10);
       const queryDiversityScore = Math.min(1, signal.uniqueQueryContexts / 8);
       const recencyScore = lightCandidate.recency;
 
       // Consolidation: check if entry appeared on multiple days
-      const daysSinceCreation = (Date.now() - Date.parse(lightCandidate.createdAt)) / (24 * 60 * 60 * 1000);
+      const daysSinceCreation =
+        (Date.now() - Date.parse(lightCandidate.createdAt)) / (24 * 60 * 60 * 1000);
       const consolidationScore = daysSinceCreation > 1 ? Math.min(1, daysSinceCreation / 7) : 0;
 
       // Conceptual richness: keyword density
       const keywords = extractKeywords(lightCandidate.value);
       const uniqueKeywords = new Set(keywords);
       const wordCount = lightCandidate.value.split(/\s+/).length;
-      const conceptualRichnessScore = wordCount > 0 ? Math.min(1, uniqueKeywords.size / (wordCount * 0.5)) : 0;
+      const conceptualRichnessScore =
+        wordCount > 0 ? Math.min(1, uniqueKeywords.size / (wordCount * 0.5)) : 0;
 
       // Weighted final score
       const finalScore =
@@ -444,9 +514,7 @@ export class DreamPipeline {
     const timeStr = now.toISOString().slice(11, 19);
 
     const promoted = deepResult.candidates.filter((c) => c.promoted);
-    const topPromoted = [...promoted]
-      .sort((a, b) => b.finalScore - a.finalScore)
-      .slice(0, 10);
+    const topPromoted = [...promoted].sort((a, b) => b.finalScore - a.finalScore).slice(0, 10);
 
     const lines: string[] = [
       `# Dream Diary — ${dateStr}`,
@@ -480,12 +548,14 @@ export class DreamPipeline {
         lines.push("");
         lines.push(`> ${entry.value.slice(0, 200)}${entry.value.length > 200 ? "..." : ""}`);
         lines.push("");
-        lines.push(`Relevance: ${entry.relevanceScore.toFixed(2)} | ` +
-          `Frequency: ${entry.frequencyScore.toFixed(2)} | ` +
-          `Diversity: ${entry.queryDiversityScore.toFixed(2)} | ` +
-          `Recency: ${entry.recencyScore.toFixed(2)} | ` +
-          `Consolidation: ${entry.consolidationScore.toFixed(2)} | ` +
-          `Richness: ${entry.conceptualRichnessScore.toFixed(2)}`);
+        lines.push(
+          `Relevance: ${entry.relevanceScore.toFixed(2)} | ` +
+            `Frequency: ${entry.frequencyScore.toFixed(2)} | ` +
+            `Diversity: ${entry.queryDiversityScore.toFixed(2)} | ` +
+            `Recency: ${entry.recencyScore.toFixed(2)} | ` +
+            `Consolidation: ${entry.consolidationScore.toFixed(2)} | ` +
+            `Richness: ${entry.conceptualRichnessScore.toFixed(2)}`,
+        );
         lines.push("");
       }
     }
@@ -530,10 +600,7 @@ export class DreamPipeline {
 
   private writePhaseToDisk(filename: string, data: unknown): void {
     try {
-      writeFileSync(
-        join(this.dreamsDir, filename),
-        JSON.stringify(data, null, 2),
-      );
+      writeFileSync(join(this.dreamsDir, filename), JSON.stringify(data, null, 2));
     } catch {
       // Best-effort persistence — do not crash the pipeline
     }
