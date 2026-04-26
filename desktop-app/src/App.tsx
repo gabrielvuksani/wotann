@@ -31,6 +31,25 @@ import {
 import { PatronSummoning, type Patron } from "./components/onboarding/PatronSummoning";
 import { CursorTrailOverlay } from "./components/workshop/CursorTrailOverlay";
 import { Delivery } from "./components/Delivery";
+// V9 Wave 2-M — orphan-component wiring. Each of these panels was
+// committed as scaffolding (Wave 0) but never imported into the
+// production component tree. We surface them here as opt-in modal
+// sheets driven by `wotann:open-<panel>` window events, mirroring the
+// existing PatronSummoning / Delivery opt-in pattern. Producers (the
+// command palette, sidebar entries, status-bar pills) fire the event;
+// the sheet renders the panel until dismissed.
+import { AgentlessPanel } from "./components/agentless/AgentlessPanel";
+import { DeployPanel } from "./components/deploy/DeployPanel";
+import { OffloadPanel } from "./components/offload/OffloadPanel";
+import { RecipePanel } from "./components/recipe/RecipePanel";
+import { SOPPanel } from "./components/sop/SOPPanel";
+// V9 Wave 2-M — daemon→window event bridge. `createEventBridge()` was
+// shipped in Wave 0 but never started. Mounting it once at App root
+// converts daemon notifications (creations.updated, computer.session,
+// tool.result) into window CustomEvents that the existing global
+// overlays already listen for (RavensFlightAnimation, McpAppOverlay,
+// the Creations strip in AppShell).
+import { createEventBridge } from "./daemon/event-bridge";
 
 /**
  * Dispatch-fired event payload for RavensFlightAnimation. Pages or
@@ -88,6 +107,24 @@ export function App() {
    * not cancel in-flight RPCs — same opt-in pattern as PatronSummoning.
    */
   const [deliveryOpen, setDeliveryOpen] = useState(false);
+
+  // V9 Wave 2-M — orphan-panel modal toggles. Each panel ships as a
+  // self-contained surface; the App-level state just controls whether
+  // the sheet is mounted. Producers fire a window event:
+  //
+  //   window.dispatchEvent(new CustomEvent("wotann:open-agentless"))
+  //   window.dispatchEvent(new CustomEvent("wotann:open-deploy"))
+  //   window.dispatchEvent(new CustomEvent("wotann:open-offload"))
+  //   window.dispatchEvent(new CustomEvent("wotann:open-recipe"))
+  //   window.dispatchEvent(new CustomEvent("wotann:open-sop"))
+  //
+  // Closing the sheet only dismisses the modal — it does not cancel
+  // in-flight RPCs (each panel manages its own request lifecycle).
+  const [agentlessOpen, setAgentlessOpen] = useState(false);
+  const [deployOpen, setDeployOpen] = useState(false);
+  const [offloadOpen, setOffloadOpen] = useState(false);
+  const [recipeOpen, setRecipeOpen] = useState(false);
+  const [sopOpen, setSopOpen] = useState(false);
 
   // T14.4 keybindings — kept here so they live alongside the motif state.
   // The base keybinding map is in src/hooks/useShortcuts.ts; we layer the
@@ -177,6 +214,46 @@ export function App() {
     }
     window.addEventListener("wotann:open-delivery", onOpen);
     return () => window.removeEventListener("wotann:open-delivery", onOpen);
+  }, []);
+
+  // V9 Wave 2-M — open-trigger subscribers for the five Wave-0 orphan
+  // panels (agentless / deploy / offload / recipe / sop). Each panel
+  // mounts as a modal sheet when its event fires; closing the sheet
+  // sets the toggle back to false. Subscribers are kept independent so
+  // adding / removing one in the future is a single-listener change.
+  useEffect(() => {
+    function onAgentless() { setAgentlessOpen(true); }
+    function onDeploy() { setDeployOpen(true); }
+    function onOffload() { setOffloadOpen(true); }
+    function onRecipe() { setRecipeOpen(true); }
+    function onSop() { setSopOpen(true); }
+    window.addEventListener("wotann:open-agentless", onAgentless);
+    window.addEventListener("wotann:open-deploy", onDeploy);
+    window.addEventListener("wotann:open-offload", onOffload);
+    window.addEventListener("wotann:open-recipe", onRecipe);
+    window.addEventListener("wotann:open-sop", onSop);
+    return () => {
+      window.removeEventListener("wotann:open-agentless", onAgentless);
+      window.removeEventListener("wotann:open-deploy", onDeploy);
+      window.removeEventListener("wotann:open-offload", onOffload);
+      window.removeEventListener("wotann:open-recipe", onRecipe);
+      window.removeEventListener("wotann:open-sop", onSop);
+    };
+  }, []);
+
+  // V9 Wave 2-M — daemon→window event bridge. Mount a single bridge
+  // instance at App root so every daemon notification (creations,
+  // computer-session, tool-result) is converted into the window
+  // CustomEvents the global overlays already listen for. The bridge
+  // is best-effort: if `@tauri-apps/api/event` fails to import (vitest
+  // / dev preview), the factory rejects and the bridge logs once + stays
+  // inert. `dispose()` is idempotent so React StrictMode double-mount in
+  // dev cannot leak listeners.
+  useEffect(() => {
+    const handle = createEventBridge();
+    return () => {
+      handle.dispose();
+    };
   }, []);
 
   const handleFlightComplete = useCallback((flightId: string) => {
@@ -498,6 +575,209 @@ export function App() {
                   : null) ?? undefined
               }
             />
+          </div>
+        </div>
+      )}
+
+      {/*
+        V9 Wave 2-M — orphan panel modals. Each sheet mirrors the Delivery /
+        PatronSummoning structure: backdrop dismiss, Escape closes, panel
+        renders inside a centred card. Panels are self-contained — they own
+        their own RPC lifecycle, so dismissing the sheet cancels nothing.
+        Producer events: `wotann:open-agentless`, `wotann:open-deploy`,
+        `wotann:open-offload`, `wotann:open-recipe`, `wotann:open-sop`.
+      */}
+      {agentlessOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Agentless repair"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setAgentlessOpen(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setAgentlessOpen(false);
+          }}
+          tabIndex={-1}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 9, 15, 0.78)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 32,
+          }}
+        >
+          <div
+            style={{
+              width: "min(900px, 100%)",
+              maxHeight: "min(720px, 100%)",
+              overflow: "auto",
+              background: "var(--surface-1)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 12,
+            }}
+          >
+            <AgentlessPanel />
+          </div>
+        </div>
+      )}
+
+      {deployOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Deploy"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeployOpen(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setDeployOpen(false);
+          }}
+          tabIndex={-1}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 9, 15, 0.78)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 32,
+          }}
+        >
+          <div
+            style={{
+              width: "min(900px, 100%)",
+              maxHeight: "min(720px, 100%)",
+              overflow: "auto",
+              background: "var(--surface-1)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 12,
+            }}
+          >
+            <DeployPanel />
+          </div>
+        </div>
+      )}
+
+      {offloadOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Offload"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setOffloadOpen(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOffloadOpen(false);
+          }}
+          tabIndex={-1}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 9, 15, 0.78)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 32,
+          }}
+        >
+          <div
+            style={{
+              width: "min(900px, 100%)",
+              maxHeight: "min(720px, 100%)",
+              overflow: "auto",
+              background: "var(--surface-1)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 12,
+            }}
+          >
+            <OffloadPanel />
+          </div>
+        </div>
+      )}
+
+      {recipeOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Recipe"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRecipeOpen(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setRecipeOpen(false);
+          }}
+          tabIndex={-1}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 9, 15, 0.78)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 32,
+          }}
+        >
+          <div
+            style={{
+              width: "min(900px, 100%)",
+              maxHeight: "min(720px, 100%)",
+              overflow: "auto",
+              background: "var(--surface-1)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 12,
+            }}
+          >
+            <RecipePanel />
+          </div>
+        </div>
+      )}
+
+      {sopOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Standard operating procedure"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSopOpen(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setSopOpen(false);
+          }}
+          tabIndex={-1}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 9, 15, 0.78)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 32,
+          }}
+        >
+          <div
+            style={{
+              width: "min(900px, 100%)",
+              maxHeight: "min(720px, 100%)",
+              overflow: "auto",
+              background: "var(--surface-1)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 12,
+            }}
+          >
+            <SOPPanel />
           </div>
         </div>
       )}

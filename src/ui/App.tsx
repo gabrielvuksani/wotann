@@ -21,6 +21,12 @@ import { AgentStatusPanel, type SubagentStatus } from "./components/AgentStatusP
 import { HistoryPicker } from "./components/HistoryPicker.js";
 import { CommandPalette } from "./components/CommandPalette.js";
 import { CommandRegistry, type Command } from "./command-registry.js";
+// V9 Wave 2-M (R-09) — TUI palette command set. `registerR09Commands`
+// was shipped in Wave 0 but never invoked in App.tsx, so the 19 R-09
+// commands (chat, editor, workshop, exploit, browse, ...) never made
+// it into the live CommandRegistry. The companion `buildMagicSubCommands`
+// produces the .magic dot-shortcut sub-palette.
+import { registerR09Commands, buildMagicSubCommands } from "./components/CommandPaletteCommands.js";
 import { MessageActions, type MessageAction } from "./components/MessageActions.js";
 import { ContextSourcePanel, type ContextSource } from "./components/ContextSourcePanel.js";
 import { TerminalBlocksView } from "./components/TerminalBlocksView.js";
@@ -687,6 +693,61 @@ export function WotannApp({
     return () => {
       for (const cmd of builtins) registry.unregister(cmd.id);
     };
+  }, []);
+
+  // ── R-09 commands: register the 19 reach-gap palette entries ──
+  // CommandPaletteCommands.ts ships a pure builder + register helper;
+  // calling it once at mount adds the entries to the same registry the
+  // built-ins use, so Cmd+P fuzzy-search returns both. The deps closure
+  // captures the live setters / handler refs so the commands react to
+  // current state at execution time. Magic sub-palette commands are
+  // registered alongside R-09 because the R-09 "magic" entry calls
+  // `onOpenMagic`, which surfaces them via the same registry.
+  useEffect(() => {
+    const registry = commandRegistryRef.current;
+
+    const cycleMode = (): void => {
+      const idx = VALID_MODES.indexOf(currentMode);
+      const next = VALID_MODES[(idx + 1) % VALID_MODES.length] ?? "default";
+      if (runtime) runtime.setMode(next);
+      setCurrentMode(next);
+      appendSystemMessage(`Mode switched to: ${next}`);
+    };
+
+    // Magic sub-palette — registered on demand by `onOpenMagic`. We
+    // build the command list once and register/unregister together so
+    // the registry doesn't accumulate stale entries across remounts.
+    const magicSubCommands: readonly Command[] = buildMagicSubCommands(appendSystemMessage);
+    let magicRegistered = false;
+    const openMagic = (): void => {
+      if (magicRegistered) {
+        appendSystemMessage("→ Magic palette already open. Type to search the .magic shortcuts.");
+        return;
+      }
+      for (const cmd of magicSubCommands) registry.register(cmd);
+      magicRegistered = true;
+      appendSystemMessage(
+        `→ Loaded ${magicSubCommands.length} magic commands. Type to search; press Esc to close.`,
+      );
+    };
+
+    const unregisterR09 = registerR09Commands(registry, {
+      appendSystemMessage,
+      onVoiceCapture: () => void handleVoiceCapture(),
+      onCycleMode: cycleMode,
+      onOpenMagic: openMagic,
+    });
+
+    return () => {
+      unregisterR09();
+      if (magicRegistered) {
+        for (const cmd of magicSubCommands) registry.unregister(cmd.id);
+      }
+    };
+    // The cycleMode + openMagic closures intentionally read the latest
+    // state via the React refs / setters they close over — they're
+    // stable across renders for the lifetime of this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Command Palette Handlers ────────────────────────────

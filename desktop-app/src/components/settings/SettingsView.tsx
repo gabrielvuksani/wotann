@@ -8,6 +8,11 @@ import { getChannelsStatus, stopEngine, startEngine, initializeFromEngine, runDo
 import { commands, type CompanionDeviceInfo, type CompanionPairingInfo } from "../../hooks/useTauriCommand";
 import { ProviderConfig } from "./ProviderConfig";
 import { ShortcutEditor } from "./ShortcutEditor";
+// V9 Wave 2-M (R-05) — surface the SettingsAdvancedSection sub-panel.
+// The sub-panel hosts the PatronSummoningButton, which is the canonical
+// `wotann:open-patron` emitter (consumed by App.tsx). Was an orphan
+// component until this wire — see SettingsAdvancedSection.tsx header.
+import { SettingsAdvancedSection } from "./SettingsAdvancedSection";
 import { WORKSPACE_PRESETS } from "../../lib/workspace-presets";
 import type { WorkspacePreset } from "../../types";
 import { ConnectorsGUI } from "../connectors/ConnectorsGUI";
@@ -378,7 +383,13 @@ export function SettingsView() {
         )}
 
         {activeSection === "advanced" && (
-          <AdvancedSection />
+          <>
+            <AdvancedSection />
+            {/* V9 Wave 2-M — Choose-Patron entry point. The sub-panel is
+                self-contained (header + helper + button) so the rest of
+                the Advanced section stays untouched. */}
+            <SettingsAdvancedSection />
+          </>
         )}
       </div>
     </div>

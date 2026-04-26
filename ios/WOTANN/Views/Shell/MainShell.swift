@@ -111,6 +111,19 @@ struct MainShell: View {
                 VoiceInputView(onSend: handleVoiceInput)
                     .environmentObject(appState)
             }
+            // V9 Wave 2-M (R-08) — ApprovalQueueView route. Push-notification
+            // deep links (`approvals.notify` → APNs → tap on phone) set
+            // `appState.deepLinkDestination = "approvals"`. We surface the
+            // queue as a sheet so the user can land on the durable list
+            // regardless of which tab is active. Clearing the destination on
+            // dismiss prevents the sheet from re-firing on the next render.
+            .sheet(isPresented: approvalsSheetBinding) {
+                ApprovalQueueView()
+                    .environmentObject(connectionManager)
+                    .environmentObject(appState)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
 
             // V9 T5.11 (F14) — Handoff banner. Top-pinned, only visible
             // when the desktop advertises a candidate. The HandoffView's
@@ -162,6 +175,23 @@ struct MainShell: View {
             },
             set: { newValue in
                 appState.activeTab = newValue
+            }
+        )
+    }
+
+    /// Derived binding that opens the `ApprovalQueueView` sheet when
+    /// `appState.deepLinkDestination == "approvals"`. Setting the
+    /// binding to `false` clears the destination so the sheet does not
+    /// re-present on subsequent renders. Setting it to `true` is a
+    /// no-op — the sheet is opened by mutating `deepLinkDestination`
+    /// from the producer side (push handler / Settings entry).
+    private var approvalsSheetBinding: Binding<Bool> {
+        Binding(
+            get: { appState.deepLinkDestination == "approvals" },
+            set: { newValue in
+                if !newValue && appState.deepLinkDestination == "approvals" {
+                    appState.deepLinkDestination = nil
+                }
             }
         )
     }
