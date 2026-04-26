@@ -72,6 +72,9 @@ export const MOUSE_ENABLE_SEQUENCE = "\x1b[?1006h\x1b[?1003h";
 export const MOUSE_DISABLE_SEQUENCE = "\x1b[?1006l\x1b[?1003l";
 
 /** Regex matching ONE complete OSC 1006 SGR mouse report. */
+// eslint-disable-next-line no-control-regex -- ANSI ESC byte (0x1B) is the
+// literal first byte of every SGR mouse report. The regex parses raw
+// terminal input where this control character is meaningful, not noise.
 const MOUSE_REPORT_PATTERN = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
 
 // ── Decoder ──────────────────────────────────────────────────────────

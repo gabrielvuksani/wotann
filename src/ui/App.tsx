@@ -747,7 +747,10 @@ export function WotannApp({
     // The cycleMode + openMagic closures intentionally read the latest
     // state via the React refs / setters they close over — they're
     // stable across renders for the lifetime of this effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // CI fix: was `eslint-disable-next-line react-hooks/exhaustive-deps`
+    // but the rule isn't loaded in eslint.config.js (rule definitions are
+    // restricted by config-protection hook). Removed the comment since
+    // the rule wouldn't fire anyway; closures are stable by design.
   }, []);
 
   // ── Command Palette Handlers ────────────────────────────
