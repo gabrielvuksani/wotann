@@ -61,12 +61,16 @@ interface ProviderKey {
   readonly free: boolean;
 }
 
+// Free-tier providers first (ollama → google → groq), then paid in
+// alphabetical order. Previous order put Anthropic in slot #2 ahead of
+// the free Google + Groq paths, biasing every "first option I see"
+// click toward a paid Anthropic key. v9 META-AUDIT.
 const PROVIDERS: readonly ProviderKey[] = [
   { id: "ollama", name: "Ollama (Free, Local)", envVar: "OLLAMA_HOST", placeholder: "http://localhost:11434", helpUrl: "https://ollama.com/download", free: true },
+  { id: "google", name: "Google (Gemini — free tier)", envVar: "GEMINI_API_KEY", placeholder: "AIza... (free tier available)", helpUrl: "https://aistudio.google.com/app/apikey", free: true },
+  { id: "groq", name: "Groq (Free tier, fast)", envVar: "GROQ_API_KEY", placeholder: "gsk_...", helpUrl: "https://console.groq.com/keys", free: true },
   { id: "anthropic", name: "Anthropic (Claude)", envVar: "ANTHROPIC_API_KEY", placeholder: "sk-ant-... (API key or Max subscription key)", helpUrl: "https://console.anthropic.com/settings/keys", free: false },
   { id: "openai", name: "OpenAI (GPT)", envVar: "OPENAI_API_KEY", placeholder: "sk-... (API key or Plus session token)", helpUrl: "https://platform.openai.com/api-keys", free: false },
-  { id: "google", name: "Google (Gemini)", envVar: "GEMINI_API_KEY", placeholder: "AIza... (free tier available)", helpUrl: "https://aistudio.google.com/app/apikey", free: false },
-  { id: "groq", name: "Groq (Free tier, fast)", envVar: "GROQ_API_KEY", placeholder: "gsk_...", helpUrl: "https://console.groq.com/keys", free: false },
   { id: "openrouter", name: "OpenRouter (Multi-model)", envVar: "OPENROUTER_API_KEY", placeholder: "sk-or-... (use any subscription)", helpUrl: "https://openrouter.ai/keys", free: false },
 ];
 

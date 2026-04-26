@@ -146,6 +146,7 @@
 		9835229EE035E2B4898820FD /* WebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614A3CF377AB282F4EC259AA /* WebSocketClient.swift */; };
 		990C890CAE5FBECE7E2E4F4F /* OfflineQueueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A75380AA0684C081EB6D23C /* OfflineQueueService.swift */; };
 		8E0AB6D3F4CF4F41B9C51FE2 /* OfflineQueueDLQ.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1666D3E8D5C94EC785F8C707 /* OfflineQueueDLQ.swift */; };
+		0BAFE41F3D034AB1971E9B08 /* MCPListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E2F50683D2C4BBE89E48A3A /* MCPListView.swift */; };
 		993CFBFB8CAE451C9E1EF8F9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF2C467534932F2AF3DCB79A /* SettingsView.swift */; };
 		998D71138E45B7A604532EEB /* ArtifactView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B9CB078FE7FC0A34309DE0 /* ArtifactView.swift */; };
 		9B588BC0138AD9FF2BD6DE77 /* CodePlaygroundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0179DCE406DE010D855EF594 /* CodePlaygroundView.swift */; };
@@ -352,6 +353,7 @@
 		49CEAA7515F27EDBDD03C465 /* ConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
 		4A75380AA0684C081EB6D23C /* OfflineQueueService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineQueueService.swift; sourceTree = "<group>"; };
 		1666D3E8D5C94EC785F8C707 /* OfflineQueueDLQ.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineQueueDLQ.swift; sourceTree = "<group>"; };
+		4E2F50683D2C4BBE89E48A3A /* MCPListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPListView.swift; sourceTree = "<group>"; };
 		4B51AA79482C2489AC5AEAA5 /* HitTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HitTarget.swift; sourceTree = "<group>"; };
 		4C56C340F9DDD344E0CBCE44 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4E80A34FF0260230786838F6 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
@@ -655,6 +657,7 @@
 				125D3C15B8578307FEF2095C /* NotificationService.swift */,
 				4A75380AA0684C081EB6D23C /* OfflineQueueService.swift */,
 				1666D3E8D5C94EC785F8C707 /* OfflineQueueDLQ.swift */,
+				4E2F50683D2C4BBE89E48A3A /* MCPListView.swift */,
 				3D49F04230915DCF8EF70FF8 /* OnDeviceModelService.swift */,
 				2E83842536E65E46408B77A0 /* VoiceService.swift */,
 				F9A710340FD9555B23051765 /* WotannStingService.swift */,
@@ -1546,6 +1549,7 @@
 				8340D1E69B31722DA04724B4 /* NotificationSettings.swift in Sources */,
 				990C890CAE5FBECE7E2E4F4F /* OfflineQueueService.swift in Sources */,
 				8E0AB6D3F4CF4F41B9C51FE2 /* OfflineQueueDLQ.swift in Sources */,
+				0BAFE41F3D034AB1971E9B08 /* MCPListView.swift in Sources */,
 				144B74393C2F8D782E60B893 /* OnDeviceAIView.swift in Sources */,
 				058CFF3CBE328B3860E9C89B /* OnDeviceModelService.swift in Sources */,
 				B332DB97CAE8EE6EC894FAC0 /* OnboardingView.swift in Sources */,

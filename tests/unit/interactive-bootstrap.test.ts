@@ -40,8 +40,12 @@ describe("interactive bootstrap", () => {
 
       expect(interactive.providers.length).toBeGreaterThan(10);
       expect(interactive.providers.every((provider) => provider.available === false)).toBe(true);
-      // No providers configured → neutral Ollama-local default (no vendor bias).
-      expect(interactive.initialProvider).toBe("ollama");
+      // No providers configured → empty sentinel (caller must onboard
+      // the user to a provider). Previous test asserted "ollama" but
+      // that was a hardcoded fallback that pretended Ollama was set up
+      // when nothing was. v9 META-AUDIT: surface the real empty state.
+      expect(interactive.initialProvider).toBe("");
+      expect(interactive.initialModel).toBe("");
       expect(interactive.runtime.getCurrentMode()).toBe("plan");
       expect(interactive.runtime.getStatus().middlewareLayers).toBeGreaterThanOrEqual(25);
       expect(interactive.runtime.getStatus().hookCount).toBeGreaterThan(10);

@@ -4256,10 +4256,12 @@ export class KairosRPCHandler {
       if (!query) throw new Error("query required");
       if (!this.runtime) throw new Error("Runtime not initialized");
       try {
-        const providerNames = (providers ?? [
-          "anthropic",
-          "openai",
-        ]) as import("../core/types.js").ProviderName[];
+        // No-default behavior: when callers omit `providers`, surface
+        // an empty list to runCouncil rather than the old [anthropic,
+        // openai] hardcode. The runtime decides what's actually
+        // configured; the daemon doesn't get to second-guess that and
+        // pre-bias the council toward two vendors. v9 META-AUDIT.
+        const providerNames = (providers ?? []) as import("../core/types.js").ProviderName[];
         const result = await this.runtime.runCouncil(query, providerNames);
         return {
           synthesis: result.synthesis,

@@ -229,14 +229,17 @@ export function buildSecurityResearchPrompt(
 }
 
 /**
- * Get Gemini-specific safety settings for API calls.
- * In guardrails-off mode, all harm categories are set to BLOCK_NONE.
+ * Get Gemini-specific safety settings for API calls. v9 paternalism
+ * removal: BLOCK_NONE in BOTH modes — the harness no longer tightens
+ * Google's own moderation behind the user's back. Whatever the Gemini
+ * API enforces is what the user gets. (Previously default mode pinned
+ * BLOCK_MEDIUM_AND_ABOVE, ratcheting tighter than Google's own default.)
  */
-export function getGeminiSafetySettings(guardrailsOff: boolean): readonly {
+export function getGeminiSafetySettings(_guardrailsOff: boolean): readonly {
   category: string;
   threshold: string;
 }[] {
-  const threshold = guardrailsOff ? "BLOCK_NONE" : "BLOCK_MEDIUM_AND_ABOVE";
+  const threshold: GeminiHarmBlockThreshold = GEMINI_HARM_BLOCK_DEFAULT;
   return [
     { category: "HARM_CATEGORY_HARASSMENT", threshold },
     { category: "HARM_CATEGORY_HATE_SPEECH", threshold },

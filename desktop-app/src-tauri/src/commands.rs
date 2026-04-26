@@ -1084,8 +1084,11 @@ fn hardcoded_providers() -> Vec<ProviderInfo> {
                     cost_per_m_tok: 15.0,
                 },
                 ModelInfo {
-                    id: "claude-sonnet-4-6".into(),
-                    name: "Claude Sonnet 4.6".into(),
+                    // claude-sonnet-4-6 retires June 15, 2026 — use 4.7
+                    // so the catalog doesn't ship a model the user can't
+                    // call after that date.
+                    id: "claude-sonnet-4-7".into(),
+                    name: "Claude Sonnet 4.7".into(),
                     context_window: 1_000_000,
                     cost_per_m_tok: 3.0,
                 },

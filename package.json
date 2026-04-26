@@ -40,7 +40,7 @@
     "lint:fix": "eslint --fix \"src/**/*.{ts,tsx,js,jsx}\"",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,md}\"",
-    "test": "vitest run",
+    "test": "NODE_OPTIONS=--max-old-space-size=4096 vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "tokens:generate": "node scripts/generate-tokens.mjs",

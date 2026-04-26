@@ -63,11 +63,20 @@ describe("Guardrails-Off Mode", () => {
     expect(overrides.destructiveGuardActive).toBe(false);
   });
 
-  it("safety overrides are all active in default mode", () => {
+  it("safety overrides do NOT inject extra cyber-risk text in default mode", () => {
+    // v9: paternalism removal. The harness no longer overlays additional
+    // safety prompts on top of the model's RLHF in default mode (user
+    // directive: "let the user do whatever they want, so there shouldn't
+    // be such a thing as 'safeguards for model misuse'"). The
+    // user-protecting guards stay on (hookEnginePaused: false,
+    // secretScannerActive: true, destructiveGuardActive: true) — those
+    // protect the USER from a confused/compromised agent.
     const overrides = getSafetyOverrides(false);
-    expect(overrides.cyberRiskInstruction.length).toBeGreaterThan(0);
+    expect(overrides.cyberRiskInstruction).toBe("");
+    expect(overrides.openaiSafetyInstruction).toBe("");
     expect(overrides.hookEnginePaused).toBe(false);
     expect(overrides.secretScannerActive).toBe(true);
+    expect(overrides.destructiveGuardActive).toBe(true);
   });
 
   it("Gemini safety settings are BLOCK_NONE when off", () => {
@@ -76,9 +85,11 @@ describe("Guardrails-Off Mode", () => {
     expect(settings.every((s) => s.threshold === "BLOCK_NONE")).toBe(true);
   });
 
-  it("Gemini safety settings are BLOCK_MEDIUM_AND_ABOVE when on", () => {
+  it("Gemini safety settings stay BLOCK_NONE in default mode (paternalism removal)", () => {
+    // v9: harness no longer tightens Google's own moderation behind the
+    // user's back. Default = whatever Google enforces.
     const settings = getGeminiSafetySettings(false);
-    expect(settings.every((s) => s.threshold === "BLOCK_MEDIUM_AND_ABOVE")).toBe(true);
+    expect(settings.every((s) => s.threshold === "BLOCK_NONE")).toBe(true);
   });
 
   it("handles all known providers", () => {

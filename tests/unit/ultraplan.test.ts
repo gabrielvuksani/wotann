@@ -66,9 +66,17 @@ describe("ULTRAPLAN", () => {
   });
 
   describe("getDefaultConfig", () => {
-    it("returns valid configuration", () => {
+    it("returns valid configuration with empty provider/model sentinels", () => {
       const config = getDefaultConfig();
-      expect(config.planModel).toBe("claude-opus-4-7");
+      // v9 META-AUDIT (provider neutrality): the default config no longer
+      // pins planProvider/execProvider to "anthropic" or planModel/execModel
+      // to specific Claude IDs. Empty strings mean "caller must specify
+      // or read from runtime config." Tests guard against regression to
+      // the old hardcoded-Anthropic defaults.
+      expect(config.planProvider).toBe("");
+      expect(config.planModel).toBe("");
+      expect(config.execProvider).toBe("");
+      expect(config.execModel).toBe("");
       expect(config.maxThinkingTokens).toBe(128_000);
       expect(config.maxPlanTimeMs).toBe(30 * 60 * 1000);
     });

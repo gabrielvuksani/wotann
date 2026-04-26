@@ -421,8 +421,10 @@ struct Composer: View {
             text: .constant(""),
             isStreaming: false,
             isEnhancing: false,
-            currentModel: "claude-opus-4-6",
-            currentProvider: "anthropic",
+            // Preview-only — pick a non-Anthropic vendor so the
+            // SwiftUI canvas doesn't bias the design preview.
+            currentModel: "qwen3-coder:30b",
+            currentProvider: "ollama",
             estimatedCost: 0.003,
             autopilotOn: false,
             onSend: {},

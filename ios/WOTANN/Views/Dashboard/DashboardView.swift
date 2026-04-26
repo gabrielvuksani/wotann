@@ -643,13 +643,15 @@ private func previewAppState() -> AppState {
     let state = AppState()
 
     // Sample conversations
+    // Sample data rotates providers so the dashboard preview doesn't
+    // bias the user's mental model toward Anthropic. v9 META-AUDIT.
     let conv1 = Conversation(
         title: "Auth flow refactor",
         messages: [
             Message(role: .user, content: "Help me refactor the auth flow"),
             Message(role: .assistant, content: "Sure, let me review the current implementation...")
         ],
-        provider: "anthropic",
+        provider: "ollama",
         updatedAt: Date.now.addingTimeInterval(-7200)
     )
     let conv2 = Conversation(
@@ -664,18 +666,18 @@ private func previewAppState() -> AppState {
     )
     let conv3 = Conversation(
         title: "API design review",
-        provider: "google",
+        provider: "anthropic",
         updatedAt: Date.now.addingTimeInterval(-86400)
     )
 
     state.conversations = [conv1, conv2, conv3]
 
-    // Sample agents
+    // Sample agents — rotate providers in deterministic order.
     let agent1 = AgentTask(
         title: "Running tests",
         status: .running,
         progress: 0.65,
-        provider: "anthropic"
+        provider: "google"
     )
     let agent2 = AgentTask(
         title: "Code review",

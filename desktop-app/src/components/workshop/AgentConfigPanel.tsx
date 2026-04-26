@@ -33,15 +33,22 @@ interface WorkerStatus {
 // Static list lets the UI offer a full override surface without depending on
 // a provider-discovery RPC. Daemons that support `providers.list` will still
 // surface the same names for each of these options.
+//
+// v9 META-AUDIT: previous list put Anthropic's three Claude variants
+// FIRST and used `claude-opus-4-6` / `-sonnet-4-6` / `-haiku-4-6`,
+// which all retire June 15, 2026. Updated to alphabetic vendor order
+// (anthropic, google, ollama, openai) and current-generation model IDs
+// so neither the visual ordering nor the default selection biases the
+// user back toward Anthropic.
 const MODEL_CHOICES: readonly { readonly provider: string; readonly model: string }[] = [
-  { provider: "anthropic", model: "claude-opus-4-6" },
-  { provider: "anthropic", model: "claude-sonnet-4-6" },
-  { provider: "anthropic", model: "claude-haiku-4-6" },
-  { provider: "openai", model: "gpt-4.1" },
-  { provider: "openai", model: "o4-mini" },
+  { provider: "anthropic", model: "claude-opus-4-7" },
+  { provider: "anthropic", model: "claude-sonnet-4-7" },
+  { provider: "anthropic", model: "claude-haiku-4-5" },
   { provider: "google", model: "gemini-2.5-pro" },
   { provider: "ollama", model: "qwen3-coder:30b" },
   { provider: "ollama", model: "devstral:24b" },
+  { provider: "openai", model: "gpt-4.1" },
+  { provider: "openai", model: "o4-mini" },
 ];
 
 // ── Helpers ──────────────────────────────────────────────

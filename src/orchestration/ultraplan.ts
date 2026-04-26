@@ -21,17 +21,21 @@ import type { ProviderName } from "../core/types.js";
 import type { KnowledgeGraph } from "../memory/graph-rag.js";
 
 export interface ULTRAPLANConfig {
-  /** Provider for planning (strongest available) */
-  readonly planProvider: ProviderName;
-  /** Model for planning (e.g., claude-opus-4-7) */
+  /**
+   * Provider for planning. Empty string means "no default — caller must
+   * specify or read from runtime config." See DEFAULT_CONFIG below for
+   * the rationale.
+   */
+  readonly planProvider: ProviderName | "";
+  /** Model for planning (e.g., claude-opus-4-7). Empty when provider is empty. */
   readonly planModel: string;
   /** Maximum thinking tokens for the planning phase */
   readonly maxThinkingTokens: number;
   /** Maximum time for the planning phase in ms */
   readonly maxPlanTimeMs: number;
-  /** Provider for execution (fast model) */
-  readonly execProvider: ProviderName;
-  /** Model for execution (e.g., claude-sonnet-4-7) */
+  /** Provider for execution. Same empty-sentinel convention as planProvider. */
+  readonly execProvider: ProviderName | "";
+  /** Model for execution (e.g., claude-sonnet-4-7). Empty when provider is empty. */
   readonly execModel: string;
 }
 
@@ -70,17 +74,20 @@ export interface PhaseResult {
   readonly durationMs: number;
 }
 
+// ULTRAPLAN was Anthropic-only by default — every cold-start invocation
+// without explicit provider/model args silently used Opus + Sonnet. That
+// turned ULTRAPLAN's "30-minute compute" promise into "30 minutes of
+// Anthropic API spend" for every user. The empty-string sentinels here
+// mean: caller must supply provider + model (or read them from runtime
+// config). Fail fast if neither is set rather than running up a bill on
+// a vendor the user didn't pick.
 const DEFAULT_CONFIG: ULTRAPLANConfig = {
-  planProvider: "anthropic",
-  // Wave 6.5-VV (V14.1): bumped to current Opus per Gabriel directive.
-  // claude-opus-4-6 retires June 15, 2026 — pre-emptive migration avoids
-  // a hardcoded-string deathmarch later.
-  planModel: "claude-opus-4-7",
+  planProvider: "",
+  planModel: "",
   maxThinkingTokens: 128_000,
   maxPlanTimeMs: 30 * 60 * 1000, // 30 minutes
-  execProvider: "anthropic",
-  // Wave 6.5-VV (V14.1): bumped to current Sonnet — same retire-date risk.
-  execModel: "claude-sonnet-4-7",
+  execProvider: "",
+  execModel: "",
 };
 
 /**

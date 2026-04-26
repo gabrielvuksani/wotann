@@ -578,6 +578,17 @@ struct SettingsView: View {
                     .foregroundColor(WTheme.Colors.textPrimary)
                     .frame(minHeight: 44)
             }
+
+            // v9 cross-surface parity: TUI/CLI/macOS all have MCP server
+            // management; iOS was the only surface missing it.
+            NavigationLink {
+                MCPListView()
+                    .environmentObject(connectionManager)
+            } label: {
+                Label("MCP Servers", systemImage: "server.rack")
+                    .foregroundColor(WTheme.Colors.textPrimary)
+                    .frame(minHeight: 44)
+            }
         } header: {
             Text("Data")
                 .font(.wotannScaled(size: 12, weight: .semibold))

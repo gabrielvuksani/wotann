@@ -35,29 +35,69 @@ export type PromptCategory =
 // ── Constants ─────────────────────────────────────────
 
 const PHOTOREALISTIC_KEYWORDS = [
-  "photo", "realistic", "photograph", "portrait", "landscape",
-  "headshot", "product shot", "real", "natural", "cinematic",
+  "photo",
+  "realistic",
+  "photograph",
+  "portrait",
+  "landscape",
+  "headshot",
+  "product shot",
+  "real",
+  "natural",
+  "cinematic",
 ];
 
 const ARTISTIC_KEYWORDS = [
-  "painting", "watercolor", "oil", "sketch", "cartoon",
-  "anime", "illustration", "stylized", "impressionist", "surreal",
-  "abstract art", "digital art", "concept art",
+  "painting",
+  "watercolor",
+  "oil",
+  "sketch",
+  "cartoon",
+  "anime",
+  "illustration",
+  "stylized",
+  "impressionist",
+  "surreal",
+  "abstract art",
+  "digital art",
+  "concept art",
 ];
 
 const ICON_KEYWORDS = [
-  "icon", "logo", "badge", "symbol", "favicon",
-  "flat", "minimal", "monochrome", "vector",
+  "icon",
+  "logo",
+  "badge",
+  "symbol",
+  "favicon",
+  "flat",
+  "minimal",
+  "monochrome",
+  "vector",
 ];
 
 const DIAGRAM_KEYWORDS = [
-  "diagram", "flowchart", "chart", "graph", "wireframe",
-  "architecture", "uml", "sequence", "schematic", "layout",
+  "diagram",
+  "flowchart",
+  "chart",
+  "graph",
+  "wireframe",
+  "architecture",
+  "uml",
+  "sequence",
+  "schematic",
+  "layout",
 ];
 
 const TEXT_HEAVY_KEYWORDS = [
-  "text", "typography", "lettering", "quote", "banner",
-  "sign", "poster", "headline", "title card",
+  "text",
+  "typography",
+  "lettering",
+  "quote",
+  "banner",
+  "sign",
+  "poster",
+  "headline",
+  "title card",
 ];
 
 /**
@@ -88,12 +128,11 @@ const PROVIDER_CATALOG: readonly ProviderCapability[] = [
     strengths: new Set(["artistic", "abstract", "photorealistic"]),
     priority: 4,
   },
-  {
-    provider: "anthropic",
-    model: "claude-image",
-    strengths: new Set(["diagram", "icon", "text-heavy"]),
-    priority: 5,
-  },
+  // The Anthropic "claude-image" entry was fictional — Anthropic does not
+  // ship an image-generation model. Listing one here meant any image
+  // request would prefer a non-existent vendor endpoint and bias routing
+  // back to Anthropic. Removed entirely; the SVG fallback below covers
+  // the diagram/icon/text-heavy strengths the entry claimed.
 ];
 
 // ── SVG Generation Constants ──────────────────────────
@@ -159,9 +198,7 @@ export class ImageGenRouter {
    */
   generateFallbackSVG(prompt: string): string {
     const category = classifyPrompt(prompt);
-    const truncatedPrompt = prompt.length > 80
-      ? `${prompt.slice(0, 77)}...`
-      : prompt;
+    const truncatedPrompt = prompt.length > 80 ? `${prompt.slice(0, 77)}...` : prompt;
 
     const shape = categoryShape(category);
     const accentColor = categoryColor(category);
@@ -225,10 +262,7 @@ function matchScore(text: string, keywords: readonly string[]): number {
 
 // ── Scoring ───────────────────────────────────────────
 
-function computeScore(
-  provider: ProviderCapability,
-  category: PromptCategory,
-): number {
+function computeScore(provider: ProviderCapability, category: PromptCategory): number {
   let score = 0;
 
   if (provider.strengths.has(category)) {
@@ -272,21 +306,22 @@ function categoryShape(category: PromptCategory): string {
 
 function categoryColor(category: PromptCategory): string {
   switch (category) {
-    case "photorealistic": return SVG_ACCENT;
-    case "artistic": return "#e9a845";
-    case "icon": return "#45e9a8";
-    case "diagram": return "#4590e9";
-    case "text-heavy": return SVG_TEXT_COLOR;
-    default: return SVG_ACCENT;
+    case "photorealistic":
+      return SVG_ACCENT;
+    case "artistic":
+      return "#e9a845";
+    case "icon":
+      return "#45e9a8";
+    case "diagram":
+      return "#4590e9";
+    case "text-heavy":
+      return SVG_TEXT_COLOR;
+    default:
+      return SVG_ACCENT;
   }
 }
 
-function wrapSvgText(
-  text: string,
-  x: number,
-  startY: number,
-  maxCharsPerLine: number,
-): string[] {
+function wrapSvgText(text: string, x: number, startY: number, maxCharsPerLine: number): string[] {
   const words = text.split(" ");
   const lines: string[] = [];
   let currentLine = "";
@@ -301,8 +336,9 @@ function wrapSvgText(
   }
   if (currentLine) lines.push(currentLine);
 
-  return lines.map((line, i) =>
-    `  <text x="${x}" y="${startY + i * 18}" text-anchor="middle" fill="${SVG_TEXT_COLOR}" font-size="12" font-family="sans-serif" opacity="0.7">${escapeXml(line)}</text>`,
+  return lines.map(
+    (line, i) =>
+      `  <text x="${x}" y="${startY + i * 18}" text-anchor="middle" fill="${SVG_TEXT_COLOR}" font-size="12" font-family="sans-serif" opacity="0.7">${escapeXml(line)}</text>`,
   );
 }
 

@@ -43,10 +43,21 @@ export async function bootstrapInteractiveSession(
   const activeProvider = detectedProviders[0];
   const runtime = await create(workingDir, normalizeMode(options.mode));
 
+  // Resolution order: explicit option → first detected provider's first
+  // model → empty sentinel. The previous fallback ("gemma4:e4b" + "ollama")
+  // hard-pinned every fresh launch with no env to a model the user might
+  // not have pulled (Ollama silently 404s if the model isn't local) AND
+  // pretended Ollama was the configured provider when it wasn't. The
+  // empty sentinel surfaces the no-provider state to App.tsx so it can
+  // route the user into the onboarding wizard rather than firing a
+  // phantom request.
+  const initialProvider = (options.provider ?? activeProvider?.provider ?? "") as ProviderName | "";
+  const initialModel = options.model ?? activeProvider?.models[0] ?? "";
+
   return {
     providers,
-    initialModel: options.model ?? activeProvider?.models[0] ?? "gemma4:e4b",
-    initialProvider: (options.provider ?? activeProvider?.provider ?? "ollama") as ProviderName,
+    initialModel,
+    initialProvider: initialProvider as ProviderName,
     runtime,
   };
 }

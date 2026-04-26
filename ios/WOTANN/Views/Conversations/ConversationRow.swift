@@ -103,8 +103,11 @@ struct ConversationRow: View {
                 Message(role: .user, content: "Why is the WebSocket disconnecting after 30 seconds?"),
                 Message(role: .assistant, content: "The heartbeat interval is set to 30s but the server expects pings every 15s...")
             ],
-            provider: "anthropic",
-            model: "claude-opus-4-6",
+            // Sample data — pick a non-Anthropic vendor so the preview
+            // doesn't bias the user's mental model. Also avoids the
+            // stale claude-opus-4-6 ID (retires Jun 15 2026).
+            provider: "ollama",
+            model: "qwen3-coder:30b",
             isStarred: true,
             cost: 0.0234
         ))
