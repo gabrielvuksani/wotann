@@ -230,6 +230,23 @@ describe("cachingSearchProvider", () => {
 });
 
 describe("createDefaultWebSearchProvider", () => {
+  // Snapshot the env we mutate so we can restore after each test —
+  // otherwise these process.env writes leak across files and break
+  // tests that assume a clean env (discovery.test.ts,
+  // account-pool.test.ts). The pollution surfaced when the vitest
+  // pool was changed: forks isolate process state per file, but
+  // vmThreads/threads share process.env regardless of vm context.
+  // The fix here makes the test correct under any pool.
+  const originalBrave = process.env.BRAVE_API_KEY;
+  const originalTavily = process.env.TAVILY_API_KEY;
+
+  afterEach(() => {
+    if (originalBrave !== undefined) process.env.BRAVE_API_KEY = originalBrave;
+    else delete process.env.BRAVE_API_KEY;
+    if (originalTavily !== undefined) process.env.TAVILY_API_KEY = originalTavily;
+    else delete process.env.TAVILY_API_KEY;
+  });
+
   it("returns null when no API keys present", () => {
     delete process.env.BRAVE_API_KEY;
     delete process.env.TAVILY_API_KEY;
