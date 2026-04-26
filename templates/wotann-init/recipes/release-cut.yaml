@@ -1,0 +1,71 @@
+version: 1
+id: release-cut
+title: Cut a Release
+author: WOTANN
+description: |
+  Bump the package version, regenerate the changelog from the commit
+  range, run the test suite, build, tag, and push. Stops on the first
+  failing gate — never auto-publishes a broken build.
+
+instructions: |
+  You are running a release cut. Treat every gate as blocking. If a
+  step fails, halt and surface the failure verbatim — never paper over
+  test or lint errors. The release lives or dies on the gates.
+
+required_extensions:
+  - git
+  - npm
+
+parameters:
+  - name: bump
+    type: string
+    required: true
+    description: Semver bump kind — "patch", "minor", or "major".
+  - name: dry_run
+    type: boolean
+    required: false
+    default: false
+    description: When true, run all gates but skip the publish + push steps.
+
+retry:
+  max_attempts: 1
+  strategy: fixed
+
+steps:
+  - type: bash
+    cmd: git status --porcelain
+    expect: ""
+
+  - type: bash
+    cmd: git fetch --tags
+
+  - type: bash
+    cmd: npm run typecheck
+
+  - type: bash
+    cmd: npm test
+
+  - type: bash
+    cmd: npm run build
+
+  - type: bash
+    cmd: npm version {{bump}} --no-git-tag-version
+
+  - type: prompt
+    text: |
+      Read CHANGELOG.md. Add a new section at the top for the version
+      that was just bumped. Summarize commits since the previous tag in
+      Conventional Commits style — group by feat / fix / chore / docs.
+    into: changelog_entry
+
+  - type: bash
+    cmd: |
+      if [ "{{dry_run}}" = "true" ]; then
+        echo "DRY RUN — skipping git tag + publish."
+      else
+        git add package.json package-lock.json CHANGELOG.md
+        git commit -m "chore(release): cut new version"
+        git tag -a "v$(node -p "require('./package.json').version")" -m "Release"
+        git push --follow-tags
+        npm publish
+      fi

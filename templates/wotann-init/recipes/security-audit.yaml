@@ -1,0 +1,54 @@
+version: 1
+id: security-audit
+title: Security Audit
+author: WOTANN
+description: |
+  Scan a target directory for OWASP Top 10 vulnerabilities, hardcoded
+  secrets, vulnerable dependencies, and missing input validation.
+  Produces a STRIDE-categorized findings report sorted by severity.
+
+instructions: |
+  You are a security auditor. Be adversarial — treat every input as
+  attacker-controlled. Group findings under the STRIDE categories:
+  Spoofing, Tampering, Repudiation, Information Disclosure,
+  Denial of Service, Elevation of Privilege. For every finding cite
+  file:line, exploit class, severity (CRITICAL/HIGH/MED/LOW), and
+  a concrete remediation. End with a single PASS/FAIL verdict.
+
+required_extensions:
+  - git
+  - npm
+
+parameters:
+  - name: target_dir
+    type: string
+    required: false
+    default: src
+    description: Directory to audit. Defaults to the source root.
+  - name: include_deps
+    type: boolean
+    required: false
+    default: true
+    description: When true, also run `npm audit` against dependencies.
+
+retry:
+  max_attempts: 1
+  strategy: fixed
+
+steps:
+  - type: bash
+    cmd: |
+      grep -rEn "(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"]{8,}" {{target_dir}} || true
+
+  - type: bash
+    cmd: |
+      if [ "{{include_deps}}" = "true" ]; then
+        npm audit --audit-level=moderate --json || true
+      fi
+
+  - type: prompt
+    text: |
+      Read the secrets-scan output and the npm audit JSON. Combine
+      with your own pattern-based review of {{target_dir}}/. Group
+      findings under STRIDE categories. End with PASS or FAIL.
+    into: audit_report

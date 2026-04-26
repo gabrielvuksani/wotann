@@ -1,0 +1,64 @@
+version: 1
+id: code-review
+title: Code Review
+author: WOTANN
+description: |
+  Run a structured code review against a target file or git diff.
+  Surfaces correctness bugs, security issues, missed edge cases,
+  test coverage gaps, and style nits — prioritized by severity.
+
+  Goose-compatible: this recipe round-trips through Goose's recipe
+  format unchanged. Either system can load and execute it.
+
+instructions: |
+  You are a senior code reviewer. Review the supplied target with the
+  rigor of a Big-Tech principal engineer doing a pre-merge gate. Group
+  findings under exactly four headers in this order:
+
+    ## Critical (blocks merge)
+    ## High (must fix before next release)
+    ## Medium (fix when convenient)
+    ## Style / Suggestions (optional)
+
+  For each finding cite the file path and line range. End with a single
+  PASS / FAIL verdict line — FAIL iff any Critical finding exists.
+
+required_extensions:
+  - git
+
+parameters:
+  - name: target
+    type: string
+    required: true
+    description: Path to a file, directory, or "HEAD" for the staged diff.
+  - name: base
+    type: string
+    required: false
+    default: main
+    description: Base branch to diff against when target is "HEAD".
+
+retry:
+  max_attempts: 2
+  strategy: fixed
+
+steps:
+  - type: bash
+    cmd: git rev-parse --is-inside-work-tree
+    expect: "true"
+
+  - type: bash
+    cmd: |
+      if [ "{{target}}" = "HEAD" ]; then
+        git diff "{{base}}"...HEAD
+      else
+        cat "{{target}}"
+      fi
+
+  - type: prompt
+    text: |
+      Review the source above. Use the Critical/High/Medium/Style
+      grouping. Cite file:line for every finding. End with PASS or FAIL.
+    into: review_output
+
+  - type: bash
+    cmd: echo "Review complete."

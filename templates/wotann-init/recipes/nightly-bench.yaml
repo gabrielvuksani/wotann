@@ -1,0 +1,55 @@
+version: 1
+id: nightly-bench
+title: Nightly Benchmark Run
+author: WOTANN
+description: |
+  Execute the project's benchmark suite, persist the JSON output,
+  diff it against the previous baseline, and surface regressions
+  worse than the configured threshold.
+
+  Designed to be invoked from cron — see the `cron` block. Re-run
+  manually with `wotann recipe run nightly-bench` to backfill.
+
+instructions: |
+  You are a benchmark watchdog. Compare today's results with the
+  baseline at .wotann/benchmarks/baseline.json. Report every metric
+  that regressed by more than the threshold. Never modify the
+  baseline file — that is the human's call after a deliberate change.
+
+required_extensions:
+  - npm
+
+parameters:
+  - name: regression_threshold_pct
+    type: number
+    required: false
+    default: 5
+    description: Percent regression beyond which a metric is flagged.
+  - name: output_dir
+    type: string
+    required: false
+    default: .wotann/benchmarks
+    description: Where to write today's results JSON.
+
+retry:
+  max_attempts: 1
+  strategy: fixed
+
+cron:
+  expression: "0 3 * * *"
+  label: nightly-bench-3am
+
+steps:
+  - type: bash
+    cmd: mkdir -p {{output_dir}}
+
+  - type: bash
+    cmd: npm run bench -- --json --out {{output_dir}}/$(date +%F).json
+
+  - type: prompt
+    text: |
+      Compare {{output_dir}}/$(date +%F).json against
+      {{output_dir}}/baseline.json. List every metric that regressed
+      by more than {{regression_threshold_pct}}%. Cite metric name,
+      baseline value, today's value, and percent delta.
+    into: regression_report

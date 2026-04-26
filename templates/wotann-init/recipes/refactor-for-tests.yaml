@@ -1,0 +1,75 @@
+version: 1
+id: refactor-for-tests
+title: Refactor for Testability
+author: WOTANN
+description: |
+  V9 spec example. Refactor a target module so its public functions
+  become testable in isolation — extract pure helpers, parameterize
+  side-effects, separate I/O from logic. Then write the test suite
+  and verify it passes.
+
+instructions: |
+  You are a refactoring + TDD specialist. Goal: take the supplied
+  module from "untestable in isolation" to "every public function has
+  a focused unit test." Follow this order:
+
+    1. Read the module. List every external dependency it touches
+       (fs, network, time, env). These become injection seams.
+    2. Extract pure helpers from any function that does both logic
+       and I/O. Helpers go in a new sibling file.
+    3. Make the I/O-touching surface accept the dependency as an
+       argument with a sensible default. Never mutate module-globals.
+    4. Write tests that exercise the pure helpers directly and the
+       I/O surface with mocks.
+    5. Run the suite. Iterate until green.
+
+  Quality bars: immutability everywhere; honest stubs (return
+  {ok:false, error} on failure, never throw silently); no
+  module-global mutable state introduced.
+
+required_extensions:
+  - git
+  - npm
+
+parameters:
+  - name: module_path
+    type: string
+    required: true
+    description: Path to the module to refactor (e.g. src/util/foo.ts).
+  - name: test_framework
+    type: string
+    required: false
+    default: vitest
+    description: Test framework label — vitest, jest, mocha, etc.
+
+retry:
+  max_attempts: 3
+  strategy: exponential
+  base_delay_ms: 200
+
+steps:
+  - type: read
+    path: "{{module_path}}"
+    into: source
+
+  - type: prompt
+    text: |
+      Read the source above. List every external dependency
+      (fs, http, time, env, child_process). Each becomes an injection
+      seam in the refactor.
+    into: deps_audit
+
+  - type: prompt
+    text: |
+      Propose a refactor plan: what pure helpers to extract, what
+      injection seams to add, what file structure to end with.
+    into: refactor_plan
+
+  - type: prompt
+    text: |
+      Apply the refactor. Write the new module(s) and the
+      {{test_framework}} test suite. Tests must exercise pure
+      helpers directly + the I/O surface with mocks.
+
+  - type: bash
+    cmd: npx {{test_framework}} run "{{module_path}}"
