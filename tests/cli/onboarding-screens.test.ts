@@ -174,9 +174,10 @@ describe("formatHardwareSummary", () => {
 // ── STRATEGY_CHOICES ──────────────────────────────────────────────────────
 
 describe("STRATEGY_CHOICES", () => {
-  it("ships exactly 5 strategies in the V9 order", () => {
-    expect(STRATEGY_CHOICES).toHaveLength(5);
+  it("ships exactly 6 strategies with auto first (V9 Wave 1-F order)", () => {
+    expect(STRATEGY_CHOICES).toHaveLength(6);
     expect(STRATEGY_CHOICES.map((c) => c.key)).toEqual([
+      "auto",
       "app",
       "byok",
       "free",
