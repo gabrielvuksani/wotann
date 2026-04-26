@@ -23,7 +23,7 @@ import type { KnowledgeGraph } from "../memory/graph-rag.js";
 export interface ULTRAPLANConfig {
   /** Provider for planning (strongest available) */
   readonly planProvider: ProviderName;
-  /** Model for planning (e.g., claude-opus-4-6) */
+  /** Model for planning (e.g., claude-opus-4-7) */
   readonly planModel: string;
   /** Maximum thinking tokens for the planning phase */
   readonly maxThinkingTokens: number;
@@ -31,7 +31,7 @@ export interface ULTRAPLANConfig {
   readonly maxPlanTimeMs: number;
   /** Provider for execution (fast model) */
   readonly execProvider: ProviderName;
-  /** Model for execution (e.g., claude-sonnet-4-6) */
+  /** Model for execution (e.g., claude-sonnet-4-7) */
   readonly execModel: string;
 }
 
@@ -72,11 +72,15 @@ export interface PhaseResult {
 
 const DEFAULT_CONFIG: ULTRAPLANConfig = {
   planProvider: "anthropic",
-  planModel: "claude-opus-4-6",
+  // Wave 6.5-VV (V14.1): bumped to current Opus per Gabriel directive.
+  // claude-opus-4-6 retires June 15, 2026 — pre-emptive migration avoids
+  // a hardcoded-string deathmarch later.
+  planModel: "claude-opus-4-7",
   maxThinkingTokens: 128_000,
   maxPlanTimeMs: 30 * 60 * 1000, // 30 minutes
   execProvider: "anthropic",
-  execModel: "claude-sonnet-4-6",
+  // Wave 6.5-VV (V14.1): bumped to current Sonnet — same retire-date risk.
+  execModel: "claude-sonnet-4-7",
 };
 
 /**

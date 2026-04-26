@@ -68,7 +68,7 @@ describe("ULTRAPLAN", () => {
   describe("getDefaultConfig", () => {
     it("returns valid configuration", () => {
       const config = getDefaultConfig();
-      expect(config.planModel).toBe("claude-opus-4-6");
+      expect(config.planModel).toBe("claude-opus-4-7");
       expect(config.maxThinkingTokens).toBe(128_000);
       expect(config.maxPlanTimeMs).toBe(30 * 60 * 1000);
     });
