@@ -2177,6 +2177,30 @@ export class WotannRuntime {
       return;
     }
 
+    // Wave 4-V — WOTANN_MAX_DAILY_SPEND hard-cap enforcement. Checked
+    // BEFORE we mutate the session, push a user message, or hit any
+    // provider — a blocked query must be a true no-op so the user can
+    // re-run after raising the cap or after midnight UTC. Wrapped in
+    // try/catch (QB#6 honest fallback) so a tracker bug never poisons
+    // the query path: log + allow rather than block legitimate users
+    // on telemetry plumbing failures.
+    try {
+      const dailyCap = this.costTracker.checkDailyBudgetCap();
+      if (!dailyCap.allowed) {
+        yield {
+          type: "error",
+          content: dailyCap.reason ?? "Daily spend cap reached.",
+          provider: attributedProvider,
+        };
+        return;
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[WotannRuntime] checkDailyBudgetCap failed; allowing query: ${(err as Error).message}`,
+      );
+    }
+
     const queryStart = Date.now();
     const sessionBeforeQuery = this.session;
     this.session = addMessage(this.session, {

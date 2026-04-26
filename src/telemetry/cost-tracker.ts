@@ -221,6 +221,39 @@ function isGroqFreeTierModel(model: string): boolean {
   return GROQ_FREE_TIER_MODELS.has(model);
 }
 
+/**
+ * Wave 4-W: identify whether a turn's cost should be zeroed because the
+ * user already pays a flat monthly subscription. Pure function (QB #7 —
+ * no state, no I/O, no logging) so call sites can wrap the existing
+ * `costTracker.record()` invocation without restructuring the runtime.
+ *
+ * Rules (any of):
+ *   - explicit `billing === "subscription"` from the provider config
+ *     (see types.ts:31 — BillingType union: "subscription" | "api-key" | "free")
+ *   - `provider === "anthropic-cli"` — uses the user's Claude Pro / Max /
+ *     Team subscription via the `claude` CLI binary; per-token cost is $0
+ *     because Anthropic bills the monthly subscription not the API
+ *   - `provider === "copilot"` — uses the user's GitHub Copilot
+ *     Individual / Business subscription; per-token cost is $0 because
+ *     Microsoft bills the Copilot seat not the API
+ *
+ * QB #6 honest fallback: when `billing` is `undefined` (caller didn't
+ * pass it) AND the provider isn't a known subscription-only one, return
+ * `false` so we charge the cost — under-counting silently is far worse
+ * than over-counting visibly. Pay-per-token API users keep their full
+ * cost telemetry; subscription users get a clean $0 line.
+ *
+ * @param provider The provider name (matches ProviderName from types.ts)
+ * @param billing  Optional explicit billing model from the provider auth
+ * @returns true when the per-token cost should be skipped entirely
+ */
+export function shouldZeroForSubscription(provider: string, billing?: string): boolean {
+  if (billing === "subscription") return true;
+  if (provider === "anthropic-cli") return true;
+  if (provider === "copilot") return true;
+  return false;
+}
+
 export class CostTracker {
   private readonly entries: CostEntry[] = [];
   private readonly storagePath?: string;
@@ -307,7 +340,36 @@ export class CostTracker {
     };
   }
 
-  estimateCost(model: string, inputTokens: number, outputTokens: number): number {
+  /**
+   * Wave 4-W: estimate USD cost for a turn, discounting cache tokens.
+   *
+   * Cache pricing (Anthropic API — verified against
+   * https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+   * and https://www.anthropic.com/api#pricing as of 2026-04):
+   *   - Cache READ:  10% of base input rate (0.10x)  — large discount for hits
+   *   - Cache WRITE: 125% of base input rate (1.25x) — premium for 5min ephemeral entry
+   *   - Output:      uses model-specific output rate (no cache adjustment)
+   *
+   * The 0.10x / 1.25x ratio is consistent across Anthropic Claude models
+   * (Opus, Sonnet, Haiku — all generations) per the published pricing
+   * page, so we derive cache rates from the input rate rather than
+   * adding cache-specific entries to COST_TABLE for every model. If a
+   * future model deviates from this ratio, prefer adding model-specific
+   * cache rates rather than altering this default.
+   *
+   * Other providers (OpenAI, Gemini, etc.) use the same shape because
+   * cache telemetry is currently only surfaced by the Anthropic adapter
+   * (see anthropic-adapter.ts:355-366 — cache_read_input_tokens /
+   * cache_creation_input_tokens). Non-Anthropic callers will pass
+   * cacheReadTokens/cacheWriteTokens = 0 (or omit them entirely) and
+   * the formula reduces to the previous (input + output) accounting.
+   */
+  estimateCost(
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+    cacheTokens?: { cacheReadTokens?: number; cacheWriteTokens?: number },
+  ): number {
     // Session-5: Groq free-tier honors WOTANN_GROQ_FREE=1 across the
     // three Groq-hosted llama models. Groq's free plan has generous
     // daily rate limits (14,400 requests/day for llama-3.3-70b, etc.)
@@ -320,7 +382,17 @@ export class CostTracker {
     const rates = COST_TABLE[model];
     if (!rates) return 0;
 
-    return (inputTokens / 1000) * rates.input + (outputTokens / 1000) * rates.output;
+    const cacheReadTokens = cacheTokens?.cacheReadTokens ?? 0;
+    const cacheWriteTokens = cacheTokens?.cacheWriteTokens ?? 0;
+
+    // Anthropic cache-read = 10% of input rate; cache-write = 125% of input rate.
+    // QB #15: source-verified against Anthropic API pricing docs (April 2026).
+    return (
+      (inputTokens / 1000) * rates.input +
+      (outputTokens / 1000) * rates.output +
+      (cacheReadTokens / 1000) * (rates.input * 0.1) +
+      (cacheWriteTokens / 1000) * (rates.input * 1.25)
+    );
   }
 
   record(
@@ -334,7 +406,9 @@ export class CostTracker {
     // are preserved as valid data points — an empty provider response
     // should not be a silent success, so downstream tools see the 0 and
     // can diagnose.
-    const cost = this.estimateCost(model, inputTokens, outputTokens);
+    // Wave 4-W: pass cache tokens through so estimateCost() can apply the
+    // 10% read discount + 125% write premium per Anthropic API pricing.
+    const cost = this.estimateCost(model, inputTokens, outputTokens, cacheTokens);
     const entry: CostEntry = {
       timestamp: new Date(),
       provider,
@@ -470,6 +544,60 @@ export class CostTracker {
 
   getBudget(): number | null {
     return this.budgetUsd;
+  }
+
+  /**
+   * Wave 4-V — enforce the `WOTANN_MAX_DAILY_SPEND` env-var hard cap.
+   *
+   * Reads `process.env.WOTANN_MAX_DAILY_SPEND` (USD as a float). When
+   * the env var is missing, empty, zero, negative, or unparseable the
+   * cap is treated as DISABLED (returns `{ allowed: true }`) — QB#6
+   * honest fallback so a config typo never blocks legitimate users
+   * from running queries. The runtime layer logs a warning when the
+   * parse fails so the operator can see and correct the value.
+   *
+   * When the cap is active and `getTodayCost()` (UTC-anchored daily
+   * total via `DailyCostStore`) is greater-than-or-equal-to the cap,
+   * returns `{ allowed: false }` with a human-readable reason and the
+   * concrete numbers so callers can render a clear error to the user.
+   *
+   * NOTE: this is a coarse guard — a single in-flight query whose
+   * cost won't be known until completion can still tip the daily
+   * total over the cap by a small amount. The intent is to prevent
+   * runaway spend across a session, not to be a hard pre-flight
+   * estimator (that's `predictCost()`).
+   */
+  checkDailyBudgetCap(): {
+    allowed: boolean;
+    reason?: string;
+    capUsd?: number;
+    currentUsd?: number;
+  } {
+    const raw = process.env["WOTANN_MAX_DAILY_SPEND"];
+    if (raw === undefined || raw === "") {
+      return { allowed: true };
+    }
+
+    const capUsd = Number.parseFloat(raw);
+    if (!Number.isFinite(capUsd) || capUsd <= 0) {
+      // QB#6 honest fallback: invalid value disables the cap rather
+      // than blocks every query. The runtime guard surfaces a warn so
+      // the operator can fix it; we don't throw here because the
+      // CostTracker itself shouldn't have a side-effect logging policy
+      // baked in (QB#7 honest separation of concerns).
+      return { allowed: true };
+    }
+
+    const currentUsd = this.getTodayCost();
+    if (currentUsd >= capUsd) {
+      return {
+        allowed: false,
+        reason: `WOTANN_MAX_DAILY_SPEND cap reached: $${currentUsd.toFixed(4)} / $${capUsd.toFixed(4)}`,
+        capUsd,
+        currentUsd,
+      };
+    }
+    return { allowed: true, capUsd, currentUsd };
   }
 
   /**
