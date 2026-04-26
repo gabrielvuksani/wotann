@@ -155,10 +155,106 @@ export function TerminalPanel() {
         </button>
       </div>
 
+      {/* Inline last-error banner. Polls the daemon's terminal monitor
+          (`terminal.lastError` RPC). When a recent error is captured we
+          surface it with the suggested fix so the user sees actionable
+          guidance without having to run a separate command. */}
+      <TerminalLastErrorBanner />
+
       {/* Terminal content */}
       <div className="flex-1 min-h-0">
         <EditorTerminal />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Inline banner rendered at the top of TerminalPanel. Polls
+ * `terminal.lastError` every 5s and renders the captured error with its
+ * suggested fix when present. Hidden when no error has been observed.
+ */
+function TerminalLastErrorBanner() {
+  const [lastError, setLastError] = useState<{
+    error: string;
+    suggestion?: string;
+    when?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let intervalHandle: ReturnType<typeof setInterval> | null = null;
+
+    async function poll() {
+      try {
+        const { commands } = await import("../../hooks/useTauriCommand");
+        const result = (await commands.rpcCall("terminal.lastError")) as {
+          error?: string;
+          suggestion?: string;
+          when?: number;
+        } | null;
+        if (cancelled) return;
+        if (result && typeof result.error === "string" && result.error.length > 0) {
+          setLastError({
+            error: result.error,
+            ...(result.suggestion ? { suggestion: result.suggestion } : {}),
+            ...(typeof result.when === "number" ? { when: result.when } : {}),
+          });
+        } else {
+          setLastError(null);
+        }
+      } catch {
+        // best-effort — daemon may be unreachable; clear any stale error
+        if (!cancelled) setLastError(null);
+      }
+    }
+
+    poll();
+    intervalHandle = setInterval(poll, 5_000);
+    return () => {
+      cancelled = true;
+      if (intervalHandle !== null) clearInterval(intervalHandle);
+    };
+  }, []);
+
+  if (!lastError) return null;
+
+  return (
+    <div
+      role="alert"
+      style={{
+        padding: "6px 10px",
+        background: "var(--color-error-muted)",
+        borderBottom: "1px solid var(--color-error-muted)",
+        fontSize: "var(--font-size-xs)",
+        color: "var(--color-text-muted)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "var(--radius-pill)",
+            background: "var(--color-error)",
+            flexShrink: 0,
+          }}
+          aria-hidden="true"
+        />
+        <span style={{ fontWeight: 600, color: "var(--color-error)" }}>Last error</span>
+        <span style={{ fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {lastError.error}
+        </span>
+      </div>
+      {lastError.suggestion && (
+        <div style={{ marginLeft: 12, fontStyle: "italic" }}>
+          Suggestion: {lastError.suggestion}
+        </div>
+      )}
     </div>
   );
 }

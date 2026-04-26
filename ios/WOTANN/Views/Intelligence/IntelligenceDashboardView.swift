@@ -232,7 +232,7 @@ private extension IntelligenceDashboardView {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.white.opacity(0.08))
+                            .fill(WTheme.Colors.surface)
                             .frame(height: 6)
 
                         RoundedRectangle(cornerRadius: 4)
@@ -540,7 +540,7 @@ private struct HealthGauge: View {
         ZStack {
             // Background ring
             Circle()
-                .stroke(Color.white.opacity(0.06), lineWidth: 6)
+                .stroke(WTheme.Colors.surface, lineWidth: 6)
 
             // Filled arc
             Circle()
@@ -660,7 +660,7 @@ private struct DeviceDot: View {
                     .background(
                         isConnected
                             ? WTheme.Colors.primary.opacity(0.1)
-                            : Color.white.opacity(0.04)
+                            : WTheme.Colors.surface
                     )
                     .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm, style: .continuous))
 

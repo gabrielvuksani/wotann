@@ -110,7 +110,7 @@ export function resolveLegacyView(view: string): AppView {
     arena: "compare", agents: "workshop", pairing: "settings",
     playground: "editor", dispatch: "workshop", tasks: "workshop",
     connectors: "settings", remote: "settings", approvals: "settings",
-    scheduled: "workshop", plugins: "settings", projects: "chat",
+    scheduled: "workshop", projects: "chat",
     arbitrage: "cost", canvas: "editor",
   };
   return legacyMap[view] ?? (view as AppView);

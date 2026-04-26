@@ -932,6 +932,14 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         icon: "🔁",
         action: () => setView("automations"),
       },
+      {
+        id: "plugins-installed",
+        title: "Installed Plugins",
+        subtitle: "plugins.list — local plugins from ~/.wotann/plugins/",
+        category: "Tools & Workflows",
+        icon: "🧩",
+        action: () => setView("plugins"),
+      },
 
       // ── Security & Privacy ──
       {

@@ -102,7 +102,11 @@ const ConnectorsGUI = lazy(() => import("../connectors/ConnectorsGUI").then((m) 
 const ProjectList = lazy(() => import("../projects/ProjectList").then((m) => ({ default: m.ProjectList })));
 const DispatchInbox = lazy(() => import("../dispatch/DispatchInbox").then((m) => ({ default: m.DispatchInbox })));
 const ExecApprovals = lazy(() => import("../security/ExecApprovals").then((m) => ({ default: m.ExecApprovals })));
-const PluginManager = lazy(() => import("../plugins/PluginManager").then((m) => ({ default: m.PluginManager })));
+// Wave-new — local plugin browser (sources `plugins.list` RPC). The
+// existing `PluginManager` is a marketplace-style component still mounted
+// inside SettingsView's "Plugins" tab; this new view shows the *installed*
+// plugin set discovered under `~/.wotann/plugins/`.
+const PluginManagerView = lazy(() => import("../plugins/PluginManagerView").then((m) => ({ default: m.PluginManagerView })));
 const DesignModePanel = lazy(() => import("../design/DesignModePanel").then((m) => ({ default: m.DesignModePanel })));
 const CodePlayground = lazy(() => import("../playground/CodePlayground").then((m) => ({ default: m.CodePlayground })));
 const ScheduledTasks = lazy(() => import("../tasks/ScheduledTasks").then((m) => ({ default: m.ScheduledTasks })));
@@ -268,7 +272,7 @@ function WorkspaceContent({
     case "approvals":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><ExecApprovals /></Suspense></ErrorBoundary>;
     case "plugins":
-      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><PluginManager /></Suspense></ErrorBoundary>;
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><PluginManagerView /></Suspense></ErrorBoundary>;
     case "design":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><DesignModePanel onClose={() => useStore.getState().setView("chat")} /></Suspense></ErrorBoundary>;
     case "playground":
