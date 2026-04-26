@@ -29,6 +29,13 @@ import chalk from "chalk";
 
 import { readFileSync } from "node:fs";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { setupProxyFromEnv } from "./utils/proxy-setup.js";
+
+// Corporate-proxy support: install undici EnvHttpProxyAgent BEFORE any
+// network code (provider clients, daemon IPC, marketplace fetch) loads.
+// Honors HTTP_PROXY / HTTPS_PROXY / NO_PROXY env vars per Unix convention.
+// No-op when no proxy env var is set; never crashes startup on bad proxy URLs.
+setupProxyFromEnv();
 
 const VERSION: string = (() => {
   try {
