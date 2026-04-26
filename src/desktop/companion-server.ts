@@ -91,8 +91,32 @@ export interface CompanionResponse {
   readonly id: string | number;
 }
 
+/**
+ * GA-11: stream events use a discriminator method name so iOS RPCClient
+ * subscriptions on `stream.text`, `stream.done`, and `stream.error` (the
+ * three topics ChatViewModel.swift attaches) can route by method without
+ * peeking at `params.type`. This was a dead-letter gap before GA-11 — iOS
+ * subscribed to those three method-name topics but daemon emitted a single
+ * `method:"stream"` notification. The discriminated method names are now
+ * the wire identifier; `params.type` is retained for back-compat with any
+ * client still inspecting it.
+ *
+ * Discriminator:
+ *   - chunk.type === "text"     → method: "stream.text"
+ *   - chunk.type === "done"     → method: "stream.done"
+ *   - chunk.type === "error"    → method: "stream.error"
+ *   - chunk.type === "thinking" → method: "stream.thinking"
+ *   - chunk.type === "tool_use" → method: "stream.tool_use"
+ */
+export type StreamMethodName =
+  | "stream.text"
+  | "stream.done"
+  | "stream.error"
+  | "stream.thinking"
+  | "stream.tool_use";
+
 export interface StreamEvent {
-  readonly method: "stream";
+  readonly method: StreamMethodName;
   readonly params: {
     readonly type: "text" | "thinking" | "tool_use" | "done" | "error";
     readonly content: string;
@@ -111,6 +135,28 @@ export interface StreamEvent {
   };
 }
 
+/**
+ * GA-11 helper — translate a streaming chunk type into the discriminated
+ * method name iOS subscribes to. Single source of truth so additions or
+ * renames stay in lockstep across every emit site.
+ */
+export function streamMethodForChunkType(
+  chunkType: "text" | "thinking" | "tool_use" | "done" | "error",
+): StreamMethodName {
+  switch (chunkType) {
+    case "text":
+      return "stream.text";
+    case "done":
+      return "stream.done";
+    case "error":
+      return "stream.error";
+    case "thinking":
+      return "stream.thinking";
+    case "tool_use":
+      return "stream.tool_use";
+  }
+}
+
 interface BridgeRPCResponse {
   readonly jsonrpc: "2.0";
   readonly result?: unknown;
@@ -120,7 +166,11 @@ interface BridgeRPCResponse {
 
 interface BridgeRPCStreamEvent {
   readonly jsonrpc: "2.0";
-  readonly method: "stream";
+  // GA-11 / Wave 2-L: bridge events also carry the discriminated method
+  // name so the bridge ↔ companion-server boundary stays type-aligned with
+  // RPCStreamEvent (kairos-rpc.ts) and StreamEvent (this file). All three
+  // surfaces converge on the StreamMethodName vocabulary.
+  readonly method: StreamMethodName;
   readonly params: {
     readonly type: "text" | "thinking" | "tool_use" | "done" | "error";
     readonly content: string;
@@ -1038,8 +1088,11 @@ export class CompanionServer {
     event: BridgeRPCStreamEvent,
     conversationId?: string,
   ): StreamEvent {
+    // GA-11 — discriminate the method name on chunk type so iOS
+    // RPCClient.subscribe("stream.text"|"stream.done"|"stream.error")
+    // routes by method instead of peeking at params.type.
     return {
-      method: "stream",
+      method: streamMethodForChunkType(event.params.type),
       params: {
         ...event.params,
         conversationId,
@@ -1095,7 +1148,7 @@ export class CompanionServer {
         }
 
         this.sendStreamEvent(ws, {
-          method: "stream",
+          method: streamMethodForChunkType(chunk.type),
           params: {
             type: chunk.type,
             content:
@@ -1120,7 +1173,7 @@ export class CompanionServer {
 
       const afterSession = this.runtime.getSession();
       this.sendStreamEvent(ws, {
-        method: "stream",
+        method: "stream.done",
         params: {
           type: "done",
           content: "",
@@ -1140,7 +1193,7 @@ export class CompanionServer {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Chat send failed";
       this.sendStreamEvent(ws, {
-        method: "stream",
+        method: "stream.error",
         params: {
           type: "error",
           content: errorMessage,

@@ -133,6 +133,13 @@ import {
   type StepUpdate as LiveActivityStepUpdate,
   type ExpandedStep as LiveActivityExpandedStep,
 } from "../session/live-activity.js";
+// V9 Wave 2-L — GA-11 stream discriminator. iOS RPCClient subscribes to
+// distinct method-name topics (`stream.text`, `stream.done`, `stream.error`,
+// `stream.thinking`, `stream.tool_use`); without the discriminator every
+// `method:"stream"` notification dead-letters at the iOS subscription layer.
+// Source of truth lives in companion-server.ts so additions or renames stay
+// in lockstep across every emit site (CLI socket, desktop bridge, iOS WS).
+import { streamMethodForChunkType, type StreamMethodName } from "../desktop/companion-server.js";
 
 // ── Voice pipeline singleton + streaming bookkeeping ──────
 //
@@ -435,7 +442,15 @@ export interface RPCError {
 
 export interface RPCStreamEvent {
   readonly jsonrpc: "2.0";
-  readonly method: "stream";
+  // V9 Wave 2-L — GA-11 stream discriminator. iOS RPCClient subscribes
+  // per-topic on `stream.text`/`stream.done`/`stream.error`/`stream.thinking`/
+  // `stream.tool_use`, so emit sites use the discriminated method name (via
+  // streamMethodForChunkType when the chunk type is dynamic; hardcoded when
+  // statically known). The previously-flagged daemon broadcast path at
+  // kairos.ts:2002 has been migrated to "stream.text" so the union no
+  // longer needs to retain the legacy "stream" literal — both BridgeRPCStreamEvent
+  // and RPCStreamEvent now converge on StreamMethodName.
+  readonly method: StreamMethodName;
   readonly params: {
     readonly type: "text" | "thinking" | "tool_use" | "done" | "error";
     readonly content: string;
@@ -1342,7 +1357,7 @@ export class KairosRPCHandler {
     if (!this.runtime) {
       yield {
         jsonrpc: "2.0",
-        method: "stream",
+        method: "stream.error",
         params: {
           type: "error",
           content: "Runtime not initialized",
@@ -1416,11 +1431,12 @@ export class KairosRPCHandler {
         model: targetModel,
         provider: targetProvider as never,
       })) {
+        const chunkType = chunk.type as "text" | "thinking" | "tool_use" | "done" | "error";
         yield {
           jsonrpc: "2.0",
-          method: "stream",
+          method: streamMethodForChunkType(chunkType),
           params: {
-            type: chunk.type as "text" | "thinking" | "tool_use" | "done" | "error",
+            type: chunkType,
             content: chunk.content,
             sessionId,
             provider: chunk.provider,
@@ -1512,7 +1528,7 @@ export class KairosRPCHandler {
         if (response) {
           yield {
             jsonrpc: "2.0",
-            method: "stream",
+            method: "stream.text",
             params: {
               type: "text",
               content: response,
@@ -1523,7 +1539,7 @@ export class KairosRPCHandler {
           };
           yield {
             jsonrpc: "2.0",
-            method: "stream",
+            method: "stream.done",
             params: { type: "done", content: "", sessionId, provider: "codex", model: codexModel },
           };
           return;
@@ -1590,7 +1606,7 @@ export class KairosRPCHandler {
                 if (chunk.message?.content) {
                   yield {
                     jsonrpc: "2.0",
-                    method: "stream",
+                    method: "stream.text",
                     params: {
                       type: "text",
                       content: chunk.message.content,
@@ -1603,7 +1619,7 @@ export class KairosRPCHandler {
                 if (chunk.done) {
                   yield {
                     jsonrpc: "2.0",
-                    method: "stream",
+                    method: "stream.done",
                     params: {
                       type: "done",
                       content: "",
@@ -1647,7 +1663,7 @@ export class KairosRPCHandler {
       if (responseText) {
         yield {
           jsonrpc: "2.0",
-          method: "stream",
+          method: "stream.text",
           params: {
             type: "text",
             content: responseText,
@@ -1658,7 +1674,7 @@ export class KairosRPCHandler {
         };
         yield {
           jsonrpc: "2.0",
-          method: "stream",
+          method: "stream.done",
           params: {
             type: "done",
             content: "",
@@ -1676,7 +1692,7 @@ export class KairosRPCHandler {
     // No providers available
     yield {
       jsonrpc: "2.0",
-      method: "stream",
+      method: "stream.error",
       params: {
         type: "error",
         content: "No providers available. Configure an API key or install a CLI (codex, claude).",
@@ -1710,7 +1726,7 @@ export class KairosRPCHandler {
     if (imageError) {
       yield {
         jsonrpc: "2.0",
-        method: "stream",
+        method: "stream.error",
         params: { type: "error", content: `Image validation failed: ${imageError}`, sessionId },
       };
       return;
@@ -1719,7 +1735,7 @@ export class KairosRPCHandler {
     if (!this.runtime) {
       yield {
         jsonrpc: "2.0",
-        method: "stream",
+        method: "stream.error",
         params: { type: "error", content: "Runtime not initialized", sessionId },
       };
       return;
@@ -1744,11 +1760,12 @@ export class KairosRPCHandler {
           model: requestedModel || undefined,
           provider: requestedProvider ? (requestedProvider as never) : undefined,
         })) {
+          const chunkType = chunk.type as "text" | "thinking" | "tool_use" | "done" | "error";
           yield {
             jsonrpc: "2.0",
-            method: "stream",
+            method: streamMethodForChunkType(chunkType),
             params: {
-              type: chunk.type as "text" | "thinking" | "tool_use" | "done" | "error",
+              type: chunkType,
               content: chunk.content,
               sessionId,
               provider: chunk.provider,
@@ -1761,7 +1778,7 @@ export class KairosRPCHandler {
     } catch (err) {
       yield {
         jsonrpc: "2.0",
-        method: "stream",
+        method: "stream.error",
         params: {
           type: "error",
           content: `chat.send failed: ${err instanceof Error ? err.message : String(err)}`,

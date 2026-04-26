@@ -1996,10 +1996,13 @@ export class KairosDaemon {
           message: `Context pressure: ${pressure.level} (${Math.round(pressure.utilizationPercent)}%)`,
           data: pressureData,
         });
-        // Broadcast to all connected CLI sessions
+        // Broadcast to all connected CLI sessions. GA-11 / Wave 2-L: use
+        // discriminated stream method name so iOS/desktop clients can route
+        // by method instead of peeking at params.type. Chunk type is "text"
+        // here so the canonical method is "stream.text".
         this.ipcServer?.broadcast({
           jsonrpc: "2.0",
-          method: "stream",
+          method: "stream.text",
           params: {
             type: "text",
             content: JSON.stringify({ type: "context-pressure", ...pressureData }),

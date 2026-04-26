@@ -407,7 +407,15 @@ export class KairosIPCClient {
 
           try {
             const msg = JSON.parse(trimmed) as RPCResponse | RPCStreamEvent;
-            if ("method" in msg && msg.method === "stream") {
+            // V9 Wave 2-L: stream events use the discriminated method names
+            // ("stream.text"/"stream.done"/"stream.error"/"stream.thinking"/
+            // "stream.tool_use") so this guard accepts any "stream.*" method
+            // instead of the legacy bare "stream" literal.
+            if (
+              "method" in msg &&
+              typeof msg.method === "string" &&
+              msg.method.startsWith("stream")
+            ) {
               const event = msg as RPCStreamEvent;
               const callback = this.streamCallbacks.get(event.params.sessionId);
               callback?.(event);
