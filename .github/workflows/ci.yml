@@ -93,22 +93,28 @@ jobs:
       # process; total wall time ~3-4 min in CI. Use a matrix to also
       # parallelize across runners for total throughput.
       - name: Test (shard 1/6)
-        run: npx vitest run --shard=1/6        env:
+        run: npx vitest run --shard=1/6
+        env:
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Test (shard 2/6)
-        run: npx vitest run --shard=2/6        env:
+        run: npx vitest run --shard=2/6
+        env:
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Test (shard 3/6)
-        run: npx vitest run --shard=3/6        env:
+        run: npx vitest run --shard=3/6
+        env:
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Test (shard 4/6)
-        run: npx vitest run --shard=4/6        env:
+        run: npx vitest run --shard=4/6
+        env:
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Test (shard 5/6)
-        run: npx vitest run --shard=5/6        env:
+        run: npx vitest run --shard=5/6
+        env:
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Test (shard 6/6)
-        run: npx vitest run --shard=6/6        env:
+        run: npx vitest run --shard=6/6
+        env:
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Build
         run: npm run build
