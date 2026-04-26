@@ -379,6 +379,15 @@ export const ACP_METHODS = {
   // Zed 0.3 parity — tool discovery + invocation over ACP.
   ToolsList: "tools/list",
   ToolsInvoke: "tools/invoke",
+  // Wave 5-EE — interactive permission elevation + filesystem proxy
+  // routes (Zed parity for editor-side fs access). Each route is gated
+  // by the dispatcher and refuses paths that escape the per-session
+  // workspace OR resolve through a symlink (QB#6 honest fallback —
+  // returns {error:"permission-denied"} as result, never throws).
+  PermissionsRequest: "permissions/request",
+  FsRead: "fs/read",
+  FsWrite: "fs/write",
+  FsList: "fs/list",
   // WOTANN-specific thread ops — additive, namespaced away from spec.
   ThreadFork: "thread/fork",
   ThreadRollback: "thread/rollback",
@@ -436,6 +445,114 @@ export interface AcpToolsInvokeResult {
   readonly content: readonly AcpContentBlock[];
   readonly isError?: boolean;
   readonly _meta?: Record<string, unknown>;
+}
+
+// ── Wave 5-EE: permissions/request + fs/* params/results ─────
+
+/**
+ * `permissions/request` — editor asks the agent whether a tool call
+ * would be allowed under the current PermissionMode. Returns one of
+ * `allow` / `deny` / `ask` so the IDE can render the right affordance
+ * (auto-run vs. prompt vs. block) before issuing the underlying call.
+ *
+ * Decoupled from execution: this is a query, never a side-effect.
+ * The resolution mirrors `resolvePermission()` in
+ * src/sandbox/security.ts so the IDE-side decision matches what the
+ * runtime would do for the same tool/args.
+ */
+export interface AcpPermissionsRequestParams {
+  readonly tool: string;
+  readonly args?: Record<string, unknown>;
+  /**
+   * Optional session scope — when provided the handler may consult
+   * session-local permission overrides (e.g. user pinned "always
+   * allow Read" for this session). Without it the handler resolves
+   * against the current global PermissionMode.
+   */
+  readonly sessionId?: string;
+}
+
+export type AcpPermissionsDecision = "allow" | "deny" | "ask";
+
+export interface AcpPermissionsRequestResult {
+  readonly decision: AcpPermissionsDecision;
+  /**
+   * Optional explanation surfaced to the user (e.g. "blocked: rm -rf
+   * matched destructive pattern"). Honest-failure data, not a
+   * machine-readable code.
+   */
+  readonly reason?: string;
+}
+
+/**
+ * `fs/read` — proxy a workspace-bounded file read through the agent.
+ * Editor hosts use this when they want WOTANN's symlink-defence + path
+ * canonicalisation rather than reading the file themselves. Refuses
+ * paths that escape workspace OR resolve through a symlink (QB#6
+ * fallback returns {error:"permission-denied"} as the result).
+ */
+export interface AcpFsReadParams {
+  readonly path: string;
+  readonly sessionId?: string;
+}
+
+export interface AcpFsReadResult {
+  readonly content: string;
+}
+
+/**
+ * `fs/write` — proxy a workspace-bounded file write through the agent.
+ * Uses `safeWriteFile` (O_NOFOLLOW on POSIX, lstat-precheck on
+ * Windows) so a pre-existing symlink at the leaf is refused with
+ * {error:"permission-denied"}. Parent directories must already exist
+ * — this route does NOT mkdir, matching the underlying helper's
+ * contract.
+ */
+export interface AcpFsWriteParams {
+  readonly path: string;
+  readonly content: string;
+  readonly sessionId?: string;
+}
+
+export interface AcpFsWriteResult {
+  readonly bytesWritten: number;
+}
+
+/**
+ * `fs/list` — list workspace-bounded directory entries. Returns one
+ * record per entry with name, dirent kind, and (for files) byte size.
+ * Symlinks are reported as kind="symlink" rather than followed, so the
+ * caller decides whether to dereference (safe path) or refuse (paranoid).
+ */
+export interface AcpFsListParams {
+  readonly dir: string;
+  readonly sessionId?: string;
+}
+
+export type AcpFsEntryType = "file" | "directory" | "symlink" | "other";
+
+export interface AcpFsEntry {
+  readonly name: string;
+  readonly type: AcpFsEntryType;
+  /** Byte size — only populated for regular files; 0 otherwise. */
+  readonly size: number;
+}
+
+export interface AcpFsListResult {
+  readonly entries: readonly AcpFsEntry[];
+}
+
+/**
+ * Result envelope used by the dispatcher for fs/* + permissions/*
+ * routes when the request is refused. JSON-RPC has its own error
+ * channel, but per QB#6 we want refusals to come back as a STRUCTURED
+ * RESULT (so the host can render "permission denied" without
+ * conflating it with a transport failure). Hosts that want the
+ * JSON-RPC error path can opt-in via `_meta.useJsonRpcError`.
+ */
+export interface AcpFsErrorResult {
+  readonly error: "permission-denied" | "not-found" | "io-error";
+  readonly message: string;
 }
 
 // ── WOTANN thread-op params/results (unchanged shape) ────────

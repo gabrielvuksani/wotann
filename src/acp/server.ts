@@ -36,10 +36,19 @@ import {
   makeResponse,
   negotiateProtocolVersion,
   type AcpCancelParams,
+  type AcpFsErrorResult,
+  type AcpFsListParams,
+  type AcpFsListResult,
+  type AcpFsReadParams,
+  type AcpFsReadResult,
+  type AcpFsWriteParams,
+  type AcpFsWriteResult,
   type AcpInitializeParams,
   type AcpInitializeResult,
   type AcpNewSessionParams,
   type AcpNewSessionResult,
+  type AcpPermissionsRequestParams,
+  type AcpPermissionsRequestResult,
   type AcpPromptParams,
   type AcpPromptResult,
   type AcpSessionUpdateNotification,
@@ -85,6 +94,40 @@ export interface AcpHandlers {
    * (name present, arguments is an object).
    */
   toolsInvoke?(params: AcpToolsInvokeParams): Promise<AcpToolsInvokeResult>;
+  /**
+   * Wave 5-EE — interactive permission elevation. Resolves whether
+   * `tool` with `args` would be allowed under the active
+   * PermissionMode (per-session if `sessionId` is supplied). Returns
+   * one of `allow` / `deny` / `ask` so the editor can render the
+   * right UI affordance before the underlying tool fires.
+   *
+   * Optional — when omitted the dispatcher returns MethodNotFound,
+   * which lets minimal/reference servers stay slim.
+   */
+  permissionsRequest?(params: AcpPermissionsRequestParams): Promise<AcpPermissionsRequestResult>;
+  /**
+   * Wave 5-EE — proxy a file read through the agent. The handler is
+   * responsible for workspace-bound + symlink-defence checks (using
+   * canonicalizePathForCheck + isWithinWorkspace). On refusal the
+   * handler returns an `AcpFsErrorResult` envelope rather than
+   * throwing, so JSON-RPC errors are reserved for transport-level
+   * failures (QB#6 honest fallback).
+   */
+  fsRead?(params: AcpFsReadParams): Promise<AcpFsReadResult | AcpFsErrorResult>;
+  /**
+   * Wave 5-EE — proxy a file write through the agent. Uses
+   * `safeWriteFile` (O_NOFOLLOW on POSIX) so a pre-existing symlink
+   * at the leaf is refused with `permission-denied`. Returns an
+   * `AcpFsErrorResult` envelope on refusal; throws only on truly
+   * unexpected I/O.
+   */
+  fsWrite?(params: AcpFsWriteParams): Promise<AcpFsWriteResult | AcpFsErrorResult>;
+  /**
+   * Wave 5-EE — list directory entries inside the workspace. Symlink
+   * entries are reported as kind="symlink" rather than dereferenced,
+   * so callers decide whether to follow.
+   */
+  fsList?(params: AcpFsListParams): Promise<AcpFsListResult | AcpFsErrorResult>;
 }
 
 export type AcpServerInfo = AcpImplementation;
@@ -190,6 +233,14 @@ export class AcpServer {
           return await this.onToolsList(req);
         case ACP_METHODS.ToolsInvoke:
           return await this.onToolsInvoke(req);
+        case ACP_METHODS.PermissionsRequest:
+          return await this.onPermissionsRequest(req);
+        case ACP_METHODS.FsRead:
+          return await this.onFsRead(req);
+        case ACP_METHODS.FsWrite:
+          return await this.onFsWrite(req);
+        case ACP_METHODS.FsList:
+          return await this.onFsList(req);
         default:
           return makeError(
             req.id,
@@ -310,7 +361,10 @@ export class AcpServer {
         "tools/invoke: missing or empty `name`",
       );
     }
-    if (raw.arguments !== undefined && (typeof raw.arguments !== "object" || raw.arguments === null || Array.isArray(raw.arguments))) {
+    if (
+      raw.arguments !== undefined &&
+      (typeof raw.arguments !== "object" || raw.arguments === null || Array.isArray(raw.arguments))
+    ) {
       return makeError(
         req.id,
         JSON_RPC_ERROR_CODES.InvalidParams,
@@ -332,6 +386,155 @@ export class AcpServer {
       ...(typeof raw.sessionId === "string" ? { sessionId: raw.sessionId } : {}),
     };
     const result = await this.handlers.toolsInvoke(params);
+    return makeResponse(req.id, result);
+  }
+
+  // ── Wave 5-EE: permissions/request + fs/* dispatcher methods ─
+
+  private async onPermissionsRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    if (!this.initialized) return this.notInitialized(req.id);
+    if (!this.handlers.permissionsRequest) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.MethodNotFound,
+        "permissions/request: handler not implemented by this agent",
+      );
+    }
+    const raw = (req.params ?? {}) as Record<string, unknown>;
+    if (typeof raw["tool"] !== "string" || raw["tool"].length === 0) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "permissions/request: missing or empty `tool`",
+      );
+    }
+    if (
+      raw["args"] !== undefined &&
+      (typeof raw["args"] !== "object" || raw["args"] === null || Array.isArray(raw["args"]))
+    ) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "permissions/request: `args` must be an object when provided",
+      );
+    }
+    if (raw["sessionId"] !== undefined && typeof raw["sessionId"] !== "string") {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "permissions/request: sessionId must be a string when provided",
+      );
+    }
+    const params: AcpPermissionsRequestParams = {
+      tool: raw["tool"],
+      ...(raw["args"] !== undefined ? { args: raw["args"] as Record<string, unknown> } : {}),
+      ...(typeof raw["sessionId"] === "string" ? { sessionId: raw["sessionId"] } : {}),
+    };
+    const result = await this.handlers.permissionsRequest(params);
+    return makeResponse(req.id, result);
+  }
+
+  private async onFsRead(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    if (!this.initialized) return this.notInitialized(req.id);
+    if (!this.handlers.fsRead) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.MethodNotFound,
+        "fs/read: handler not implemented by this agent",
+      );
+    }
+    const raw = (req.params ?? {}) as Record<string, unknown>;
+    if (typeof raw["path"] !== "string" || raw["path"].length === 0) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "fs/read: missing or empty `path`",
+      );
+    }
+    if (raw["sessionId"] !== undefined && typeof raw["sessionId"] !== "string") {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "fs/read: sessionId must be a string when provided",
+      );
+    }
+    const params: AcpFsReadParams = {
+      path: raw["path"],
+      ...(typeof raw["sessionId"] === "string" ? { sessionId: raw["sessionId"] } : {}),
+    };
+    const result = await this.handlers.fsRead(params);
+    return makeResponse(req.id, result);
+  }
+
+  private async onFsWrite(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    if (!this.initialized) return this.notInitialized(req.id);
+    if (!this.handlers.fsWrite) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.MethodNotFound,
+        "fs/write: handler not implemented by this agent",
+      );
+    }
+    const raw = (req.params ?? {}) as Record<string, unknown>;
+    if (typeof raw["path"] !== "string" || raw["path"].length === 0) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "fs/write: missing or empty `path`",
+      );
+    }
+    if (typeof raw["content"] !== "string") {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "fs/write: `content` must be a string",
+      );
+    }
+    if (raw["sessionId"] !== undefined && typeof raw["sessionId"] !== "string") {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "fs/write: sessionId must be a string when provided",
+      );
+    }
+    const params: AcpFsWriteParams = {
+      path: raw["path"],
+      content: raw["content"],
+      ...(typeof raw["sessionId"] === "string" ? { sessionId: raw["sessionId"] } : {}),
+    };
+    const result = await this.handlers.fsWrite(params);
+    return makeResponse(req.id, result);
+  }
+
+  private async onFsList(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    if (!this.initialized) return this.notInitialized(req.id);
+    if (!this.handlers.fsList) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.MethodNotFound,
+        "fs/list: handler not implemented by this agent",
+      );
+    }
+    const raw = (req.params ?? {}) as Record<string, unknown>;
+    if (typeof raw["dir"] !== "string" || raw["dir"].length === 0) {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "fs/list: missing or empty `dir`",
+      );
+    }
+    if (raw["sessionId"] !== undefined && typeof raw["sessionId"] !== "string") {
+      return makeError(
+        req.id,
+        JSON_RPC_ERROR_CODES.InvalidParams,
+        "fs/list: sessionId must be a string when provided",
+      );
+    }
+    const params: AcpFsListParams = {
+      dir: raw["dir"],
+      ...(typeof raw["sessionId"] === "string" ? { sessionId: raw["sessionId"] } : {}),
+    };
+    const result = await this.handlers.fsList(params);
     return makeResponse(req.id, result);
   }
 
@@ -380,3 +583,247 @@ export function createRecordingBus(): RecordingBus {
 // just to emit a banner. The recordingBus/server pair is the stable
 // public surface of this module.
 export { ACP_PROTOCOL_VERSION };
+
+// ── Wave 5-EE: default fs/* + permissions/request handler factory ──
+
+import { lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { canonicalizePathForCheck, safeWriteFile } from "../utils/path-realpath.js";
+import { isWithinWorkspace, resolvePermission, classifyRisk } from "../sandbox/security.js";
+import type { PermissionMode } from "../core/types.js";
+
+/**
+ * Per-session bindings consumed by `createFsHandlers()`. Owned by the
+ * caller (one record per session, not a module-global Map) — satisfies
+ * QB#7 by routing every request through a session-resolver callback
+ * rather than sharing handler state across sessions.
+ */
+export interface AcpFsHandlerSession {
+  readonly workspaceRoot: string;
+  readonly permissionMode: PermissionMode;
+}
+
+export interface AcpFsHandlerDeps {
+  /**
+   * Resolve the per-session workspace + permission mode. Return null
+   * when the sessionId is unknown — the dispatcher then refuses with
+   * `permission-denied` rather than reading from a default workspace.
+   */
+  readonly getSession: (sessionId: string | undefined) => AcpFsHandlerSession | null;
+  /**
+   * Optional cap on `fs/read` size (bytes). Defaults to 5 MiB so a
+   * pathological request can't blow up the JSON-RPC frame. Reads
+   * larger than the cap return `permission-denied` with an explanatory
+   * message — honest, no truncation surprise.
+   */
+  readonly maxReadBytes?: number;
+}
+
+const DEFAULT_MAX_READ_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Build a partial AcpHandlers containing only the Wave 5-EE routes
+ * (`permissionsRequest` + `fsRead` + `fsWrite` + `fsList`). Compose into
+ * a full handlers object via spread, e.g.:
+ *
+ *   const handlers: AcpHandlers = {
+ *     ...createRuntimeAcpHandlers({ runtime }),
+ *     ...createFsHandlers({ getSession }),
+ *   };
+ *
+ * Every route enforces `isWithinWorkspace` AFTER `canonicalizePathForCheck`,
+ * so a symlinked path is always evaluated by its real target. Refusals
+ * return the structured `AcpFsErrorResult` envelope (QB#6); only truly
+ * unexpected errors are thrown for the dispatcher to wrap as JSON-RPC
+ * InternalError.
+ */
+export function createFsHandlers(
+  deps: AcpFsHandlerDeps,
+): Pick<AcpHandlers, "permissionsRequest" | "fsRead" | "fsWrite" | "fsList"> {
+  const maxReadBytes = deps.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
+
+  /**
+   * Resolve a request path against its session's workspace, performing
+   * symlink-safe canonicalisation. Returns either the canonical absolute
+   * path (when safe) or an `AcpFsErrorResult` describing why we refused.
+   */
+  const guard = (
+    rawPath: string,
+    session: AcpFsHandlerSession | null,
+  ): { canonical: string; session: AcpFsHandlerSession } | AcpFsErrorResult => {
+    if (!session) {
+      return {
+        error: "permission-denied",
+        message: "session not found or not yet established",
+      };
+    }
+    let canonical: string;
+    try {
+      canonical = canonicalizePathForCheck(rawPath);
+    } catch {
+      return { error: "permission-denied", message: "path canonicalisation failed" };
+    }
+    if (!isWithinWorkspace(canonical, session.workspaceRoot)) {
+      return {
+        error: "permission-denied",
+        message: `path escapes workspace ${session.workspaceRoot}`,
+      };
+    }
+    // Defence-in-depth: if the leaf exists and is a symlink, refuse
+    // even though canonicalisation already followed it. The symlink
+    // target is inside the workspace per the check above, but we
+    // still don't want to silently read/write through one — the host
+    // should request the canonical path explicitly. Mirrors the
+    // assertNotSymlink stance used by safeWriteFile.
+    try {
+      const stat = lstatSync(rawPath);
+      if (stat.isSymbolicLink()) {
+        return {
+          error: "permission-denied",
+          message: `refusing to operate on symbolic link at ${rawPath}`,
+        };
+      }
+    } catch {
+      // ENOENT / EACCES is fine — fall through; subsequent fs op
+      // surfaces the real failure as `not-found` / `io-error`.
+    }
+    return { canonical, session };
+  };
+
+  return {
+    async permissionsRequest(
+      params: AcpPermissionsRequestParams,
+    ): Promise<AcpPermissionsRequestResult> {
+      const session = deps.getSession(params.sessionId);
+      if (!session) {
+        // Per QB#6 honest fallback: refuse-by-default when we don't
+        // know the session's PermissionMode. Returning "ask" would
+        // prompt the user for an unidentified session, which is worse.
+        return { decision: "deny", reason: "session not found" };
+      }
+      const risk = classifyRisk(params.tool, params.args);
+      const internal = resolvePermission(session.permissionMode, risk);
+      // resolvePermission emits "allow" / "deny" / "always-allow"; ACP
+      // only knows "allow" / "deny" / "ask". Collapse "always-allow"
+      // to "allow" (semantically equivalent for a single-shot query)
+      // and promote "deny" to "ask" in the interactive default mode so
+      // the editor prompts instead of silently blocking.
+      let decision: AcpPermissionsRequestResult["decision"];
+      if (internal === "always-allow" || internal === "allow") {
+        decision = "allow";
+      } else if (session.permissionMode === "default") {
+        decision = "ask";
+      } else {
+        decision = "deny";
+      }
+      return {
+        decision,
+        reason: `tool=${params.tool} risk=${risk} mode=${session.permissionMode}`,
+      };
+    },
+
+    async fsRead(params: AcpFsReadParams): Promise<AcpFsReadResult | AcpFsErrorResult> {
+      const session = deps.getSession(params.sessionId);
+      const guarded = guard(params.path, session);
+      if ("error" in guarded) return guarded;
+      try {
+        const stat = statSync(guarded.canonical);
+        if (!stat.isFile()) {
+          return {
+            error: "permission-denied",
+            message: `${params.path} is not a regular file`,
+          };
+        }
+        if (stat.size > maxReadBytes) {
+          return {
+            error: "permission-denied",
+            message: `file exceeds maxReadBytes=${maxReadBytes} (size=${stat.size})`,
+          };
+        }
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT") {
+          return { error: "not-found", message: `no such file: ${params.path}` };
+        }
+        return {
+          error: "io-error",
+          message: `stat failed: ${(err as Error)?.message ?? String(err)}`,
+        };
+      }
+      try {
+        const content = readFileSync(guarded.canonical, "utf-8");
+        return { content };
+      } catch (err: unknown) {
+        return {
+          error: "io-error",
+          message: `read failed: ${(err as Error)?.message ?? String(err)}`,
+        };
+      }
+    },
+
+    async fsWrite(params: AcpFsWriteParams): Promise<AcpFsWriteResult | AcpFsErrorResult> {
+      const session = deps.getSession(params.sessionId);
+      const guarded = guard(params.path, session);
+      if ("error" in guarded) return guarded;
+      try {
+        // safeWriteFile uses O_NOFOLLOW on POSIX so a pre-existing
+        // symlink at the leaf is refused atomically with ELOOP — even
+        // if our lstat precheck somehow missed it (TOCTOU window).
+        safeWriteFile(guarded.canonical, params.content);
+        return { bytesWritten: Buffer.byteLength(params.content, "utf-8") };
+      } catch (err: unknown) {
+        const message = (err as Error)?.message ?? String(err);
+        // safeWriteFile throws a clear "refused to follow symbolic
+        // link" message on ELOOP; map that to permission-denied so the
+        // host renders it as a refusal rather than an opaque I/O bug.
+        if (message.includes("refused to follow symbolic link")) {
+          return { error: "permission-denied", message };
+        }
+        return { error: "io-error", message: `write failed: ${message}` };
+      }
+    },
+
+    async fsList(params: AcpFsListParams): Promise<AcpFsListResult | AcpFsErrorResult> {
+      const session = deps.getSession(params.sessionId);
+      const guarded = guard(params.dir, session);
+      if ("error" in guarded) return guarded;
+      let dirents;
+      try {
+        dirents = readdirSync(guarded.canonical, { withFileTypes: true });
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT") {
+          return { error: "not-found", message: `no such directory: ${params.dir}` };
+        }
+        if (code === "ENOTDIR") {
+          return { error: "permission-denied", message: `${params.dir} is not a directory` };
+        }
+        return {
+          error: "io-error",
+          message: `readdir failed: ${(err as Error)?.message ?? String(err)}`,
+        };
+      }
+      const entries = dirents.map((d) => {
+        const type = d.isFile()
+          ? ("file" as const)
+          : d.isDirectory()
+            ? ("directory" as const)
+            : d.isSymbolicLink()
+              ? ("symlink" as const)
+              : ("other" as const);
+        let size = 0;
+        if (type === "file") {
+          try {
+            const childPath = `${guarded.canonical}/${d.name}`;
+            size = statSync(childPath).size;
+          } catch {
+            // Honest fallback: report size=0 rather than hide the
+            // entry; the caller can re-stat individually if needed.
+            size = 0;
+          }
+        }
+        return { name: d.name, type, size };
+      });
+      return { entries };
+    },
+  };
+}
