@@ -16,6 +16,15 @@ struct VoiceInputView: View {
     @State private var durationTimer: Timer?
     @State private var permissionError: String?
 
+    // V9 T14.4 — Opt-in barge-in. When the user has flipped the
+    // Settings → Voice → "Enable barge-in" toggle, we ALSO spin up a
+    // `DuplexVoiceSession` alongside the regular `VoiceService` recording
+    // pipeline. The duplex session enables interrupt-the-assistant flow
+    // for downstream callers; the visible recording UI continues to track
+    // `voiceService` so the user-facing surface is unchanged.
+    @AppStorage("voiceBargeInEnabled") private var voiceBargeIn = false
+    @State private var duplexSession: DuplexVoiceSession?
+
     let onSend: (String) -> Void
 
     private var isRecording: Bool { voiceService.isRecording }
@@ -296,6 +305,31 @@ struct VoiceInputView: View {
                 return
             }
 
+            // V9 T14.4 — When the barge-in toggle is on, spin up a
+            // DuplexVoiceSession in parallel. We do NOT route the visible
+            // transcription through it — `voiceService.transcription` is
+            // still the source of truth for the on-screen text — but the
+            // duplex session is now available for any consumer that wants
+            // interrupt-the-assistant behaviour. Failures are logged and
+            // surfaced via permissionError but do NOT abort the regular
+            // recording path; the user still gets a working voice input
+            // even if duplex setup fails.
+            if voiceBargeIn, #available(iOS 17.0, *) {
+                let session = DuplexVoiceSession()
+                duplexSession = session
+                let granted = await session.requestPermissions()
+                if granted {
+                    do {
+                        try await session.start()
+                    } catch {
+                        permissionError = "Barge-in unavailable: \(error.localizedDescription)"
+                        duplexSession = nil
+                    }
+                } else {
+                    duplexSession = nil
+                }
+            }
+
             // Animate pulse (skip repeating animation when reduce motion is on)
             if reduceMotion {
                 pulseScale = 1.0
@@ -333,6 +367,12 @@ struct VoiceInputView: View {
 
     private func stopRecording() {
         voiceService.stopRecording()
+        // V9 T14.4 — also tear down the parallel duplex session, if any.
+        // We don't `nil` it here so the cleanup path on view dismissal
+        // still has a handle for a defensive second `stop()`.
+        if #available(iOS 17.0, *) {
+            duplexSession?.stop()
+        }
 
         withAnimation(WTheme.Animation.smooth) {
             pulseScale = 1.0
@@ -373,6 +413,13 @@ struct VoiceInputView: View {
         waveformTimer?.invalidate()
         durationTimer?.invalidate()
         voiceService.stopRecording()
+        // V9 T14.4 — tear down the parallel duplex session if we spun
+        // one up. Safe to call when nil; safe to call when not running
+        // (`stop()` no-ops when neither listening nor speaking).
+        if #available(iOS 17.0, *) {
+            duplexSession?.stop()
+            duplexSession = nil
+        }
     }
 
     private var formattedDuration: String {

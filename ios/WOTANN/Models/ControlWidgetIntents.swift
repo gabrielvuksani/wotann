@@ -154,18 +154,31 @@ struct OpenCostDialogIntent: AppIntent {
 // and the IntentsSupported plist — they just aren't AppShortcut-discoverable
 // any more (the extension's AppShortcutsProvider was dead anyway).
 
+// Audit-finding GAP 3 fix: every Writing Tools intent now accepts the
+// user's selected text as a @Parameter and stashes it into the shared
+// app group's UserDefaults under "control.<action>.payload". WOTANNApp's
+// onContinueUserActivity / scenePhase handler reads these and the
+// MainShell renders the matching Composer with the payload pre-filled.
+// Previously the intent only set a timestamp — the user's selection
+// was discarded, making "Writing Tools" theatre.
+
 @available(iOS 18.0, *)
 struct AskWOTANNFromShortcutIntent: AppIntent {
     nonisolated(unsafe) static var title: LocalizedStringResource = "Ask WOTANN"
     nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
-        "Open WOTANN to ask a question.",
+        "Send the selected text to WOTANN as the start of a question.",
         categoryName: "Chat"
     )
     nonisolated(unsafe) static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Selected Text", default: "")
+    var selectedText: String
+
     init() {}
     func perform() async throws -> some IntentResult {
         let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
         defaults.set(Date().timeIntervalSince1970, forKey: "control.ask.requestedAt")
+        defaults.set(selectedText, forKey: "control.ask.payload")
         return .result()
     }
 }
@@ -174,14 +187,19 @@ struct AskWOTANNFromShortcutIntent: AppIntent {
 struct RewriteWithWOTANNFromShortcutIntent: AppIntent {
     nonisolated(unsafe) static var title: LocalizedStringResource = "Rewrite with WOTANN"
     nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
-        "Open WOTANN to rewrite text.",
+        "Rewrite the selected text using WOTANN's chosen model.",
         categoryName: "Writing Tools"
     )
     nonisolated(unsafe) static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Selected Text", default: "")
+    var selectedText: String
+
     init() {}
     func perform() async throws -> some IntentResult {
         let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
         defaults.set(Date().timeIntervalSince1970, forKey: "control.rewrite.requestedAt")
+        defaults.set(selectedText, forKey: "control.rewrite.payload")
         return .result()
     }
 }
@@ -190,14 +208,19 @@ struct RewriteWithWOTANNFromShortcutIntent: AppIntent {
 struct SummarizeWithWOTANNFromShortcutIntent: AppIntent {
     nonisolated(unsafe) static var title: LocalizedStringResource = "Summarize with WOTANN"
     nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
-        "Open WOTANN to summarize text.",
+        "Summarize the selected text using WOTANN's chosen model.",
         categoryName: "Writing Tools"
     )
     nonisolated(unsafe) static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Selected Text", default: "")
+    var selectedText: String
+
     init() {}
     func perform() async throws -> some IntentResult {
         let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
         defaults.set(Date().timeIntervalSince1970, forKey: "control.summarize.requestedAt")
+        defaults.set(selectedText, forKey: "control.summarize.payload")
         return .result()
     }
 }
@@ -206,14 +229,19 @@ struct SummarizeWithWOTANNFromShortcutIntent: AppIntent {
 struct ExpandWithWOTANNFromShortcutIntent: AppIntent {
     nonisolated(unsafe) static var title: LocalizedStringResource = "Expand with WOTANN"
     nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
-        "Open WOTANN to expand text.",
+        "Expand the selected text using WOTANN's chosen model.",
         categoryName: "Writing Tools"
     )
     nonisolated(unsafe) static var openAppWhenRun: Bool = true
+
+    @Parameter(title: "Selected Text", default: "")
+    var selectedText: String
+
     init() {}
     func perform() async throws -> some IntentResult {
         let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
         defaults.set(Date().timeIntervalSince1970, forKey: "control.expand.requestedAt")
+        defaults.set(selectedText, forKey: "control.expand.payload")
         return .result()
     }
 }

@@ -46,7 +46,7 @@
     "tokens:generate": "node scripts/generate-tokens.mjs",
     "tokens:check": "node scripts/generate-tokens.mjs --check",
     "prepare": "tsc && chmod +x dist/index.js",
-    "postinstall": "npm run build || echo 'Build failed — run npm run build manually'",
+    "postinstall": "node -e \"try { require('node:fs').chmodSync('dist/index.js', 0o755); } catch {}\"",
     "wotann": "tsx src/index.ts",
     "test-provider": "tsx src/cli/test-provider.ts"
   },

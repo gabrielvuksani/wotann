@@ -901,6 +901,34 @@ export async function dispatchRuntimeTool(
           return () =>
             dispatchConnectorToolAsResult(toolName, input, deps.connectorRegistry ?? null, ctx);
         }
+        // Aux tools (PDF extract, post_callback, task.spawn, monitor_bg).
+        // Resurrected from src/tools/aux-tools.ts; these are agent-callable
+        // when buildAuxToolDefinitions() exposes them in the schema (wired
+        // from runtime.ts:2810). dispatchAuxTool returns a normalized envelope
+        // we wrap into ToolDispatchResult.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const auxModule =
+          require("../tools/aux-tools.js") as typeof import("../tools/aux-tools.js");
+        if (auxModule.isAuxTool(toolName)) {
+          return async () => {
+            const auxResult = await auxModule.dispatchAuxTool(toolName, input, {
+              // task.spawn requires a TaskTool dep — we don't currently
+              // surface one through ToolDispatchDeps, so spawn returns an
+              // honest `not_configured` error. The other 4 aux tools
+              // (PDF, post_callback, monitor_bg) work without it.
+              taskTool: null,
+            });
+            const content = auxResult.ok
+              ? JSON.stringify(auxResult.data)
+              : `Error: ${auxResult.error}${auxResult.detail ? ` — ${auxResult.detail}` : ""}`;
+            return {
+              type: "text" as const,
+              content,
+              provider: ctx.responseProvider,
+              model: ctx.responseModel,
+            };
+          };
+        }
         return null;
     }
   };

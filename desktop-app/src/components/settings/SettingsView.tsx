@@ -1136,15 +1136,54 @@ function AutomationsSection() {
   );
 }
 
-// ── Recommended models for auto-update ──────────────────
-const RECOMMENDED_MODELS: readonly { readonly id: string; readonly name: string; readonly description: string }[] = [
-  { id: "gemma3:4b", name: "Gemma 3 4B", description: "Google's efficient 4B model — great for code and chat" },
-  { id: "qwen3:4b", name: "Qwen 3 4B", description: "Alibaba's strong multilingual 4B model" },
-  { id: "llama3.2:3b", name: "Llama 3.2 3B", description: "Meta's compact 3B model — fast local inference" },
-  { id: "deepseek-coder-v2:16b", name: "DeepSeek Coder V2 16B", description: "Specialized coding model with strong benchmarks" },
-  { id: "codellama:7b", name: "Code Llama 7B", description: "Meta's code-specialized 7B model" },
-  { id: "mistral:7b", name: "Mistral 7B", description: "Mistral AI's balanced 7B model" },
-];
+// ── Recommended models — derived from daemon's auto-update.ts ──
+// `models.recommended` returns the canonical curated list (single source
+// of truth, kept in src/daemon/auto-update.ts). The friendly-name table
+// below adds display metadata for known IDs; unknown IDs fall back to
+// title-case of the ID. Adding a model only requires editing
+// auto-update.ts — no UI edit needed for it to appear here.
+interface RecommendedModel {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+}
+const MODEL_DISPLAY_OVERRIDES: Readonly<Record<string, { name: string; description: string }>> = {
+  // Coding-focused
+  "qwen3-coder-next": { name: "Qwen3 Coder Next", description: "Alibaba's frontier coding model — top of HumanEval" },
+  "devstral": { name: "Devstral", description: "Mistral's coding model with deep IDE awareness" },
+  "codestral": { name: "Codestral", description: "Mistral's code-specialized model" },
+  "deepseek-coder-v2:16b": { name: "DeepSeek Coder V2 16B", description: "Strong coding benchmarks at 16B scale" },
+  "codellama:7b": { name: "Code Llama 7B", description: "Meta's code-specialized 7B model" },
+  // General
+  "gemma4": { name: "Gemma 4", description: "Google's efficient general model" },
+  "gemma4:2b": { name: "Gemma 4 2B", description: "Tiny variant for ultra-fast local inference" },
+  "gemma3:4b": { name: "Gemma 3 4B", description: "Google's efficient 4B model" },
+  "llama4": { name: "Llama 4", description: "Meta's flagship general model" },
+  "llama4:scout": { name: "Llama 4 Scout", description: "Smaller Llama 4 variant" },
+  "llama3.2:3b": { name: "Llama 3.2 3B", description: "Meta's compact 3B model — fast local inference" },
+  "phi-4": { name: "Phi-4", description: "Microsoft's reasoning-focused compact model" },
+  "phi-4-mini": { name: "Phi-4 Mini", description: "Tiny Phi-4 variant for low-RAM hardware" },
+  "mistral-large": { name: "Mistral Large", description: "Mistral AI's flagship general model" },
+  "mistral:7b": { name: "Mistral 7B", description: "Mistral AI's balanced 7B model" },
+  "qwen3:4b": { name: "Qwen 3 4B", description: "Alibaba's strong multilingual 4B model" },
+  // Reasoning
+  "deepseek-r1": { name: "DeepSeek R1", description: "Reasoning model with strong chain-of-thought" },
+  "qwen3.5:27b": { name: "Qwen 3.5 27B", description: "Reasoning + multilingual 27B model" },
+  // Multilingual
+  "glm-5": { name: "GLM-5", description: "Tsinghua/Zhipu multilingual model" },
+  "glm-5.1": { name: "GLM-5.1", description: "Updated GLM with stronger English" },
+};
+function decorateModel(id: string): RecommendedModel {
+  const meta = MODEL_DISPLAY_OVERRIDES[id];
+  if (meta) return { id, name: meta.name, description: meta.description };
+  // Fallback: title-case the model id; no canned description so we never
+  // lie about a model we haven't curated.
+  const name = id
+    .split(/[:\-_]/)
+    .map((part) => (part.length ? part[0]!.toUpperCase() + part.slice(1) : part))
+    .join(" ");
+  return { id, name, description: "Local model (Ollama)" };
+}
 
 // ── Advanced Section ────────────────────────────────────
 function AdvancedSection() {
@@ -1164,6 +1203,31 @@ function AdvancedSection() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [pullingModel, setPullingModel] = useState<string | null>(null);
   const [pullMessage, setPullMessage] = useState("");
+  // Recommended models — fetched from daemon `models.recommended` RPC so
+  // a new entry in auto-update.ts surfaces here without a Desktop edit.
+  const [recommendedModels, setRecommendedModels] = useState<readonly RecommendedModel[]>([]);
+
+  // Fetch recommended models from daemon on mount.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadRecommended() {
+      try {
+        const { commands } = await import("../../hooks/useTauriCommand");
+        const response = await commands.rpcCall("models.recommended");
+        if (cancelled) return;
+        const ids = Array.isArray((response as { models?: unknown }).models)
+          ? ((response as { models: unknown[] }).models.filter(
+              (x): x is string => typeof x === "string",
+            ))
+          : [];
+        setRecommendedModels(ids.map(decorateModel));
+      } catch {
+        if (!cancelled) setRecommendedModels([]);
+      }
+    }
+    loadRecommended();
+    return () => { cancelled = true; };
+  }, []);
 
   // Derive installed Ollama models from providers store data
   const ollamaProvider = providers.find((p) => p.id === "ollama");
@@ -1218,7 +1282,7 @@ function AdvancedSection() {
 
   // Combine installed from both sources
   const allInstalled = [...new Set([...installedModels, ...ollamaModelIds])];
-  const notInstalled = RECOMMENDED_MODELS.filter(
+  const notInstalled = recommendedModels.filter(
     (m) => !allInstalled.some((installed) => installed.includes(m.id.split(":")[0] ?? "")),
   );
 

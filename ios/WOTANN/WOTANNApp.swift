@@ -273,26 +273,37 @@ struct WOTANNApp: App {
     /// repeated foregrounds don't re-fire the action.
     private func processControlIntentRequests() {
         guard let defaults = UserDefaults(suiteName: "group.com.wotann.shared") else { return }
-        if defaults.object(forKey: "control.ask.requestedAt") != nil {
-            defaults.removeObject(forKey: "control.ask.requestedAt")
+
+        // Audit-finding GAP 3 fix: pull the @Parameter selectedText payload
+        // alongside the timestamp. The payload key was added to each
+        // RewriteWith/SummarizeWith/ExpandWith/AskWOTANN intent. This handler
+        // now stashes the selection into appState.deepLinkPayload so the
+        // matching MainShell view can pre-fill the Composer.
+        let consume: (String) -> String? = { key in
+            guard defaults.object(forKey: "control.\(key).requestedAt") != nil else { return nil }
+            defaults.removeObject(forKey: "control.\(key).requestedAt")
+            let payload = defaults.string(forKey: "control.\(key).payload")
+            defaults.removeObject(forKey: "control.\(key).payload")
+            return payload ?? ""
+        }
+
+        if let text = consume("ask") {
             appState.activeTab = 0  // Conversations tab
             appState.deepLinkDestination = "ask"
+            appState.deepLinkPayload = text
         }
-        if defaults.object(forKey: "control.rewrite.requestedAt") != nil {
-            defaults.removeObject(forKey: "control.rewrite.requestedAt")
+        if let text = consume("rewrite") {
             appState.deepLinkDestination = "rewrite"
+            appState.deepLinkPayload = text
         }
-        if defaults.object(forKey: "control.summarize.requestedAt") != nil {
-            defaults.removeObject(forKey: "control.summarize.requestedAt")
+        if let text = consume("summarize") {
             appState.deepLinkDestination = "summarize"
+            appState.deepLinkPayload = text
         }
-        if defaults.object(forKey: "control.expand.requestedAt") != nil {
-            defaults.removeObject(forKey: "control.expand.requestedAt")
+        if let text = consume("expand") {
             appState.deepLinkDestination = "expand"
+            appState.deepLinkPayload = text
         }
-        // The pre-existing voice/relay/cost handlers also live in this file's
-        // legacy scene-activation reader if any. Adding the 4 new keys here
-        // closes the SB-N4 wiring loop.
     }
 
     private var resolvedColorScheme: ColorScheme? {

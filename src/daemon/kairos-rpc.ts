@@ -8400,6 +8400,39 @@ export class KairosRPCHandler {
         return { error: err instanceof Error ? err.message : String(err) };
       }
     });
+
+    // ── Auto-update RPCs (resurrected from src/daemon/auto-update.ts) ──
+    // Surfaces the curated Ollama recommendations + new-model discovery
+    // to Settings/Onboarding so the UI doesn't ship a stale hardcoded
+    // model list. Single source of truth for "models we suggest installing".
+    this.handlers.set("models.recommended", async () => {
+      try {
+        const { getRecommendedModels } = await import("./auto-update.js");
+        return { ok: true, models: getRecommendedModels() };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("models.checkForUpdates", async () => {
+      try {
+        const { checkForUpdates } = await import("./auto-update.js");
+        return await checkForUpdates();
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("models.pull", async (params) => {
+      try {
+        const { pullModel } = await import("./auto-update.js");
+        const { name } = params as { name?: string };
+        if (!name) return { error: "name required" };
+        return await pullModel(name);
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
   }
 
   private errorResponse(id: string | number | null, code: number, message: string): RPCResponse {

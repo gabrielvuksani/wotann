@@ -257,9 +257,18 @@ final class ApprovalSheetViewModel {
                 "granted": .bool(granted),
             ])
             errorMessage = nil
+            // V9 T14.4 — Norse audio cue on approval. Only fires on the
+            // grant path; deny is a deliberately silent action so the user
+            // is not "rewarded" with a positive cue for blocking work.
+            if granted, #available(iOS 16.0, *) {
+                WotannStingService.shared.playApprovalGranted()
+            }
         } catch {
             errorMessage = "Could not send decision: \(error.localizedDescription)"
             Self.log.error("approvals.decide failed: \(error.localizedDescription, privacy: .public)")
+            if #available(iOS 16.0, *) {
+                WotannStingService.shared.playError()
+            }
         }
 
         advance()

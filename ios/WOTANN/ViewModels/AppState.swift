@@ -39,6 +39,11 @@ final class AppState: ObservableObject {
     @Published var showMeetModeSheet = false
     @Published var deepLinkAgentId: UUID?
     @Published var deepLinkDestination: String?
+    /// User's selected text payload for Writing Tools (rewrite/summarize/expand)
+    /// + Ask intents. Set by `processControlIntentRequests` (WOTANNApp.swift)
+    /// from the @Parameter the iOS Writing Tools host passes through. Cleared
+    /// by the receiving view once it consumes the payload.
+    @Published var deepLinkPayload: String?
 
     /// Observer for reconnect-triggered re-syncs.
     private var reconnectSubscription: AnyCancellable?

@@ -107,6 +107,21 @@ struct MainShell: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
+            // Audit-finding GAP 3: render AskComposer with the Writing
+            // Tools payload + matching template when an Ask/Rewrite/
+            // Summarize/Expand intent fires. The 4 destinations open the
+            // SAME sheet but with different templates so the model sees
+            // a precise instruction.
+            .sheet(isPresented: writingToolsSheetBinding) {
+                AskComposer(
+                    initialText: appState.deepLinkPayload,
+                    template: writingToolsTemplate
+                )
+                    .environmentObject(appState)
+                    .environmentObject(connectionManager)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
             .fullScreenCover(isPresented: $showVoiceSheet) {
                 VoiceInputView(onSend: handleVoiceInput)
                     .environmentObject(appState)
@@ -194,6 +209,39 @@ struct MainShell: View {
                 }
             }
         )
+    }
+
+    /// True when the deep link destination is one of the 4 Writing Tools
+    /// actions. Setting back to false clears both the destination and the
+    /// payload so the sheet doesn't re-present on subsequent renders.
+    private var writingToolsSheetBinding: Binding<Bool> {
+        Binding(
+            get: {
+                let dest = appState.deepLinkDestination ?? ""
+                return ["ask", "rewrite", "summarize", "expand"].contains(dest)
+            },
+            set: { newValue in
+                if !newValue {
+                    appState.deepLinkDestination = nil
+                    appState.deepLinkPayload = nil
+                }
+            }
+        )
+    }
+
+    /// Template wrapping the user's selected text per Writing Tools action.
+    /// Returns nil for `ask` (treated as a free-form prompt seed).
+    private var writingToolsTemplate: String? {
+        switch appState.deepLinkDestination ?? "" {
+        case "rewrite":
+            return "Rewrite the following text more clearly while preserving meaning:\n\n{{text}}"
+        case "summarize":
+            return "Summarize the following text concisely:\n\n{{text}}"
+        case "expand":
+            return "Expand the following text with more detail and supporting points:\n\n{{text}}"
+        default:
+            return nil
+        }
     }
 
     // MARK: - Voice Dispatch

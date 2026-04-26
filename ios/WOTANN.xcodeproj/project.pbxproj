@@ -12,6 +12,8 @@
 		01A64FB4AF8F17B7B9719282 /* ControlWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CF3ECE69388945A604D88F3 /* ControlWidgets.swift */; };
 		02AA1EFB1D3F2D56CE233C14 /* SummarizeWithWOTANNIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44D4A70E5A741B1628A2243 /* SummarizeWithWOTANNIntent.swift */; };
 		02F42A71E37B4950D3247D09 /* WotannStingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9A710340FD9555B23051765 /* WotannStingService.swift */; };
+		AF39B1DC650943C0ACA30980 /* DuplexVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C32FC48C5971461987F7ACD4 /* DuplexVoiceSession.swift */; };
+		05CB7CB341774FFD9888117C /* NorseSoundCues.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4309FC2C3B524EA48DBCA047 /* NorseSoundCues.swift */; };
 		058CFF3CBE328B3860E9C89B /* OnDeviceModelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D49F04230915DCF8EF70FF8 /* OnDeviceModelService.swift */; };
 		06D00631F8972325EE52B326 /* WotannTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D2ABF287165B0CD0E71BB0F /* WotannTokens.swift */; };
 		06F959DB4461DE45ABF3CF0B /* HeroAsk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0B5B7E2D8D66209D1CBA27 /* HeroAsk.swift */; };
@@ -477,6 +479,8 @@
 		F79F94065DC79C5DD95E0B57 /* StatusShape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusShape.swift; sourceTree = "<group>"; };
 		F950D55B6D1A8E84E4BE2E7B /* WorkflowsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowsView.swift; sourceTree = "<group>"; };
 		F9A710340FD9555B23051765 /* WotannStingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WotannStingService.swift; sourceTree = "<group>"; };
+		C32FC48C5971461987F7ACD4 /* DuplexVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplexVoiceSession.swift; sourceTree = "<group>"; };
+		4309FC2C3B524EA48DBCA047 /* NorseSoundCues.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NorseSoundCues.swift; sourceTree = "<group>"; };
 		FBCA5677FBF5FF63F853CA43 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FBCD366A7A90C0978E6EDFF8 /* CostDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostDashboardView.swift; sourceTree = "<group>"; };
 		FC4279027D915B49348FAA83 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
@@ -660,6 +664,8 @@
 				3D49F04230915DCF8EF70FF8 /* OnDeviceModelService.swift */,
 				2E83842536E65E46408B77A0 /* VoiceService.swift */,
 				F9A710340FD9555B23051765 /* WotannStingService.swift */,
+				C32FC48C5971461987F7ACD4 /* DuplexVoiceSession.swift */,
+				4309FC2C3B524EA48DBCA047 /* NorseSoundCues.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1604,6 +1610,8 @@
 				B533B879C329A2F4E77C73B6 /* WorkView.swift in Sources */,
 				8DE374868B52FC320ED7A786 /* WorkflowsView.swift in Sources */,
 				02F42A71E37B4950D3247D09 /* WotannStingService.swift in Sources */,
+				AF39B1DC650943C0ACA30980 /* DuplexVoiceSession.swift in Sources */,
+				05CB7CB341774FFD9888117C /* NorseSoundCues.swift in Sources */,
 				EE03BCFD8A4705AB89D27D7F /* WotannTokens.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

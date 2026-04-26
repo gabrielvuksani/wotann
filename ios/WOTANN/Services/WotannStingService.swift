@@ -74,6 +74,42 @@ final class WotannStingService {
         play()
     }
 
+    /// Play the Norse "wax-seal" cue when an approval has been granted.
+    /// Delegates to `NorseSoundCues.shared` — the sting service stays the
+    /// single audio facade callers reach for. Marked nonisolated so it can
+    /// be invoked from any actor; the underlying cue service is `@MainActor`
+    /// and we hop onto it.
+    func playApprovalGranted() {
+        Task { @MainActor in
+            NorseSoundCues.shared.playWaxSeal()
+        }
+    }
+
+    /// Play the Norse "well-hum" cue on a task-completion event. Same
+    /// hop-to-main-actor pattern as `playApprovalGranted()`.
+    func playTaskComplete() {
+        Task { @MainActor in
+            NorseSoundCues.shared.playWellHum()
+        }
+    }
+
+    /// Play the Norse "rune-tap" cue for a brand-voice button tap. This is
+    /// the lightest cue — use sparingly so it stays distinctive.
+    func playRuneTap() {
+        Task { @MainActor in
+            NorseSoundCues.shared.playRuneTap()
+        }
+    }
+
+    /// Play the Norse "wood-knock" cue on a recoverable error. Pairs with
+    /// the existing `HapticService.shared.trigger(.error)` notification
+    /// haptic so the failure has both a tactile and audio signature.
+    func playError() {
+        Task { @MainActor in
+            NorseSoundCues.shared.playWoodKnock()
+        }
+    }
+
     /// Force-play regardless of session state. Used by the Settings screen
     /// "Preview audio sting" button.
     func play() {

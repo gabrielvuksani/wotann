@@ -60,8 +60,17 @@ final class TaskMonitorViewModel {
         do {
             try await connectionManager.rpcClient.approveAction(taskId: taskId)
             HapticService.shared.trigger(.taskComplete)
+            // V9 T14.4 — wax-seal cue on inline action approval. This is an
+            // approval grant so it gets the same audio signature as the
+            // sheet/queue grant paths.
+            if #available(iOS 16.0, *) {
+                WotannStingService.shared.playApprovalGranted()
+            }
         } catch {
             HapticService.shared.trigger(.error)
+            if #available(iOS 16.0, *) {
+                WotannStingService.shared.playError()
+            }
         }
     }
 

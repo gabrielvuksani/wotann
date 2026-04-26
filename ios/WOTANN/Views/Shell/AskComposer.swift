@@ -21,6 +21,14 @@ struct AskComposer: View {
     @State private var compareMode: Bool = false
     @State private var councilMode: Bool = false
     @FocusState private var promptFocused: Bool
+    /// Optional initial text from a Writing Tools / Ask intent payload.
+    /// Pre-fills the prompt so the user lands in the composer with their
+    /// selection already in place. Cleared by the dispatch handler.
+    var initialText: String? = nil
+    /// Optional template wrapper applied around `initialText` at mount.
+    /// e.g. "Rewrite the following more clearly:\n\n{{text}}". Routed by
+    /// the deepLinkDestination on the receiving side.
+    var template: String? = nil
 
     // MARK: - Body
 
@@ -44,6 +52,17 @@ struct AskComposer: View {
                 }
             }
             .onAppear {
+                // Pre-fill prompt from a Writing Tools / Ask intent
+                // payload when present. The template (if provided) wraps
+                // the selection so the model sees a clear instruction
+                // alongside the user's text.
+                if promptText.isEmpty, let initial = initialText, !initial.isEmpty {
+                    if let tmpl = template {
+                        promptText = tmpl.replacingOccurrences(of: "{{text}}", with: initial)
+                    } else {
+                        promptText = initial
+                    }
+                }
                 // Autofocus the text editor as soon as the sheet appears.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                     promptFocused = true

@@ -36,6 +36,14 @@ final class SettingsStore: ObservableObject {
 
     @AppStorage("voiceBackend") var voiceBackend = "on-device"
 
+    /// Opt-in barge-in voice mode (V9 T14.4). When ON, the voice input
+    /// surface activates `DuplexVoiceSession` in parallel with the regular
+    /// `VoiceService` recording path so the user can interrupt the
+    /// assistant mid-utterance. Off by default — duplex audio uses the
+    /// `.playAndRecord` AV session category, which is heavier and ducks
+    /// other audio. Users who want it enable it explicitly.
+    @AppStorage("voiceBargeInEnabled") var voiceBargeInEnabled = false
+
     // MARK: On-Device AI (opt-in)
 
     /// When enabled AND offline, WOTANN will attempt to run queries locally

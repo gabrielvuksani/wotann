@@ -165,6 +165,12 @@ final class ApprovalQueueService {
                 "deciderDeviceId": .string(deviceId),
             ])
             errorMessage = nil
+            // V9 T14.4 — wax-seal cue on the queue-side approval grant.
+            // Mirrors the same gating used in the modal sheet path so a
+            // queue-managed grant gets the same audio signature.
+            if decision == "allow", #available(iOS 16.0, *) {
+                WotannStingService.shared.playApprovalGranted()
+            }
         } catch {
             // Roll back. The RPC may have failed because the approval was
             // already decided/expired by another surface — refresh to land
@@ -172,6 +178,9 @@ final class ApprovalQueueService {
             approvals = previous
             errorMessage = "Could not record decision: \(error.localizedDescription)"
             Self.log.error("approvals.decide failed: \(error.localizedDescription, privacy: .public)")
+            if #available(iOS 16.0, *) {
+                WotannStingService.shared.playError()
+            }
             await refresh()
         }
     }

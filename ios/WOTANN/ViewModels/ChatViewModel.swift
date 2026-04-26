@@ -221,6 +221,13 @@ final class ChatViewModel: ObservableObject {
                         }
                         self.isStreaming = false
                         HapticService.shared.trigger(.responseComplete)
+                        // V9 T14.4 — well-hum on a completed assistant turn.
+                        // Pairs with the existing `responseComplete` haptic so
+                        // the end-of-turn moment has a tactile + audio
+                        // signature.
+                        if #available(iOS 16.0, *) {
+                            WotannStingService.shared.playTaskComplete()
+                        }
                     },
                     onError: { [weak self] error in
                         guard let self else { return }
@@ -228,6 +235,9 @@ final class ChatViewModel: ObservableObject {
                         self.errorMessage = error
                         self.isStreaming = false
                         HapticService.shared.trigger(.error)
+                        if #available(iOS 16.0, *) {
+                            WotannStingService.shared.playError()
+                        }
                     }
                 )
 
@@ -252,6 +262,9 @@ final class ChatViewModel: ObservableObject {
                 isStreaming = false
                 errorMessage = error.localizedDescription
                 HapticService.shared.trigger(.error)
+                if #available(iOS 16.0, *) {
+                    WotannStingService.shared.playError()
+                }
             }
         }
     }
@@ -264,6 +277,12 @@ final class ChatViewModel: ObservableObject {
 
         isEnhancing = true
         HapticService.shared.trigger(.buttonTap)
+        // V9 T14.4 — Enhance is a brand-voice button: it invokes the
+        // WOTANN prompt-improver. Rune-tap pairs with the buttonTap
+        // haptic so the action has a cued, deliberate feel.
+        if #available(iOS 16.0, *) {
+            WotannStingService.shared.playRuneTap()
+        }
 
         Task {
             do {

@@ -2801,6 +2801,21 @@ export class WotannRuntime {
         );
       }
 
+      // ── Aux tools: PDF extraction, webhook callbacks, sub-agent spawn,
+      // background-process monitor. Resurrected from src/tools/aux-tools.ts
+      // (was previously orphaned). Wiring here means every model that gets
+      // tools also gets these capabilities, gated through `dispatchAuxTool`
+      // when the model invokes one (see tool-handler.ts dispatch site).
+      try {
+        const { buildAuxToolDefinitions } = await import("../tools/aux-tools.js");
+        for (const def of buildAuxToolDefinitions()) {
+          effectiveTools.push(def);
+        }
+      } catch {
+        // Aux-tools is optional — if its module fails to load we just
+        // omit those tool defs so the runtime keeps working.
+      }
+
       // F8: in test mode, truncate every tool description to keep prompts
       // deterministic and small. The flag is opt-in (WOTANN_TEST_MODE=1) so it
       // has zero effect on normal runs. Mutating the array in place keeps the

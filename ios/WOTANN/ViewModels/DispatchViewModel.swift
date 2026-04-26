@@ -78,9 +78,16 @@ final class DispatchViewModel {
             promptText = ""
             selectedTemplate = nil
             HapticService.shared.trigger(.taskComplete)
+            // V9 T14.4 — well-hum cue on a successful dispatch.
+            if #available(iOS 16.0, *) {
+                WotannStingService.shared.playTaskComplete()
+            }
         } catch {
             errorMessage = "Dispatch failed: \(error.localizedDescription)"
             HapticService.shared.trigger(.error)
+            if #available(iOS 16.0, *) {
+                WotannStingService.shared.playError()
+            }
         }
 
         isDispatching = false

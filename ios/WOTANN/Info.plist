@@ -34,6 +34,39 @@
 		<string>_wotann._tcp</string>
 	</array>
 	<!--
+		User-facing privacy strings. Apple HARD-CRASHES the app on the
+		first call to mic/camera/HealthKit/Speech/NFC if the matching
+		"Why does this app need access?" string is missing. App Store
+		Review (2.5.1 + 5.1.1) rejects builds without these for any API
+		the binary references. See:
+		- AVCaptureDevice.requestAccess(.audio) → NSMicrophoneUsageDescription
+		- AVCaptureDevice.requestAccess(.video) → NSCameraUsageDescription
+		- SFSpeechRecognizer / DuplexVoiceSession → NSSpeechRecognitionUsageDescription
+		- HKHealthStore in HealthKitService.swift → NSHealthShareUsageDescription
+		  + NSHealthUpdateUsageDescription
+		- NFCNDEFReaderSession (PairingManager NFC tap) → NFCReaderUsageDescription
+	-->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>WOTANN uses your microphone for voice input — push-to-talk transcription and barge-in conversation. Audio is processed locally or via your configured provider; no recording is uploaded without your explicit action.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>WOTANN uses the camera to scan pairing QR codes from your desktop. The camera only activates on the Pairing screen.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>WOTANN uses on-device speech recognition to transcribe your voice prompts. Transcripts stay on your device unless you choose to send them to a configured provider.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>WOTANN reads optional Health metrics (sleep, activity, focus session length) so the agent can adapt its workload to your current capacity. Sharing is opt-in per metric.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>WOTANN can write completed focus sessions back to Health when you opt in — purely for your own records, never shared off-device.</string>
+	<key>NFCReaderUsageDescription</key>
+	<string>WOTANN can pair with your desktop via an NFC tap. The NFC reader only activates when you choose "Pair with NFC" on the Pairing screen.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>WOTANN attaches images you pick from Photos to your conversation. Selection is per-image and stays on-device unless you send it to a provider.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>WOTANN sends notifications when long-running tasks finish, when an approval is requested, or when a relayed task arrives from your desktop. You can disable any category in Settings.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>WOTANN can look up contacts when you mention someone by name in a prompt — used only when you explicitly opt in to "Contact mentions" in Settings.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>WOTANN uses your location only when you opt in to location-aware automations (e.g. "remind me when I'm home"). Location is never sent off-device.</string>
+	<!--
 		SB-18 (Wave 5-J): iOS 18 strict ATS BLOCKS plaintext ws://localhost:* connections.
 		WOTANN's phone↔desktop bridge uses unencrypted WebSocket on the LAN because
 		(a) the connection is end-to-end ECDH-encrypted at the application layer

@@ -10,6 +10,10 @@ struct SettingsView: View {
     @AppStorage("autoConnectEnabled") private var autoConnect = true
     @AppStorage("notificationsEnabled") private var notifications = true
     @AppStorage("hapticFeedback") private var hapticFeedback = true
+    // V9 T14.4 — opt-in barge-in voice mode. When ON the voice surface
+    // activates `DuplexVoiceSession` in parallel with the regular recording
+    // path so the user can interrupt the assistant.
+    @AppStorage("voiceBargeInEnabled") private var voiceBargeIn = false
     @State private var showUnpairAlert = false
     @State private var showDispatchFromDeepLink = false
     @State private var healthKitService = HealthKitService()
@@ -27,6 +31,7 @@ struct SettingsView: View {
                 healthInsightsSection
                 fileSharingSection
                 appearanceSection
+                voiceSection
                 privacySection
                 notificationSection
                 dataSection
@@ -426,6 +431,37 @@ struct SettingsView: View {
             }
         } header: {
             Text("Appearance")
+                .font(.wotannScaled(size: 12, weight: .semibold))
+                .tracking(WTheme.Tracking.wide)
+                .textCase(.uppercase)
+        }
+        .listRowBackground(WTheme.Colors.surface)
+    }
+
+    private var voiceSection: some View {
+        // V9 T14.4 — Voice settings. Currently exposes the opt-in barge-in
+        // toggle. Off by default — duplex audio uses the heavier
+        // `.playAndRecord` AV session category which ducks other audio,
+        // so users who want it enable it explicitly.
+        Section {
+            Toggle(isOn: $voiceBargeIn) {
+                HStack(spacing: WTheme.Spacing.sm) {
+                    Image(systemName: "waveform.and.mic")
+                        .foregroundColor(WTheme.Colors.primary)
+                        .frame(width: WTheme.IconSize.md)
+                    VStack(alignment: .leading, spacing: WTheme.Spacing.xxs) {
+                        Text("Enable barge-in")
+                        Text("Let WOTANN listen while it speaks so you can interrupt mid-reply.")
+                            .font(WTheme.Typography.caption)
+                            .foregroundColor(WTheme.Colors.textTertiary)
+                    }
+                }
+            }
+            .tint(WTheme.Colors.primary)
+            .accessibilityLabel("Enable barge-in voice mode")
+            .accessibilityHint("When on, the voice input session keeps listening while the assistant speaks so you can interrupt it.")
+        } header: {
+            Text("Voice")
                 .font(.wotannScaled(size: 12, weight: .semibold))
                 .tracking(WTheme.Tracking.wide)
                 .textCase(.uppercase)
