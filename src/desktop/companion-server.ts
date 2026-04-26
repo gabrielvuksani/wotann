@@ -28,14 +28,22 @@
  * - Server → Client: { result?, error?, id } or { method: "stream", params }
  */
 
-import { randomUUID, randomBytes, createHash, createECDH, hkdfSync } from "node:crypto";
+import {
+  randomUUID,
+  randomBytes,
+  createHash,
+  createECDH,
+  hkdfSync,
+  timingSafeEqual,
+} from "node:crypto";
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import type { Server as HTTPServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { execFileSync, spawn } from "node:child_process";
-import { hostname, networkInterfaces, homedir } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 import { join as pathJoin } from "node:path";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { WebSocketServer } from "ws";
 import {
   takeScreenshot,
@@ -336,8 +344,20 @@ export class PairingManager {
       return { success: false, error: "Pairing request expired" };
     }
 
-    // Verify PIN against the stored pairing request — constant-time comparison
-    if (!pin || pin !== request.pin) {
+    // SECURITY (SB-2): constant-time PIN comparison via crypto.timingSafeEqual.
+    // Previous code used `pin !== request.pin` and falsely claimed constant-time
+    // in the comment — string `!==` short-circuits on the first byte mismatch and
+    // leaks PIN bytes via timing. timingSafeEqual requires equal-length buffers,
+    // so we length-check first and reject mismatched lengths as invalid.
+    if (!pin || typeof pin !== "string") {
+      return { success: false, error: "Invalid PIN" };
+    }
+    const providedPinBuf = Buffer.from(pin, "utf8");
+    const expectedPinBuf = Buffer.from(request.pin, "utf8");
+    if (
+      providedPinBuf.length !== expectedPinBuf.length ||
+      !timingSafeEqual(providedPinBuf, expectedPinBuf)
+    ) {
       return { success: false, error: "Invalid PIN" };
     }
 
@@ -361,12 +381,66 @@ export class PairingManager {
     return { success: true, sessionId };
   }
 
+  /**
+   * Complete a local-network (Bonjour/manual) pairing.
+   *
+   * SECURITY (SB-1): Previously this method accepted any deviceName/deviceId
+   * with no authentication and minted a 24-hour auth token — a trivial LAN
+   * takeover. Any process on the same network could call `pair.local` with
+   * arbitrary parameters and obtain a token.
+   *
+   * The fixed flow requires the caller to first obtain a `requestId`/`pin`
+   * pair from `generatePairingRequest()` (the same pending-request store the
+   * QR-code `pair` flow uses) and present BOTH the requestId AND the PIN.
+   * The PIN is verified via crypto.timingSafeEqual to defeat timing leaks.
+   *
+   * Without these two values local pairing is rejected. The pre-shared PIN
+   * is broadcast out-of-band via Bonjour TXT records or shown in the desktop
+   * UI for manual entry — same channel as the QR pair flow.
+   */
   completeLocalPairing(
+    requestId: string,
+    pin: string,
     deviceName: string,
     deviceId: string,
   ): { success: boolean; sessionId?: string; error?: string } {
+    // Reject empty/non-string inputs early (fail-CLOSED, QB#6).
+    if (!requestId || typeof requestId !== "string") {
+      return { success: false, error: "Local pairing requires a valid requestId" };
+    }
+    if (!pin || typeof pin !== "string") {
+      return { success: false, error: "Local pairing requires a valid PIN" };
+    }
+    if (!deviceName || typeof deviceName !== "string") {
+      return { success: false, error: "Local pairing requires a deviceName" };
+    }
+    if (!deviceId || typeof deviceId !== "string") {
+      return { success: false, error: "Local pairing requires a deviceId" };
+    }
+
+    const request = this.pendingPairings.get(requestId);
+    if (!request) {
+      return { success: false, error: "Invalid or expired pairing request" };
+    }
+
+    if (new Date(request.expiresAt) < new Date()) {
+      this.pendingPairings.delete(requestId);
+      return { success: false, error: "Pairing request expired" };
+    }
+
+    // SECURITY (SB-2): constant-time PIN comparison.
+    const providedPinBuf = Buffer.from(pin, "utf8");
+    const expectedPinBuf = Buffer.from(request.pin, "utf8");
+    if (
+      providedPinBuf.length !== expectedPinBuf.length ||
+      !timingSafeEqual(providedPinBuf, expectedPinBuf)
+    ) {
+      return { success: false, error: "Invalid PIN" };
+    }
+
     try {
       const { sessionId } = this.upsertDeviceSession(deviceName, deviceId);
+      this.pendingPairings.delete(requestId);
       return { success: true, sessionId };
     } catch (error) {
       return {
@@ -636,6 +710,26 @@ export class CompanionServer {
   private readonly deviceEncryptionKeys: Map<string, Buffer> = new Map();
   /** Session auth tokens — issued on successful pairing, required on all other RPC calls. */
   private readonly authTokens: AuthTokenStore;
+  /**
+   * SECURITY (SB-1): Per-WS-client source IP, captured at HTTP upgrade.
+   * Used by the pair.local handler to apply per-source-IP rate limiting.
+   * WeakMap so entries are GC'd when the ws client is dropped.
+   */
+  private readonly clientAddresses: WeakMap<object, string> = new WeakMap();
+  /**
+   * SECURITY (SB-1): Per-source-IP pair.local attempt timestamps (ms epoch),
+   * pruned to the last 60s window on each lookup. Per-instance state (QB#7);
+   * a separate CompanionServer instance gets its own limiter, so test
+   * harnesses and parallel daemons do not share quota.
+   */
+  private readonly pairLocalAttempts: Map<string, number[]> = new Map();
+  /** Per-instance audit log for pair.local attempts (success + failure). */
+  private readonly pairLocalAuditLog: Array<{
+    readonly ts: number;
+    readonly sourceIp: string;
+    readonly deviceId: string;
+    readonly outcome: "ok" | "rate_limited" | "invalid_pin" | "expired" | "missing_args";
+  }> = [];
 
   constructor(config?: Partial<CompanionServerConfig>) {
     this.config = {
@@ -705,6 +799,18 @@ export class CompanionServer {
 
       wss.on("connection", (...args: unknown[]) => {
         const ws = args[0] as WebSocketLike;
+        // SECURITY (SB-1): capture the source IP from the HTTP upgrade
+        // request so pair.local can rate-limit per-source. The `ws` package
+        // emits `(ws, request)` on its connection event; req.socket.remoteAddress
+        // is the connecting peer's IP. Defaults to "unknown" when the upgrade
+        // request shape is unexpected — rate limiter coalesces all "unknown"
+        // sources into a single bucket, fail-CLOSED.
+        const upgradeReq = args[1] as { socket?: { remoteAddress?: string } } | undefined;
+        const sourceIp =
+          upgradeReq?.socket?.remoteAddress && typeof upgradeReq.socket.remoteAddress === "string"
+            ? upgradeReq.socket.remoteAddress
+            : "unknown";
+        this.clientAddresses.set(ws as unknown as object, sourceIp);
         this.connectedClients.add(ws);
 
         // Wave 4-AA: per-connection 'error' handler. WebSocket emits 'error'
@@ -770,7 +876,7 @@ export class CompanionServer {
     }
 
     // Kill any orphaned Bonjour advertisement from a previous crash
-    const bonjourPidPath = pathJoin(homedir(), ".wotann", "bonjour.pid");
+    const bonjourPidPath = resolveWotannHomeSubdir("bonjour.pid");
     try {
       const oldPid = parseInt(readFileSync(bonjourPidPath, "utf-8").trim(), 10);
       if (oldPid > 0) {
@@ -818,7 +924,7 @@ export class CompanionServer {
       (this as Record<string, unknown>)._bonjourProc = proc;
 
       // Write PID for orphan cleanup on restart
-      const pidPath = pathJoin(homedir(), ".wotann", "bonjour.pid");
+      const pidPath = resolveWotannHomeSubdir("bonjour.pid");
       if (proc.pid) {
         try {
           writeFileSync(pidPath, String(proc.pid));
@@ -994,6 +1100,137 @@ export class CompanionServer {
   }
 
   /**
+   * SECURITY (SB-1): per-source-IP rate limiter for `pair.local`.
+   * Allows up to PAIR_LOCAL_MAX_PER_WINDOW attempts per source IP per
+   * PAIR_LOCAL_WINDOW_MS. Returns true when the attempt is admitted (and
+   * records the timestamp); false when the source has exhausted its quota.
+   *
+   * Per-instance state (QB#7); two CompanionServer instances do not share
+   * quota. Pruning happens lazily on lookup so a long-idle source's history
+   * is reaped without a background timer.
+   */
+  private static readonly PAIR_LOCAL_MAX_PER_WINDOW = 5;
+  private static readonly PAIR_LOCAL_WINDOW_MS = 60_000;
+
+  private checkPairLocalRateLimit(sourceIp: string): boolean {
+    const now = Date.now();
+    const cutoff = now - CompanionServer.PAIR_LOCAL_WINDOW_MS;
+    const history = this.pairLocalAttempts.get(sourceIp) ?? [];
+    // Prune entries older than the window.
+    const fresh = history.filter((ts) => ts > cutoff);
+    if (fresh.length >= CompanionServer.PAIR_LOCAL_MAX_PER_WINDOW) {
+      // Update the pruned (but at-quota) history so future checks stay accurate.
+      this.pairLocalAttempts.set(sourceIp, fresh);
+      return false;
+    }
+    fresh.push(now);
+    this.pairLocalAttempts.set(sourceIp, fresh);
+    return true;
+  }
+
+  /**
+   * SECURITY (SB-1): record a pair.local attempt to the per-instance audit log.
+   * Bounded to the most recent 256 entries to defeat memory exhaustion.
+   */
+  private logPairLocalAttempt(
+    sourceIp: string,
+    deviceId: string,
+    outcome: "ok" | "rate_limited" | "invalid_pin" | "expired" | "missing_args",
+  ): void {
+    this.pairLocalAuditLog.push({ ts: Date.now(), sourceIp, deviceId, outcome });
+    if (this.pairLocalAuditLog.length > 256) {
+      this.pairLocalAuditLog.splice(0, this.pairLocalAuditLog.length - 256);
+    }
+    // Also surface to console for operators tailing logs. Failure cases warn;
+    // successes log at info-level.
+    const line = `[CompanionServer] pair.local ${outcome} src=${sourceIp} device=${deviceId}`;
+    if (outcome === "ok") {
+      console.log(line);
+    } else {
+      console.warn(line);
+    }
+  }
+
+  /**
+   * Read-only view of the pair.local audit log (for tests and observability).
+   */
+  getPairLocalAuditLog(): ReadonlyArray<{
+    readonly ts: number;
+    readonly sourceIp: string;
+    readonly deviceId: string;
+    readonly outcome: "ok" | "rate_limited" | "invalid_pin" | "expired" | "missing_args";
+  }> {
+    return this.pairLocalAuditLog;
+  }
+
+  /**
+   * SECURITY (SB-1): handle pair.local with PIN verification, per-IP rate
+   * limiting, and audit logging. The previous implementation was an
+   * unauthenticated LAN takeover vector — any process on the network could
+   * mint a 24-hour auth token by calling pair.local with arbitrary device
+   * params. The fixed flow requires a pre-shared PIN issued by
+   * generatePairingRequest() (same store as the QR code `pair` flow).
+   */
+  private async handlePairLocal(
+    ws: WebSocketLike,
+    parsed: CompanionMessage,
+  ): Promise<CompanionResponse> {
+    const sourceIp = this.clientAddresses.get(ws as unknown as object) ?? "unknown";
+    const params = parsed.params ?? {};
+    const requestId = typeof params["requestId"] === "string" ? params["requestId"] : "";
+    const pin = typeof params["pin"] === "string" ? params["pin"] : "";
+    const deviceName = typeof params["deviceName"] === "string" ? params["deviceName"] : "";
+    const deviceId = typeof params["deviceId"] === "string" ? params["deviceId"] : "";
+
+    // Per-IP rate limit FIRST so an attacker burning CPU on completePairing
+    // does not get to amortize their cost across the limiter check.
+    if (!this.checkPairLocalRateLimit(sourceIp)) {
+      this.logPairLocalAttempt(sourceIp, deviceId || "<missing>", "rate_limited");
+      return {
+        result: {
+          success: false,
+          error: "Rate limit exceeded for pair.local from this source",
+        },
+        error: { code: -32002, message: "rate_limited" },
+        id: parsed.id,
+      };
+    }
+
+    // Argument shape check.
+    if (!requestId || !pin || !deviceName || !deviceId) {
+      this.logPairLocalAttempt(sourceIp, deviceId || "<missing>", "missing_args");
+      return {
+        result: {
+          success: false,
+          error: "pair.local requires requestId, pin, deviceName, and deviceId",
+        },
+        error: { code: -32602, message: "invalid_params" },
+        id: parsed.id,
+      };
+    }
+
+    const result = this.pairingManager.completeLocalPairing(requestId, pin, deviceName, deviceId);
+
+    if (result.success && result.sessionId) {
+      const authToken = this.authTokens.issue(result.sessionId, deviceId);
+      this.logPairLocalAttempt(sourceIp, deviceId, "ok");
+      return { result: { ...result, authToken }, id: parsed.id };
+    }
+
+    // Map error string back to an outcome code for the audit log.
+    const outcome: "invalid_pin" | "expired" | "missing_args" = result.error
+      ?.toLowerCase()
+      .includes("expired")
+      ? "expired"
+      : result.error?.toLowerCase().includes("pin") ||
+          result.error?.toLowerCase().includes("invalid or expired pairing request")
+        ? "invalid_pin"
+        : "missing_args";
+    this.logPairLocalAttempt(sourceIp, deviceId, outcome);
+    return { result, id: parsed.id };
+  }
+
+  /**
    * Handle an incoming WebSocket message: parse JSON-RPC, dispatch through
    * RPC handler, and send the response back with haptic pattern metadata.
    */
@@ -1033,6 +1270,16 @@ export class CompanionServer {
 
     if (parsed.method === "chat.send") {
       await this.handleChatSend(ws, parsed);
+      return;
+    }
+
+    // SECURITY (SB-1): pair.local needs the source IP (for rate limiting and
+    // audit logging), which the rpcHandler signature does not expose. Handle
+    // it here so we can read clientAddresses; everything else flows through
+    // the generic dispatch below.
+    if (parsed.method === "pair.local") {
+      const response = await this.handlePairLocal(ws, parsed);
+      this.sendRPCResponse(ws, parsed.method, response);
       return;
     }
 
@@ -1401,7 +1648,7 @@ export class CompanionServer {
       // Gather relay config from disk
       let relayConfig: RelayConfig | null = null;
       try {
-        const relayPath = pathJoin(homedir(), ".wotann", "relay.json");
+        const relayPath = resolveWotannHomeSubdir("relay.json");
         if (existsSync(relayPath)) {
           relayConfig = JSON.parse(readFileSync(relayPath, "utf-8")) as RelayConfig;
         }
@@ -1415,7 +1662,7 @@ export class CompanionServer {
       // Gather user preferences from wotann.yaml if it exists
       let userPrefs: Record<string, unknown> = {};
       try {
-        const yamlPath = pathJoin(homedir(), ".wotann", "wotann.yaml");
+        const yamlPath = resolveWotannHomeSubdir("wotann.yaml");
         if (existsSync(yamlPath)) {
           const raw = readFileSync(yamlPath, "utf-8");
           // Extract key settings from YAML (simple key: value parsing)
@@ -1553,7 +1800,7 @@ export class CompanionServer {
 
       // Save photo to ~/.wotann/captures/ for context injection
       if (base64Data) {
-        const capturesDir = pathJoin(homedir(), ".wotann", "captures");
+        const capturesDir = resolveWotannHomeSubdir("captures");
         if (!existsSync(capturesDir)) mkdirSync(capturesDir, { recursive: true });
         const filename = `continuity-${Date.now()}.${format === "png" ? "png" : "jpg"}`;
         const filepath = pathJoin(capturesDir, filename);
@@ -2112,15 +2359,19 @@ export class CompanionServer {
       return result;
     });
 
-    this.rpcHandler.register("pair.local" as CompanionRPCMethod, async (params) => {
-      const deviceName = params["deviceName"] as string;
-      const deviceId = params["deviceId"] as string;
-      const result = this.pairingManager.completeLocalPairing(deviceName, deviceId);
-      if (result.success && result.sessionId) {
-        const authToken = this.authTokens.issue(result.sessionId, deviceId);
-        return { ...result, authToken };
-      }
-      return result;
+    // SECURITY (SB-1): pair.local is handled inline in handleWebSocketMessage
+    // (see handlePairLocal) because it needs the source IP for per-IP rate
+    // limiting and audit logging — the generic RPC handler signature does not
+    // expose the WebSocket. The dispatch in handleWebSocketMessage special-
+    // cases the method name BEFORE this generic dispatch fires. We still
+    // register a stub here to keep `rpcHandler.has("pair.local")` true so
+    // legacy callers that introspect available methods continue to see it,
+    // but this stub will never execute via the WebSocket transport.
+    this.rpcHandler.register("pair.local" as CompanionRPCMethod, async () => {
+      return {
+        success: false,
+        error: "pair.local must be invoked over the WebSocket transport (security)",
+      };
     });
 
     this.rpcHandler.register("unpair" as CompanionRPCMethod, async (params) => {

@@ -20,6 +20,7 @@ import {
   createDecipheriv,
   createECDH,
   hkdfSync,
+  timingSafeEqual,
 } from "node:crypto";
 
 // ── Types ──────────────────────────────────────────────
@@ -187,7 +188,19 @@ export class SecureAuthManager {
       };
     }
 
-    if (pending.pin !== request.pin) {
+    // SECURITY (SB-2): constant-time PIN comparison via crypto.timingSafeEqual.
+    // String `!==` short-circuits on the first byte mismatch and leaks PIN
+    // bytes via timing — an attacker can recover the PIN one digit at a time.
+    // timingSafeEqual requires equal-length buffers, so we length-check first.
+    if (!request.pin || typeof request.pin !== "string") {
+      return { success: false, sessionToken: null, sharedSecretHash: null, error: "Invalid PIN" };
+    }
+    const providedPinBuf = Buffer.from(request.pin, "utf8");
+    const expectedPinBuf = Buffer.from(pending.pin, "utf8");
+    if (
+      providedPinBuf.length !== expectedPinBuf.length ||
+      !timingSafeEqual(providedPinBuf, expectedPinBuf)
+    ) {
       return { success: false, sessionToken: null, sharedSecretHash: null, error: "Invalid PIN" };
     }
 

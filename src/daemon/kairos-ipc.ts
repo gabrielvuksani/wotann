@@ -11,7 +11,7 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { KairosRPCHandler, type RPCResponse, type RPCStreamEvent } from "./kairos-rpc.js";
 
 // ── Session Token (B1) ───────────────────────────────────
@@ -30,12 +30,22 @@ import { KairosRPCHandler, type RPCResponse, type RPCStreamEvent } from "./kairo
 /** Path to the shared daemon session-token file. */
 const SESSION_TOKEN_PATH = join(homedir(), ".wotann", "session-token.json");
 
-/** RPC methods that do NOT require a session token (bootstrapping / health). */
-const UNAUTH_IPC_METHODS: ReadonlySet<string> = new Set([
-  "ping",
-  "keepalive",
-  "auth.handshake", // iOS/desktop pull the token via this endpoint after ECDH-encrypted pairing
-]);
+/**
+ * RPC methods that do NOT require a session token (bootstrapping / health).
+ *
+ * SECURITY (SB-5): `auth.handshake` was previously listed here with the
+ * justification that "iOS/desktop pull the token via this endpoint after
+ * ECDH-encrypted pairing." That claim was unverified — iOS actually pairs
+ * over the CompanionServer WebSocket (see src/desktop/companion-server.ts,
+ * `pair`/`pair.local` handlers), not over the kairos IPC socket, so the
+ * exemption gave any local process with UDS connectivity a free path to
+ * the daemon session token. The 0600 permission on ~/.wotann/session-token.json
+ * already restricts disk access to the owning user; legitimate IPC clients
+ * read the token directly from that file (see KairosIPCClient.call which
+ * calls readSessionToken before sending). The exemption is therefore both
+ * unnecessary and dangerous, so it has been removed.
+ */
+const UNAUTH_IPC_METHODS: ReadonlySet<string> = new Set(["ping", "keepalive"]);
 
 interface SessionTokenFile {
   readonly token: string;
@@ -114,16 +124,22 @@ export function readSessionToken(path: string = SESSION_TOKEN_PATH): string | nu
 
 /**
  * Check whether the incoming RPC should be admitted. Authentication is
- * bypassed entirely when WOTANN_AUTH_BYPASS=1 (for trusted dev shells), when
- * the method is in UNAUTH_IPC_METHODS, or when the supplied token matches the
- * daemon's session-token file.
+ * granted when the method is in UNAUTH_IPC_METHODS or when the supplied
+ * token matches the daemon's session-token file on disk.
+ *
+ * V9 Wave 6-RR (SB-8): the previous `WOTANN_AUTH_BYPASS=1 + NODE_ENV=test`
+ * env-var bypass has been REMOVED. NODE_ENV is attacker-controllable in
+ * many launch scenarios (cron jobs, CI runners, supervised processes,
+ * shell-injected env), so the gate was effectively defeated by anyone
+ * who could set two env vars on the daemon process. Tests must instead
+ * go through the real session-token file path — `readSessionToken(...)`
+ * returns a fixture token they can include in their RPC requests, and
+ * tests can pass a `tokenPath` override pointing at a per-test fixture.
  */
 export function isIPCRequestAuthorized(
   raw: string,
   tokenPath: string = SESSION_TOKEN_PATH,
 ): boolean {
-  if (process.env["WOTANN_AUTH_BYPASS"] === "1" && process.env["NODE_ENV"] === "test") return true;
-
   let method = "";
   try {
     const parsed = JSON.parse(raw) as { method?: string };
@@ -135,7 +151,17 @@ export function isIPCRequestAuthorized(
 
   const expected = readSessionTokenFile(tokenPath);
   if (!expected) return false;
-  return extractIPCToken(raw) === expected;
+  // SECURITY (SB-2): constant-time token comparison via crypto.timingSafeEqual.
+  // A `===` string comparison on session tokens leaks token bytes via timing
+  // — Node's string equality short-circuits on the first byte mismatch. An
+  // attacker probing the IPC socket could recover the token byte-by-byte.
+  // timingSafeEqual requires equal-length buffers, so we length-check first
+  // and treat any mismatched length as unauthorized.
+  const provided = extractIPCToken(raw);
+  const providedBuf = Buffer.from(provided, "utf8");
+  const expectedBuf = Buffer.from(expected, "utf8");
+  if (providedBuf.length !== expectedBuf.length) return false;
+  return timingSafeEqual(providedBuf, expectedBuf);
 }
 
 // ── Types ────────────────────────────────────────────────
@@ -470,10 +496,11 @@ export class KairosIPCClient {
 
     const id = ++this.requestCounter;
 
-    // SECURITY (B1): attach the daemon session token to every outgoing RPC
-    // unless the caller supplied their own or the request is for an exempt
-    // method (ping/keepalive/auth.handshake). The token is read from the
-    // canonical ~/.wotann/session-token.json file, which is 0600 so only
+    // SECURITY (B1, SB-5): attach the daemon session token to every outgoing
+    // RPC unless the caller supplied their own or the request is for an exempt
+    // bootstrapping/health method (ping/keepalive). auth.handshake is NO
+    // longer exempt — see UNAUTH_IPC_METHODS comment. The token is read from
+    // the canonical ~/.wotann/session-token.json file, which is 0600 so only
     // the owning user can read it.
     const mergedParams: Record<string, unknown> = { ...(params ?? {}) };
     if (!UNAUTH_IPC_METHODS.has(method) && mergedParams["authToken"] === undefined) {

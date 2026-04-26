@@ -1821,12 +1821,22 @@ export class KairosRPCHandler {
       return this.runtime.getStatus();
     });
 
-    // SECURITY (B1): auth.handshake — surface the current session token to
-    // callers that already completed an out-of-band trust dance (ECDH
-    // pairing for iOS, Unix-socket filesystem ACL for CLI). This method is
-    // exempt from the session-token gate in kairos-ipc.ts so clients can
-    // bootstrap. iOS calls this immediately after pairing with the ECDH key
-    // established so the token never traverses the wire in plaintext.
+    // SECURITY (B1, SB-5): auth.handshake — surface the current session
+    // token to callers that have already proven they own the daemon. The
+    // method was previously listed in UNAUTH_IPC_METHODS with a comment
+    // claiming "ECDH-encrypted pairing" protected it; that was a LIE — the
+    // daemon performed no ECDH verification, so any local process could
+    // call this method and get a 24-hour daemon token cleartext. The fix
+    // (SB-5) removes auth.handshake from UNAUTH_IPC_METHODS in kairos-ipc.ts,
+    // so the surrounding IPC dispatcher will reject the call unless the
+    // caller already presents a valid session token. With auth gating
+    // restored, this handler is effectively a no-op (the caller already has
+    // what it returns) but is kept for backwards compatibility with
+    // legitimate clients that probe for the endpoint.
+    //
+    // iOS DOES NOT use this method. iOS pairs over the WebSocket
+    // CompanionServer (`pair`/`pair.local`) and gets its auth token in
+    // the pair response — it never connects to the kairos UDS.
     this.handlers.set("auth.handshake", async () => {
       const { readSessionToken } = await import("./kairos-ipc.js");
       const token = readSessionToken();
