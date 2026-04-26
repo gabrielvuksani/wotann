@@ -171,7 +171,30 @@ program
     ]);
     const { bootstrapInteractiveSession } = await import("./ui/bootstrap.js");
     const React = ReactModule.default;
-    const interactive = await bootstrapInteractiveSession(process.cwd(), options);
+    let interactive = await bootstrapInteractiveSession(process.cwd(), options);
+
+    // Auto-launch onboarding wizard on first-run when no providers are
+    // detected. The TUI also shows an inline banner (App.tsx
+    // needsOnboarding) but the explicit wizard hand-holds the user
+    // through provider auth + a smoke-test message. Skip when an
+    // explicit --provider/--model was supplied (user knows what they
+    // want), or when WOTANN_SKIP_WIZARD=1 (CI / power users).
+    const detected = interactive.providers.filter((p) => p.available).length;
+    const skipWizard =
+      process.env["WOTANN_SKIP_WIZARD"] === "1" ||
+      Boolean(options.provider) ||
+      Boolean(options.model);
+    if (detected === 0 && !skipWizard) {
+      try {
+        const { runOnboardingWizard } = await import("./cli/run-onboarding-wizard.js");
+        await runOnboardingWizard();
+        // After the wizard completes, re-bootstrap so the TUI sees the
+        // newly-configured providers.
+        interactive = await bootstrapInteractiveSession(process.cwd(), options);
+      } catch {
+        // Wizard import or run failed — fall through to TUI banner.
+      }
+    }
 
     render(
       React.createElement(WotannApp, {
