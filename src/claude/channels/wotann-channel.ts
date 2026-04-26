@@ -144,17 +144,36 @@ export async function runChannelPlugin(opts: ChannelPluginOptions): Promise<void
 
     try {
       switch (req.method) {
-        case "initialize":
+        case "initialize": {
+          // V9 Wave 5-DD (H-39a) — protocol version negotiation.
+          // Channel plugin speaks the same MCP wire protocol as the
+          // main MCP server. Echo the client's requested version when
+          // we support it; otherwise fall back to the current spec
+          // version + log a warn so operators see the downgrade.
+          const channelSupported = ["2024-11-05", "2025-06-18", "2025-11-25"] as const;
+          const requestedVersion = req.params?.["protocolVersion"];
+          const requested = typeof requestedVersion === "string" ? requestedVersion : null;
+          const negotiated =
+            requested !== null && (channelSupported as readonly string[]).includes(requested)
+              ? requested
+              : "2025-11-25";
+          if (requested !== null && negotiated !== requested) {
+            log(
+              "warn",
+              `channel-plugin: client requested unsupported protocolVersion="${requested}", falling back to "${negotiated}"`,
+            );
+          }
           reply({
             jsonrpc: "2.0",
             id: req.id,
             result: {
-              protocolVersion: "2024-11-05",
+              protocolVersion: negotiated,
               capabilities: { channel: { subscriptions: true, outbound: true } },
               serverInfo: { name: "wotann-channel", version: "0.1.0" },
             },
           });
           break;
+        }
 
         case "channels/list": {
           const channels = await listAcrossAdapters(opts.deps.adapters);

@@ -11,7 +11,12 @@
  * use Cursor; the next day you use WOTANN standalone. Same skills,
  * same memory, same tools.
  *
- * Protocol: MCP 2024-11-05 JSON-RPC over stdio. Implements:
+ * Protocol: MCP 2025-11-25 JSON-RPC over stdio (current spec). Backward-
+ * compatible with 2024-11-05 and 2025-06-18 via version negotiation in
+ * the `initialize` handler — the client's `params.protocolVersion` is
+ * echoed back when supported, otherwise the server falls back to its
+ * latest supported version + logs a warning (QB#6 honest fallback).
+ * Implements:
  *   - initialize
  *   - tools/list
  *   - tools/call
@@ -50,7 +55,27 @@ import {
 
 // ── Types ──────────────────────────────────────────────
 
-export const MCP_PROTOCOL_VERSION = "2024-11-05";
+/**
+ * Default MCP protocol version this server speaks (V9 Wave 5-DD H-39a).
+ * Bumped to current spec "2025-11-25". Older clients still get their
+ * own version echoed back when they advertise one we support — see
+ * `SUPPORTED_PROTOCOL_VERSIONS` and the negotiation logic in the
+ * `initialize` dispatch handler.
+ */
+export const MCP_PROTOCOL_VERSION = "2025-11-25";
+
+/**
+ * Versions this server can speak. Order is purely informational — the
+ * negotiation uses set membership, not preference. When a client
+ * requests a listed version we echo it back; when it requests anything
+ * else we fall back to `MCP_PROTOCOL_VERSION` + log a warn so the
+ * client sees a downgrade rather than a silent mismatch (QB#6).
+ */
+export const SUPPORTED_PROTOCOL_VERSIONS: readonly string[] = [
+  "2024-11-05",
+  "2025-06-18",
+  "2025-11-25",
+];
 
 export interface McpServerInfo {
   readonly name: string;
@@ -78,12 +103,52 @@ export interface ToolHostAdapter {
   readonly callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
 }
 
+/**
+ * V9 Wave 5-II — `mcp_tool` hook event callback.
+ *
+ * Fired immediately before each `tools/call` dispatch so consumers can
+ * attach observability, audit logging, auto-approval, or policy
+ * decisions to MCP-sourced tool calls without having to wrap every
+ * adapter. Mirrors Claude Code v2.1.118 / V14.43 hook taxonomy where
+ * `mcp_tool` distinguishes MCP-driven invocations from native tool
+ * calls in PreToolUse/PostToolUse handlers.
+ *
+ * Contract (QB #6, #7):
+ *   - The callback is fire-and-forget. Its return value is ignored and
+ *     the MCP `tools/call` always proceeds — this is a notification
+ *     surface, not a gate. Hosts that want gating should additionally
+ *     wire PreToolUse on the runtime side.
+ *   - Errors thrown by the callback are caught + logged to stderr and
+ *     never block the underlying tool call (QB #6 — hook failure does
+ *     not break the tool path).
+ *   - Stateless per-call: nothing is retained between invocations on the
+ *     server side beyond what the callback itself chooses to persist.
+ *
+ * The shape mirrors the runtime's `HookEngine.fire()` payload contract so
+ * a composition root can adapt with a single arrow function. The MCP
+ * module stays decoupled from `src/hooks/engine.ts` (no import) — same
+ * separation pattern as the elicitation registry.
+ */
+export type McpToolHookCallback = (event: {
+  readonly event: "mcp_tool";
+  readonly toolName: string;
+  readonly toolInput: Record<string, unknown>;
+  readonly tier: McpTier | null;
+  readonly timestamp: number;
+}) => void | Promise<void>;
+
 export interface McpServerOptions {
   readonly info: McpServerInfo;
   readonly adapter: ToolHostAdapter;
   readonly stdin?: Readable;
   readonly stdout?: Writable;
   readonly stderr?: Writable;
+  /**
+   * Optional `mcp_tool` hook callback (V9 Wave 5-II). When supplied, the
+   * server fires this before each `tools/call` dispatch. See
+   * `McpToolHookCallback` for the full contract.
+   */
+  readonly onMcpToolCall?: McpToolHookCallback;
   /**
    * Optional MCP tier scope (Lane 2 #10 — task-master parity). When
    * set, the server filters the adapter's `listTools()` output to the
@@ -151,6 +216,12 @@ export class WotannMcpServer {
    * server instance — QB #7 per-call state.
    */
   private readonly elicitationRegistry: ElicitationRegistry;
+  /**
+   * V9 Wave 5-II — Optional `mcp_tool` hook callback. Captured at
+   * construction so the dispatch path can read it without a property
+   * lookup against `options` after the fact. `null` when not wired.
+   */
+  private readonly onMcpToolCall: McpToolHookCallback | null;
 
   constructor(options: McpServerOptions) {
     this.info = options.info;
@@ -158,6 +229,7 @@ export class WotannMcpServer {
     this.stdin = options.stdin ?? process.stdin;
     this.stdout = options.stdout ?? process.stdout;
     this.stderr = options.stderr ?? process.stderr;
+    this.onMcpToolCall = options.onMcpToolCall ?? null;
 
     // Tier resolution — explicit option wins, then WOTANN_MCP_TIER env,
     // then null (legacy: expose full adapter catalogue). We only build
@@ -301,18 +373,47 @@ export class WotannMcpServer {
     switch (method) {
       case "initialize": {
         this.initialized = true;
+        // V9 Wave 5-DD (H-39a) — version negotiation.
+        // Spec: server SHOULD echo the client's protocolVersion when
+        // it can speak that version; otherwise advertise its latest
+        // supported version so the client can decide whether to retry
+        // or abort. Previously this handler ignored params.protocolVersion
+        // entirely and forced everyone onto the stale 2024-11-05.
+        const initParams = (params ?? {}) as { protocolVersion?: unknown };
+        const requested =
+          typeof initParams.protocolVersion === "string" ? initParams.protocolVersion : null;
+        const negotiated =
+          requested !== null && SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+            ? requested
+            : MCP_PROTOCOL_VERSION;
+        if (requested !== null && negotiated !== requested) {
+          // QB#6 honest fallback: the client asked for something we
+          // can't honor. Log to stderr (out-of-band w/ the JSON-RPC
+          // stream) so the operator sees the downgrade.
+          this.log(
+            "version negotiation",
+            `client requested unsupported protocolVersion="${requested}", falling back to "${negotiated}"`,
+          );
+        }
+        // Elicitation capability is advertised only when a handler is
+        // actually registered. Listing it unconditionally would dead-letter
+        // clients into the "no-handler" cancel envelope (QB#6).
+        const capabilities: Record<string, unknown> = {
+          tools: {},
+          resources: {},
+        };
+        if (this.elicitationRegistry.count() > 0) {
+          capabilities["elicitation"] = {};
+        }
         return {
-          protocolVersion: MCP_PROTOCOL_VERSION,
+          protocolVersion: negotiated,
           // V9 Wave 3-N audit fix (QB#6 honest behavior): only advertise
           // capabilities we actually honor. `prompts` was previously
           // advertised but the handler always returned `[]`, dead-lettering
           // any client that called `prompts/list`. Until WOTANN skills are
           // mapped to MCP prompt schemas (with arguments + templates), the
           // capability is omitted so spec-compliant clients won't ask.
-          capabilities: {
-            tools: {},
-            resources: {},
-          },
+          capabilities,
           serverInfo: this.info,
         };
       }

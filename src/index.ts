@@ -2926,8 +2926,78 @@ mcpCmd
       info: { name: "wotann", version: "0.6.0" },
       adapter,
     });
+
+    // V9 Wave 5-DD (H-39c) — wire a real elicitation handler so the
+    // server advertises the `elicitation` capability and returns
+    // structured user input instead of the honest "no-handler"
+    // cancel envelope. The MCP server holds stdin for the JSON-RPC
+    // wire, so we open the controlling TTY (`/dev/tty`) directly.
+    // When there's no TTY (CI, daemon, host without forwarding) we
+    // honestly decline with a stable reason — no silent acceptance.
+    const elicitationRegistry = server.getElicitationRegistry();
+    elicitationRegistry.register(async (request) => {
+      // Open /dev/tty for synchronous prompt — never touches stdin
+      // (which is owned by the MCP JSON-RPC reader).
+      const fs = await import("node:fs");
+      const readline = await import("node:readline");
+      let ttyIn: NodeJS.ReadableStream | null = null;
+      let ttyOut: NodeJS.WritableStream | null = null;
+      try {
+        const fdIn = fs.openSync("/dev/tty", "r");
+        const fdOut = fs.openSync("/dev/tty", "w");
+        ttyIn = fs.createReadStream("", { fd: fdIn });
+        ttyOut = fs.createWriteStream("", { fd: fdOut });
+      } catch (err) {
+        // No controlling TTY — honest decline with a stable reason.
+        process.stderr.write(
+          `[mcp] elicitation/create: no TTY available (${err instanceof Error ? err.message : String(err)}), declining\n`,
+        );
+        return { action: "decline" };
+      }
+
+      const rl = readline.createInterface({ input: ttyIn, output: ttyOut });
+      try {
+        ttyOut.write(`\n${request.params.message}\n`);
+        const required = request.params.requestedSchema.required ?? [];
+        const properties = (request.params.requestedSchema.properties ?? {}) as Record<
+          string,
+          unknown
+        >;
+        const collected: Record<string, unknown> = {};
+        // Iterate in spec'd order: required first, then any other declared properties.
+        const propertyKeys = Array.from(new Set([...required, ...Object.keys(properties)]));
+        for (const key of propertyKeys) {
+          const propSchema = (properties[key] ?? {}) as { type?: string };
+          const expectedType = propSchema.type ?? "string";
+          const answer: string = await new Promise((resolveAnswer) => {
+            rl.question(`${key} (${expectedType}): `, (input) => resolveAnswer(input));
+          });
+          if (answer.length === 0 && required.includes(key)) {
+            // User skipped a required field — cancel (don't fabricate).
+            return { action: "cancel" };
+          }
+          if (answer.length === 0) continue;
+          // Coerce primitives per requestedSchema.type. Honest fallback: pass
+          // raw string when the coercion fails so the server can validate.
+          if (expectedType === "number" || expectedType === "integer") {
+            const num = Number(answer);
+            collected[key] = Number.isFinite(num) ? num : answer;
+          } else if (expectedType === "boolean") {
+            collected[key] = answer === "true" || answer === "yes" || answer === "y";
+          } else {
+            collected[key] = answer;
+          }
+        }
+        return { action: "accept", content: collected };
+      } finally {
+        rl.close();
+      }
+    });
+
     process.stderr.write(
-      chalk.green("✓ wotann MCP server listening on stdio (memory + shadow-git wired)\n"),
+      chalk.green(
+        "✓ wotann MCP server listening on stdio (memory + shadow-git + elicitation wired)\n",
+      ),
     );
     await server.run();
   });
