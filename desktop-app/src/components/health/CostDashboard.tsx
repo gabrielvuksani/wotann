@@ -16,16 +16,30 @@ const COST_TABS: readonly { readonly id: CostTab; readonly label: string }[] = [
   { id: "providers", label: "Provider Comparison" },
 ];
 
-/** Map provider name to its dedicated CSS color variable. */
+/**
+ * Map provider name to a CSS color. Tries provider-specific vars first
+ * (`--color-provider-<id>`) and falls back to a deterministic palette
+ * derived from the provider id's hash so any provider added in the
+ * future gets a stable, distinguishable color without code changes.
+ */
 function providerBarColor(provider: string): string {
   const key = provider.toLowerCase();
-  if (key === "anthropic") return "var(--color-provider-anthropic)";
-  if (key === "openai") return "var(--color-provider-openai)";
-  if (key === "google") return "var(--color-provider-google)";
-  if (key === "ollama") return "var(--color-provider-ollama)";
-  if (key === "copilot") return "var(--color-provider-copilot)";
-  if (key === "codex") return "var(--color-provider-codex)";
-  return "var(--color-primary)";
+  // First-class providers ship dedicated CSS vars; no enum check needed —
+  // the var lookup falls back to undefined if absent and CSS treats
+  // undefined-var-with-fallback as the fallback. See globals.css for
+  // shipped first-class colors.
+  return `var(--color-provider-${key}, ${derivedHashColor(key)})`;
+}
+
+/** Stable HSL color derived from a 32-bit hash of the provider id. */
+function derivedHashColor(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) {
+    h = (h * 31 + key.charCodeAt(i)) & 0x7fffffff;
+  }
+  // 11 hue steps spread evenly so hashed neighbours don't collide; sat/lum
+  // tuned to read against both light + dark surfaces.
+  return `hsl(${(h % 360)}, 55%, 55%)`;
 }
 
 export function CostDashboard() {

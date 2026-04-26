@@ -12,6 +12,11 @@ pub struct AppState {
     pub sidecar: SidecarManager,
     /// Whether the WOTANN Engine sidecar is running
     pub engine_running: Mutex<bool>,
+    /// Last daemon-spawn error message (None when healthy). Populated by
+    /// the watchdog whenever a spawn / connect attempt fails so the UI
+    /// can render a precise reason in its offline banner instead of a
+    /// generic "engine unreachable".
+    pub last_daemon_error: Mutex<Option<String>>,
     /// Current provider name
     pub provider: Mutex<String>,
     /// Current model identifier
@@ -33,6 +38,7 @@ impl Default for AppState {
         Self {
             sidecar: SidecarManager::new(),
             engine_running: Mutex::new(false),
+            last_daemon_error: Mutex::new(None),
             // Provider neutrality fix: empty string is the "not configured"
             // sentinel. Daemon handshake populates these via FFI on first
             // sidecar event so we don't bias Ollama-only / OpenAI-only users.

@@ -214,6 +214,8 @@ struct VoiceInputView: View {
                 }
             }
             .scaleEffect(isRecording ? pulseScale : 1.0)
+            .accessibilityLabel(isRecording ? "Stop recording" : "Start voice recording")
+            .accessibilityHint(isRecording ? "Stops the current voice transcription" : "Begins voice transcription using the microphone")
         }
         .animation(WTheme.Animation.smooth, value: isRecording)
     }

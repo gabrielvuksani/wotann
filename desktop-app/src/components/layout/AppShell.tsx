@@ -38,11 +38,13 @@ interface AgentEditDetail {
   readonly kind: SigilKind; // "modified" | "created" | "deleted"
 }
 
-/** Free-tier provider names. Matches the canonical FREE_PROVIDERS list in
- *  src/providers/fallback-chain.ts so the CostGlint sheen only fires for
- *  paid (BYOK) keys. Anything else (anthropic, openai, openrouter, etc.)
- *  is treated as paid. */
-const FREE_PROVIDERS = new Set<string>([
+/** Last-resort free provider names — used only when the live provider
+ *  catalogue from the daemon doesn't include the active provider. The
+ *  primary check looks at the provider's models[] cost so any provider
+ *  the daemon advertises with $0 models gets the free treatment without
+ *  needing this list to be edited.
+ */
+const FALLBACK_FREE_PROVIDER_IDS = new Set<string>([
   "gemini",
   "ollama",
   "free",
@@ -122,6 +124,10 @@ const CreationsBrowser = lazy(() => import("../creations/CreationsBrowser").then
 // shipped but was not routed in the WorkspaceContent switch, so users
 // could not reach it. Lazy-loaded to keep the entry chunk small.
 const StudioTab = lazy(() => import("../studio/StudioTab").then((m) => ({ default: m.StudioTab })));
+// Wave-new — Automations panel (CRUD over `automations.*` RPCs).
+const AutomationsPanel = lazy(() => import("../automations/AutomationsPanel").then((m) => ({ default: m.AutomationsPanel })));
+// Wave-new — Audit Log view (queries `audit.query` with type + date filters).
+const AuditLogView = lazy(() => import("../security/AuditLogView").then((m) => ({ default: m.AuditLogView })));
 
 // ── Resizable Panel Hook ───────────────────────────────────────────
 
@@ -297,6 +303,14 @@ function WorkspaceContent({
       // engine, reflector replay) is owned by the daemon; this route
       // mounts the UI so users can reach the surface.
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><StudioTab /></Suspense></ErrorBoundary>;
+    case "automations":
+      // CRUD UI over the daemon's automations.* RPCs. Reachable via the
+      // command palette under "Tools & Workflows".
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><AutomationsPanel /></Suspense></ErrorBoundary>;
+    case "audit":
+      // Read-only audit log view. Queries audit.query with type + date
+      // filters. Reachable via the command palette under "Security & Privacy".
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><AuditLogView /></Suspense></ErrorBoundary>;
     default:
       return <ErrorBoundary><ChatView /></ErrorBoundary>;
   }
@@ -326,6 +340,7 @@ export function AppShell({ twinRavenSplit = false }: AppShellProps = {}) {
   const layoutMode = useStore((s) => s.layoutMode);
   const setLayoutMode = useStore((s) => s.setLayoutMode);
   const engineConnected = useStore((s) => s.engineConnected);
+  const daemonError = useStore((s) => s.daemonError);
   const onboardingComplete = useStore((s) => s.onboardingComplete);
   const terminalPanelOpen = useStore((s) => s.terminalPanelOpen);
   const diffPanelOpen = useStore((s) => s.diffPanelOpen);
@@ -374,8 +389,18 @@ export function AppShell({ twinRavenSplit = false }: AppShellProps = {}) {
   // running locally never feels visually taxed.
   const provider = useStore((s) => s.provider);
   const cost = useStore((s) => s.cost);
-  const isPaidProvider =
-    provider !== "" && !FREE_PROVIDERS.has(provider.toLowerCase());
+  const providers = useStore((s) => s.providers);
+  // Derive paid-vs-free from the live provider catalogue first; use the
+  // fallback id list only when the active provider isn't in the live set.
+  const isPaidProvider = (() => {
+    if (provider === "") return false;
+    const id = provider.toLowerCase();
+    const match = providers.find((p) => p.id.toLowerCase() === id);
+    if (match && match.models.length > 0) {
+      return match.models.some((m) => (m.costPerMTok ?? 0) > 0);
+    }
+    return !FALLBACK_FREE_PROVIDER_IDS.has(id);
+  })();
 
   const terminalResize = useResizable(220, 120, 500, "wotann-terminal-height", "vertical");
   const diffResize = useResizable(380, 280, 600, "wotann-diff-width", "horizontal");
@@ -467,6 +492,7 @@ export function AppShell({ twinRavenSplit = false }: AppShellProps = {}) {
               — otherwise a user who dismissed once stays dismissed forever. */}
           <DisconnectedBanner
             engineConnected={engineConnected}
+            reason={daemonError ?? null}
             onRetry={async () => {
               // Previous wiring just re-ran initializeFromEngine() which
               // queries the daemon but never respawns it. When the daemon

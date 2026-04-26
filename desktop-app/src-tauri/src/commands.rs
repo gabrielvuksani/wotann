@@ -1070,116 +1070,40 @@ fn hardcoded_providers() -> Vec<ProviderInfo> {
         }
     }
 
-    // 2. Anthropic — gated on ANTHROPIC_API_KEY
-    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+    // 2..N: Detected-but-engine-offline providers. We surface the provider
+    // ID so the UI confirms "yes your key was detected", but we DO NOT
+    // enumerate models — those come from each adapter's `listModels()`
+    // dynamic call when the daemon is up. Returning a stale model list
+    // here would lie to the user about what they can actually call.
+    //
+    // Tuples: (env_var, provider_id, display_name).
+    let detected: &[(&str, &str, &str)] = &[
+        ("ANTHROPIC_API_KEY", "anthropic", "Anthropic"),
+        ("OPENAI_API_KEY", "openai", "OpenAI"),
+        ("GEMINI_API_KEY", "gemini", "Google Gemini"),
+        ("GOOGLE_API_KEY", "gemini", "Google Gemini"),
+        ("GROQ_API_KEY", "groq", "Groq"),
+        ("CEREBRAS_API_KEY", "cerebras", "Cerebras"),
+        ("DEEPSEEK_API_KEY", "deepseek", "DeepSeek"),
+        ("XAI_API_KEY", "xai", "xAI"),
+        ("OPENROUTER_API_KEY", "openrouter", "OpenRouter"),
+        ("MISTRAL_API_KEY", "mistral", "Mistral"),
+        ("COHERE_API_KEY", "cohere", "Cohere"),
+    ];
+    let mut seen_ids = std::collections::HashSet::<&str>::new();
+    for (env_var, id, name) in detected {
+        if std::env::var(env_var).is_err() {
+            continue;
+        }
+        if !seen_ids.insert(id) {
+            continue; // de-dup (GEMINI_API_KEY + GOOGLE_API_KEY → same id)
+        }
         providers.push(ProviderInfo {
-            id: "anthropic".into(),
-            name: "Anthropic".into(),
+            id: (*id).into(),
+            name: format!("{} (engine offline)", name),
             enabled: true,
-            models: vec![
-                ModelInfo {
-                    id: "claude-opus-4-7".into(),
-                    name: "Claude Opus 4.7".into(),
-                    context_window: 1_000_000,
-                    cost_per_m_tok: 15.0,
-                },
-                ModelInfo {
-                    // claude-sonnet-4-6 retires June 15, 2026 — use 4.7
-                    // so the catalog doesn't ship a model the user can't
-                    // call after that date.
-                    id: "claude-sonnet-4-7".into(),
-                    name: "Claude Sonnet 4.7".into(),
-                    context_window: 1_000_000,
-                    cost_per_m_tok: 3.0,
-                },
-                ModelInfo {
-                    id: "claude-haiku-4-5-20251001".into(),
-                    name: "Claude Haiku 4.5".into(),
-                    context_window: 200_000,
-                    cost_per_m_tok: 0.25,
-                },
-            ],
-            default_model: "claude-opus-4-7".into(),
-        });
-    }
-
-    // 3. OpenAI — gated on OPENAI_API_KEY
-    if std::env::var("OPENAI_API_KEY").is_ok() {
-        providers.push(ProviderInfo {
-            id: "openai".into(),
-            name: "OpenAI".into(),
-            enabled: true,
-            models: vec![
-                ModelInfo {
-                    id: "gpt-5".into(),
-                    name: "GPT-5".into(),
-                    context_window: 256_000,
-                    cost_per_m_tok: 10.0,
-                },
-                ModelInfo {
-                    id: "gpt-5-mini".into(),
-                    name: "GPT-5 mini".into(),
-                    context_window: 128_000,
-                    cost_per_m_tok: 0.5,
-                },
-            ],
-            default_model: "gpt-5".into(),
-        });
-    }
-
-    // 4. Google Gemini — gated on GEMINI_API_KEY or GOOGLE_API_KEY
-    if std::env::var("GEMINI_API_KEY").is_ok() || std::env::var("GOOGLE_API_KEY").is_ok() {
-        providers.push(ProviderInfo {
-            id: "gemini".into(),
-            name: "Google Gemini".into(),
-            enabled: true,
-            models: vec![
-                ModelInfo {
-                    id: "gemini-3-pro".into(),
-                    name: "Gemini 3 Pro".into(),
-                    context_window: 2_000_000,
-                    cost_per_m_tok: 3.5,
-                },
-                ModelInfo {
-                    id: "gemini-3-flash".into(),
-                    name: "Gemini 3 Flash".into(),
-                    context_window: 1_000_000,
-                    cost_per_m_tok: 0.15,
-                },
-            ],
-            default_model: "gemini-3-pro".into(),
-        });
-    }
-
-    // 5. Groq — gated on GROQ_API_KEY
-    if std::env::var("GROQ_API_KEY").is_ok() {
-        providers.push(ProviderInfo {
-            id: "groq".into(),
-            name: "Groq (free tier)".into(),
-            enabled: true,
-            models: vec![ModelInfo {
-                id: "llama-3.3-70b-versatile".into(),
-                name: "Llama 3.3 70B".into(),
-                context_window: 128_000,
-                cost_per_m_tok: 0.0,
-            }],
-            default_model: "llama-3.3-70b-versatile".into(),
-        });
-    }
-
-    // 6. Cerebras — gated on CEREBRAS_API_KEY
-    if std::env::var("CEREBRAS_API_KEY").is_ok() {
-        providers.push(ProviderInfo {
-            id: "cerebras".into(),
-            name: "Cerebras".into(),
-            enabled: true,
-            models: vec![ModelInfo {
-                id: "llama3.1-70b".into(),
-                name: "Llama 3.1 70B".into(),
-                context_window: 128_000,
-                cost_per_m_tok: 0.0,
-            }],
-            default_model: "llama3.1-70b".into(),
+            models: Vec::new(),
+            default_model: String::new(),
         });
     }
 
@@ -2770,6 +2694,18 @@ pub fn is_daemon_connected() -> bool {
     } else {
         false
     }
+}
+
+/// Read the most recent daemon-spawn error message (None when healthy).
+/// React polls this alongside `is_daemon_connected` to render a precise
+/// reason in the offline banner instead of a generic "engine unreachable".
+#[tauri::command]
+pub fn last_daemon_error(state: State<AppState>) -> Option<String> {
+    state
+        .last_daemon_error
+        .lock()
+        .ok()
+        .and_then(|s| s.clone())
 }
 
 // ── Window Management ──────────────────────────────────

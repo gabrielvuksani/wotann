@@ -109,8 +109,11 @@ export class AgentBridge {
     this.router = config.router;
     this.rateLimiter = config.rateLimiter;
     this.accountPool = config.accountPool ?? null;
-    this.defaultModel = config.defaultModel ?? "gemma4:e4b";
-    this.defaultProvider = config.defaultProvider ?? ("ollama" as ProviderName);
+    // Empty-string sentinels: when caller omits these, the router/discovery
+    // path picks based on the actually-installed providers rather than
+    // forcing an Ollama+gemma fallback the user may not have installed.
+    this.defaultModel = config.defaultModel ?? "";
+    this.defaultProvider = config.defaultProvider ?? ("" as ProviderName);
     this.onPreflightEstimate = config.onPreflightEstimate;
     if (process.env["WOTANN_SEMANTIC_CACHE"] === "1") {
       this.semanticCache = new SemanticCache<QueryResult>({

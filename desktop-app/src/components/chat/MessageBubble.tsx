@@ -37,6 +37,26 @@ function formatTime(ts: number): string {
   return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * Last-resort classification when the daemon didn't report
+ * `localOrFree` on a chunk. Reads the live providers store
+ * (mirrors `providers.list` RPC) so any provider whose models
+ * are all zero-cost gets the badge — no hardcoded enum here.
+ * Returns false when uncertain (e.g., provider is no longer in
+ * the live list).
+ */
+function isLocalOrFreeProvider(providerId: string): boolean {
+  const id = providerId.toLowerCase();
+  const providers = useStore.getState().providers;
+  const match = providers.find((p) => p.id.toLowerCase() === id);
+  if (match && match.models.length > 0) {
+    return match.models.every((m) => (m.costPerMTok ?? 0) <= 0);
+  }
+  // Provider not in the live list — historic last-resort only fires when
+  // the conversation outlives the provider's removal.
+  return id === "ollama" || id === "free";
+}
+
 // ── Shell / bash tool detection ────────────────────────────
 // A small subset of tools emit shell-style command output that benefits from
 // the Warp-style Block treatment. Anything else falls back to ToolCallCard.
@@ -329,7 +349,12 @@ export function MessageBubble({ message, conversationId, onRetry, onCopy }: Mess
     return {
       provider,
       model,
-      localOrFree: metadata.localOrFree ?? (provider === "ollama" || provider === "free"),
+      // Provider-id classification only fires as a last resort when the
+      // backend didn't send `localOrFree`. Pulled from the providers
+      // store (which mirrors `providers.list` RPC) so any provider
+      // tagged free/local at the daemon level shows the badge — no
+      // hardcoded enum here.
+      localOrFree: metadata.localOrFree ?? isLocalOrFreeProvider(provider),
       contextWindow: metadata.contextWindow,
       augmentations: metadata.augmentations,
       native: metadata.native,

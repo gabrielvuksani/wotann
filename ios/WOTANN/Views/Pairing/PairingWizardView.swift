@@ -32,7 +32,7 @@ struct PairingWizardView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                WTheme.Colors.background.ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: WTheme.Spacing.lg) {

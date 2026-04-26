@@ -432,7 +432,9 @@ export interface RuntimeConfig {
   readonly initialMode?: WotannMode;
   readonly thinkingEffort?: ThinkingEffort;
   readonly maxContextTokens?: number;
-  readonly enableAntiDistillation?: boolean;
+  // PHASE E: enableAntiDistillation removed. Open-source contradiction —
+  // watermarking + decoy tools degrade legitimate users while being
+  // trivially bypassed by anyone running the model themselves.
   /**
    * Provider to use when discovery hasn't run yet and the user hasn't
    * picked one. Historically hardcoded to "anthropic" throughout the
@@ -612,6 +614,9 @@ export interface RuntimeConfig {
 export interface RuntimeStatus {
   readonly providers: readonly ProviderName[];
   readonly activeProvider: ProviderName | null;
+  /** Last model id used by the active provider, when known. Empty
+   *  string when nothing has been routed through the runtime yet. */
+  readonly activeModel: string;
   readonly hookCount: number;
   readonly middlewareLayers: number;
   readonly memoryEnabled: boolean;
@@ -2956,23 +2961,11 @@ export class WotannRuntime {
       const sanitizedPrompt =
         piiResult.totalRedacted > 0 ? piiResult.redactedText : boosted.boosted;
 
-      // ── Step 6.7: AntiDistillation — inject fake tools to poison distillation ──
-      // Session-5 fix: the generated fake tools were previously stored
-      // in a local variable and never merged into the query's effective
-      // tool set — the whole feature was dead code. Now the fake tools
-      // are appended to `effectiveTools` so the model sees them and
-      // any distillation attempt captures them as noise.
-      //
-      // Wave-3E wiring (spec priority #7): honor the
-      // `WOTANN_ANTI_DISTILLATION=1` env var as an opt-in alongside the
-      // config flag. Env-var opt-in lets operators enable distillation
-      // defence without rebuilding config, matching the pattern used by
-      // PHASE E: anti-distillation removed entirely. WOTANN is open source —
+      // PHASE E: anti-distillation step removed. WOTANN is open source —
       // watermarking output and injecting fake-tool decoys are theatrical
-      // safeguards in that context (the source itself is published). Per
-      // user directive: no safeguards against model misuse. Decoy code paths
-      // also degrade legitimate tool-call schemas (extra entries in
-      // effectiveTools confuse models that don't recognize them).
+      // safeguards (the source itself is published). Per user directive:
+      // no safeguards against model misuse. Decoy code paths also degrade
+      // legitimate tool-call schemas.
 
       // ── Step 6.9: Provider arbitrage — find cheapest provider meeting capability ──
       const taskType = classifyTaskType(options.prompt);
@@ -4891,6 +4884,7 @@ export class WotannRuntime {
     return {
       providers: this.infra?.bridge?.getAvailableProviders?.() ?? [],
       activeProvider: this.session.provider,
+      activeModel: this.session.model ?? "",
       hookCount: this.hookEngine.getRegisteredHooks().length,
       middlewareLayers: this.pipeline.getLayerCount(),
       memoryEnabled: this.memoryStore !== null,
@@ -7172,9 +7166,8 @@ export async function createRuntime(
 // a duplicate previously lived in a second runtime module that
 // silently drifted (both copies missed notebook_path, caught in the
 // 2026-04-15 audit). Session-5 deleted the drifted second module
-// entirely (it had zero live consumers and had fallen further behind
-// the real runtime — missing anti-distillation, flow tracker, active
-// memory, user model, and instinct system wiring).
+// entirely (it had zero live consumers and had fallen behind on
+// flow tracker, active memory, user model, and instinct system wiring).
 
 /**
  * Synthetic error-status perspective used when the progressive-budget

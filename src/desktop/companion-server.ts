@@ -1915,12 +1915,12 @@ export class CompanionServer {
             }
           : null,
 
-        // Active provider. Falls through to Ollama local neutral default
-        // when nothing is configured (no vendor bias). Actual model selection
-        // is per-request at query time — this is just what the phone shows
-        // as the current-session attribution.
-        provider: status?.activeProvider ?? "ollama",
-        model: "gemma4:e4b",
+        // Active provider/model attribution for the phone's "what desktop
+        // is using" badge. Empty-string sentinel when nothing is configured
+        // — the phone's UI then shows a neutral "No active model" hint
+        // instead of asserting a model the user hasn't installed.
+        provider: status?.activeProvider ?? "",
+        model: status?.activeModel ?? "",
         providers: status?.providers ?? [],
 
         // Desktop identity

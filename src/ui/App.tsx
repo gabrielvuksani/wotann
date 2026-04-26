@@ -30,6 +30,13 @@ import { registerR09Commands, buildMagicSubCommands } from "./components/Command
 import { MessageActions, type MessageAction } from "./components/MessageActions.js";
 import { ContextSourcePanel, type ContextSource } from "./components/ContextSourcePanel.js";
 import { TerminalBlocksView } from "./components/TerminalBlocksView.js";
+// V9 Wave 4 — 4 settings/admin overlay panels accessible from CommandPalette.
+// Each panel mirrors a corresponding kairos-rpc handler but talks to the
+// in-process backing store directly (TUI runs in-process — no JSON-RPC client).
+import { TrustPanel } from "./components/TrustPanel.js";
+import { GdprPanel } from "./components/GdprPanel.js";
+import { AuditLogPanel } from "./components/AuditLogPanel.js";
+import { AutomationsPanel } from "./components/AutomationsPanel.js";
 import { BlockBuffer, type Block } from "./terminal-blocks/block.js";
 import { Osc133Parser } from "./terminal-blocks/osc-133-parser.js";
 import type { AgentMessage, ProviderName, ProviderStatus } from "../core/types.js";
@@ -367,6 +374,11 @@ export function WotannApp({
   const blockBufferRef = useRef<BlockBuffer | null>(null);
   const [showMessageActions, setShowMessageActions] = useState(false);
   const [isIncognito, setIsIncognito] = useState(false);
+  // Wave 4 admin overlays — opened via slash commands or the CommandPalette.
+  const [showTrustPanel, setShowTrustPanel] = useState(false);
+  const [showGdprPanel, setShowGdprPanel] = useState(false);
+  const [showAuditPanel, setShowAuditPanel] = useState(false);
+  const [showAutomationsPanel, setShowAutomationsPanel] = useState(false);
 
   const getSkillRegistry = useCallback((): SkillRegistry => {
     if (!skillRegistryRef.current) {
@@ -559,6 +571,10 @@ export function WotannApp({
           setShowMessageActions(false);
           setShowTerminalBlocks(false);
           setShowCommandPalette(false);
+          setShowTrustPanel(false);
+          setShowGdprPanel(false);
+          setShowAuditPanel(false);
+          setShowAutomationsPanel(false);
           break;
         case "voice-capture":
           void handleVoiceCapture();
@@ -743,8 +759,45 @@ export function WotannApp({
       onOpenMagic: openMagic,
     });
 
+    // Wave 4 — admin overlay commands (trust, gdpr, audit, automations).
+    // These are registered alongside R-09 so the same Cmd+P fuzzy search
+    // surfaces them. Each handler simply opens its overlay; the overlays
+    // own their own state + RPC-equivalent calls.
+    const adminCommands: readonly Command[] = [
+      {
+        id: "admin.trust",
+        label: "Trusted Workspaces",
+        description: "List, add, remove trusted workspace paths (workspace.trust*)",
+        keywords: ["trust", "workspace", "security", "allowlist", "trusted"],
+        handler: () => setShowTrustPanel(true),
+      },
+      {
+        id: "admin.gdpr",
+        label: "GDPR Tools",
+        description: "Export ~/.wotann or delete it (gdpr.export / gdpr.delete)",
+        keywords: ["gdpr", "export", "delete", "privacy", "data"],
+        handler: () => setShowGdprPanel(true),
+      },
+      {
+        id: "admin.audit",
+        label: "Audit Log",
+        description: "Browse the last 50 audit entries with type filter (audit.query)",
+        keywords: ["audit", "log", "history", "trail", "trace"],
+        handler: () => setShowAuditPanel(true),
+      },
+      {
+        id: "admin.automations",
+        label: "Automations",
+        description: "List, toggle, create, delete automations (automations.*)",
+        keywords: ["automations", "automation", "cron", "trigger", "schedule"],
+        handler: () => setShowAutomationsPanel(true),
+      },
+    ];
+    for (const cmd of adminCommands) registry.register(cmd);
+
     return () => {
       unregisterR09();
+      for (const cmd of adminCommands) registry.unregister(cmd.id);
       if (magicRegistered) {
         for (const cmd of magicSubCommands) registry.unregister(cmd.id);
       }
@@ -2270,7 +2323,27 @@ export function WotannApp({
           return true;
         }
 
+        case "/gdpr": {
+          // Wave 4 — open the GDPR export/delete overlay (mirrors gdpr.* RPC).
+          setShowGdprPanel(true);
+          return true;
+        }
+
+        case "/automations": {
+          // Wave 4 — open the automations CRUD overlay (mirrors automations.* RPC).
+          setShowAutomationsPanel(true);
+          return true;
+        }
+
         case "/audit": {
+          // Wave 4 — `/audit` (no args) opens the new overlay against the
+          // daemon's ~/.wotann/audit.db. `/audit workspace` keeps the legacy
+          // text printout against the workspace .wotann/audit.db so existing
+          // callers (and CLI parity tests) don't break.
+          if (rest.trim() !== "workspace") {
+            setShowAuditPanel(true);
+            return true;
+          }
           void (async () => {
             const { queryWorkspaceAudit } = await import("../cli/audit.js");
             const result = queryWorkspaceAudit(workingDir, { limit: 10 });
@@ -3075,14 +3148,17 @@ export function WotannApp({
         // Closes the gap where /trust, /export, /delete, /login were
         // CLI-only — power users in the TUI shouldn't have to drop to CLI.
         case "/trust": {
+          // Wave 4 — `/trust` (no args) opens the overlay panel for
+          // interactive list/add/remove. `/trust <path>` keeps the legacy
+          // CLI-parity behavior (trust the path inline, no panel).
           if (!arg) {
-            sysMsg("Usage: /trust [path]  (defaults to cwd)");
+            setShowTrustPanel(true);
             return true;
           }
           (async () => {
             try {
               const { trustWorkspace } = await import("../utils/trusted-workspaces.js");
-              const targetPath = arg === "." || arg === "" ? process.cwd() : arg;
+              const targetPath = arg === "." ? process.cwd() : arg;
               const added = trustWorkspace(targetPath);
               sysMsg(added ? `Trusted: ${targetPath}` : `Already trusted: ${targetPath}`);
             } catch (err) {
@@ -3460,6 +3536,16 @@ export function WotannApp({
           onError={handleCommandPaletteError}
         />
       )}
+
+      {showTrustPanel && (
+        <TrustPanel workingDir={workingDir} onClose={() => setShowTrustPanel(false)} />
+      )}
+
+      {showGdprPanel && <GdprPanel onClose={() => setShowGdprPanel(false)} />}
+
+      {showAuditPanel && <AuditLogPanel onClose={() => setShowAuditPanel(false)} />}
+
+      {showAutomationsPanel && <AutomationsPanel onClose={() => setShowAutomationsPanel(false)} />}
 
       {showContextPanel && runtime && (
         <ContextSourcePanel

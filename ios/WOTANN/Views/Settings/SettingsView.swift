@@ -590,6 +590,17 @@ struct SettingsView: View {
                     .frame(minHeight: 44)
             }
 
+            // Cron + Schedule cross-surface parity (TUI /schedule + CLI
+            // wotann cron/schedule). Combined view with tab switcher.
+            NavigationLink {
+                ScheduleView()
+                    .environmentObject(connectionManager)
+            } label: {
+                Label("Scheduled Tasks", systemImage: "clock.badge")
+                    .foregroundColor(WTheme.Colors.textPrimary)
+                    .frame(minHeight: 44)
+            }
+
             // H-E15: dead-letter queue surface so users can inspect
             // tasks that exhausted their retry budget. Without this UI
             // the DLQ accumulated silently on disk.

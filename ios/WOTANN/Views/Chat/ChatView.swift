@@ -60,7 +60,7 @@ struct ChatViewContent: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color.black.ignoresSafeArea()
+            WTheme.Colors.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 connectionStatusBar
@@ -77,7 +77,7 @@ struct ChatViewContent: View {
 
             composerDock
         }
-        .background(Color.black)
+        .background(WTheme.Colors.background)
         .navigationTitle(viewModel.conversation?.title ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { chatToolbar }
@@ -398,7 +398,7 @@ struct ChatViewContent: View {
             onClearQuote: { quotedReply = nil }
         )
         .background(
-            Color.black
+            WTheme.Colors.surface
                 .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: -4)
         )
     }

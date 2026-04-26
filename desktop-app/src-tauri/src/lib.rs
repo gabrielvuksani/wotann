@@ -126,6 +126,7 @@ pub fn run() {
             // Connection & Streaming
             commands::send_message_streaming,
             commands::is_daemon_connected,
+            commands::last_daemon_error,
             commands::install_daemon_service,
             commands::get_companion_pairing,
             commands::get_companion_devices,
@@ -277,10 +278,18 @@ pub fn run() {
                         }
                     }
                     Ok(Err(e)) => {
-                        eprintln!("Daemon error: {} — watchdog will retry", e);
+                        let msg = format!("Daemon error: {}", e);
+                        eprintln!("{} — watchdog will retry", msg);
+                        if let Ok(mut slot) = state.last_daemon_error.lock() {
+                            *slot = Some(msg);
+                        }
                     }
                     Err(_) => {
-                        eprintln!("Daemon spawn panicked — watchdog will retry");
+                        let msg = "Daemon spawn panicked".to_string();
+                        eprintln!("{} — watchdog will retry", msg);
+                        if let Ok(mut slot) = state.last_daemon_error.lock() {
+                            *slot = Some(msg);
+                        }
                     }
                 }
                 // Always arm the watchdog. It polls every 15s and:
@@ -299,5 +308,13 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running WOTANN Desktop");
+        .unwrap_or_else(|err| {
+            // Tauri runtime failed to initialize (missing entitlement,
+            // broken WebView2, etc.). Print a one-line cause to stderr
+            // so the user sees a real error in the terminal/Console.app
+            // rather than a raw Rust panic stack.
+            eprintln!("WOTANN Desktop failed to start: {}", err);
+            eprintln!("Common causes: WebView2 not installed (Windows), missing entitlement (macOS), display server unreachable (Linux).");
+            std::process::exit(1);
+        });
 }

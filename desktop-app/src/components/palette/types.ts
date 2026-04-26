@@ -18,6 +18,8 @@ export type PaletteCategory =
   | "Modes"
   | "Layout"
   | "Tools"
+  | "Tools & Workflows"
+  | "Security & Privacy"
   | "Power"
   | "Settings";
 

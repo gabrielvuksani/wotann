@@ -29,7 +29,7 @@ struct VoiceInlineSheet: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.98).ignoresSafeArea()
+            WTheme.Colors.background.opacity(0.98).ignoresSafeArea()
 
             VStack(spacing: WTheme.Spacing.lg) {
                 header

@@ -38,7 +38,7 @@ struct QRScannerView: View {
                     FullScreenLoading(message: "Requesting camera access...")
                 }
             }
-            .background(Color.black)
+            .background(WTheme.Colors.background)
             .navigationTitle("Scan QR Code")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -73,9 +73,13 @@ const DISMISS_KEY = "wotann-disconnected-banner-dismissed";
 export function DisconnectedBanner({
   onRetry,
   engineConnected = false,
+  reason,
 }: {
   readonly onRetry?: () => void;
   readonly engineConnected?: boolean;
+  /** Optional precise reason ("KAIROS source not found", "spawn EACCES", …)
+   *  surfaced to the user so they aren't left guessing why the daemon is down. */
+  readonly reason?: string | null;
 }) {
   const [dismissed, setDismissed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -121,6 +125,14 @@ export function DisconnectedBanner({
         <div className="shrink-0" style={{ width: 6, height: 6, borderRadius: 9999, background: "var(--color-warning)" }} aria-hidden="true" />
         <span style={{ fontSize: "var(--font-size-xs)", fontWeight: 500, color: "var(--color-text-muted)" }}>
           Engine disconnected
+          {reason && (
+            <>
+              {" — "}
+              <span style={{ fontWeight: 400, color: "var(--color-text-tertiary, var(--color-text-muted))" }}>
+                {reason}
+              </span>
+            </>
+          )}
         </span>
       </div>
       <div className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>

@@ -307,9 +307,30 @@ export async function refreshStatus(): Promise<void> {
       } catch { /* provider fetch failed */ }
     }
 
+    // When the engine just transitioned offline, fetch the precise reason
+    // so the DisconnectedBanner can show "engine source not found" /
+    // "spawn EACCES" instead of the generic "Engine disconnected" string.
+    // We always clear the error on reconnect.
+    if (!status.connected) {
+      try {
+        const reason = await commands.lastDaemonError();
+        patch["daemonError"] = reason ?? null;
+      } catch {
+        patch["daemonError"] = null;
+      }
+    } else {
+      patch["daemonError"] = null;
+    }
+
     useStore.setState(patch);
   } catch {
-    useStore.setState({ engineConnected: false });
+    let reason: string | null = null;
+    try {
+      reason = (await commands.lastDaemonError()) ?? null;
+    } catch {
+      // best-effort
+    }
+    useStore.setState({ engineConnected: false, daemonError: reason });
   }
 }
 

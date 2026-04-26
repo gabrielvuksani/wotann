@@ -111,7 +111,10 @@ final class EditorViewModel: ObservableObject {
 
     // MARK: - Internals
 
-    private let connectionManager: ConnectionManager
+    /// Exposed (read-only) so the EditorView toolbar can hand the same
+    /// connection to child sheets like UndoView and ComposerSheet without
+    /// requiring callers to thread the ConnectionManager through twice.
+    let connectionManager: ConnectionManager
     private let logger = Logger(subsystem: "com.wotann.ios", category: "EditorViewModel")
     private var cancellables = Set<AnyCancellable>()
     private var diffRefreshTask: Task<Void, Never>?

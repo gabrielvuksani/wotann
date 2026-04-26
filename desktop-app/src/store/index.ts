@@ -67,6 +67,10 @@ interface DesktopState {
 
   // Connection
   readonly engineConnected: boolean;
+  /** Last daemon-spawn error message (null when healthy). Polled from
+   *  Tauri `last_daemon_error` whenever engineConnected goes false so the
+   *  DisconnectedBanner can show a precise reason rather than generic. */
+  readonly daemonError: string | null;
   readonly onboardingComplete: boolean;
 
   // Notifications
@@ -227,6 +231,7 @@ export const useStore = create<DesktopState>((set) => ({
 
   // Connection — starts disconnected, set to true when engine responds
   engineConnected: false,
+  daemonError: null,
   onboardingComplete: !!localStorage.getItem("wotann-onboarded"),
 
   // Notifications — empty on fresh start

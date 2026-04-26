@@ -42,7 +42,7 @@ struct FirstRunSuccessView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            WTheme.Colors.background.ignoresSafeArea()
 
             VStack(spacing: WTheme.Spacing.xl) {
                 Spacer()

@@ -19,7 +19,6 @@ import {
   isHybridV2Enabled,
   isOnnxEmbeddingsEnabled,
   isThinkInCodeEnabled,
-  isAntiDistillationEnabled,
   isAutoPopulateKGEnabled,
   isCoveEnabled,
   isContextualAbstentionEnabled,
@@ -159,11 +158,7 @@ describe("default-OFF gates", () => {
     expect(isThinkInCodeEnabled({}, { WOTANN_THINK_IN_CODE: "1" })).toBe(true);
   });
 
-  it("AntiDistillation", () => {
-    expect(isAntiDistillationEnabled({}, env)).toBe(false);
-    expect(isAntiDistillationEnabled({ enableAntiDistillation: true }, env)).toBe(true);
-    expect(isAntiDistillationEnabled({}, { WOTANN_ANTI_DISTILLATION: "1" })).toBe(true);
-  });
+  // PHASE E: AntiDistillation gate removed — see provider-gates.ts.
 
   it("AutoPopulateKG", () => {
     expect(isAutoPopulateKGEnabled({}, env)).toBe(false);

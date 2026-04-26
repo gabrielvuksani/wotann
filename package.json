@@ -113,6 +113,7 @@
   },
   "overrides": {
     "picomatch": "^4.0.2",
-    "@eslint/plugin-kit": "^0.7.1"
+    "@eslint/plugin-kit": "^0.7.1",
+    "brace-expansion": "2.0.1"
   }
 }

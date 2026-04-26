@@ -39,7 +39,7 @@ struct ArtifactEditorView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                WTheme.Colors.background.ignoresSafeArea()
 
                 ScrollView([.vertical, .horizontal], showsIndicators: true) {
                     HStack(alignment: .top, spacing: 0) {
@@ -83,7 +83,7 @@ struct ArtifactEditorView: View {
                 }
             }
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(Color.black, for: .navigationBar)
+            .toolbarBackground(WTheme.Colors.background, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
@@ -99,7 +99,7 @@ struct ArtifactEditorView: View {
         }
         .frame(width: lineNumberWidth, alignment: .trailing)
         .padding(.trailing, 8)
-        .background(Color.black)
+        .background(WTheme.Colors.background)
     }
 
     private var codeColumn: some View {

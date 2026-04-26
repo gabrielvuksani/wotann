@@ -72,8 +72,17 @@ describe("ToolTimingLogger", () => {
   });
 
   it("swallows filesystem errors silently (best-effort)", () => {
-    // Unwritable path — should not throw.
-    const logger = new ToolTimingLogger("/proc/invalid/does/not/exist.jsonl");
+    // Unwritable path. Previous fixture was `/proc/invalid/does/not/...`
+    // which had OS-specific behaviour: macOS mkdirSync errors instantly,
+    // but Linux's /proc filesystem is virtual and node ≥22's mkdirSync
+    // recursive walk hung the vitest forks worker on shard 4 in CI for
+    // 7+ minutes (verified via load-tracer 2026-04-26). Use a path that
+    // always fails fast on every OS instead — a regular file masquerading
+    // as a parent directory triggers ENOTDIR immediately.
+    const tempDir = mkdtempSync(join(tmpdir(), "wotann-tt-blocked-"));
+    const blocker = join(tempDir, "blocker");
+    require("node:fs").writeFileSync(blocker, "x");
+    const logger = new ToolTimingLogger(join(blocker, "child.jsonl"));
     expect(() =>
       logger.record({
         timestamp: Date.now(),
@@ -82,6 +91,7 @@ describe("ToolTimingLogger", () => {
         success: true,
       }),
     ).not.toThrow();
+    rmSync(tempDir, { recursive: true, force: true });
   });
 });
 

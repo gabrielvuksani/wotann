@@ -58,7 +58,7 @@ struct Composer: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color.black)
+        .background(WTheme.Colors.surface)
         .sheet(isPresented: $showFilePathSheet) {
             mentionPathSheet
         }

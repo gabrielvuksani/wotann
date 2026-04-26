@@ -191,8 +191,12 @@ program
         // After the wizard completes, re-bootstrap so the TUI sees the
         // newly-configured providers.
         interactive = await bootstrapInteractiveSession(process.cwd(), options);
-      } catch {
-        // Wizard import or run failed — fall through to TUI banner.
+      } catch (err) {
+        // Wizard import or run failed — log so first-launch users get
+        // a hint why the hand-holding wizard didn't appear, then fall
+        // through to the in-TUI onboarding banner.
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[wotann] onboarding wizard unavailable: ${msg}\n`);
       }
     }
 

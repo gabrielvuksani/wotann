@@ -55,9 +55,9 @@
 		  + WOTANNApp.swift route push payloads while the app is suspended.
 		- processing: Live Activities (NSSupportsLiveActivitiesFrequentUpdates)
 		  and BGProcessingTask windows for relay/sync.
-		- audio: VoiceService.swift + DuplexVoiceSession.swift hold an
-		  AVAudioSession during voice ask + CarPlay voice control so STT/TTS
-		  survives the app moving to the background.
+		- audio: VoiceService.swift holds an AVAudioSession during voice
+		  ask + CarPlay voice control so STT/TTS survives the app moving
+		  to the background.
 		- fetch: opportunistic snapshot refreshes when the OS wakes us up.
 	-->
 	<key>UIBackgroundModes</key>

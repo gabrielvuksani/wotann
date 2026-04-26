@@ -135,7 +135,6 @@ export interface GateConfig {
   readonly useHybridV2?: boolean;
   readonly enableOnnxEmbeddings?: boolean;
   readonly thinkInCode?: boolean;
-  readonly enableAntiDistillation?: boolean;
   readonly autoPopulateKG?: boolean;
   readonly enableHooks?: boolean;
   readonly enableMiddleware?: boolean;
@@ -181,12 +180,9 @@ export function isThinkInCodeEnabled(c: GateConfig, env: EnvReader = defaultEnvR
   return gateDefaultOff(c.thinkInCode, env["WOTANN_THINK_IN_CODE"]);
 }
 
-export function isAntiDistillationEnabled(
-  c: GateConfig,
-  env: EnvReader = defaultEnvReader(),
-): boolean {
-  return gateDefaultOff(c.enableAntiDistillation, env["WOTANN_ANTI_DISTILLATION"]);
-}
+// PHASE E: isAntiDistillationEnabled removed — watermarking + decoy
+// tools are theatrical safeguards in an open-source context where the
+// source itself is published.
 
 export function isAutoPopulateKGEnabled(
   c: GateConfig,

@@ -249,7 +249,9 @@ export function PromptInput() {
         title: preview || "New Chat",
         preview,
         updatedAt: Date.now(),
-        provider: useStore.getState().provider || "ollama",
+        // Empty-string sentinel when no provider is selected — daemon
+        // routes via discovery instead of biasing toward Ollama.
+        provider: useStore.getState().provider || "",
         model: useStore.getState().model || "",
         cost: 0,
         messageCount: 0,

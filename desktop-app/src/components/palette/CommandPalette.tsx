@@ -104,6 +104,8 @@ const CATEGORY_ORDER: readonly PaletteCategory[] = [
   "Modes",
   "Layout",
   "Tools",
+  "Tools & Workflows",
+  "Security & Privacy",
   "Power",
   "Settings",
 ];
@@ -919,6 +921,26 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
             message: result?.summary ?? "Analysis complete",
           });
         },
+      },
+
+      // ── Tools & Workflows ──
+      {
+        id: "automations",
+        title: "Automations",
+        subtitle: "automations.list — schedule, event, webhook, manual triggers",
+        category: "Tools & Workflows",
+        icon: "🔁",
+        action: () => setView("automations"),
+      },
+
+      // ── Security & Privacy ──
+      {
+        id: "audit-log",
+        title: "Audit Log",
+        subtitle: "audit.query — recent actions, filterable by type and date",
+        category: "Security & Privacy",
+        icon: "🪪",
+        action: () => setView("audit"),
       },
     ];
   }, [

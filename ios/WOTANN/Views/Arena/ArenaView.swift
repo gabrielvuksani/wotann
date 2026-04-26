@@ -246,6 +246,8 @@ struct ArenaView: View {
                     .clipShape(Circle())
                 }
                 .disabled(!canRun)
+                .accessibilityLabel(isRunning ? "Running comparison" : "Run comparison")
+                .accessibilityHint("Compares responses across selected models")
             }
             .padding(.horizontal, WTheme.Spacing.md)
             .padding(.vertical, WTheme.Spacing.sm)

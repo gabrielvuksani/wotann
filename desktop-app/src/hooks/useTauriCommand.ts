@@ -393,6 +393,10 @@ export const commands = {
 
   stopEngine: () => invoke<void>("stop_engine"),
 
+  isDaemonConnected: () => invoke<boolean>("is_daemon_connected"),
+
+  lastDaemonError: () => invoke<string | null>("last_daemon_error"),
+
   getConversations: () =>
     invoke<readonly ConversationSummary[]>("get_conversations"),
 

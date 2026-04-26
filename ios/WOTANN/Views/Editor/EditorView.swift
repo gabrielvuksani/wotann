@@ -78,6 +78,11 @@ struct EditorView: View {
     @State private var showInlineAIMenu: Bool = false
     @State private var inlineSelection: String = ""
     @State private var completionSelectedIndex: Int = 0
+    // Sheets for shadow-git undo browser and the multi-file composer.
+    // Both are launched from the toolbar overflow menu so they don't
+    // crowd the primary editor chrome.
+    @State private var showUndoSheet: Bool = false
+    @State private var showComposerSheet: Bool = false
 
     private let logger = Logger(subsystem: "com.wotann.ios", category: "EditorView")
 
@@ -118,6 +123,22 @@ struct EditorView: View {
                 },
                 onCancel: { showDocumentPicker = false }
             )
+        }
+        .sheet(isPresented: $showUndoSheet) {
+            // Wrap in NavigationStack so UndoView's nav title renders.
+            NavigationStack {
+                UndoView()
+                    .environmentObject(viewModel.connectionManager)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showUndoSheet = false }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $showComposerSheet) {
+            ComposerSheet()
+                .environmentObject(viewModel.connectionManager)
         }
         .alert(
             "Editor Error",
@@ -357,6 +378,21 @@ struct EditorView: View {
                     promptInlineAI()
                 } label: {
                     Label("Ask WOTANN about selection", systemImage: "sparkles")
+                }
+                // Shadow-git checkpoint browser + multi-file composer
+                // surfaces. Both rely on the connectionManager held by
+                // EditorViewModel, so they're available even when the
+                // editor was launched from a deep-link with no parent
+                // chat surface to host them.
+                Button {
+                    showUndoSheet = true
+                } label: {
+                    Label("Undo & Checkpoints", systemImage: "clock.arrow.circlepath")
+                }
+                Button {
+                    showComposerSheet = true
+                } label: {
+                    Label("Composer (multi-file)", systemImage: "square.stack.3d.down.right.fill")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")

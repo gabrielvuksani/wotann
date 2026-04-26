@@ -15,7 +15,7 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            WTheme.Colors.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Page content

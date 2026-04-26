@@ -490,13 +490,20 @@ export class ModelRouter {
       };
     }
 
-    // Fallback: first available provider with any model. Falls to Ollama
-    // local as neutral no-vendor-bias default when the availability set is
-    // empty (can only happen pre-discovery).
+    // Fallback: first available provider with any model. Throws when
+    // there are no available providers — prior code returned a fake
+    // "ollama" route which masked the configuration error and caused
+    // confusing 404s downstream when Ollama wasn't installed. Honest
+    // fail-loud is safer than silent vendor pin.
     const firstAvailable = [...this.config.availableProviders][0];
+    if (!firstAvailable) {
+      throw new Error(
+        "model-router: no providers available — configure at least one provider (ANTHROPIC_API_KEY / OPENAI_API_KEY / Ollama running / etc.)",
+      );
+    }
     return {
       tier: 2,
-      provider: firstAvailable ?? "ollama",
+      provider: firstAvailable,
       model: "auto",
       cost: 0,
     };
