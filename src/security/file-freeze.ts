@@ -13,6 +13,7 @@
  */
 
 import { resolve, relative, isAbsolute } from "node:path";
+import { canonicalizePathForCheck } from "../utils/path-realpath.js";
 
 export interface FreezeRule {
   readonly pattern: string;
@@ -40,7 +41,11 @@ export class FileFreezer {
   /**
    * Freeze a file, directory, or glob pattern.
    */
-  freeze(pattern: string, reason: string = "Manual freeze", permanent: boolean = false): FreezeRule {
+  freeze(
+    pattern: string,
+    reason: string = "Manual freeze",
+    permanent: boolean = false,
+  ): FreezeRule {
     const existing = this.rules.find((r) => r.pattern === pattern);
     if (existing) return existing;
 
@@ -83,15 +88,27 @@ export class FileFreezer {
 
   /**
    * Check if a file path is frozen.
+   *
+   * CVE-2026-25724 defence: pure path.resolve is lexical, so a symlink
+   * `safe.txt → ../../../package.json` would bypass any freeze rule that
+   * matched on the raw path. We canonicalize through realpath BEFORE
+   * matching, so the matcher sees the real target. Defence-in-depth:
+   * we also check the lexically-resolved path so a freeze rule written
+   * against the user-visible name still fires.
    */
   check(filePath: string): FreezeCheckResult {
     const resolved = isAbsolute(filePath) ? filePath : resolve(this.workingDir, filePath);
+    const canonical = canonicalizePathForCheck(resolved);
     const rel = relative(this.workingDir, resolved);
+    const canonicalRel = relative(this.workingDir, canonical);
 
-    // Focus mode: block everything outside the focus path
+    // Focus mode: block everything outside the focus path. We check both
+    // the raw resolved path AND the canonical (post-realpath) path —
+    // either one outside focus is grounds for blocking.
     if (this.focusPath) {
-      const isFocused = resolved.startsWith(this.focusPath) || resolved === this.focusPath;
-      if (!isFocused) {
+      const focusRaw = resolved.startsWith(this.focusPath) || resolved === this.focusPath;
+      const focusCanonical = canonical.startsWith(this.focusPath) || canonical === this.focusPath;
+      if (!focusRaw || !focusCanonical) {
         return {
           frozen: true,
           rule: {
@@ -106,9 +123,10 @@ export class FileFreezer {
       }
     }
 
-    // Check explicit freeze rules
+    // Check explicit freeze rules. A match on EITHER the raw user-supplied
+    // path OR the canonical (symlink-resolved) target counts as frozen.
     for (const rule of this.rules) {
-      if (matchesPattern(rel, rule.pattern)) {
+      if (matchesPattern(rel, rule.pattern) || matchesPattern(canonicalRel, rule.pattern)) {
         return { frozen: true, rule, resolvedPath: resolved };
       }
     }

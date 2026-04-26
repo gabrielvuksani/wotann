@@ -22,6 +22,8 @@
  * policy decider in their existing approval flow.
  */
 
+import { canonicalizePathForCheck } from "../utils/path-realpath.js";
+
 // ── Types ──────────────────────────────────────────────
 
 export type ApprovalAction = "allow" | "deny" | "ask";
@@ -114,18 +116,31 @@ export class ApprovalRuleEngine {
   /**
    * Evaluate a proposed tool call against all active rules.
    * Short-circuits on first match. Returns `ask` when no rule applies.
+   *
+   * CVE-2026-25724 defence: when the input contains a `path`/`file_path`
+   * field (as Read/Write/Edit tools do), a symlink at that path can
+   * bypass deny rules that match on the raw value. We expose BOTH the
+   * raw stringification AND the canonical-path-substituted variant to
+   * the matcher; a deny rule fires if either form matches. Defence-in-
+   * depth: this does not affect rules that match on non-path content
+   * (e.g. a Bash command pattern).
    */
   evaluate(toolName: string, input: unknown): EvaluationResult {
     const now = this.now();
     const target = stringifyInput(input);
+    const canonicalTarget = stringifyInputCanonical(input);
 
     for (const rule of this.rules) {
       // Expiry check
       if (rule.expiresAt !== undefined && rule.expiresAt <= now) continue;
       // Tool name check
       if (rule.toolName !== undefined && rule.toolName !== toolName) continue;
-      // Pattern match
-      const matched = matchPattern(rule.pattern, target);
+      // Pattern match — try raw first, then canonical (symlink-resolved)
+      // form. The two strings are usually identical; they only differ
+      // when input carries a path that is itself a symlink.
+      const matched =
+        matchPattern(rule.pattern, target) ||
+        (canonicalTarget !== target && matchPattern(rule.pattern, canonicalTarget));
       if (!matched) continue;
 
       return {
@@ -195,6 +210,72 @@ function stringifyInput(input: unknown): string {
     return JSON.stringify(input);
   } catch {
     return String(input);
+  }
+}
+
+/**
+ * Path-aware stringification — if `input` is a string that resolves to
+ * a different canonical path, return the JSON-stringified canonical form.
+ * If `input` is an object whose path-shaped fields contain a symlink,
+ * substitute those fields with their realpath targets BEFORE stringifying.
+ *
+ * Returns the same string as `stringifyInput` when no path substitution
+ * applies — callers can compare `=== target` to detect the no-op case
+ * cheaply and skip the second matcher pass.
+ *
+ * Path-shaped field names are limited to the conventional Anthropic-tool
+ * surface (`path`, `file_path`, `filePath`, `filepath`, `notebook_path`,
+ * `target`, `source`) so we don't accidentally rewrite unrelated string
+ * fields that happen to look path-like.
+ */
+const PATH_SHAPED_FIELDS: ReadonlySet<string> = new Set([
+  "path",
+  "file_path",
+  "filePath",
+  "filepath",
+  "notebook_path",
+  "notebookPath",
+  "target",
+  "source",
+  "src",
+  "dest",
+  "destination",
+]);
+
+function stringifyInputCanonical(input: unknown): string {
+  if (typeof input === "string") {
+    // Bare-string input: try canonicalization. If it differs from input
+    // (i.e. there's a symlink in the prefix), return the canonical form.
+    try {
+      const canonical = canonicalizePathForCheck(input);
+      return canonical;
+    } catch {
+      return stringifyInput(input);
+    }
+  }
+  if (input === null || typeof input !== "object") return stringifyInput(input);
+  // Object input: clone with path-shaped fields rewritten to canonical
+  // form. We never mutate the caller's object.
+  try {
+    const rewritten: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+    let touched = false;
+    for (const [k, v] of Object.entries(rewritten)) {
+      if (typeof v !== "string") continue;
+      if (!PATH_SHAPED_FIELDS.has(k)) continue;
+      try {
+        const canonical = canonicalizePathForCheck(v);
+        if (canonical !== v) {
+          rewritten[k] = canonical;
+          touched = true;
+        }
+      } catch {
+        // realpath failure is non-fatal — leave the field as-is.
+      }
+    }
+    if (!touched) return stringifyInput(input);
+    return stringifyInput(rewritten);
+  } catch {
+    return stringifyInput(input);
   }
 }
 

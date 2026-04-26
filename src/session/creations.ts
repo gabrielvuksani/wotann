@@ -63,11 +63,11 @@ import {
   rmSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve as resolvePath, sep as pathSep } from "node:path";
 import type { UnifiedEvent } from "../channels/fan-out.js";
+import { safeWriteFile } from "../utils/path-realpath.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -455,8 +455,14 @@ export class CreationsStore {
     // Actual write. We rewrap disk-full errors so callers can
     // discriminate on `.code === "CREATIONS_DISK_FULL"` rather than
     // parsing errno strings.
+    //
+    // CVE-2026-39861 defence: `resolveFilePath` uses lexical isInside()
+    // checks which are defeated by a symlink at `absPath`. safeWriteFile
+    // opens with O_NOFOLLOW so the syscall itself refuses to follow a
+    // symlink at the leaf — closes the leaf-vulnerability that the
+    // parent-only realpath check upstream cannot see.
     try {
-      writeFileSync(absPath, buffer);
+      safeWriteFile(absPath, buffer);
     } catch (err) {
       const rewrapped = rewrapDiskError(err);
       if (rewrapped) throw rewrapped;

@@ -1545,8 +1545,15 @@ export class WotannRuntime {
         return readFile(path, "utf-8");
       },
       async (path: string, content: string) => {
-        const { writeFile } = await import("node:fs/promises");
-        await writeFile(path, content, "utf-8");
+        // CVE-2026-39861 defence: AutoresearchEngine receives path
+        // strings derived from autonomous task plans. Without the
+        // O_NOFOLLOW guard, a symlink staged at `path` (e.g. by an
+        // earlier untrusted research step) would be followed and
+        // overwrite the symlink target. safeWriteFile is sync — wrap
+        // in an immediately-resolved Promise to keep the lambda's
+        // async signature intact.
+        const { safeWriteFile } = await import("../utils/path-realpath.js");
+        safeWriteFile(path, content);
       },
       this.shadowGit,
     );

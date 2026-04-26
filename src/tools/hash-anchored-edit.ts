@@ -20,9 +20,10 @@
  * trailing whitespace and line endings.
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { recordWrite } from "../security/write-audit.js";
+import { safeWriteFile } from "../utils/path-realpath.js";
 
 export interface HashAnchor {
   readonly startLine: number; // 1-indexed
@@ -105,8 +106,13 @@ export function applyHashAnchoredEdit(edit: HashAnchoredEdit): HashAnchoredEditR
   // anchor or a full-file hash.
   const shaBefore = createHash("sha256").update(content).digest("hex");
 
+  // CVE-2026-39861 defence: edit.filePath is model-supplied. A symlink
+  // pre-staged at filePath (e.g. workspace.ts → ~/.aws/credentials)
+  // would have followed through with plain writeFileSync. safeWriteFile
+  // uses O_NOFOLLOW so the open syscall refuses to follow a leaf
+  // symlink — turns CVE-2026-39861 into a clean "write_failed" verdict.
   try {
-    writeFileSync(edit.filePath, newContent, "utf-8");
+    safeWriteFile(edit.filePath, newContent);
   } catch (err) {
     return {
       ok: false,

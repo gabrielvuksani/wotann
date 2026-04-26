@@ -15,6 +15,8 @@
  * From Hermes v0.7.0 secret exfiltration blocking pattern.
  */
 
+import { canonicalizePathForCheck } from "../utils/path-realpath.js";
+
 export interface SecretPattern {
   readonly name: string;
   readonly pattern: RegExp;
@@ -40,20 +42,90 @@ export interface SecretFinding {
  */
 const SECRET_PATTERNS: readonly SecretPattern[] = [
   // API Keys
-  { name: "anthropic_key", pattern: /sk-ant-[a-zA-Z0-9_-]{20,}/g, severity: "critical", description: "Anthropic API key" },
-  { name: "openai_key", pattern: /sk-[a-zA-Z0-9]{20,}/g, severity: "critical", description: "OpenAI API key" },
-  { name: "github_token", pattern: /gh[pousr]_[A-Za-z0-9_]{36,}/g, severity: "critical", description: "GitHub token" },
-  { name: "aws_access_key", pattern: /AKIA[0-9A-Z]{16}/g, severity: "critical", description: "AWS access key ID" },
-  { name: "aws_secret_key", pattern: /[A-Za-z0-9/+=]{40}(?=\s|$|"|')/g, severity: "high", description: "Possible AWS secret key" },
-  { name: "gcp_service_account", pattern: /"type"\s*:\s*"service_account"/g, severity: "critical", description: "GCP service account JSON" },
-  { name: "azure_key", pattern: /[a-zA-Z0-9/+=]{44}(?=\s|$|"|')/g, severity: "medium", description: "Possible Azure key" },
-  { name: "stripe_key", pattern: /[rs]k_(live|test)_[a-zA-Z0-9]{20,}/g, severity: "critical", description: "Stripe API key" },
-  { name: "slack_token", pattern: /xox[bporas]-[0-9]{10,13}-[a-zA-Z0-9-]+/g, severity: "critical", description: "Slack token" },
-  { name: "jwt_token", pattern: /eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g, severity: "high", description: "JWT token" },
-  { name: "private_key", pattern: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/g, severity: "critical", description: "Private key header" },
-  { name: "password_literal", pattern: /(?:password|passwd|pwd)\s*[=:]\s*['"][^'"]{8,}['"]/gi, severity: "high", description: "Password in plaintext" },
-  { name: "connection_string", pattern: /(?:mongodb|postgres|mysql|redis):\/\/[^\s]+:[^\s]+@[^\s]+/g, severity: "critical", description: "Database connection string with credentials" },
-  { name: "bearer_token", pattern: /Bearer\s+[a-zA-Z0-9._-]{20,}/g, severity: "high", description: "Bearer authentication token" },
+  {
+    name: "anthropic_key",
+    pattern: /sk-ant-[a-zA-Z0-9_-]{20,}/g,
+    severity: "critical",
+    description: "Anthropic API key",
+  },
+  {
+    name: "openai_key",
+    pattern: /sk-[a-zA-Z0-9]{20,}/g,
+    severity: "critical",
+    description: "OpenAI API key",
+  },
+  {
+    name: "github_token",
+    pattern: /gh[pousr]_[A-Za-z0-9_]{36,}/g,
+    severity: "critical",
+    description: "GitHub token",
+  },
+  {
+    name: "aws_access_key",
+    pattern: /AKIA[0-9A-Z]{16}/g,
+    severity: "critical",
+    description: "AWS access key ID",
+  },
+  {
+    name: "aws_secret_key",
+    pattern: /[A-Za-z0-9/+=]{40}(?=\s|$|"|')/g,
+    severity: "high",
+    description: "Possible AWS secret key",
+  },
+  {
+    name: "gcp_service_account",
+    pattern: /"type"\s*:\s*"service_account"/g,
+    severity: "critical",
+    description: "GCP service account JSON",
+  },
+  {
+    name: "azure_key",
+    pattern: /[a-zA-Z0-9/+=]{44}(?=\s|$|"|')/g,
+    severity: "medium",
+    description: "Possible Azure key",
+  },
+  {
+    name: "stripe_key",
+    pattern: /[rs]k_(live|test)_[a-zA-Z0-9]{20,}/g,
+    severity: "critical",
+    description: "Stripe API key",
+  },
+  {
+    name: "slack_token",
+    pattern: /xox[bporas]-[0-9]{10,13}-[a-zA-Z0-9-]+/g,
+    severity: "critical",
+    description: "Slack token",
+  },
+  {
+    name: "jwt_token",
+    pattern: /eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g,
+    severity: "high",
+    description: "JWT token",
+  },
+  {
+    name: "private_key",
+    pattern: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/g,
+    severity: "critical",
+    description: "Private key header",
+  },
+  {
+    name: "password_literal",
+    pattern: /(?:password|passwd|pwd)\s*[=:]\s*['"][^'"]{8,}['"]/gi,
+    severity: "high",
+    description: "Password in plaintext",
+  },
+  {
+    name: "connection_string",
+    pattern: /(?:mongodb|postgres|mysql|redis):\/\/[^\s]+:[^\s]+@[^\s]+/g,
+    severity: "critical",
+    description: "Database connection string with credentials",
+  },
+  {
+    name: "bearer_token",
+    pattern: /Bearer\s+[a-zA-Z0-9._-]{20,}/g,
+    severity: "high",
+    description: "Bearer authentication token",
+  },
 ];
 
 /**
@@ -158,16 +230,36 @@ export class SecretScanner {
 
   /**
    * Check if a file path accesses a protected credential directory.
+   *
+   * CVE-2026-25724 defence: pure substring matching on the raw path is
+   * defeated by a symlink (`harmless.txt → ~/.ssh/id_rsa`). We test
+   * BOTH the raw normalized path AND the realpath-canonicalized form;
+   * a hit on either is grounds for treating the access as protected.
+   * Defence-in-depth: the explicit user override (`allowPath`) is
+   * keyed on the raw filePath the caller supplied, so the bypass
+   * surface for a symlink-allow-then-symlink-redirect is closed.
    */
   isProtectedPath(filePath: string): boolean {
     if (this.allowedPaths.has(filePath)) return false;
 
     const normalized = filePath.replace(/\\/g, "/");
+    let canonicalNormalized = normalized;
+    try {
+      const canonical = canonicalizePathForCheck(filePath);
+      canonicalNormalized = canonical.replace(/\\/g, "/");
+    } catch {
+      // realpath failure — treat as suspicious by leaving canonical equal
+      // to raw. The raw match below still fires; honest-fallback (QB#6)
+      // logs the gap but does not silently approve.
+    }
     const home = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
 
     for (const dir of PROTECTED_DIRECTORIES) {
       const fullPath = `${home}/${dir}`;
-      if (normalized.startsWith(fullPath) || normalized.includes(`/${dir}/`)) {
+      const matchRaw = normalized.startsWith(fullPath) || normalized.includes(`/${dir}/`);
+      const matchCanonical =
+        canonicalNormalized.startsWith(fullPath) || canonicalNormalized.includes(`/${dir}/`);
+      if (matchRaw || matchCanonical) {
         return true;
       }
     }

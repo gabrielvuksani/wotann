@@ -14,6 +14,7 @@
 import { platform } from "node:os";
 import { existsSync, realpathSync } from "node:fs";
 import { resolve, relative, normalize } from "node:path";
+import { canonicalizePathForCheck } from "../utils/path-realpath.js";
 import type { RiskLevel, PermissionMode, PermissionDecision } from "../core/types.js";
 import {
   ApprovalRuleEngine,
@@ -308,9 +309,29 @@ const SENSITIVE_FILE_PATTERNS: readonly RegExp[] = [
 
 /**
  * Check if a file path points to a sensitive file.
+ *
+ * CVE-2026-25724 defence: the patterns test the RAW path string, so a
+ * symlink (`harmless.txt → /home/user/.env`) bypasses the matcher. We
+ * test BOTH the raw input AND the canonical (realpath-resolved) form;
+ * a match on either is grounds for treating the file as sensitive.
+ * Defence-in-depth: callers should still combine this with
+ * `safeWriteFile` so a successful raw-match doesn't lull them into
+ * forgetting the leaf-symlink risk on writes.
  */
 export function isSensitiveFile(filePath: string): boolean {
-  return SENSITIVE_FILE_PATTERNS.some((p) => p.test(filePath));
+  if (SENSITIVE_FILE_PATTERNS.some((p) => p.test(filePath))) return true;
+  try {
+    const canonical = canonicalizePathForCheck(filePath);
+    if (canonical !== filePath && SENSITIVE_FILE_PATTERNS.some((p) => p.test(canonical))) {
+      return true;
+    }
+  } catch {
+    // realpath failure — honest fallback (QB#6): be cautious. We've
+    // already evaluated the raw path; if that didn't match, there's
+    // nothing more to test, but the caller still has lstat-precheck
+    // protection on writes via safeWriteFile.
+  }
+  return false;
 }
 
 // ── Environment Sanitization ─────────────────────────────

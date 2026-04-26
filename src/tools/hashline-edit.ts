@@ -17,9 +17,10 @@
  * - Can verify file hasn't changed since the agent read it
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { recordWrite } from "../security/write-audit.js";
+import { safeWriteFile } from "../utils/path-realpath.js";
 
 // ── Hash Functions ────────────────────────────────────────
 
@@ -196,7 +197,12 @@ export function applyHashEdit(filePath: string, edit: HashEditOperation): HashEd
   // we just read is the authoritative before-state.
   const shaBefore = createHash("sha256").update(content).digest("hex");
 
-  writeFileSync(filePath, newContent);
+  // CVE-2026-39861 defence: filePath flows directly from the model's
+  // tool-use input. A pre-existing symlink at filePath (e.g. attacker
+  // pre-creates harmless.ts → ~/.zshrc, model edits it) would have
+  // followed through with plain writeFileSync. safeWriteFile uses
+  // O_NOFOLLOW so the syscall itself refuses to follow a leaf symlink.
+  safeWriteFile(filePath, newContent);
 
   const newFileHash = createHash("sha256").update(newContent).digest("hex");
 

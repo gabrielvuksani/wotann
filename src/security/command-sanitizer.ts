@@ -33,6 +33,7 @@
  */
 
 import { parse as parseShell } from "shell-quote";
+import { canonicalizePathForCheck } from "../utils/path-realpath.js";
 
 // ── Public API ─────────────────────────────────────────────
 
@@ -329,8 +330,44 @@ function inspectTokens(tokens: readonly ParseToken[]): ParseReject | null {
     return { reason: `forbidden command: ${first}` };
   }
 
+  // CVE-2026-25724 defence: a redirection target like `>some_path` is
+  // tokenised as `[{op:">"}, "some_path"]`. The legacy regex layer only
+  // matches literal `/etc/passwd`, etc. — a symlink at `some_path`
+  // pointing to `/etc/passwd` evades it. We canonicalize each
+  // redirection target through realpath and reject if the resolved
+  // form lives in a system-sensitive location.
+  for (let i = 0; i < tokens.length - 1; i++) {
+    const op = tokens[i];
+    if (op === undefined || !isOp(op)) continue;
+    if (op.op !== ">" && op.op !== ">>") continue;
+    const target = tokens[i + 1];
+    if (typeof target !== "string") continue;
+    let canonical = target;
+    try {
+      canonical = canonicalizePathForCheck(target);
+    } catch {
+      // Honest-fallback (QB#6): if canonicalization throws, be
+      // suspicious — a target we can't resolve safely is one we
+      // shouldn't write to. Reject.
+      return { reason: `redirect target unresolvable: ${target}` };
+    }
+    if (REDIRECT_DENY_REGEX.test(canonical)) {
+      return {
+        reason: `redirect to system-sensitive path: ${target} -> ${canonical}`,
+      };
+    }
+  }
+
   return null;
 }
+
+// Sensitive paths that no shell-redirection should ever target. Match
+// against the CANONICAL (realpath-resolved) form so a symlink at the
+// raw target cannot evade the check. Also matches common admin paths
+// outside the legacy /etc/{passwd,shadow,sudoers,hosts} list — defence
+// in depth.
+const REDIRECT_DENY_REGEX =
+  /^\/(?:etc\/(?:passwd|shadow|sudoers(?:\.d\/.*)?|hosts|crontab|cron\.[a-z]+\/.*|ssh\/.*|pam\.d\/.*)|root\/.*|boot\/.*|proc\/.*|sys\/.*|dev\/(?:mem|kmem|sd[a-z]|hd[a-z]|nvme\d|disk\d).*)$/;
 
 // ── Public API ─────────────────────────────────────────────
 

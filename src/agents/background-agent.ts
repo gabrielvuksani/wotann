@@ -11,10 +11,11 @@
  */
 
 import { execFileSync, type ExecFileSyncOptions } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
+import { safeWriteFile } from "../utils/path-realpath.js";
 
 import {
   ciFeedbackLoop,
@@ -373,7 +374,12 @@ export class BackgroundAgentManager {
   private emitStatus(status: BackgroundTaskStatus): void {
     this.statusCallback?.(status);
     try {
-      writeFileSync(join(AGENT_DIR, `${status.id}.json`), JSON.stringify(status, null, 2));
+      // CVE-2026-39861 defence: status.id flows from RPC input, so a
+      // hostile id-shaped symlink under AGENT_DIR could redirect this
+      // write to ~/.ssh/authorized_keys (or any file under the agent
+      // user's reach). safeWriteFile uses O_NOFOLLOW so the open()
+      // syscall itself refuses to follow a symlink at the leaf.
+      safeWriteFile(join(AGENT_DIR, `${status.id}.json`), JSON.stringify(status, null, 2));
     } catch {
       /* Best effort */
     }
