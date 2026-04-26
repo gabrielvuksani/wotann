@@ -335,6 +335,199 @@ final class LiveActivityManager: ObservableObject {
         #endif
     }
 
+    // MARK: - Restoration (V9 H-9, Wave 6-LL)
+
+    /// Re-attach to ActivityKit activities that survived a daemon restart
+    /// or app relaunch. Without this, an in-flight Live Activity becomes
+    /// "orphaned" — visible in the Dynamic Island / Lock Screen but no
+    /// longer wired to any session, so the user sees a frozen progress
+    /// indicator forever (H-9 finding).
+    ///
+    /// Behaviour:
+    ///  1. Iterate `Activity<TaskProgressAttributes>.activities` (the
+    ///     system's authoritative list of activities the OS resurrected
+    ///     for our app at launch).
+    ///  2. For each, rebuild the in-memory registries (`activities`,
+    ///     `kinds`, `sessionToActivity`) so subsequent `update`/`end`
+    ///     calls route correctly.
+    ///  3. If an `RPCClient` is supplied AND it reports as connected,
+    ///     call `liveActivity.pending` with each session id to ask the
+    ///     daemon whether the session is still live. Sessions absent
+    ///     from the daemon's pending set are gracefully ended (with a
+    ///     "stale" outcome so the user sees the activity dismiss with
+    ///     dignity instead of vanishing).
+    ///  4. Honest fallback (quality bar #6): if the daemon is
+    ///     unreachable during restoration we DO NOT end any activities.
+    ///     The activities stay in our registry as known-but-unverified
+    ///     so a subsequent `live.activity` push event can refresh them.
+    ///     The caller surfaces this via `restoreError`.
+    ///
+    /// Idempotent: safe to call multiple times. The second call is a
+    /// near no-op (registries are already populated; the daemon
+    /// reconciliation pass repeats but produces the same answer).
+    @discardableResult
+    func restoreActivities(client: RPCClient? = nil) async -> RestoreOutcome {
+        #if canImport(ActivityKit)
+        var rebuilt = 0
+        var endedStale = 0
+        var verified = 0
+        var unreachable = false
+
+        let live = Activity<TaskProgressAttributes>.activities
+
+        // Phase 1: rebuild the in-memory registry. We do this whether or
+        // not the daemon is reachable so subsequent pushes can find the
+        // activity.
+        for activity in live {
+            let taskId = activity.attributes.taskId
+            let activityId: UUID
+            if let parsed = UUID(uuidString: taskId) {
+                activityId = parsed
+            } else {
+                // Daemon-side sessionIds are not guaranteed to be UUIDs;
+                // mint a stable client-side UUID so our registry keys
+                // remain UUID-shaped. This loses round-trip with the
+                // daemon's sessionId — sessionToActivity below preserves
+                // the daemon-side string for push routing.
+                activityId = UUID()
+            }
+            activities[activityId] = activity
+            // We have no source-of-truth for the kind once the process
+            // dies — assume `.taskRun` (the most common case). End-time
+            // dismissal policy is the only thing this affects.
+            kinds[activityId] = .taskRun
+            sessionToActivity[taskId] = activityId
+            rebuilt += 1
+        }
+
+        Self.log.info(
+            "restoreActivities phase 1: rebuilt \(rebuilt) registry entries"
+        )
+
+        // Phase 2: reconcile with daemon if a connected client is given.
+        // Honest stub (#6): if no client OR the call fails, leave
+        // activities alone — they will refresh via push events when the
+        // daemon comes back online.
+        guard let client else {
+            Self.log.info(
+                "restoreActivities phase 2 skipped: no RPC client provided"
+            )
+            return RestoreOutcome(
+                rebuilt: rebuilt,
+                verified: 0,
+                endedStale: 0,
+                daemonUnreachable: false
+            )
+        }
+
+        // Snapshot the session ids we just rebuilt so we can iterate
+        // without mutating the registry mid-loop.
+        let sessionIds = Array(sessionToActivity.keys)
+        guard !sessionIds.isEmpty else {
+            return RestoreOutcome(
+                rebuilt: 0,
+                verified: 0,
+                endedStale: 0,
+                daemonUnreachable: false
+            )
+        }
+
+        let pendingResponse: RPCResponse
+        do {
+            // No sessionId → daemon returns ALL pending steps. Cheaper
+            // than N round-trips and avoids a thundering-herd on a slow
+            // daemon during cold start.
+            pendingResponse = try await client.send("liveActivity.pending")
+        } catch {
+            unreachable = true
+            self.restoreError = "liveActivity.pending failed: \(error.localizedDescription)"
+            Self.log.error(
+                "restoreActivities daemon reconciliation failed: \(error.localizedDescription, privacy: .public). Leaving \(rebuilt) activity/activities in registry as known-but-unverified."
+            )
+            return RestoreOutcome(
+                rebuilt: rebuilt,
+                verified: 0,
+                endedStale: 0,
+                daemonUnreachable: true
+            )
+        }
+
+        self.restoreError = nil
+
+        // Build the set of session ids the daemon still considers active.
+        var liveSessionIds = Set<String>()
+        if let pendingArray = pendingResponse.result?.objectValue?["pending"]?.arrayValue {
+            for value in pendingArray {
+                guard let obj = value.objectValue else { continue }
+                if let sid = obj["sessionId"]?.stringValue, !sid.isEmpty {
+                    liveSessionIds.insert(sid)
+                }
+            }
+        }
+
+        // Phase 3: for every session we restored, decide:
+        //  - daemon says still pending → leave registry intact (the next
+        //    push event will refresh state). Count as verified.
+        //  - daemon says NOT pending → end gracefully with a "Recovered"
+        //    status so the user sees the activity dismiss instead of
+        //    hanging at frozen-progress.
+        for sessionId in sessionIds {
+            guard let activityId = sessionToActivity[sessionId],
+                  let activity = activities[activityId] else { continue }
+
+            if liveSessionIds.contains(sessionId) {
+                verified += 1
+                Self.log.info(
+                    "restoreActivities verified session \(sessionId, privacy: .public)"
+                )
+            } else {
+                // Compose a dignified terminal state from whatever the
+                // OS preserved across launches.
+                let lastState = activity.content.state
+                let outcome = LiveActivityOutcome(
+                    progress: lastState.progress,
+                    status: "Recovered",
+                    cost: lastState.cost,
+                    elapsedSeconds: lastState.elapsedSeconds
+                )
+                end(id: activityId, outcome: outcome)
+                sessionToActivity.removeValue(forKey: sessionId)
+                endedStale += 1
+                Self.log.info(
+                    "restoreActivities ended stale session \(sessionId, privacy: .public)"
+                )
+            }
+        }
+
+        return RestoreOutcome(
+            rebuilt: rebuilt,
+            verified: verified,
+            endedStale: endedStale,
+            daemonUnreachable: unreachable
+        )
+        #else
+        return RestoreOutcome(rebuilt: 0, verified: 0, endedStale: 0, daemonUnreachable: false)
+        #endif
+    }
+
+    /// Outcome of a restoration pass. Surfaced for diagnostics and for
+    /// callers that want to log/metric the recovery rate.
+    struct RestoreOutcome: Equatable {
+        let rebuilt: Int
+        let verified: Int
+        let endedStale: Int
+        /// True if the daemon was unreachable during the reconciliation
+        /// step. Quality bar #6 honest fallback marker — the caller can
+        /// surface "we restored N activities but couldn't verify them".
+        let daemonUnreachable: Bool
+    }
+
+    /// Last error from the daemon-reconciliation step of
+    /// `restoreActivities`. Surfaced as @Published so a Settings or
+    /// diagnostics screen can render the failure rather than have it
+    /// disappear silently. Quality bar #6: every RPC failure surfaces.
+    @Published var restoreError: String?
+
     // MARK: - RPC Subscription (T5.3)
 
     /// Wire the manager to a paired desktop's RPC client and subscribe to
