@@ -242,29 +242,100 @@ export function assembleSystemPromptParts(options: PromptAssemblyOptions): Promp
   // 1b. Discover standard instruction files from workspace root.
   //     These provide cross-tool interop (CLAUDE.md, .cursorrules, etc.)
   //     Bootstrap files in .wotann/ are separate — no overlap.
-  const WORKSPACE_INSTRUCTION_FILES: readonly string[] = [
-    "CLAUDE.md",
-    "AGENTS.md",
-    ".cursorrules",
-    ".github/copilot-instructions.md",
-    "WOTANN.md",
-  ];
+  //
+  //     Wave 5-HH: case-insensitive matching for the markdown-style
+  //     files (CLAUDE.md, AGENTS.md, WOTANN.md) so AGENTS.md /
+  //     agents.md / Agents.md all resolve. Mirrors Claude Code's
+  //     CLAUDE.md discovery and the AGENTS.md ecosystem standard.
+  //     `.cursorrules` and copilot's nested path keep exact-match
+  //     semantics (their conventions encode the casing).
+  const ROOT_CASE_INSENSITIVE_FILES: readonly string[] = ["CLAUDE.md", "AGENTS.md", "WOTANN.md"];
+  const ROOT_EXACT_FILES: readonly string[] = [".cursorrules", ".github/copilot-instructions.md"];
 
-  for (const filename of WORKSPACE_INSTRUCTION_FILES) {
-    const filePath = join(options.workspaceRoot, filename);
-    if (existsSync(filePath)) {
-      try {
-        let content = readFileSync(filePath, "utf-8");
-        if (content.length > MAX_FILE_CHARS) {
-          content = content.slice(0, MAX_FILE_CHARS) + "\n[TRUNCATED — max 20K chars per file]";
-        }
-        if (totalChars + content.length <= MAX_TOTAL_CHARS) {
-          cachedParts.push(`# Workspace: ${filename}\n\n${content}`);
-          totalChars += content.length;
-        }
-      } catch {
-        /* skip unreadable files */
+  // Build case-insensitive lookup against actual root entries (single
+  // readdir, no caching across calls — QB#7 stateless).
+  let rootEntries: readonly string[] = [];
+  try {
+    rootEntries = readdirSync(options.workspaceRoot);
+  } catch {
+    /* unreadable workspace — fall through with empty list */
+  }
+  const rootByLower = new Map<string, string>();
+  for (const entry of rootEntries) {
+    rootByLower.set(entry.toLowerCase(), entry);
+  }
+
+  const seenLabels = new Set<string>();
+
+  const ingestInstructionFile = (filePath: string, label: string): void => {
+    if (seenLabels.has(label)) return;
+    if (!existsSync(filePath)) return;
+    try {
+      let content = readFileSync(filePath, "utf-8");
+      if (content.length > MAX_FILE_CHARS) {
+        content = content.slice(0, MAX_FILE_CHARS) + "\n[TRUNCATED — max 20K chars per file]";
       }
+      if (totalChars + content.length <= MAX_TOTAL_CHARS) {
+        cachedParts.push(`# Workspace: ${label}\n\n${content}`);
+        totalChars += content.length;
+        seenLabels.add(label);
+      }
+    } catch {
+      /* skip unreadable files */
+    }
+  };
+
+  for (const canonical of ROOT_CASE_INSENSITIVE_FILES) {
+    const actual = rootByLower.get(canonical.toLowerCase());
+    if (actual) {
+      ingestInstructionFile(join(options.workspaceRoot, actual), actual);
+    }
+  }
+
+  for (const filename of ROOT_EXACT_FILES) {
+    ingestInstructionFile(join(options.workspaceRoot, filename), filename);
+  }
+
+  // Per-subdir AGENTS.md discovery (case-insensitive, immediate
+  // children only — depth=1). Concatenated in path-sorted order so
+  // assembly is deterministic across runs. Skip vendored / build /
+  // VCS dirs via small denylist (NO_PROXY-style exemption).
+  const SUBDIR_DENYLIST: ReadonlySet<string> = new Set([
+    "node_modules",
+    ".git",
+    ".hg",
+    ".svn",
+    "dist",
+    "build",
+    "out",
+    "target",
+    ".next",
+    ".turbo",
+    ".cache",
+    "coverage",
+    ".wotann",
+    ".vscode",
+    ".idea",
+  ]);
+  const AGENTS_MD_LOWER = "agents.md";
+
+  const subdirs = rootEntries
+    .filter((entry) => !SUBDIR_DENYLIST.has(entry) && !entry.startsWith("."))
+    .slice()
+    .sort();
+
+  for (const subdir of subdirs) {
+    const subdirPath = join(options.workspaceRoot, subdir);
+    let childEntries: readonly string[] = [];
+    try {
+      childEntries = readdirSync(subdirPath);
+    } catch {
+      continue; /* not a dir or unreadable */
+    }
+    const matched = childEntries.find((entry) => entry.toLowerCase() === AGENTS_MD_LOWER);
+    if (matched) {
+      const label = `${subdir}/${matched}`;
+      ingestInstructionFile(join(subdirPath, matched), label);
     }
   }
 
