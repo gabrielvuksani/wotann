@@ -155,7 +155,9 @@ export function OffloadPanel(): ReactElement {
   const [providers, setProviders] = useState<readonly OffloadProvider[]>(
     DEFAULT_PROVIDERS,
   );
-  const [selected, setSelected] = useState<string>(DEFAULT_PROVIDERS[0].id);
+  const [selected, setSelected] = useState<string>(
+    DEFAULT_PROVIDERS[0]?.id ?? "",
+  );
   const [task, setTask] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -170,7 +172,8 @@ export function OffloadPanel(): ReactElement {
       const list = parseProviders(result);
       setProviders(list);
       if (!list.some((p) => p.id === selected) && list.length > 0) {
-        setSelected(list[0].id);
+        const first = list[0];
+        if (first) setSelected(first.id);
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));

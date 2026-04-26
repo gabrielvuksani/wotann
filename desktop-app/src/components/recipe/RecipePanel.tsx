@@ -140,7 +140,8 @@ export function RecipePanel(): ReactElement {
         setSelected(null);
       }
       if (selected === null && list.length > 0) {
-        setSelected(list[0].name);
+        const first = list[0];
+        if (first) setSelected(first.name);
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));

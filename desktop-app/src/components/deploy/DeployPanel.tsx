@@ -135,7 +135,8 @@ export function DeployPanel(): ReactElement {
         setSelectedTarget(null);
       }
       if (selectedTarget === null && list.length > 0) {
-        setSelectedTarget(list[0].id);
+        const first = list[0];
+        if (first) setSelectedTarget(first.id);
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
