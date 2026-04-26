@@ -92,6 +92,27 @@ import { PerceptionEngine } from "../computer-use/perception-engine.js";
 import { MeetingRuntime } from "../meet/meeting-runtime.js";
 import { AutoArchiveHook } from "../hooks/auto-archive.js";
 import { RateLimitResumeManager } from "../hooks/rate-limit-resume.js";
+// GA-09 / V9 T11.1 + T11.2 — wire orphan virtual-cursor pool/consumer
+// and sleep-time agent/consumer into daemon lifecycle.
+import {
+  createVirtualCursorPool,
+  type VirtualCursorPool,
+} from "../computer-use/virtual-cursor-pool.js";
+import {
+  createVirtualCursorConsumer,
+  type VirtualCursorConsumer,
+} from "../orchestration/virtual-cursor-consumer.js";
+import {
+  createSleepTimeAgent,
+  type SleepTimeAgent,
+  type SleepTimeTask,
+  type SleepTimeResult,
+  type SleepTimeOpportunity,
+} from "../learning/sleep-time-agent.js";
+import {
+  createSleepTimeConsumer,
+  type SleepTimeConsumer,
+} from "../orchestration/sleep-time-consumer.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -212,6 +233,43 @@ export class KairosDaemon {
   private readonly trajectoryExtractor = new TrajectoryExtractor();
   private supabaseRelay: SupabaseRelay | null = null;
   private skillMerger: SkillMerger | null = null;
+
+  // GA-09 / V9 T11.1 — Virtual cursor pool + consumer wire. The pool
+  // (src/computer-use/virtual-cursor-pool.ts) was an audit-flagged
+  // 4-file island with ZERO production importers; this field plus the
+  // consumer below close that gap. The consumer is driven from
+  // tick() — every daemon tick advances the pool by one frame and
+  // dispatches the resulting cursor frames through the companion
+  // server's broadcast topic ("cursor.stream") so iOS RemoteDesktopView
+  // / desktop overlays can render the multi-session cursors.
+  //
+  // Instantiated AFTER the companion server in start() so the
+  // dispatcher closure captures a live broadcastNotification target;
+  // torn down BEFORE the registry / WS so disposeAll doesn't race a
+  // pending tick.
+  private virtualCursorPool: VirtualCursorPool | null = null;
+  private virtualCursorConsumer: VirtualCursorConsumer | null = null;
+
+  // GA-09 / V9 T11.2 — Sleep-time agent + consumer wire. The agent
+  // (src/learning/sleep-time-agent.ts) was orphan: zero non-test
+  // consumers in src/. The consumer fires the agent's runIdleSession
+  // when the existing IdleDetector flips to idle, draining the queue
+  // against budget + duration caps. Opportunity is built from the
+  // detector's signals so policy lives in one place (the agent), not
+  // duplicated here.
+  //
+  // Both are instantiated at start() and torn down at stop(). The
+  // agent's taskExecutor closure captures the runtime so submitted
+  // tasks can route through the model; without a runtime (daemon-only
+  // mode) the executor returns an honest-stub `ok:false` result rather
+  // than silently succeeding.
+  private sleepTimeAgent: SleepTimeAgent | null = null;
+  private sleepTimeConsumer: SleepTimeConsumer | null = null;
+  // Track when we last fired a sleep session so we don't re-trigger on
+  // every 15s tick during a long idle window. One opportunity per
+  // active->idle transition is the right cadence — we re-arm only
+  // after the user returns and the detector flips back to active.
+  private lastSleepSessionAt: number | null = null;
 
   // Track C additions: dream pipeline, event triggers, ambient awareness
   private dreamPipeline: DreamPipeline | null = null;
@@ -452,6 +510,127 @@ export class KairosDaemon {
         this.appendLog({
           type: "error",
           message: `Failed to wire companion bridge: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+
+      // GA-09 / V9 T11.1 — virtual cursor pool + consumer wire.
+      // The pool was an audit-flagged 4-file island with zero production
+      // importers; this is the SOLE production wire that drives it.
+      // Each daemon tick advances the pool by one frame and dispatches
+      // the resulting cursor frames through the companion server's
+      // broadcast topic so iOS RemoteDesktopView and desktop overlays
+      // can render the multi-session cursors.
+      try {
+        const cursorPool = createVirtualCursorPool();
+        const companionRef = this.companionServer;
+        const cursorConsumer = createVirtualCursorConsumer({
+          pool: cursorPool,
+          dispatcher: (frames) => {
+            // QB #6 honest stub — when the companion server isn't up
+            // (test mode or shutdown race) we drop the dispatch
+            // silently because the consumer's diagnostics still
+            // surface the tick count + last error.
+            if (!companionRef || frames.length === 0) return;
+            companionRef.broadcastNotification({
+              jsonrpc: "2.0",
+              method: "cursor.stream",
+              params: {
+                frames: frames.map((f) => ({
+                  sessionId: f.sessionId,
+                  x: f.x,
+                  y: f.y,
+                  timestamp: f.timestamp,
+                  trail: f.trail,
+                })),
+              },
+            });
+          },
+        });
+        this.virtualCursorPool = cursorPool;
+        this.virtualCursorConsumer = cursorConsumer;
+        this.appendLog({
+          type: "start",
+          message: "GA-09 T11.1 virtual cursor pool + consumer wired",
+        });
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `Failed to wire virtual cursor pool: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+
+      // GA-09 / V9 T11.2 — sleep-time agent + consumer wire.
+      // The agent was orphan (zero non-test consumers in src/). This is
+      // the SOLE production wire. The consumer fires runIdleSession()
+      // when the existing IdleDetector flips to idle (see tick() below),
+      // draining the queue against budget + duration caps.
+      try {
+        const runtimeRef2 = this.runtime;
+        // Honest task executor: when the runtime is alive, route the
+        // task's payload through runtime.query(). When the runtime
+        // failed to initialize (daemon-only mode) we return ok:false
+        // with an explicit error rather than silently succeeding —
+        // QB #6 honest stub.
+        const sleepAgent = createSleepTimeAgent({
+          taskExecutor: async (task: SleepTimeTask): Promise<SleepTimeResult> => {
+            if (!runtimeRef2) {
+              return {
+                taskId: task.id,
+                ok: false,
+                outputSummary: "",
+                durationMs: 0,
+                costUsd: 0,
+                error: "runtime-unavailable",
+              };
+            }
+            const startedAt = Date.now();
+            try {
+              const prompt =
+                typeof (task.payload as { prompt?: unknown })?.prompt === "string"
+                  ? (task.payload as { prompt: string }).prompt
+                  : `Sleep-time task: ${task.kind}`;
+              let collected = "";
+              for await (const chunk of runtimeRef2.query({ prompt })) {
+                if (chunk.type === "text") collected += chunk.content;
+              }
+              return {
+                taskId: task.id,
+                ok: true,
+                outputSummary: collected.slice(0, 200),
+                durationMs: Date.now() - startedAt,
+                // Cost accounting is the runtime's responsibility; we
+                // record the floor (estimated cost) here so a silently
+                // expensive runtime cycle is caught by aggregate budget.
+                costUsd: task.estimatedCostUsd,
+              };
+            } catch (err) {
+              return {
+                taskId: task.id,
+                ok: false,
+                outputSummary: "",
+                durationMs: Date.now() - startedAt,
+                costUsd: task.estimatedCostUsd,
+                error: err instanceof Error ? err.message : String(err),
+              };
+            }
+          },
+        });
+        const sleepConsumer = createSleepTimeConsumer({
+          agent: sleepAgent,
+          log: (msg: string) => {
+            this.appendLog({ type: "heartbeat", message: msg });
+          },
+        });
+        this.sleepTimeAgent = sleepAgent;
+        this.sleepTimeConsumer = sleepConsumer;
+        this.appendLog({
+          type: "start",
+          message: "GA-09 T11.2 sleep-time agent + consumer wired",
+        });
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `Failed to wire sleep-time agent: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
 
@@ -842,6 +1021,28 @@ export class KairosDaemon {
       }
       this.companionBridge = null;
     }
+    // GA-09 / V9 T11.1 — tear down virtual cursor pool + consumer BEFORE
+    // the companion server closes so any in-flight tick that's
+    // dispatching through `companionRef.broadcastNotification` (see
+    // start() L527-546) lands in a still-live WS rather than racing the
+    // server shutdown. The pool/consumer have no .stop() / .dispose()
+    // method (pure-state modules per their own design notes), so we
+    // despawn all sessions to release per-cursor state and null the
+    // fields. The tickInterval was already cleared at the top of
+    // stop() so no in-flight advance() can race this teardown.
+    if (this.virtualCursorPool) {
+      try {
+        // Snapshot is frozen — iterate and despawn each session so the
+        // pool's internal Map is empty before we drop the reference.
+        for (const cursor of this.virtualCursorPool.snapshot()) {
+          this.virtualCursorPool.despawn(cursor.sessionId);
+        }
+      } catch {
+        /* best-effort */
+      }
+      this.virtualCursorPool = null;
+    }
+    this.virtualCursorConsumer = null;
     if (this.companionServer) {
       this.companionServer.stop();
       this.companionServer = null;
@@ -878,6 +1079,31 @@ export class KairosDaemon {
       this.scheduleStore.close();
       this.scheduleStore = null;
     }
+    // GA-09 / V9 T11.2 — tear down sleep-time agent + consumer. The
+    // agent's taskExecutor closure captured `this.runtime`, which is
+    // now closed (above at L1036-1039); any future task would receive
+    // a runtime-unavailable error from the closure's null guard. The
+    // agent has no .stop() / .dispose() method (pure-logic module per
+    // its design notes); we drain the pending task queue so any
+    // unsubmitted work is reported via clearQueue's count, then null
+    // the fields. The tickInterval was already cleared at the top of
+    // stop() so no in-flight maybeRun() can race this teardown.
+    if (this.sleepTimeAgent) {
+      try {
+        const drained = this.sleepTimeAgent.clearQueue();
+        if (drained > 0) {
+          this.appendLog({
+            type: "stop",
+            message: `Sleep-time agent torn down with ${drained} pending tasks dropped`,
+          });
+        }
+      } catch {
+        /* best-effort */
+      }
+      this.sleepTimeAgent = null;
+    }
+    this.sleepTimeConsumer = null;
+    this.lastSleepSessionAt = null;
     this.rpcHandler = null;
 
     this.appendLog({ type: "stop", message: "KAIROS daemon stopped" });
@@ -1780,6 +2006,95 @@ export class KairosDaemon {
             sessionId: "daemon",
           },
         });
+      }
+    }
+
+    // ── GA-09 / V9 T11.1 — virtual cursor pool advance ──
+    // The wires at lines 240/518 promise that "every daemon tick advances
+    // the pool by one frame and dispatches the resulting cursor frames."
+    // This is the actual invocation that makes that comment TRUE.
+    //
+    // advance() returns a Promise<readonly CursorFrame[]> — fire-and-forget
+    // because (a) the consumer has its own try/catch around pool.tick()
+    // and the dispatcher (see virtual-cursor-consumer.ts L108-130), and
+    // (b) blocking the daemon tick on a downstream WebSocket broadcast
+    // would couple cursor smoothness to network latency. The consumer's
+    // diagnostics surface any failures via getDiagnostics().lastDispatchError
+    // for post-hoc inspection. QB #6: outer try/catch is belt-and-braces
+    // for the synchronous portion (consumer construction validates inputs
+    // at create-time, so this should never throw — but if a future change
+    // makes advance() throw synchronously, it must NOT crash the daemon).
+    if (this.virtualCursorConsumer) {
+      try {
+        void this.virtualCursorConsumer.advance().catch((err) => {
+          this.appendLog({
+            type: "error",
+            message: `virtualCursorConsumer.advance() rejected: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        });
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `virtualCursorConsumer.advance() threw synchronously: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+
+    // ── GA-09 / V9 T11.2 — sleep-time consumer drain on idle transition ──
+    // The wire at line 252 promises that "the consumer fires the agent's
+    // runIdleSession when the existing IdleDetector flips to idle." This
+    // is the actual invocation that makes that comment TRUE.
+    //
+    // We re-use `wasIdle` from line 1781 (the existing IdleDetector check
+    // for away-summary) so we don't double-call checkIdle(). The
+    // `lastSleepSessionAt` field (declared at L271) gates re-firing: we
+    // only run a session ONCE per active->idle transition. When the user
+    // returns and the detector flips back to active (recordActivity()
+    // resets isIdle), `lastSleepSessionAt` is cleared and the next idle
+    // window can fire again.
+    //
+    // QB #6 honest stub: maybeRun() returns null on agent error and
+    // already swallows internal exceptions; we still wrap in try/catch
+    // for the construction step (e.g. opportunity object validation).
+    if (this.sleepTimeConsumer) {
+      if (wasIdle) {
+        const idleDurationMs = this.idleDetector.getIdleDurationMs();
+        // Only fire when the idle window is actually established (avoids
+        // spurious sub-tick flicker) and we haven't already drained the
+        // queue for this idle window.
+        if (idleDurationMs > 0 && this.lastSleepSessionAt === null) {
+          this.lastSleepSessionAt = now.getTime();
+          try {
+            const opportunity: SleepTimeOpportunity = {
+              signal: "user-away",
+              detectedAt: now.getTime(),
+              estimatedIdleMs: idleDurationMs,
+              lastSeenActivity: now.getTime() - idleDurationMs,
+            };
+            void this.sleepTimeConsumer.maybeRun(opportunity).catch((err) => {
+              this.appendLog({
+                type: "error",
+                message: `sleepTimeConsumer.maybeRun() rejected: ${err instanceof Error ? err.message : String(err)}`,
+              });
+            });
+            this.appendLog({
+              type: "heartbeat",
+              message: `Sleep-time session triggered (idle ${Math.floor(idleDurationMs / 60_000)}min)`,
+            });
+          } catch (err) {
+            this.appendLog({
+              type: "error",
+              message: `sleepTimeConsumer.maybeRun() threw synchronously: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
+        }
+      } else {
+        // Detector says NOT idle. Re-arm so the next active->idle
+        // transition can fire a fresh session. Cheap to re-set every
+        // tick when already null.
+        if (this.lastSleepSessionAt !== null) {
+          this.lastSleepSessionAt = null;
+        }
       }
     }
   }
