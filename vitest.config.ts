@@ -16,5 +16,10 @@ export default defineConfig({
     pool: "forks",
     maxWorkers: 1,
     fileParallelism: false,
+    // setupFiles run before each test file. The load-tracer is gated
+    // by WOTANN_TEST_TRACE_LOAD=1 — when set, each file's setup logs
+    // `[wotann-load] <iso-ts> <file>` to stderr so a hung CI run can
+    // be diagnosed by reading the LAST line before the cancel marker.
+    setupFiles: ["./tests/_helpers/load-tracer.ts"],
   },
 });
