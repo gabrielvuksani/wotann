@@ -221,6 +221,11 @@
 		F6EE63B3011644DF40E6516B /* ExpandWithWOTANNIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C79A41A4A15C264BCCF2C8D /* ExpandWithWOTANNIntent.swift */; };
 		FB73488C0CB7A86377A9230E /* FirstRunSuccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDE936CC278C00E570B63335 /* FirstRunSuccessView.swift */; };
 		FFF304A635478FB42AA98140 /* ControlWidgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE7C84C303A55BAB2AF32993 /* ControlWidgetIntents.swift */; };
+		A800000000000000000A0002 /* ApprovalQueueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0001 /* ApprovalQueueService.swift */; };
+		A800000000000000000A0004 /* ApprovalQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0003 /* ApprovalQueueView.swift */; };
+		A800000000000000000A0006 /* ApprovalDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0005 /* ApprovalDetailView.swift */; };
+		A800000000000000000A0008 /* EditorLSPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0007 /* EditorLSPService.swift */; };
+		A800000000000000000A000A /* PairingProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0009 /* PairingProviderConfig.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -465,6 +470,11 @@
 		FD4FCFB6760540EF97A7DA40 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FF2C467534932F2AF3DCB79A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		"TEMP_F3A6507D-B6C3-4B51-9D9A-5D48085DF186" /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+		A800000000000000000A0001 /* ApprovalQueueService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalQueueService.swift; sourceTree = "<group>"; };
+		A800000000000000000A0003 /* ApprovalQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalQueueView.swift; sourceTree = "<group>"; };
+		A800000000000000000A0005 /* ApprovalDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalDetailView.swift; sourceTree = "<group>"; };
+		A800000000000000000A0007 /* EditorLSPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorLSPService.swift; sourceTree = "<group>"; };
+		A800000000000000000A0009 /* PairingProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingProviderConfig.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -609,6 +619,7 @@
 		3105D322DF7096028FE48443 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A800000000000000000A0001 /* ApprovalQueueService.swift */,
 				B416704CA80DC04925F3D876 /* BonjourDiscovery.swift */,
 				858AA65551925BEBA0EA15AB /* CameraService.swift */,
 				62F56A2BBEBBD733E0895A87 /* CarPlayService.swift */,
@@ -619,6 +630,7 @@
 				6E64BDB7DBE8104D59B6AD95 /* CrossDeviceService.swift */,
 				EF46B6C92C6DF4852A033775 /* DuplexVoiceSession.swift */,
 				1A970BCCA60E9BE6DC6C23B5 /* EditorService.swift */,
+				A800000000000000000A0007 /* EditorLSPService.swift */,
 				E35578B937A1B6B65955180A /* Haptics.swift */,
 				8F6F9658FE45E7FE8311F9EB /* HapticService.swift */,
 				36E5C03AEA8B07FACAC501D6 /* HealthKitService.swift */,
@@ -1083,6 +1095,8 @@
 			isa = PBXGroup;
 			children = (
 				E55E72B99A5BFA538F432E6B /* ApprovalSheetView.swift */,
+				A800000000000000000A0003 /* ApprovalQueueView.swift */,
+				A800000000000000000A0005 /* ApprovalDetailView.swift */,
 			);
 			path = Approvals;
 			sourceTree = "<group>";
@@ -1107,6 +1121,7 @@
 			isa = PBXGroup;
 			children = (
 				F65F7C041405B0992A27A764 /* AutoDetectedCard.swift */,
+				A800000000000000000A0009 /* PairingProviderConfig.swift */,
 				134BED7028B56BDFE8D4A930 /* PairingView.swift */,
 				F22870B229A1585EE0F44DB8 /* PairingWizardView.swift */,
 				20EC6DEF7EC4A37874CAA0F2 /* PINEntryView.swift */,
@@ -1402,6 +1417,9 @@
 				C807759AE01BCE6E7B7E8129 /* AmbientCrossDeviceView.swift in Sources */,
 				E80B08833BB301F43D25EB3D /* AppState.swift in Sources */,
 				86675FE0ED30D9994CE2E446 /* AppearanceSettings.swift in Sources */,
+				A800000000000000000A0006 /* ApprovalDetailView.swift in Sources */,
+				A800000000000000000A0002 /* ApprovalQueueService.swift in Sources */,
+				A800000000000000000A0004 /* ApprovalQueueView.swift in Sources */,
 				B926DCC5041B06F6BC2F7C5E /* ApprovalSheetView.swift in Sources */,
 				699353ED9D4DD85DB9C47AE2 /* ArenaView.swift in Sources */,
 				34970A1A2199D90E20013CFF /* ArtifactEditorView.swift in Sources */,
@@ -1456,6 +1474,7 @@
 				769400F88A9E4EB69F2718D1 /* EditorHoverCard.swift in Sources */,
 				257CA59CB07AFE462CF99428 /* EditorInlineAIMenu.swift in Sources */,
 				42F9D7D152939A7052AED056 /* EditorLSPBridge.swift in Sources */,
+				A800000000000000000A0008 /* EditorLSPService.swift in Sources */,
 				C7A1F0C0983AC2309DC883F4 /* EditorLanguages.swift in Sources */,
 				406704D6B31A083DC6E4526F /* EditorMinimap.swift in Sources */,
 				6D83206B8D48FF7E6C8483C3 /* EditorService.swift in Sources */,
@@ -1507,6 +1526,7 @@
 				53F9BED5475B003FA048BF7A /* PINEntryView.swift in Sources */,
 				AE9A4FCB2188846E1B96851E /* PairedDevicesView.swift in Sources */,
 				28A2824BEC70C5ADF79BF207 /* PairingManager.swift in Sources */,
+				A800000000000000000A000A /* PairingProviderConfig.swift in Sources */,
 				C96331771429D701D552F114 /* PairingState.swift in Sources */,
 				A997C22906B6716C70982FA5 /* PairingView.swift in Sources */,
 				1DBF7CB49929C59A63CCC4B1 /* PairingViewModel.swift in Sources */,
