@@ -206,7 +206,9 @@ describe("KairosRPCHandler", () => {
       );
 
       const resp = result as RPCResponse;
-      expect(resp.error?.code).toBe(-32603);
+      // SB-N2 fix (QB#15): missing required params surface -32602 (invalid
+      // params) per JSON-RPC 2.0 spec, not -32603 (internal error).
+      expect(resp.error?.code).toBe(-32602);
       expect(resp.error?.message).toContain("provider and model required");
     });
 
@@ -245,7 +247,8 @@ describe("KairosRPCHandler", () => {
       );
 
       const resp = result as RPCResponse;
-      expect(resp.error?.code).toBe(-32603);
+      // SB-N2 fix (QB#15): missing required param surfaces -32602 per spec.
+      expect(resp.error?.code).toBe(-32602);
     });
 
     it("handles agents.spawn with task", async () => {
@@ -277,7 +280,8 @@ describe("KairosRPCHandler", () => {
       );
 
       const resp = result as RPCResponse;
-      expect(resp.error?.code).toBe(-32603);
+      // SB-N2 fix (QB#15): missing required param surfaces -32602 per spec.
+      expect(resp.error?.code).toBe(-32602);
     });
 
     it("handles agents.kill with valid id", async () => {
@@ -309,7 +313,8 @@ describe("KairosRPCHandler", () => {
       );
 
       const resp = result as RPCResponse;
-      expect(resp.error?.code).toBe(-32603);
+      // SB-N2 fix (QB#15): missing required param surfaces -32602 per spec.
+      expect(resp.error?.code).toBe(-32602);
     });
 
     it("handles config.get", async () => {

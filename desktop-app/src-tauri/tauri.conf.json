@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npx vite build",
+    "beforeBuildCommand": "npx vite build && node ../scripts/bundle-daemon-for-tauri.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -38,12 +38,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": ["wotann-runtime/**/*"],
     "macOS": {
       "minimumSystemVersion": "13.0",
       "infoPlist": "Info.plist",
       "signingIdentity": null,
       "providerShortName": null,
-      "entitlements": "Entitlements.plist"
+      "entitlements": "Entitlements.mac.plist"
     },
     "android": {
       "minSdkVersion": 24,

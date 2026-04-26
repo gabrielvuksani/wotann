@@ -461,6 +461,47 @@ program
     await runDoctor(process.cwd());
   });
 
+// ── wotann trust (workspace trust ledger — SB-N1) ────────────
+// Without this CLI surface, users silently lose CLAUDE.md / AGENTS.md /
+// .cursorrules loading on every untrusted-workspace prompt.
+program
+  .command("trust [path]")
+  .description("Trust a workspace so CLAUDE.md / AGENTS.md / .cursorrules load")
+  .option("-r, --remove", "Remove the workspace from the trusted set")
+  .option("-l, --list", "List all trusted workspace hashes")
+  .action(async (pathArg: string | undefined, options: { remove?: boolean; list?: boolean }) => {
+    const { trustWorkspace, untrustWorkspace, listTrustedHashes, isWorkspaceTrusted } =
+      await import("./utils/trusted-workspaces.js");
+    if (options.list) {
+      const hashes = listTrustedHashes();
+      if (hashes.length === 0) {
+        console.log("No trusted workspaces.");
+      } else {
+        console.log(`${hashes.length} trusted workspace hash(es):`);
+        for (const h of hashes) console.log(`  ${h}`);
+      }
+      return;
+    }
+    const target = pathArg ?? process.cwd();
+    if (options.remove) {
+      const removed = untrustWorkspace(target);
+      console.log(removed ? chalk.yellow(`Untrusted: ${target}`) : `Not in trusted set: ${target}`);
+      return;
+    }
+    try {
+      const added = trustWorkspace(target);
+      const status = isWorkspaceTrusted(target);
+      console.log(
+        added
+          ? chalk.green(`Trusted: ${target} (${status.hash})`)
+          : `Already trusted: ${target} (${status.hash})`,
+      );
+    } catch (err) {
+      console.log(chalk.red(`error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exit(1);
+    }
+  });
+
 // ── wotann kanban (worktree board — C19) ─────────────────────
 
 program

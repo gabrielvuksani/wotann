@@ -66,11 +66,47 @@ impl SidecarManager {
             .map_err(|e| e.to_string())
     }
 
+    /// SB-N3 fix: locate the daemon bundled into the Tauri .app/.dmg via
+    /// `bundle.resources` in `tauri.conf.json`. The companion script
+    /// `desktop-app/scripts/bundle-daemon-for-tauri.mjs` populates a
+    /// `wotann-runtime/` dir before each Tauri build; Tauri's bundler
+    /// places it at `Contents/Resources/wotann-runtime/` on macOS.
+    /// Without this, end-user DMG installs have no daemon source on disk
+    /// and `source_dir()` falls through to "WOTANN source not found".
+    fn bundled_runtime_dir() -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        // macOS: WOTANN.app/Contents/MacOS/WOTANN -> WOTANN.app/Contents/Resources/wotann-runtime
+        let macos_path = exe
+            .parent()  // Contents/MacOS
+            .and_then(|p| p.parent())  // Contents
+            .map(|p| p.join("Resources").join("wotann-runtime"));
+        if let Some(p) = macos_path.as_ref() {
+            if p.join("dist/daemon/start.js").exists() && p.join("package.json").exists() {
+                return Some(p.clone());
+            }
+        }
+        // Linux/Windows: bundled resources usually sit alongside the exe
+        let neighbor = exe.parent().map(|p| p.join("wotann-runtime"));
+        if let Some(p) = neighbor.as_ref() {
+            if p.join("dist/daemon/start.js").exists() && p.join("package.json").exists() {
+                return Some(p.clone());
+            }
+        }
+        None
+    }
+
     /// Resolve the WOTANN source directory.
     ///
     /// Auto-start avoids probing macOS privacy-protected folders like Desktop.
     /// Explicit install/setup flows can opt into broader discovery.
     fn source_dir(include_protected_dirs: bool) -> Option<PathBuf> {
+        // SB-N3 fix: prefer the daemon bundled with the .app/.dmg over any
+        // external source. A user's local checkout (if any) may be stale or
+        // mismatched with the running desktop binary; the bundled daemon is
+        // the version the .dmg was built against.
+        if let Some(path) = Self::bundled_runtime_dir() {
+            return Some(path);
+        }
         if let Some(path) = Self::configured_source_dir() {
             return Some(path);
         }

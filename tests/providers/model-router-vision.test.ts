@@ -51,11 +51,31 @@ describe("ModelRouter — vision routing (Phase 4 Sprint B2 item 16)", () => {
       expect(decision.model).toBe("gpt-5.4");
     });
 
-    it("falls back to Ollama qwen3.5 when only local available", () => {
-      const router = makeRouter(["ollama"]);
+    it("falls back to Ollama installed model when only local available", () => {
+      // SB-NEW-2 fix (QB#15): the router no longer hardcodes "qwen3.5" —
+      // it picks from the user's installed models. Pass qwen3.5:27b in the
+      // installed list so the router can match it; an empty list now
+      // correctly omits the Ollama candidate entirely (no qwen3.5 ghost).
+      const router = new ModelRouter({
+        availableProviders: new Set(["ollama"]),
+        ollamaModels: ["qwen3.5:27b"],
+      });
       const decision = router.route(makeTask({ requiresVision: true }));
       expect(decision.provider).toBe("ollama");
-      expect(decision.model).toBe("qwen3.5");
+      expect(decision.model).toBe("qwen3.5:27b");
+    });
+
+    it("returns honest 'auto' fallback when only ollama available with NO models installed (SB-NEW-2)", () => {
+      const router = new ModelRouter({
+        availableProviders: new Set(["ollama"]),
+        ollamaModels: [],
+      });
+      const decision = router.route(makeTask({ requiresVision: true }));
+      // The router omits the ollama candidate when no models are installed
+      // (previously it injected the hardcoded "qwen3.5" string and a
+      // subsequent query would 404). The fall-through "auto" string makes
+      // it loud that no real model was selected.
+      expect(decision.model).toBe("auto");
     });
 
     it("skips Gemini when its health is degraded", () => {

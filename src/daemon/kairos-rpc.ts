@@ -503,7 +503,35 @@ type RPCHandler = (params: Record<string, unknown>) => Promise<unknown>;
 const RPC_PARSE_ERROR = -32700;
 const RPC_INVALID_REQUEST = -32600;
 const RPC_METHOD_NOT_FOUND = -32601;
+const RPC_INVALID_PARAMS = -32602;
 const RPC_INTERNAL_ERROR = -32603;
+// Application error range per JSON-RPC 2.0 spec (server-defined: -32000..-32099).
+const RPC_APP_ERROR_BASE = -32000;
+
+/**
+ * SB-N2 fix: structured error code extraction for the dispatcher catch.
+ * Handlers can throw any Error with a numeric `code` field (or use the
+ * exported `JsonRpcError` from src/mcp/mcp-server.ts) to surface a
+ * spec-compliant code instead of collapsing to -32603.
+ */
+function inferRpcErrorCode(error: unknown): number {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code: unknown }).code;
+    if (typeof code === "number") return code;
+  }
+  if (error instanceof Error) {
+    // Lightweight heuristic for handler throws that haven't been tagged
+    // yet: messages mentioning "required" / "invalid params" map to
+    // -32602, "not found" maps to -32000 (app error). Everything else
+    // remains -32603. This keeps the catch honest without forcing a
+    // codebase-wide refactor of every throw site.
+    const msg = error.message;
+    if (/^Method not found:/i.test(msg)) return RPC_METHOD_NOT_FOUND;
+    if (/(required|invalid params|malformed)/i.test(msg)) return RPC_INVALID_PARAMS;
+    if (/(not found|unknown|unavailable|disabled)/i.test(msg)) return RPC_APP_ERROR_BASE;
+  }
+  return RPC_INTERNAL_ERROR;
+}
 
 // ── Codex JWT Verification (B3) ──────────────────────────
 //
@@ -927,7 +955,14 @@ export class KairosRPCHandler {
   // Computer-session keystone store (Phase 3 P1-F1). Per-session state lives here,
   // NOT in module globals (QB #7). Polling subscribers hold a rolling buffer keyed
   // by subscription id; the store owns the canonical event log.
-  private readonly computerSessionStore = new ComputerSessionStore();
+  // SB-NEW-4 fix: persistPath wires SQLite so sessions survive daemon restart.
+  // QB #16 test-isolation: skip persistence under NODE_ENV=test so vitest
+  // runs in pristine in-memory state instead of inheriting prior-run records.
+  private readonly computerSessionStore = new ComputerSessionStore(
+    process.env["NODE_ENV"] === "test"
+      ? {}
+      : { persistPath: resolveWotannHomeSubdir("computer-sessions.sqlite") },
+  );
   private readonly computerSessionSubscriptions = new Map<
     string,
     {
@@ -1002,7 +1037,13 @@ export class KairosRPCHandler {
   // per-session state, not a module global) so tests construct their own.
   // Broadcast is wired in setRuntime once the dispatch plane is available.
   // Polling subscribers buffer events here until a drain call comes in.
-  private readonly approvalQueue = new ApprovalQueue();
+  // SB-NEW-4 fix: persistPath wires SQLite so in-flight approvals survive restart.
+  // QB #16 test-isolation: skip persistence under NODE_ENV=test.
+  private readonly approvalQueue = new ApprovalQueue(
+    process.env["NODE_ENV"] === "test"
+      ? {}
+      : { persistPath: resolveWotannHomeSubdir("approvals.sqlite") },
+  );
   private readonly approvalSubscriptions = new Map<
     string,
     {
@@ -1018,7 +1059,13 @@ export class KairosRPCHandler {
   // itself is usable stand-alone in tests. The subscription map follows
   // the same polling shape as F6 approvals because NDJSON IPC cannot
   // carry long-lived push streams.
-  private readonly fileDelivery = new FileDelivery();
+  // SB-NEW-4 fix: persistPath wires SQLite so deliveries survive restart.
+  // QB #16 test-isolation: skip persistence under NODE_ENV=test.
+  private readonly fileDelivery = new FileDelivery(
+    process.env["NODE_ENV"] === "test"
+      ? {}
+      : { persistPath: resolveWotannHomeSubdir("file-delivery.sqlite") },
+  );
   private readonly deliverySubscriptions = new Map<
     string,
     {
@@ -1043,9 +1090,17 @@ export class KairosRPCHandler {
   // lives on the manager per QB #7. Broadcast is wired in setRuntime once
   // the dispatch plane is available; without a plane the manager still
   // records pending state so surfaces can pull via `liveActivity.pending`.
-  private readonly liveActivity = new LiveActivityManager({
-    store: this.computerSessionStore,
-  });
+  // SB-NEW-4 fix: persistPath ensures the in-flight Live Activity step
+  // survives daemon restart (otherwise iOS Dynamic Island shows stale steps).
+  // QB #16 test-isolation: skip persistence under NODE_ENV=test.
+  private readonly liveActivity = new LiveActivityManager(
+    process.env["NODE_ENV"] === "test"
+      ? { store: this.computerSessionStore }
+      : {
+          store: this.computerSessionStore,
+          persistPath: resolveWotannHomeSubdir("live-activity.sqlite"),
+        },
+  );
   // Polling subscriptions follow the same shape as F6 approvals / F9
   // delivery: NDJSON IPC can't carry long-lived push streams, so the
   // client calls `liveActivity.subscribe` to seed a subscription id then
@@ -1492,9 +1547,14 @@ export class KairosRPCHandler {
       const result = await handler(request.params ?? {});
       return { jsonrpc: "2.0", result, id: request.id };
     } catch (error) {
+      // SB-N2 fix: surface JSON-RPC 2.0 spec-compliant error codes.
+      // Handlers can throw with a numeric `code` field (e.g. JsonRpcError
+      // from mcp-server.ts) to override the catch-all -32603. Untagged
+      // throws fall through inferRpcErrorCode's heuristic.
+      const code = inferRpcErrorCode(error);
       return this.errorResponse(
         request.id,
-        RPC_INTERNAL_ERROR,
+        code,
         error instanceof Error ? error.message : "Internal error",
       );
     }

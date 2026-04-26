@@ -20,6 +20,7 @@ import { promisify } from "node:util";
 import { ChannelGateway, type ChannelMessage } from "../channels/gateway.js";
 import { UnifiedDispatchPlane } from "../channels/unified-dispatch.js";
 import { wrapLegacyAdapter } from "../channels/integration.js";
+import { createAvailableAdapters } from "../channels/auto-detect.js";
 import { RoutePolicyEngine, createDefaultPolicy } from "../channels/route-policies.js";
 import { runWorkspaceDreamIfDue } from "../learning/dream-runner.js";
 import { KairosRPCHandler } from "./kairos-rpc.js";
@@ -1660,6 +1661,38 @@ export class KairosDaemon {
       });
     } catch {
       /* ide bridge not available */
+    }
+
+    // NB-5 fix: register any credentials-discovered adapters that the
+    // hand-curated `selections` switchboard above didn't cover. These are
+    // the 6 channel types whose adapter classes existed but were only
+    // instantiated by `createAvailableAdapters` for credential-based
+    // discovery and never registered with the gateway: Mastodon, WeChat,
+    // Line, Viber, DingTalk, Feishu. Without this loop the gateway code
+    // path is dead for all 6. Skipping types already registered by the
+    // selections switchboard above preserves explicit configuration.
+    try {
+      const alreadyRegistered = new Set(this.gateway.getRegisteredChannels());
+      const extra = createAvailableAdapters();
+      let extraRegistered = 0;
+      for (const result of extra) {
+        if (!result.adapter) continue;
+        if (alreadyRegistered.has(result.type)) continue;
+        try {
+          this.gateway.registerAdapter(wrapLegacyAdapter(result.adapter));
+          extraRegistered += 1;
+        } catch {
+          /* skip on registration failure */
+        }
+      }
+      if (extraRegistered > 0) {
+        this.appendLog({
+          type: "heartbeat",
+          message: `Channel: registered ${extraRegistered} additional credentialed adapter(s) via auto-detect`,
+        });
+      }
+    } catch {
+      /* auto-detect not available or no extra adapters */
     }
 
     // Phase-C wire-up: now that every adapter is registered on the

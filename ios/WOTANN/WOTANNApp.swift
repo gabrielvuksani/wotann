@@ -70,6 +70,28 @@ struct WOTANNApp: App {
                         .onOpenURL { url in
                             handleDeepLink(url)
                         }
+                        // SB-N5 fix: Continuity / Universal Links handler.
+                        // Fires when iOS hands the app a NSUserActivity from
+                        // Handoff (another device), Spotlight (search-result tap),
+                        // or a Universal Link tap that resolves via the AASA
+                        // file at https://wotann.com/.well-known/apple-app-site-association.
+                        // The activity types matched here MUST also be listed
+                        // in Info.plist's NSUserActivityTypes array.
+                        .onContinueUserActivity("com.wotann.conversation") { userActivity in
+                            handleContinueConversation(userActivity)
+                        }
+                        .onContinueUserActivity("com.wotann.pair") { userActivity in
+                            handleContinuePairing(userActivity)
+                        }
+                        .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
+                            // Universal Link path — resolves to a wotann.com URL
+                            // if AASA is deployed. Route through the same deep-link
+                            // handler so https://wotann.com/conversation/<id> and
+                            // wotann://conversation/<id> share routing logic.
+                            if let url = userActivity.webpageURL {
+                                handleDeepLink(url)
+                            }
+                        }
                         .sheet(isPresented: $appState.showMeetModeSheet) {
                             MeetModeView()
                                 .environmentObject(appState)
@@ -151,6 +173,21 @@ struct WOTANNApp: App {
         // which fails with NECP address-in-use if the app relaunches quickly or
         // a second instance is running (e.g. simulator + device).
         connectionManager.autoDiscover()
+
+        // SB-NEW-5 fix: rehydrate in-flight Live Activities so the Dynamic
+        // Island stops showing stale steps from a prior launch. The manager
+        // probes ActivityKit for live activities, rebuilds its in-memory
+        // registry, and asks the daemon (when reachable) to verify which
+        // remain in-flight. Idempotent + safe to call without an RPC client.
+        Task { @MainActor in
+            await LiveActivityManager.shared.restoreActivities(client: connectionManager.rpcClient)
+        }
+
+        // SB-N6 fix: register BGTaskScheduler identifiers so the `processing`
+        // UIBackgroundMode in Info.plist is BACKED by code. Apple App Review
+        // (guideline 2.5.4) rejects unbacked background mode claims. The
+        // coordinator self-schedules its own next firing on each invocation.
+        BackgroundTaskCoordinator.shared.registerTasks()
 
         // Debug-only: if the test runner / fastlane passes
         // `WOTANN_DIAG_DUMP_AT_LAUNCH=1` we open the diagnostic share sheet
@@ -297,6 +334,35 @@ struct WOTANNApp: App {
 
         appState.activeTab = 2  // Agents tab
         appState.deepLinkAgentId = uuid
+    }
+
+    // MARK: - Continuity / Universal Links handlers (SB-N5 fix)
+
+    /// Resume a conversation handed off from another device (Mac, iPad,
+    /// Spotlight tap). The other device wraps the conversation id in
+    /// `userInfo["conversationId"]` per Apple's NSUserActivity contract.
+    private func handleContinueConversation(_ activity: NSUserActivity) {
+        guard let conversationIdString = activity.userInfo?["conversationId"] as? String,
+              let uuid = UUID(uuidString: conversationIdString) else { return }
+        appState.activeTab = 0  // Conversations tab
+        appState.activeConversationId = uuid
+    }
+
+    /// Resume a pairing handshake handed off from another device. Reuses
+    /// the same pairing payload shape as wotann://pair URLs so callers
+    /// can hand off mid-flow without re-entering pin/host/port.
+    private func handleContinuePairing(_ activity: NSUserActivity) {
+        guard let userInfo = activity.userInfo,
+              let pin = userInfo["pin"] as? String,
+              let host = userInfo["host"] as? String,
+              let port = userInfo["port"] as? Int else { return }
+        let info = ConnectionManager.PairingInfo(
+            id: (userInfo["id"] as? String) ?? UUID().uuidString,
+            pin: pin,
+            host: host,
+            port: port
+        )
+        Task { try? await connectionManager.pair(with: info) }
     }
 }
 

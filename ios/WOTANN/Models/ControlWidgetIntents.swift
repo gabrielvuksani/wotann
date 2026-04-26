@@ -136,12 +136,94 @@ struct OpenCostDialogIntent: AppIntent {
     }
 }
 
-// MARK: - App Shortcuts (main-app side)
+// MARK: - Writing Tools / Ask deep-link Intents (SB-N4 main-app side)
+//
+// SB-N4 fix: iOS only honors a SINGLE `AppShortcutsProvider` per app target.
+// The intent extension (WOTANNIntents) used to declare its own provider
+// (AskWOTANNShortcuts) — iOS silently ignored it because the main app's
+// WOTANNControlAppShortcuts wins. To surface the Ask/Rewrite/Summarize/Expand
+// shortcuts to Siri + Spotlight + App Library, we declare deep-link intents
+// here in the main target and add them to WOTANNControlAppShortcuts.
+//
+// Each deep-link intent foregrounds the app and writes a UserDefaults key
+// in the App Group; the main-app scene-activation handler reads the key
+// and navigates to the right view (mirrors the OpenCostDialogIntent pattern).
+// The actual prompt/rewrite/summarize/expand logic still lives in the
+// extension's intents (AskWOTANNIntent, RewriteWithWOTANNIntent, etc.) —
+// THOSE are reachable via Apple Intelligence Writing Tools, App Intents API,
+// and the IntentsSupported plist — they just aren't AppShortcut-discoverable
+// any more (the extension's AppShortcutsProvider was dead anyway).
 
-/// AppShortcut entries make the four control intents discoverable from
-/// Spotlight + AppShortcuts UI without the user needing to add the
-/// Control Widget. Each phrase is the natural-language trigger Siri
-/// will accept.
+@available(iOS 18.0, *)
+struct AskWOTANNFromShortcutIntent: AppIntent {
+    nonisolated(unsafe) static var title: LocalizedStringResource = "Ask WOTANN"
+    nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
+        "Open WOTANN to ask a question.",
+        categoryName: "Chat"
+    )
+    nonisolated(unsafe) static var openAppWhenRun: Bool = true
+    init() {}
+    func perform() async throws -> some IntentResult {
+        let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
+        defaults.set(Date().timeIntervalSince1970, forKey: "control.ask.requestedAt")
+        return .result()
+    }
+}
+
+@available(iOS 18.0, *)
+struct RewriteWithWOTANNFromShortcutIntent: AppIntent {
+    nonisolated(unsafe) static var title: LocalizedStringResource = "Rewrite with WOTANN"
+    nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
+        "Open WOTANN to rewrite text.",
+        categoryName: "Writing Tools"
+    )
+    nonisolated(unsafe) static var openAppWhenRun: Bool = true
+    init() {}
+    func perform() async throws -> some IntentResult {
+        let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
+        defaults.set(Date().timeIntervalSince1970, forKey: "control.rewrite.requestedAt")
+        return .result()
+    }
+}
+
+@available(iOS 18.0, *)
+struct SummarizeWithWOTANNFromShortcutIntent: AppIntent {
+    nonisolated(unsafe) static var title: LocalizedStringResource = "Summarize with WOTANN"
+    nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
+        "Open WOTANN to summarize text.",
+        categoryName: "Writing Tools"
+    )
+    nonisolated(unsafe) static var openAppWhenRun: Bool = true
+    init() {}
+    func perform() async throws -> some IntentResult {
+        let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
+        defaults.set(Date().timeIntervalSince1970, forKey: "control.summarize.requestedAt")
+        return .result()
+    }
+}
+
+@available(iOS 18.0, *)
+struct ExpandWithWOTANNFromShortcutIntent: AppIntent {
+    nonisolated(unsafe) static var title: LocalizedStringResource = "Expand with WOTANN"
+    nonisolated(unsafe) static var description: IntentDescription = IntentDescription(
+        "Open WOTANN to expand text.",
+        categoryName: "Writing Tools"
+    )
+    nonisolated(unsafe) static var openAppWhenRun: Bool = true
+    init() {}
+    func perform() async throws -> some IntentResult {
+        let defaults = UserDefaults(suiteName: sharedGroupID) ?? .standard
+        defaults.set(Date().timeIntervalSince1970, forKey: "control.expand.requestedAt")
+        return .result()
+    }
+}
+
+// MARK: - App Shortcuts (main-app side — SINGLE source per iOS rule)
+
+/// SB-N4 fix: this is the ONE AND ONLY AppShortcutsProvider for the WOTANN
+/// app. iOS rejects multiple providers per target — the extension's
+/// previous AskWOTANNShortcuts was silently ignored. All user-facing
+/// Siri/Spotlight shortcuts MUST be declared here.
 @available(iOS 18.0, *)
 struct WOTANNControlAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
@@ -171,6 +253,43 @@ struct WOTANNControlAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Cost",
             systemImageName: "dollarsign.circle.fill"
+        )
+        AppShortcut(
+            intent: AskWOTANNFromShortcutIntent(),
+            phrases: [
+                "Ask \(.applicationName) a question",
+                "Send a message to \(.applicationName)",
+                "Query \(.applicationName)",
+            ],
+            shortTitle: "Ask WOTANN",
+            systemImageName: "w.circle.fill"
+        )
+        AppShortcut(
+            intent: RewriteWithWOTANNFromShortcutIntent(),
+            phrases: [
+                "Rewrite with \(.applicationName)",
+                "Have \(.applicationName) rewrite this",
+            ],
+            shortTitle: "Rewrite with WOTANN",
+            systemImageName: "pencil.and.outline"
+        )
+        AppShortcut(
+            intent: SummarizeWithWOTANNFromShortcutIntent(),
+            phrases: [
+                "Summarize with \(.applicationName)",
+                "Have \(.applicationName) summarize this",
+            ],
+            shortTitle: "Summarize with WOTANN",
+            systemImageName: "text.redaction"
+        )
+        AppShortcut(
+            intent: ExpandWithWOTANNFromShortcutIntent(),
+            phrases: [
+                "Expand with \(.applicationName)",
+                "Have \(.applicationName) expand this",
+            ],
+            shortTitle: "Expand with WOTANN",
+            systemImageName: "text.append"
         )
     }
 }

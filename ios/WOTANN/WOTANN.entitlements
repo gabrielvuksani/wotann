@@ -51,16 +51,29 @@
     <key>com.apple.developer.carplay-audio</key>
     <true/>
     <!--
-        Universal links / push deep linking. The actual associated domains
-        list MUST be edited per environment before App Review and the
-        matching .well-known/apple-app-site-association file MUST be
-        served from each domain. Default scaffold below; flip `?mode=developer`
-        once the production AASA file is published.
+        SB-N5 fix: production-mode Universal Links + WebAuthn web credentials.
+        `?mode=developer` was a temporary scaffold that let dev builds skip
+        AASA validation; production builds REQUIRE the file to live at
+        https://wotann.com/.well-known/apple-app-site-association with
+        Content-Type: application/json. USER ACTION required before TestFlight:
+        deploy the AASA JSON to that URL with the schema:
+          {
+            "applinks": {
+              "apps": [],
+              "details": [{
+                "appID": "TEAMID.com.wotann.ios",
+                "paths": ["/share/*", "/conversation/*", "/pair/*"]
+              }]
+            },
+            "webcredentials": { "apps": ["TEAMID.com.wotann.ios"] }
+          }
+        Without the file, Universal Links resolve to Safari and the
+        `onContinueUserActivity` handler in WOTANNApp.swift never fires.
     -->
     <key>com.apple.developer.associated-domains</key>
     <array>
-        <string>applinks:wotann.com?mode=developer</string>
-        <string>webcredentials:wotann.com?mode=developer</string>
+        <string>applinks:wotann.com</string>
+        <string>webcredentials:wotann.com</string>
     </array>
     <key>com.apple.developer.healthkit</key>
     <true/>

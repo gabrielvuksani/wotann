@@ -156,17 +156,16 @@ export async function getOllamaModelContextWindow(
 }
 
 /**
- * Map installed Ollama models to routing tiers.
+ * Map installed Ollama models to routing tiers (by string name).
+ * Vendor-neutral: only matches generic family substrings; never injects names not in the input list.
  */
-export function mapOllamaModels(models: readonly OllamaModel[]): {
+export function pickOllamaDefaultsByName(names: readonly string[]): {
   coding: string | null;
   reasoning: string | null;
   efficient: string | null;
   general: string | null;
   fallback: string | null;
 } {
-  const names = models.map((m) => m.name);
-
   return {
     coding:
       names.find(
@@ -183,7 +182,23 @@ export function mapOllamaModels(models: readonly OllamaModel[]): {
   };
 }
 
-export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"): ProviderAdapter {
+/**
+ * Map installed Ollama models to routing tiers.
+ */
+export function mapOllamaModels(models: readonly OllamaModel[]): {
+  coding: string | null;
+  reasoning: string | null;
+  efficient: string | null;
+  general: string | null;
+  fallback: string | null;
+} {
+  return pickOllamaDefaultsByName(models.map((m) => m.name));
+}
+
+export function createOllamaAdapter(
+  baseUrl: string = "http://localhost:11434",
+  installedModels: readonly string[] = [],
+): ProviderAdapter {
   const capabilities: ProviderCapabilities = {
     supportsComputerUse: false,
     supportsToolCalling: true,
@@ -197,7 +212,16 @@ export function createOllamaAdapter(baseUrl: string = "http://localhost:11434"):
   };
 
   async function* query(options: UnifiedQueryOptions): AsyncGenerator<StreamChunk> {
-    const model = options.model ?? "qwen3.5";
+    // SB-NEW-2 fix: no qwen3.5 hardcode. Caller-provided model wins; otherwise
+    // fall back to the user's first installed model. Throw a clear error when
+    // neither is available so the failure is loud, not silent (QB#10).
+    const model = options.model ?? installedModels[0];
+    if (!model) {
+      throw new Error(
+        "ollama-adapter: no model specified and no installed Ollama models discovered. " +
+          "Run `ollama pull <model>` (e.g. `ollama pull qwen3-coder`) or pass options.model explicitly.",
+      );
+    }
 
     // Use Ollama's native /api/chat endpoint (NOT /v1/chat/completions)
     const url = `${baseUrl}/api/chat`;

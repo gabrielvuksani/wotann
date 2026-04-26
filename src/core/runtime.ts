@@ -100,7 +100,7 @@ import type { FileInfo } from "../intelligence/context-relevance.js";
 import { ResponseValidator } from "../intelligence/response-validator.js";
 import { ResponseCache } from "../middleware/response-cache.js";
 import type { CacheableQuery } from "../middleware/response-cache.js";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from "node:fs";
 import {
   buildOverrideDirective,
@@ -1949,9 +1949,15 @@ export class WotannRuntime {
           this.providerBilling.set(auth.provider, auth.billing);
         }
       }
-      const firstProvider = providers[0];
-      if (firstProvider) {
-        this.session = createSession(firstProvider.provider, firstProvider.models[0] ?? "auto");
+      // SB-NEW-3 fix: prefer user-specified bootstrap provider (config.defaultProvider
+      // or WOTANN_DEFAULT_PROVIDER env, captured in this.session.provider during the
+      // constructor) over the arbitrary first-discovered provider. Without this guard
+      // `WOTANN_DEFAULT_PROVIDER=ollama` got silently overridden to whichever provider
+      // discovery returned first (typically "anthropic" by priority).
+      const userPreferred = providers.find((p) => p.provider === this.session.provider);
+      const chosen = userPreferred ?? providers[0];
+      if (chosen) {
+        this.session = createSession(chosen.provider, chosen.models[0] ?? "auto");
         this.contextIntelligence.adaptToProvider(this.session.provider, this.session.model);
       }
     }
@@ -5537,10 +5543,7 @@ export class WotannRuntime {
    * dir so per-project graphs stay isolated.
    */
   private knowledgeGraphPath(): string {
-    // Late-require node:path to avoid a top-level import churn.
-    // Safe inside WotannRuntime methods (always runs in Node).
-    const path = require("node:path") as typeof import("node:path");
-    return path.join(this.config.workingDir, ".wotann", "knowledge-graph.json");
+    return join(this.config.workingDir, ".wotann", "knowledge-graph.json");
   }
 
   /**
@@ -5577,9 +5580,8 @@ export class WotannRuntime {
    */
   async persistKnowledgeGraph(): Promise<void> {
     const fs = await import("node:fs/promises");
-    const path = await import("node:path");
     const target = this.knowledgeGraphPath();
-    const dir = path.dirname(target);
+    const dir = dirname(target);
     const tmp = `${target}.tmp.${process.pid}.${Date.now()}`;
     let renamed = false;
     try {

@@ -1,4 +1,11 @@
 import Foundation
+#if canImport(CoreSpotlight)
+import CoreSpotlight
+#endif
+#if canImport(MobileCoreServices)
+import MobileCoreServices
+#endif
+import UniformTypeIdentifiers
 
 // MARK: - ConversationStore
 
@@ -11,6 +18,11 @@ final class ConversationStore {
     private let conversationsKey = "wotann.cached.conversations"
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+
+    /// SB-N5 fix: Spotlight domain identifier so `CSSearchableIndex.default()`
+    /// can scope index/delete operations to WOTANN's conversation surface
+    /// without touching other indexed content (e.g. messages or skills).
+    private let spotlightDomain = "com.wotann.conversation"
 
     private init() {
         encoder.dateEncodingStrategy = .iso8601
@@ -43,11 +55,49 @@ final class ConversationStore {
             all.insert(conversation, at: 0)
         }
         saveConversations(all)
+        indexInSpotlight(conversation)
     }
 
     func removeConversation(id: UUID) {
         let filtered = loadConversations().filter { $0.id != id }
         saveConversations(filtered)
+        deindexFromSpotlight(id: id)
+    }
+
+    // MARK: - Spotlight (SB-N5 fix)
+
+    /// Index a conversation in CoreSpotlight so users can find it via
+    /// the system search bar. Each entry is a CSSearchableItem with the
+    /// conversation title + message preview as text content, scoped to
+    /// our `spotlightDomain` so it can be wiped on logout/clear without
+    /// touching other indexed content.
+    ///
+    /// Honest no-op (QB#6) if CoreSpotlight is unavailable. Failures are
+    /// logged at debug level — Spotlight indexing is not critical-path.
+    func indexInSpotlight(_ conversation: Conversation) {
+        #if canImport(CoreSpotlight)
+        let attrs = CSSearchableItemAttributeSet(contentType: UTType.text)
+        attrs.title = conversation.title
+        attrs.contentDescription = conversation.preview
+        attrs.contentCreationDate = conversation.createdAt
+        attrs.contentModificationDate = conversation.updatedAt
+        let item = CSSearchableItem(
+            uniqueIdentifier: conversation.id.uuidString,
+            domainIdentifier: spotlightDomain,
+            attributeSet: attrs
+        )
+        CSSearchableIndex.default().indexSearchableItems([item]) { _ in
+            // Indexing is best-effort. Failures don't block save.
+        }
+        #endif
+    }
+
+    func deindexFromSpotlight(id: UUID) {
+        #if canImport(CoreSpotlight)
+        CSSearchableIndex.default().deleteSearchableItems(
+            withIdentifiers: [id.uuidString]
+        ) { _ in }
+        #endif
     }
 
     // MARK: - Utilities

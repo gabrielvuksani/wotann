@@ -168,7 +168,103 @@ behavior; if the GitHub team ships a fix, this section can be removed.
 
 ---
 
-## 6. Secret rotation calendar
+## 6. SB-N7 — Tauri auto-updater pubkey (REQUIRED for self-update flow)
+
+`desktop-app/src-tauri/tauri.conf.json:61` currently has:
+
+```json
+"pubkey": "TODO-USER-ACTION-GENERATE-VIA-tauri-signer-generate"
+```
+
+This placeholder makes the Tauri auto-updater REJECT every update because
+no signature can verify against a non-PEM public key. End users see "Update
+failed" indefinitely.
+
+### Fix
+```bash
+cd desktop-app/src-tauri
+npx @tauri-apps/cli signer generate
+# Outputs:
+#   ~/.tauri/wotann.key       (private — STORE IN 1PASSWORD, NEVER COMMIT)
+#   ~/.tauri/wotann.key.pub   (public  — paste content into pubkey below)
+```
+
+Open `~/.tauri/wotann.key.pub`, copy the entire base64 content (it starts
+with `untrusted comment: minisign public key:` followed by the key string),
+and paste **only the key string** into `tauri.conf.json:61`. Per Tauri 2.x
+docs, the `pubkey` field MUST contain the literal PEM/minisign content,
+NOT a file path.
+
+The private key (`~/.tauri/wotann.key`) is used by `npm run release` /
+the `tauri-action` CI step to sign each new release artifact. Store it
+in the project's secrets manager (1Password, Bitwarden, GitHub Actions
+Secret as `TAURI_SIGNING_PRIVATE_KEY`). Apple App Notary Service is a
+separate concern — see SB-N10 below.
+
+## 7. SB-N8 — macOS code signing identity (REQUIRED for DMG distribution)
+
+`desktop-app/src-tauri/tauri.conf.json:44` currently has:
+
+```json
+"signingIdentity": null
+```
+
+With `null`, Tauri produces an unsigned `.app` / `.dmg`. Gatekeeper rejects
+unsigned binaries with the "WOTANN can't be opened because it's from an
+unidentified developer" warning. Notarization (SB-N10) requires a signed
+binary as input.
+
+### Fix
+```bash
+# 1. List your Developer ID Application certificates:
+security find-identity -v -p codesigning
+# Look for an entry like:
+#   "Developer ID Application: Gabriel Vuksani (TEAMID12)"
+
+# 2. Edit desktop-app/src-tauri/tauri.conf.json:
+#    "signingIdentity": "Developer ID Application: Gabriel Vuksani (TEAMID12)"
+#                                                                   ^^^^^^^^^^
+#                                                                   your team ID
+```
+
+If you do NOT have a Developer ID Application certificate yet:
+1. Go to https://developer.apple.com/account/resources/certificates/list
+2. Apple Developer Program membership ($99/year) required
+3. Click `+`, choose "Developer ID Application", follow the CSR upload flow
+4. Download the .cer + double-click to install in Keychain Access
+5. Re-run `security find-identity -v -p codesigning` to confirm
+
+The corresponding `Entitlements.mac.plist` (created in TIER 0 fix) declares
+the Hardened Runtime entitlements required for notarization. Do NOT remove
+it — `xcrun notarytool` rejects DMG submissions without Hardened Runtime.
+
+## 8. SB-N10 — macOS notarization workflow (REQUIRED before TestFlight/distribution)
+
+After SB-N7 + SB-N8 are configured, every release DMG must additionally
+be submitted to Apple's App Notary Service:
+
+```bash
+# Set env vars (use 1Password / GitHub Secrets for these):
+export APPLE_ID="you@apple.example.com"
+export APPLE_TEAM_ID="TEAMID12"
+export APPLE_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"  # app-specific from appleid.apple.com
+
+# After tauri build, submit + staple:
+scripts/release/notarize-macos.sh \
+  desktop-app/src-tauri/target/release/bundle/dmg/WOTANN_*.dmg
+```
+
+The script (created in TIER 0 fix) wraps `xcrun notarytool submit --wait`
++ `xcrun stapler staple` + `xcrun stapler validate`. Submission typically
+takes 1-15 minutes. After success the .dmg has a stapled ticket so
+Gatekeeper accepts it offline.
+
+Notarization is REQUIRED since macOS 10.15 (Catalina) for binaries
+distributed outside the Mac App Store. Without it, every download triggers
+a "macOS cannot verify that this app is free of malware" prompt that can't
+be dismissed by right-click-Open since macOS Sonoma (14.0).
+
+## 9. Secret rotation calendar
 
 | Secret                       | Cadence  | Reminder source                           |
 | ---------------------------- | -------- | ----------------------------------------- |

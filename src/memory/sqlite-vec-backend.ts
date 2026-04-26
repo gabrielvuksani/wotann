@@ -36,6 +36,7 @@
  */
 
 import type Database from "better-sqlite3";
+import { initSqliteStore } from "../utils/sqlite-store-init.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -121,6 +122,14 @@ export function createSqliteVecBackend(config: SqliteVecBackendConfig): SqliteVe
     throw new Error(`sqlite-vec: invalid tableName "${table}" (alnum + _ only)`);
   }
   const idsTable = `${table}_ids`;
+
+  // SB-N9 fix: enable WAL + standard pragma profile BEFORE the first write.
+  // Without WAL, sqlite-vec writes use the rollback-journal mode, which loses
+  // partially-written rows on crash mid-write. WAL writes go to a separate
+  // wal file that's atomic per-frame; on restart SQLite replays unflushed
+  // frames so no vector data is lost. See utils/sqlite-store-init.ts for the
+  // full pragma rationale.
+  initSqliteStore(config.db);
 
   // Load extension on this db. If it fails, throw a caller-friendly
   // error with an install hint rather than a cryptic binding error.

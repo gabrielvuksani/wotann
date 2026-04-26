@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+    Entitlements.mac.plist — SB-N8 fix.
+
+    macOS-specific entitlements for the WOTANN desktop app, including the
+    Hardened Runtime entitlements required by Apple notarization
+    (xcrun notarytool, see scripts/release/notarize-macos.sh).
+
+    Reference: https://developer.apple.com/documentation/security/hardened_runtime
+
+    Notarization gate (Apple App Notary Service) rejects any macOS app
+    that does NOT enable Hardened Runtime. Tauri 2.x apps additionally
+    need:
+      * cs.disable-library-validation — sidecar.rs spawns the bundled
+        daemon as a child Node process (see SB-N3). Without this, the
+        OS refuses to dlopen any dylib not signed by the same Team ID
+        as the parent (better-sqlite3, magika, onnxruntime-node).
+      * cs.allow-jit + cs.allow-unsigned-executable-memory — the WebKit
+        WebView the desktop UI runs inside JIT-compiles JavaScript.
+        Without these, the WebView crashes on first JS execution.
+      * cs.disable-executable-page-protection — required by certain
+        Node native modules that mprotect() pages mid-execution.
+
+    NOTE: app-sandbox is intentionally NOT enabled here. Tauri sidecar
+    spawn + daemon socket access (Unix domain socket at ~/.wotann/kairos.sock)
+    are incompatible with the App Sandbox container. WOTANN is distributed
+    via Developer ID outside the Mac App Store, so MAS sandbox isn't
+    required. If/when we ship to the Mac App Store, a separate
+    Entitlements.mas.plist with app-sandbox enabled is needed.
+-->
+<dict>
+    <!-- Hardened Runtime base — required for notarization -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.disable-executable-page-protection</key>
+    <true/>
+
+    <!-- Network: WebSocket to the daemon + outbound HTTPS to providers -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <!-- File access: user-selected files (open dialogs) + Documents/Downloads -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- Inherit when spawning child processes (daemon sidecar) -->
+    <key>com.apple.security.inherit</key>
+    <true/>
+</dict>
+</plist>

@@ -66,7 +66,7 @@ export function createProviderInfrastructure(
         adapters.set("copilot", createCopilotAdapter(auth.token));
         break;
       case "ollama":
-        adapters.set("ollama", createOllamaAdapter(auth.token));
+        adapters.set("ollama", createOllamaAdapter(auth.token, auth.models));
         ollamaModels.push(...auth.models);
         break;
       case "free": {

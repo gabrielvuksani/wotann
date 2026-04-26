@@ -34,55 +34,18 @@ struct AskWOTANNIntent: AppIntent {
     }
 }
 
-// MARK: - AskWOTANN Shortcuts Provider
+// MARK: - SB-N4 fix: AskWOTANNShortcuts DELETED
 //
-// T7.5 — iOS only allows a single `AppShortcutsProvider` per app target.
-// This provider aggregates every user-facing shortcut WOTANN exposes:
-// the original Ask shortcut plus the three Writing Tools intents
-// (Rewrite / Summarize / Expand) that surface in the Apple Intelligence
-// Writing Tools menu on any text selection.
-
-struct AskWOTANNShortcuts: AppShortcutsProvider {
-    static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: AskWOTANNIntent(),
-            phrases: [
-                "Ask \(.applicationName) a question",
-                "Send a message to \(.applicationName)",
-                "Query \(.applicationName)",
-            ],
-            shortTitle: "Ask WOTANN",
-            systemImageName: "w.circle.fill"
-        )
-        AppShortcut(
-            intent: RewriteWithWOTANNIntent(),
-            phrases: [
-                "Rewrite with \(.applicationName)",
-                "Rewrite this with \(.applicationName)",
-                "Have \(.applicationName) rewrite this",
-            ],
-            shortTitle: "Rewrite with WOTANN",
-            systemImageName: "pencil.and.outline"
-        )
-        AppShortcut(
-            intent: SummarizeWithWOTANNIntent(),
-            phrases: [
-                "Summarize with \(.applicationName)",
-                "Summarize this with \(.applicationName)",
-                "Have \(.applicationName) summarize this",
-            ],
-            shortTitle: "Summarize with WOTANN",
-            systemImageName: "text.redaction"
-        )
-        AppShortcut(
-            intent: ExpandWithWOTANNIntent(),
-            phrases: [
-                "Expand with \(.applicationName)",
-                "Expand this with \(.applicationName)",
-                "Have \(.applicationName) expand this",
-            ],
-            shortTitle: "Expand with WOTANN",
-            systemImageName: "text.append"
-        )
-    }
-}
+// iOS only allows a single `AppShortcutsProvider` per app target. The
+// previous `AskWOTANNShortcuts` here was a SHADOW DUPLICATE — iOS picked
+// the main-app `WOTANNControlAppShortcuts` and silently ignored this one,
+// so the four shortcut entries (Ask/Rewrite/Summarize/Expand) never
+// surfaced in Siri/Spotlight/App Library.
+//
+// The fix lives in `ios/WOTANN/Models/ControlWidgetIntents.swift`:
+// the canonical provider now includes deep-link variants of all 7
+// shortcuts that route into the main app via App Group UserDefaults,
+// mirroring the existing OpenCostDialogIntent pattern. The intents in
+// THIS file (AskWOTANNIntent + RewriteWithWOTANNIntent + ...) remain
+// reachable via the App Intents API and Apple Intelligence Writing Tools
+// menu (registered via IntentsSupported in WOTANNIntents/Info.plist).

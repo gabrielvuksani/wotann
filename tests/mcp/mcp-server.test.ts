@@ -134,7 +134,9 @@ describe("WotannMcpServer — tools/call", () => {
       JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: {} }),
     );
     const parsed = JSON.parse(response!);
-    expect(parsed.error.code).toBe(-32603);
+    // SB-N2: missing required param surfaces -32602 (invalid params), not -32603.
+    // Prior assertion codified the spec-violation bug per QB#15.
+    expect(parsed.error.code).toBe(-32602);
   });
 });
 
@@ -159,6 +161,8 @@ describe("WotannMcpServer — protocol errors", () => {
       JSON.stringify({ jsonrpc: "2.0", id: 5, method: "made-up-method" }),
     );
     const parsed = JSON.parse(response!);
+    // SB-N2: method not implemented surfaces -32601 (method not found) per JSON-RPC 2.0 spec.
+    expect(parsed.error.code).toBe(-32601);
     expect(parsed.error.message).toContain("not implemented");
   });
 });

@@ -15,6 +15,7 @@ import type { ProviderName, RoutingDecision, TaskDescriptor, ModelTier } from ".
 import type { ProviderHealthScore } from "./types.js";
 import type { RepoModelOutcome, RepoModelPerformanceRecord } from "./model-performance.js";
 import { PROVIDER_DEFAULTS } from "./model-defaults.js";
+import { pickOllamaDefaultsByName } from "./ollama-adapter.js";
 import {
   decideModel,
   buildTierMap,
@@ -41,11 +42,10 @@ const VERTEX_DEFAULTS = PROVIDER_DEFAULTS["vertex"]!;
 const COPILOT_CLAUDE_SONNET_ALIAS = "claude-sonnet-4-copilot";
 const COPILOT_GPT_ALIAS = "gpt-5-copilot";
 
-// Ollama coder default — chosen at routing time when the user has Ollama
-// installed and the task category is "code". Future: derive from the
-// installed model list rather than hardcoding.
-const OLLAMA_CODER_DEFAULT = "qwen3-coder-next";
-const OLLAMA_VISION_DEFAULT = "qwen3.5";
+// SB-NEW-2 fix: no qwen3-coder-next / qwen3.5 hardcodes. Ollama defaults
+// are derived from the user's actual installed model list via
+// pickOllamaDefaultsByName. The router refuses to suggest Ollama when the
+// user has no installed models (the candidate is omitted from findBestAvailable).
 
 interface RouterConfig {
   readonly availableProviders: ReadonlySet<ProviderName>;
@@ -260,11 +260,15 @@ export class ModelRouter {
   private routeInner(task: TaskDescriptor): RoutingDecision {
     // BUDGET ENFORCEMENT: if budget exceeded, force free providers only
     if (this.isBudgetExceeded()) {
-      return this.findBestAvailable([
-        { provider: "ollama", model: OLLAMA_CODER_DEFAULT, tier: 1 },
-        { provider: "gemini", model: GEMINI_DEFAULTS.workerModel, tier: 1 },
-        { provider: "free", model: "auto", tier: 1 },
-      ]);
+      return this.findBestAvailable(
+        this.withOllamaCandidate(
+          [
+            { provider: "gemini", model: GEMINI_DEFAULTS.workerModel, tier: 1 },
+            { provider: "free", model: "auto", tier: 1 },
+          ],
+          "coding",
+        ),
+      );
     }
 
     // Tier 0: WASM bypass (handled externally — router doesn't handle this)
@@ -295,13 +299,17 @@ export class ModelRouter {
     // Fall through to paid Claude/GPT only when Gemini is unavailable or
     // health-degraded. Phase 4 Sprint B2 item 16: vision-model routing.
     if (task.requiresVision) {
-      return this.findBestAvailable([
-        { provider: "gemini", model: GEMINI_DEFAULTS.defaultModel, tier: 1 },
-        { provider: "vertex", model: VERTEX_DEFAULTS.defaultModel, tier: 1 },
-        { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
-        { provider: "openai", model: OPENAI_DEFAULTS.oracleModel, tier: 2 },
-        { provider: "ollama", model: OLLAMA_VISION_DEFAULT, tier: 1 },
-      ]);
+      return this.findBestAvailable(
+        this.withOllamaCandidate(
+          [
+            { provider: "gemini", model: GEMINI_DEFAULTS.defaultModel, tier: 1 },
+            { provider: "vertex", model: VERTEX_DEFAULTS.defaultModel, tier: 1 },
+            { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
+            { provider: "openai", model: OPENAI_DEFAULTS.oracleModel, tier: 2 },
+          ],
+          "vision",
+        ),
+      );
     }
 
     // Long-context (>128k est. tokens) → Gemini's default (1M context free).
@@ -317,12 +325,16 @@ export class ModelRouter {
 
     // Tier 2: Fast frontier for coding/execution
     if (task.priority === "latency" || task.category === "code") {
-      return this.findBestAvailable([
-        { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
-        { provider: "copilot", model: COPILOT_CLAUDE_SONNET_ALIAS, tier: 2 },
-        { provider: "openai", model: OPENAI_DEFAULTS.workerModel, tier: 2 },
-        { provider: "ollama", model: OLLAMA_CODER_DEFAULT, tier: 1 },
-      ]);
+      return this.findBestAvailable(
+        this.withOllamaCandidate(
+          [
+            { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
+            { provider: "copilot", model: COPILOT_CLAUDE_SONNET_ALIAS, tier: 2 },
+            { provider: "openai", model: OPENAI_DEFAULTS.workerModel, tier: 2 },
+          ],
+          "coding",
+        ),
+      );
     }
 
     // Tier 3: Deep frontier for planning/review
@@ -335,13 +347,17 @@ export class ModelRouter {
     }
 
     // Default: balanced selection
-    return this.findBestAvailable([
-      { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
-      { provider: "openai", model: OPENAI_DEFAULTS.workerModel, tier: 2 },
-      { provider: "copilot", model: COPILOT_CLAUDE_SONNET_ALIAS, tier: 2 },
-      { provider: "gemini", model: GEMINI_DEFAULTS.workerModel, tier: 2 },
-      { provider: "ollama", model: OLLAMA_CODER_DEFAULT, tier: 1 },
-    ]);
+    return this.findBestAvailable(
+      this.withOllamaCandidate(
+        [
+          { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
+          { provider: "openai", model: OPENAI_DEFAULTS.workerModel, tier: 2 },
+          { provider: "copilot", model: COPILOT_CLAUDE_SONNET_ALIAS, tier: 2 },
+          { provider: "gemini", model: GEMINI_DEFAULTS.workerModel, tier: 2 },
+        ],
+        "general",
+      ),
+    );
   }
 
   // ── Health Scoring ──────────────────────────────────────────
@@ -499,6 +515,34 @@ export class ModelRouter {
     }
 
     return models[0] ?? null;
+  }
+
+  /**
+   * SB-NEW-2 fix: build a tier-1 Ollama candidate ONLY when the user has
+   * installed models. Picks the best fit for the role from the installed
+   * list (no qwen3-coder-next / qwen3.5 hardcodes). Returns null when no
+   * Ollama models are installed so the candidate is omitted from the
+   * findBestAvailable race rather than failing later with "model not found".
+   */
+  private ollamaCandidate(role: "coding" | "vision" | "general"): ModelCandidate | null {
+    if (this.config.ollamaModels.length === 0) return null;
+    const defaults = pickOllamaDefaultsByName(this.config.ollamaModels);
+    const model =
+      role === "coding"
+        ? (defaults.coding ?? defaults.fallback)
+        : role === "vision"
+          ? (defaults.reasoning ?? defaults.fallback) // qwen3.5 family covers vision
+          : defaults.fallback;
+    if (!model) return null;
+    return { provider: "ollama", model, tier: 1 };
+  }
+
+  private withOllamaCandidate(
+    base: readonly ModelCandidate[],
+    role: "coding" | "vision" | "general",
+  ): ModelCandidate[] {
+    const c = this.ollamaCandidate(role);
+    return c ? [...base, c] : [...base];
   }
 
   private scoreCandidate(candidate: ModelCandidate, index: number): number {

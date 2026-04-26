@@ -115,6 +115,36 @@ export interface ToolHostAdapter {
 }
 
 /**
+ * SB-N2 fix: JSON-RPC 2.0 spec-compliant error codes.
+ *   -32700 parse error           (handled before dispatch)
+ *   -32600 invalid request       (handled before dispatch)
+ *   -32601 method not found
+ *   -32602 invalid params
+ *   -32603 internal error        (catch-all for true server bugs)
+ *   -32000..-32099 application errors (server-defined; we use -32001..-32003)
+ *
+ * Throw a `JsonRpcError(code, message)` from any dispatch path that
+ * should surface a specific code. The catch handler unwraps `code` from
+ * instances and falls back to -32603 only when the error isn't tagged.
+ */
+export const RPC_METHOD_NOT_FOUND = -32601;
+export const RPC_INVALID_PARAMS = -32602;
+export const RPC_INTERNAL_ERROR = -32603;
+export const RPC_APP_TOOL_NOT_AVAILABLE = -32001;
+export const RPC_APP_CAPABILITY_DISABLED = -32002;
+export const RPC_APP_RESOURCE_NOT_FOUND = -32003;
+
+export class JsonRpcError extends Error {
+  constructor(
+    public readonly code: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "JsonRpcError";
+  }
+}
+
+/**
  * V9 Wave 5-II — `mcp_tool` hook event callback.
  *
  * Fired immediately before each `tools/call` dispatch so consumers can
@@ -391,10 +421,15 @@ export class WotannMcpServer {
       }
     } catch (e) {
       if (req.id !== undefined && req.id !== null) {
+        // SB-N2 fix: read JSON-RPC error code from JsonRpcError instances
+        // so method-not-found, invalid-params, and application errors
+        // get their spec-mandated codes instead of collapsing to -32603.
+        const code = e instanceof JsonRpcError ? e.code : RPC_INTERNAL_ERROR;
+        const message = e instanceof Error ? e.message : String(e);
         this.sendResponse({
           jsonrpc: "2.0",
           id: req.id,
-          error: { code: -32603, message: (e as Error).message },
+          error: { code, message },
         });
       }
     }
@@ -462,13 +497,14 @@ export class WotannMcpServer {
       }
       case "tools/call": {
         const p = (params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
-        if (!p.name) throw new Error("tools/call: name is required");
+        if (!p.name) throw new JsonRpcError(RPC_INVALID_PARAMS, "tools/call: name is required");
         // Enforce the tier allowlist at invocation time as well — a
         // client that cached an older (wider) tools/list response
         // should not be able to dispatch to a hidden tool. This
         // matches the "honest error envelope" bar.
         if (this.tierAllowlist !== null && !this.tierAllowlist.has(p.name)) {
-          throw new Error(
+          throw new JsonRpcError(
+            RPC_APP_TOOL_NOT_AVAILABLE,
             `tools/call: tool "${p.name}" not available at tier "${this.activeTier ?? "unknown"}"`,
           );
         }
@@ -521,11 +557,14 @@ export class WotannMcpServer {
         // fabricating an empty prompt (QB#6 — the client asked for a
         // named prompt by id; "[]" is a lie).
         if (this.skillRegistry === null) {
-          throw new Error("prompts/get: prompts capability not enabled (no SkillRegistry wired)");
+          throw new JsonRpcError(
+            RPC_APP_CAPABILITY_DISABLED,
+            "prompts/get: prompts capability not enabled (no SkillRegistry wired)",
+          );
         }
         const p = (params ?? {}) as { name?: unknown; arguments?: unknown };
         if (typeof p.name !== "string" || p.name.length === 0) {
-          throw new Error("prompts/get: params.name (string) required");
+          throw new JsonRpcError(RPC_INVALID_PARAMS, "prompts/get: params.name (string) required");
         }
         // Coerce arguments to Record<string,string>. The MCP spec says
         // `arguments` is a string-map; we discard non-string values
@@ -554,11 +593,17 @@ export class WotannMcpServer {
         // invalid → 404-equivalent error" row).
         const p = params as { uri?: unknown };
         if (typeof p.uri !== "string") {
-          throw new Error("resources/read: params.uri (string) required");
+          throw new JsonRpcError(
+            RPC_INVALID_PARAMS,
+            "resources/read: params.uri (string) required",
+          );
         }
         const content = readUiResource(p.uri);
         if (!content) {
-          throw new Error(`resources/read: unknown uri: ${p.uri}`);
+          throw new JsonRpcError(
+            RPC_APP_RESOURCE_NOT_FOUND,
+            `resources/read: unknown uri: ${p.uri}`,
+          );
         }
         return { contents: [content] };
       }
@@ -569,7 +614,10 @@ export class WotannMcpServer {
         // registry returns an honest "no-handler" envelope (QB #6).
         const parsed = parseElicitationRequest({ method, params });
         if (parsed === null) {
-          throw new Error("elicitation/create: malformed params (need {message, requestedSchema})");
+          throw new JsonRpcError(
+            RPC_INVALID_PARAMS,
+            "elicitation/create: malformed params (need {message, requestedSchema})",
+          );
         }
         const handled = await this.elicitationRegistry.handle(parsed as ElicitationRequest);
         if (handled.ok) return handled.result;
@@ -589,7 +637,7 @@ export class WotannMcpServer {
         // outbound layer).
         const result = parseElicitationResult(params);
         if (result === null) {
-          throw new Error("elicitation/result: malformed payload");
+          throw new JsonRpcError(RPC_INVALID_PARAMS, "elicitation/result: malformed payload");
         }
         return result;
       }
@@ -600,7 +648,7 @@ export class WotannMcpServer {
       case "ping":
         return {};
       default:
-        throw new Error(`method not implemented: ${method}`);
+        throw new JsonRpcError(RPC_METHOD_NOT_FOUND, `method not implemented: ${method}`);
     }
   }
 

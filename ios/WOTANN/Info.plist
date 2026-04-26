@@ -67,6 +67,28 @@
 		<string>audio</string>
 		<string>fetch</string>
 	</array>
+	<!--
+		SB-N6 fix: every BGTaskScheduler identifier the app registers MUST
+		be listed here (Apple App Review guideline 2.5.4: declared
+		background modes need backing code). See BackgroundTaskCoordinator.swift
+		for the registrations matching these identifiers.
+	-->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.wotann.ios.offlinequeue.flush</string>
+		<string>com.wotann.ios.memory.sync</string>
+	</array>
+	<!--
+		SB-N5 fix: NSUserActivityTypes declares which user activity identifiers
+		this app accepts via Continuity / Handoff / Spotlight Continue. Without
+		these keys iOS rejects unknown activity types even with a registered
+		`onContinueUserActivity` handler. See WOTANNApp.swift for the handler.
+	-->
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.wotann.conversation</string>
+		<string>com.wotann.pair</string>
+	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>

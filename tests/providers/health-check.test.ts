@@ -342,10 +342,14 @@ describe("ollama-adapter: Bug #5 stopReason=tool_calls on tool-use turns", () =>
       return { ok: true, status: 200, body } as unknown as Response;
     });
 
+    // SB-NEW-2 (QB#15): adapter no longer hardcodes a fallback model. Pass
+    // a test model explicitly so the test exercises the stopReason logic
+    // independent of which model is "default".
     const adapter = createOllamaAdapter("http://localhost:11434");
     let emittedToolUse = false;
     let doneStopReason: string | undefined;
     for await (const chunk of adapter.query({
+      model: "test-model",
       prompt: "get the time",
       tools: [
         {
@@ -389,9 +393,12 @@ describe("ollama-adapter: Bug #5 stopReason=tool_calls on tool-use turns", () =>
       return { ok: true, status: 200, body } as unknown as Response;
     });
 
+    // SB-NEW-2 (QB#15): adapter no longer hardcodes a fallback model. Pass
+    // a test model explicitly so the test exercises the stopReason logic
+    // independent of which model is "default".
     const adapter = createOllamaAdapter("http://localhost:11434");
     let doneStopReason: string | undefined;
-    for await (const chunk of adapter.query({ prompt: "hi" })) {
+    for await (const chunk of adapter.query({ model: "test-model", prompt: "hi" })) {
       if (chunk.type === "done") doneStopReason = chunk.stopReason;
     }
     expect(doneStopReason).toBe("stop");
