@@ -6,12 +6,62 @@
     <array>
         <string>group.com.wotann.shared</string>
     </array>
+    <!--
+        Keychain sharing with extension targets so the share extension,
+        widgets, intents, and watch surfaces can read the same auth token
+        and provider credentials saved by the main app. Each member of
+        the access group must declare an identical entry; the four
+        extension .entitlements files added in Wave 1-G mirror this group.
+    -->
+    <key>keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)com.wotann.shared</string>
+    </array>
     <key>com.apple.developer.nfc.readersession.formats</key>
     <array>
         <string>TAG</string>
     </array>
+    <!--
+        APNs environment.
+        TODO (App Review prep, USER-ACTION REQUIRED): Apple expects
+        `production` for TestFlight + App Store builds and `development`
+        only for Xcode-signed debug builds. The standard pattern is to
+        flip this via a build-phase script that rewrites the entitlements
+        file per configuration, OR by maintaining two .entitlements files
+        and pointing CODE_SIGN_ENTITLEMENTS at the right one per scheme
+        (Debug -> WOTANN.entitlements, Release -> WOTANN-Release.entitlements).
+        Leaving as `development` here is correct for local builds; the
+        Release entitlements + matching App Store provisioning profile
+        must be configured in App Store Connect before the first TestFlight
+        upload. See ios/Tests/PhysicalDeviceTestChecklist.md.
+    -->
     <key>aps-environment</key>
     <string>development</string>
+    <!--
+        CarPlay audio category — matches the shipped CarPlay surface in
+        Services/CarPlayService.swift (CPVoiceControlTemplate, hands-free
+        voice ask, conversation list/detail). Apple gates CarPlay binaries
+        behind a request-only entitlement: the project must be approved
+        via https://developer.apple.com/contact/carplay/ before this
+        entitlement is honored at code-sign time. Building locally with
+        an unapproved profile will produce a "Provisioning profile does
+        not include com.apple.developer.carplay-audio" error — that is
+        expected until Apple greenlights the request.
+    -->
+    <key>com.apple.developer.carplay-audio</key>
+    <true/>
+    <!--
+        Universal links / push deep linking. The actual associated domains
+        list MUST be edited per environment before App Review and the
+        matching .well-known/apple-app-site-association file MUST be
+        served from each domain. Default scaffold below; flip `?mode=developer`
+        once the production AASA file is published.
+    -->
+    <key>com.apple.developer.associated-domains</key>
+    <array>
+        <string>applinks:wotann.com?mode=developer</string>
+        <string>webcredentials:wotann.com?mode=developer</string>
+    </array>
     <key>com.apple.developer.healthkit</key>
     <true/>
     <key>com.apple.developer.healthkit.access</key>

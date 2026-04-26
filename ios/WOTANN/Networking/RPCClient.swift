@@ -57,6 +57,20 @@ final class RPCClient: ObservableObject {
 
     // MARK: Connection
 
+    /// Establish the WebSocket bridge to the desktop daemon.
+    ///
+    /// `useTLS` defaults to `false` because the bridge runs over the local
+    /// network (Bonjour-discovered IP, typically 192.168.x.x or fe80::/10).
+    /// Provisioning a publicly-trusted certificate for an ephemeral LAN
+    /// peer is impractical, so we instead rely on:
+    ///   1. NSAllowsLocalNetworking in Info.plist (SB-18 fix) which is
+    ///      Apple's documented escape hatch for ATS on the local network.
+    ///   2. Application-layer end-to-end encryption via ECDHManager — every
+    ///      RPC payload is wrapped in ChaCha20-Poly1305 once
+    ///      `ecdhManager.isKeyExchangeComplete` is true (see sendOnce / handleIncoming).
+    /// Callers MAY set `useTLS: true` when the desktop is reachable over a
+    /// trusted FQDN (e.g. via a Tailscale exit node with a valid cert);
+    /// in that case the WebSocket layer will validate the chain normally.
     func connect(host: String, port: Int, useTLS: Bool = false) {
         let scheme = useTLS ? "wss" : "ws"
         // Wrap IPv6 addresses in brackets for valid URL construction

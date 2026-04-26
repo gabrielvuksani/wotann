@@ -33,6 +33,40 @@
 	<array>
 		<string>_wotann._tcp</string>
 	</array>
+	<!--
+		SB-18 (Wave 5-J): iOS 18 strict ATS BLOCKS plaintext ws://localhost:* connections.
+		WOTANN's phone↔desktop bridge uses unencrypted WebSocket on the LAN because
+		(a) the connection is end-to-end ECDH-encrypted at the application layer
+		(see Networking/RPCClient.swift + Security/ECDHManager.swift), and
+		(b) certificate provisioning for ad-hoc local IPs is impractical.
+		Apple's documented escape hatch is NSAllowsLocalNetworking — strictly
+		narrower than NSAllowsArbitraryLoads (which we explicitly do NOT use)
+		and acceptable for App Review when paired with Bonjour discovery and
+		NSLocalNetworkUsageDescription (both already declared).
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!--
+		Background capabilities required by shipped features:
+		- remote-notification: APNs handlers in NotificationService.swift
+		  + WOTANNApp.swift route push payloads while the app is suspended.
+		- processing: Live Activities (NSSupportsLiveActivitiesFrequentUpdates)
+		  and BGProcessingTask windows for relay/sync.
+		- audio: VoiceService.swift + DuplexVoiceSession.swift hold an
+		  AVAudioSession during voice ask + CarPlay voice control so STT/TTS
+		  survives the app moving to the background.
+		- fetch: opportunistic snapshot refreshes when the OS wakes us up.
+	-->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+		<string>processing</string>
+		<string>audio</string>
+		<string>fetch</string>
+	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
