@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PALETTE, safeInvoke } from "./IntegrationsView";
+import { WebhookServerSection } from "./WebhookServerSection";
 
 interface ConnectorStatus {
   readonly id: string;
@@ -103,9 +104,13 @@ export function ConnectorsTab({ onRefresh }: Props) {
   return (
     <div style={{
       height: "100%", overflowY: "auto", padding: "20px 24px",
-      display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-      gap: 12, alignContent: "start",
+      display: "flex", flexDirection: "column", gap: 16,
     }}>
+      <WebhookServerSection />
+      <div style={{
+        display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+        gap: 12, alignContent: "start",
+      }}>
       {merged.map(({ meta, status }) => {
         const isSyncing = syncing[meta.id] === true;
         const isConfiguring = configuringId === meta.id;
@@ -157,6 +162,7 @@ export function ConnectorsTab({ onRefresh }: Props) {
           </article>
         );
       })}
+      </div>
     </div>
   );
 }
