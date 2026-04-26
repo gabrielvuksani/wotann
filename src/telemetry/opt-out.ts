@@ -9,10 +9,9 @@
  */
 
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
-const SENTINEL_PATH = join(homedir(), ".wotann", "no-telemetry");
+const SENTINEL_PATH = resolveWotannHomeSubdir("no-telemetry");
 
 let cachedValue: boolean | null = null;
 

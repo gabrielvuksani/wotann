@@ -14,7 +14,7 @@
 
 import { writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHome } from "../utils/wotann-home.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -50,7 +50,7 @@ export class SelfEvolutionEngine {
   private readonly actionLog: EvolutionAction[] = [];
 
   constructor(config?: Partial<SelfEvolutionConfig>) {
-    const wotannDir = join(homedir(), ".wotann");
+    const wotannDir = resolveWotannHome();
     this.config = {
       wotannDir,
       autoUpdateUser: true,

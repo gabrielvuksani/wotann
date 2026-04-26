@@ -28,6 +28,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -57,8 +58,8 @@ const CODEX_CLI_PATHS: readonly string[] = [
 ];
 
 /** WOTANN's own token store (populated by `importCodexCliCredential`). */
-const WOTANN_CODEX_TOKEN_FILE = join(homedir(), ".wotann", "codex-tokens.json");
-const WOTANN_LEGACY_ARCHIVE_DIR = join(homedir(), ".wotann", ".legacy");
+const WOTANN_CODEX_TOKEN_FILE = resolveWotannHomeSubdir("codex-tokens.json");
+const WOTANN_LEGACY_ARCHIVE_DIR = resolveWotannHomeSubdir(".legacy");
 
 // ── Detection ─────────────────────────────────────────────────────────────
 
@@ -151,7 +152,7 @@ function pickString(data: Record<string, unknown>, ...keys: readonly string[]): 
 }
 
 function saveTokens(tokens: CodexTokens): void {
-  const dir = join(homedir(), ".wotann");
+  const dir = resolveWotannHome();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(WOTANN_CODEX_TOKEN_FILE, JSON.stringify(tokens, null, 2), {
     mode: 0o600,

@@ -19,6 +19,7 @@ import {
 import { join, dirname, resolve as resolvePath } from "node:path";
 import { homedir } from "node:os";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
+import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import type { WotannRuntime } from "../core/runtime.js";
 import type { KairosDaemon } from "./kairos.js";
 import type { QueryExecutor } from "../desktop/prompt-enhancer.js";
@@ -899,7 +900,7 @@ export class KairosRPCHandler {
   private readonly pendingNodeRequests = new Map<string, PendingNodeRequest>();
   private readonly ecdhSessions = new Map<string, ECDHSession>();
   private readonly frameBuffer: ContinuityFrame[] = [];
-  private notificationPrefsPath = join(homedir(), ".wotann", "notifications.json");
+  private notificationPrefsPath = resolveWotannHomeSubdir("notifications.json");
 
   // Computer-session keystone store (Phase 3 P1-F1). Per-session state lives here,
   // NOT in module globals (QB #7). Polling subscribers hold a rolling buffer keyed
@@ -1381,9 +1382,9 @@ export class KairosRPCHandler {
       // Fallback: load AGENTS.md directly if prompt engine fails
       try {
         const { readFileSync, existsSync } = await import("node:fs");
-        const { homedir } = await import("node:os");
         const { join } = await import("node:path");
-        const agentsPath = join(homedir(), ".wotann", "AGENTS.md");
+        const { resolveWotannHomeSubdir } = await import("../utils/wotann-home.js");
+        const agentsPath = resolveWotannHomeSubdir("AGENTS.md");
         const projectAgentsPath = join(process.cwd(), ".wotann", "AGENTS.md");
         const path = existsSync(projectAgentsPath)
           ? projectAgentsPath
@@ -2673,7 +2674,7 @@ export class KairosRPCHandler {
 
     // Config — reads/writes ~/.wotann/wotann.yaml
     this.handlers.set("config.get", async (params) => {
-      const configPath = join(homedir(), ".wotann", "wotann.yaml");
+      const configPath = resolveWotannHomeSubdir("wotann.yaml");
       if (!existsSync(configPath)) return {};
       try {
         const raw = readFileSync(configPath, "utf-8");
@@ -2692,7 +2693,7 @@ export class KairosRPCHandler {
       const value = params.value;
       if (!key) throw new Error("key required");
 
-      const wotannDir = join(homedir(), ".wotann");
+      const wotannDir = resolveWotannHome();
       const configPath = join(wotannDir, "wotann.yaml");
 
       let config: Record<string, unknown> = {};
@@ -3254,7 +3255,7 @@ export class KairosRPCHandler {
       const connectorType = p["connectorType"] as string | undefined;
       const config = (p["config"] as Record<string, unknown>) ?? {};
       if (!connectorType) return { ok: false, error: "connectorType required" };
-      const configPath = join(homedir(), ".wotann", "wotann.yaml");
+      const configPath = resolveWotannHomeSubdir("wotann.yaml");
       try {
         if (!existsSync(dirname(configPath))) mkdirSync(dirname(configPath), { recursive: true });
         const root = existsSync(configPath)
@@ -3933,7 +3934,7 @@ export class KairosRPCHandler {
     this.handlers.set("session.resume", async (params) => {
       const sessionId = params.sessionId as string | undefined;
       if (!this.runtime) throw new Error("Runtime not initialized");
-      const sessionsDir = join(homedir(), ".wotann", "sessions");
+      const sessionsDir = resolveWotannHomeSubdir("sessions");
       if (!existsSync(sessionsDir)) return { success: false, reason: "No sessions directory" };
 
       if (sessionId) {
@@ -4305,7 +4306,7 @@ export class KairosRPCHandler {
     // mcp.list — list MCP servers (installed and available)
     this.handlers.set("mcp.list", async () => {
       // MCP servers are config-based; read from wotann.yaml
-      const configPath = join(homedir(), ".wotann", "wotann.yaml");
+      const configPath = resolveWotannHomeSubdir("wotann.yaml");
       if (!existsSync(configPath)) return { servers: [], count: 0 };
       try {
         const raw = readFileSync(configPath, "utf-8");
@@ -4421,7 +4422,7 @@ export class KairosRPCHandler {
       const name = (params as Record<string, unknown>)["name"] as string | undefined;
       const enabled = (params as Record<string, unknown>)["enabled"] as boolean | undefined;
       if (!name) return { ok: false, error: "name required" };
-      const configPath = join(homedir(), ".wotann", "wotann.yaml");
+      const configPath = resolveWotannHomeSubdir("wotann.yaml");
       try {
         const config = existsSync(configPath)
           ? ((yamlParse(readFileSync(configPath, "utf-8")) ?? {}) as Record<string, unknown>)
@@ -4450,7 +4451,7 @@ export class KairosRPCHandler {
       const args = (p["args"] as string[] | undefined) ?? [];
       const transport = ((p["transport"] as string | undefined) ?? "stdio") as "stdio" | "http";
       if (!name || !command) return { ok: false, error: "name and command required" };
-      const configPath = join(homedir(), ".wotann", "wotann.yaml");
+      const configPath = resolveWotannHomeSubdir("wotann.yaml");
       try {
         if (!existsSync(dirname(configPath))) mkdirSync(dirname(configPath), { recursive: true });
         const config = existsSync(configPath)
@@ -4473,7 +4474,7 @@ export class KairosRPCHandler {
 
     // audit.query — query the audit trail
     this.handlers.set("audit.query", async (params) => {
-      const dbPath = join(homedir(), ".wotann", "audit.db");
+      const dbPath = resolveWotannHomeSubdir("audit.db");
       if (!existsSync(dbPath)) return { entries: [], count: 0 };
       try {
         const trail = new AuditTrail(dbPath);
@@ -4574,7 +4575,7 @@ export class KairosRPCHandler {
 
     // train.extract — extract training data from session recordings
     this.handlers.set("train.extract", async (params) => {
-      const sessionDir = (params.sessionDir as string) ?? join(homedir(), ".wotann", "sessions");
+      const sessionDir = (params.sessionDir as string) ?? resolveWotannHomeSubdir("sessions");
       if (!this.runtime) throw new Error("Runtime not initialized");
       const pipeline = this.runtime.getTrainingPipeline();
       const pairs = pipeline.extractTrainingData(sessionDir);
@@ -4626,7 +4627,7 @@ export class KairosRPCHandler {
       const name = params["name"] as string | undefined;
       const inlineWorkflow = params["workflow"] as Record<string, unknown> | undefined;
       const input = (params["input"] as string) ?? "";
-      const customDir = join(homedir(), ".wotann", "workflows");
+      const customDir = resolveWotannHomeSubdir("workflows");
 
       let workflow = inlineWorkflow as unknown as Workflow | undefined;
       if (!workflow) {
@@ -4664,7 +4665,7 @@ export class KairosRPCHandler {
         return { success: false, error: "invalid workflow name" };
       }
       try {
-        const workflowsDir = join(homedir(), ".wotann", "workflows");
+        const workflowsDir = resolveWotannHomeSubdir("workflows");
         if (!existsSync(workflowsDir)) mkdirSync(workflowsDir, { recursive: true });
         const outPath = join(workflowsDir, `${name}.yaml`);
         writeFileSync(outPath, yamlStringify(workflow), "utf-8");
@@ -4960,7 +4961,7 @@ export class KairosRPCHandler {
       const characters = Number((params as Record<string, unknown>)["characters"] ?? 0);
       const safeChars = Number.isFinite(characters) && characters >= 0 ? characters : 0;
       const today = new Date().toISOString().slice(0, 10);
-      const statsPath = join(homedir(), ".wotann", "completion-stats.json");
+      const statsPath = resolveWotannHomeSubdir("completion-stats.json");
       try {
         const existing = existsSync(statsPath)
           ? (JSON.parse(readFileSync(statsPath, "utf-8")) as Record<
@@ -7868,7 +7869,7 @@ export class KairosRPCHandler {
       if (typeof photo !== "string") return { error: "photo (base64) required" };
       try {
         const { writeFileSync, mkdirSync } = await import("node:fs");
-        const photoDir = join(homedir(), ".wotann", "continuity");
+        const photoDir = resolveWotannHomeSubdir("continuity");
         mkdirSync(photoDir, { recursive: true });
         const id = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const path = join(photoDir, `${id}.jpg`);
@@ -7970,7 +7971,7 @@ export class KairosRPCHandler {
       };
       try {
         const { writeFileSync, mkdirSync } = await import("node:fs");
-        mkdirSync(join(homedir(), ".wotann"), { recursive: true });
+        mkdirSync(resolveWotannHome(), { recursive: true });
         const prefs = {
           enabled: enabled ?? true,
           types: types ?? ["task", "error", "briefing"],

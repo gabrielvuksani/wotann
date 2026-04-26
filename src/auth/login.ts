@@ -16,6 +16,7 @@
 import { existsSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import chalk from "chalk";
 import { runDeviceCodeFlow, getGitHubDeviceCodeConfig } from "./oauth-server.js";
 import {
@@ -46,7 +47,7 @@ export type LoginModeArg = "personal" | "business";
  * Path on disk where the AuthModeConfig is persisted. Single source
  * of truth — exported so tests can stub `homedir()` and assert path.
  */
-export const AUTH_MODE_CONFIG_PATH = join(homedir(), ".wotann", "auth-mode.json");
+export const AUTH_MODE_CONFIG_PATH = resolveWotannHomeSubdir("auth-mode.json");
 
 /**
  * Persist an AuthModeConfig to ~/.wotann/auth-mode.json with mode-0600
@@ -240,7 +241,7 @@ async function loginCopilot(): Promise<LoginResult> {
   }
 
   // Save the token for use as GH_TOKEN
-  const wotannConfigDir = join(homedir(), ".wotann");
+  const wotannConfigDir = resolveWotannHome();
   if (!existsSync(wotannConfigDir)) mkdirSync(wotannConfigDir, { recursive: true });
 
   const tokenData = {

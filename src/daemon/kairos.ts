@@ -14,8 +14,8 @@ import {
   unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { execFile } from "node:child_process";
+import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { promisify } from "node:util";
 import { ChannelGateway, type ChannelMessage } from "../channels/gateway.js";
 import { UnifiedDispatchPlane } from "../channels/unified-dispatch.js";
@@ -341,7 +341,7 @@ export class KairosDaemon {
   // so PR-merge events (via github-bot) and rate-limit hits (via router)
   // can route into one honest state store instead of being swallowed.
   private readonly autoArchiveHook = new AutoArchiveHook({
-    archiveDir: join(homedir(), ".wotann", "archives"),
+    archiveDir: resolveWotannHomeSubdir("archives"),
   });
   private readonly rateLimitResume = new RateLimitResumeManager();
 
@@ -472,7 +472,7 @@ export class KairosDaemon {
       });
 
       // Phase A3: Start IPC server on Unix Domain Socket
-      const wotannDir = join(homedir(), ".wotann");
+      const wotannDir = resolveWotannHome();
       if (!existsSync(wotannDir)) {
         mkdirSync(wotannDir, { recursive: true });
       }
@@ -700,11 +700,11 @@ export class KairosDaemon {
       // Sandbox: Task isolation for parallel agent execution
       this.taskIsolation = new TaskIsolationManager(
         this.workingDir,
-        join(homedir(), ".wotann", "isolation"),
+        resolveWotannHomeSubdir("isolation"),
       );
 
       // Identity: User model for preference learning + reasoning engine for thought process
-      this.userModel = new UserModel(join(homedir(), ".wotann"));
+      this.userModel = new UserModel(resolveWotannHome());
       this.reasoningEngine = new ReasoningEngine();
 
       // Phase C: Meeting runtime — owns MeetingStore (SQLite at
@@ -2344,7 +2344,7 @@ export class KairosDaemon {
     if (this.lastAutoCapturesPruneDay === today) return;
     this.lastAutoCapturesPruneDay = today;
     try {
-      const dbPath = join(homedir(), ".wotann", "memory.db");
+      const dbPath = resolveWotannHomeSubdir("memory.db");
       if (!existsSync(dbPath)) return; // no DB yet — nothing to prune
       const { MemoryStore } = await import("../memory/store.js");
       const store = new MemoryStore(dbPath);
@@ -2385,7 +2385,7 @@ export class KairosDaemon {
     if (this.lastAuditTrailPruneDay === today) return;
     this.lastAuditTrailPruneDay = today;
     try {
-      const dbPath = join(homedir(), ".wotann", "audit.db");
+      const dbPath = resolveWotannHomeSubdir("audit.db");
       if (!existsSync(dbPath)) return; // no audit DB — nothing to prune
       const { AuditTrail } = await import("../telemetry/audit-trail.js");
       const trail = new AuditTrail(dbPath);
@@ -2890,7 +2890,7 @@ export class KairosDaemon {
    * @returns the number of files removed, split by bucket.
    */
   private sweepOrphanFiles(): { tmpRemoved: number; walRemoved: number; shmRemoved: number } {
-    const wotannDirs = [join(this.workingDir, ".wotann"), join(homedir(), ".wotann")];
+    const wotannDirs = [join(this.workingDir, ".wotann"), resolveWotannHome()];
     let tmpRemoved = 0;
     let walRemoved = 0;
     let shmRemoved = 0;

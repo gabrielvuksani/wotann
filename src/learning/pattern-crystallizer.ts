@@ -16,7 +16,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHome } from "../utils/wotann-home.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -24,20 +24,20 @@ export interface ActionPattern {
   readonly id: string;
   readonly name: string;
   readonly description: string;
-  readonly toolSequence: readonly string[];   // e.g., ["Read", "Grep", "Edit", "Bash"]
+  readonly toolSequence: readonly string[]; // e.g., ["Read", "Grep", "Edit", "Bash"]
   readonly triggerKeywords: readonly string[]; // What prompts trigger this pattern
   readonly useCount: number;
   readonly successCount: number;
   readonly lastUsed: number;
   readonly createdAt: number;
-  readonly crystallized: boolean;             // true = promoted to skill
-  readonly skillPath?: string;                // Path to generated SKILL.md
+  readonly crystallized: boolean; // true = promoted to skill
+  readonly skillPath?: string; // Path to generated SKILL.md
 }
 
 export interface PatternMatch {
   readonly patternId: string;
-  readonly similarity: number;  // 0-1 Jaccard similarity of tool sequence
-  readonly confidence: number;  // successCount / useCount
+  readonly similarity: number; // 0-1 Jaccard similarity of tool sequence
+  readonly confidence: number; // successCount / useCount
 }
 
 // ── Pattern Crystallizer ─────────────────────────────────
@@ -49,12 +49,12 @@ export class PatternCrystallizer {
 
   // Thresholds (from OpenClaw Foundry research)
   private readonly MIN_USES = 5;
-  private readonly MIN_SUCCESS_RATE = 0.70;
-  private readonly PRUNE_SUCCESS_RATE = 0.20;
+  private readonly MIN_SUCCESS_RATE = 0.7;
+  private readonly PRUNE_SUCCESS_RATE = 0.2;
   private readonly PRUNE_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
   constructor() {
-    const wotannDir = join(homedir(), ".wotann");
+    const wotannDir = resolveWotannHome();
     this.dataPath = join(wotannDir, "patterns.json");
     this.skillsDir = join(wotannDir, "skills");
 
@@ -200,9 +200,9 @@ export class PatternCrystallizer {
       "",
       `When the user's request matches these keywords, follow this tool sequence:`,
       "",
-      pattern.toolSequence.map((tool, i) =>
-        `Step ${i + 1}: Use ${tool} to ${this.describeToolAction(tool)}`,
-      ).join("\n"),
+      pattern.toolSequence
+        .map((tool, i) => `Step ${i + 1}: Use ${tool} to ${this.describeToolAction(tool)}`)
+        .join("\n"),
       "",
     ].join("\n");
 

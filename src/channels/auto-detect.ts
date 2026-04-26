@@ -36,8 +36,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import type { ChannelType } from "./channel-types.js";
 import type { ChannelAdapter } from "./adapter.js";
 import { TelegramAdapter } from "./telegram.js";
@@ -128,7 +127,7 @@ export interface ChannelsConfig {
   };
 }
 
-const CHANNELS_CONFIG_PATH = join(homedir(), ".wotann", "channels.json");
+const CHANNELS_CONFIG_PATH = resolveWotannHomeSubdir("channels.json");
 
 /**
  * Load channel credentials from ~/.wotann/channels.json.

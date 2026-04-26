@@ -10,8 +10,8 @@
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { KairosRPCHandler, type RPCResponse, type RPCStreamEvent } from "./kairos-rpc.js";
 
 // ── Session Token (B1) ───────────────────────────────────
@@ -28,7 +28,7 @@ import { KairosRPCHandler, type RPCResponse, type RPCStreamEvent } from "./kairo
 // adds defence-in-depth for shared hosts or ACL-weak filesystems.
 
 /** Path to the shared daemon session-token file. */
-const SESSION_TOKEN_PATH = join(homedir(), ".wotann", "session-token.json");
+const SESSION_TOKEN_PATH = resolveWotannHomeSubdir("session-token.json");
 
 /**
  * RPC methods that do NOT require a session token (bootstrapping / health).
@@ -187,7 +187,7 @@ interface IPCMessage {
 
 // ── Default Config ───────────────────────────────────────
 
-const DEFAULT_SOCKET_PATH = join(homedir(), ".wotann", "kairos.sock");
+const DEFAULT_SOCKET_PATH = resolveWotannHomeSubdir("kairos.sock");
 
 const DEFAULT_CONFIG: IPCServerConfig = {
   socketPath: DEFAULT_SOCKET_PATH,

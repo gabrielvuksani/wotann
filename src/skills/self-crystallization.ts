@@ -28,6 +28,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import type { AgentSkill } from "./skill-standard.js";
 import { renderAgentSkillFile, validateAgentSkill } from "./skill-standard.js";
 
@@ -111,7 +112,7 @@ export function crystallizeSuccess(input: CrystallizationInput): Crystallization
   const safePrompt = redactPrompt(input.prompt).trim();
   const title = (input.title ?? safePrompt.split(/[.!?\n]/)[0] ?? "auto-skill").slice(0, 96);
   const slug = slugifyPrompt(safePrompt);
-  const outputDir = input.outputDir ?? join(homedir(), ".wotann", "skills", "auto");
+  const outputDir = input.outputDir ?? resolveWotannHomeSubdir("skills", "auto");
   const filepath = join(outputDir, `${slug}.md`);
 
   const toolSequence = input.toolCalls.length > 0 ? input.toolCalls.join(" → ") : "(none recorded)";

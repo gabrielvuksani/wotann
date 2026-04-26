@@ -13,7 +13,7 @@
 
 import { readdirSync, statSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, relative, basename, extname } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 // ── Types ────────────────────────────────────────────
 
@@ -99,7 +99,7 @@ export class SmartFileSearch {
 
   constructor(workingDir: string) {
     this.workingDir = workingDir;
-    this.dbPath = join(homedir(), ".wotann", "frecency.json");
+    this.dbPath = resolveWotannHomeSubdir("frecency.json");
     this.loadFrecencyDb();
   }
 
@@ -301,7 +301,7 @@ export class SmartFileSearch {
 
   private saveFrecencyDb(): void {
     try {
-      const dir = join(homedir(), ".wotann");
+      const dir = resolveWotannHome();
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const obj = Object.fromEntries(this.frecencyDb);
       writeFileSync(this.dbPath, JSON.stringify(obj));

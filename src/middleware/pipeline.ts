@@ -69,8 +69,8 @@ import {
 import { SandboxAuditMiddleware, createSandboxAuditMiddleware } from "./sandbox-audit.js";
 import { AuditTrail } from "../telemetry/audit-trail.js";
 import { existsSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveWotannHome } from "../utils/wotann-home.js";
 import { TitleMiddleware, createTitleMiddleware } from "./title.js";
 import {
   DeferredToolFilterMiddleware,
@@ -113,7 +113,7 @@ function getDefaultAuditTrail(): AuditTrail | undefined {
     return cachedAuditTrail ?? undefined;
   }
   try {
-    const wotannDir = join(homedir(), ".wotann");
+    const wotannDir = resolveWotannHome();
     if (!existsSync(wotannDir)) {
       mkdirSync(wotannDir, { recursive: true });
     }

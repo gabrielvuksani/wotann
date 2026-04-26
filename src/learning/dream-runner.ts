@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveWotannHome } from "../utils/wotann-home.js";
 import {
   classifyFeedback,
   loadGotchas,
@@ -187,10 +187,10 @@ export function runWorkspaceDream(
     const evolutionEngine =
       options.selfEvolution ??
       new SelfEvolutionEngine({
-        wotannDir: options.userProfileDir ?? join(homedir(), ".wotann"),
+        wotannDir: options.userProfileDir ?? resolveWotannHome(),
       });
     const profileWotannDir =
-      options.userProfileDir ?? (options.selfEvolution ? undefined : join(homedir(), ".wotann"));
+      options.userProfileDir ?? (options.selfEvolution ? undefined : resolveWotannHome());
     const profilePathHint = profileWotannDir ? join(profileWotannDir, "USER.md") : undefined;
 
     let userProfileUpdated = false;

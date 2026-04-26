@@ -13,9 +13,9 @@
 // Removed session-5 to close 5 lint warnings.
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import { resolveWotannHome } from "../utils/wotann-home.js";
 
 // ── Trigger Types ──────────────────────────────────────────
 
@@ -275,7 +275,7 @@ export class AutomationEngine {
   private executeHandler: AutomationExecuteHandler | null = null;
 
   constructor() {
-    this.configDir = path.join(os.homedir(), ".wotann");
+    this.configDir = resolveWotannHome();
     this.configPath = path.join(this.configDir, "automations.json");
   }
 

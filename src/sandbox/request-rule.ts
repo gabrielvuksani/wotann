@@ -27,8 +27,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type {
   ApprovalAction,
@@ -83,7 +83,7 @@ export interface PersistedRules {
 }
 
 /** Default location — override for tests via `storePath` option. */
-export const DEFAULT_RULES_PATH = join(homedir(), ".wotann", "approval-rules.json");
+export const DEFAULT_RULES_PATH = resolveWotannHomeSubdir("approval-rules.json");
 export const PERSISTED_RULES_VERSION = 1 as const;
 
 // ── Heuristics: ApprovedAction → RuleDraft ─────────────

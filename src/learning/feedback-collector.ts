@@ -19,7 +19,7 @@
 
 import { appendFileSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -30,12 +30,12 @@ export interface FeedbackEntry {
   readonly prompt: string;
   readonly response: string;
   readonly feedback: FeedbackType;
-  readonly reward: number;          // +0.75 positive, -0.25 negative, 0 neutral
+  readonly reward: number; // +0.75 positive, -0.25 negative, 0 neutral
   readonly provider: string;
   readonly model: string;
   readonly timestamp: number;
   readonly sessionId: string;
-  readonly taskDomain?: string;     // From domain-skill-router
+  readonly taskDomain?: string; // From domain-skill-router
 }
 
 export interface FeedbackStats {
@@ -43,7 +43,7 @@ export interface FeedbackStats {
   readonly positive: number;
   readonly negative: number;
   readonly neutral: number;
-  readonly acceptRate: number;      // positive / (positive + negative)
+  readonly acceptRate: number; // positive / (positive + negative)
   readonly readyForTraining: boolean; // 500+ non-neutral entries
 }
 
@@ -54,7 +54,7 @@ export class FeedbackCollector {
   private stats: FeedbackStats;
 
   constructor() {
-    const wotannDir = join(homedir(), ".wotann");
+    const wotannDir = resolveWotannHome();
     const feedbackDir = join(wotannDir, "feedback");
     if (!existsSync(feedbackDir)) {
       mkdirSync(feedbackDir, { recursive: true });
@@ -76,9 +76,7 @@ export class FeedbackCollector {
     sessionId: string,
     taskDomain?: string,
   ): void {
-    const reward = feedback === "positive" ? 0.75
-      : feedback === "negative" ? -0.25
-      : 0;
+    const reward = feedback === "positive" ? 0.75 : feedback === "negative" ? -0.25 : 0;
 
     const entry: FeedbackEntry = {
       id: `fb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -115,9 +113,7 @@ export class FeedbackCollector {
     sessionId: string,
   ): void {
     const feedback: FeedbackType =
-      action === "kept" ? "positive"
-      : action === "regenerated" ? "negative"
-      : "neutral";
+      action === "kept" ? "positive" : action === "regenerated" ? "negative" : "neutral";
 
     this.recordFeedback(prompt, response, feedback, provider, model, sessionId);
   }
@@ -127,18 +123,20 @@ export class FeedbackCollector {
    * KTO format: {"prompt": "...", "completion": "...", "label": true/false}
    */
   exportForKTO(): string {
-    const outputPath = join(homedir(), ".wotann", "training-data", `kto-${Date.now()}.jsonl`);
-    const dir = join(homedir(), ".wotann", "training-data");
+    const dir = resolveWotannHomeSubdir("training-data");
+    const outputPath = join(dir, `kto-${Date.now()}.jsonl`);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     const entries = this.getAllEntries();
     const lines = entries
       .filter((e) => e.feedback !== "neutral") // KTO needs binary labels
-      .map((e) => JSON.stringify({
-        prompt: e.prompt,
-        completion: e.response,
-        label: e.feedback === "positive",
-      }));
+      .map((e) =>
+        JSON.stringify({
+          prompt: e.prompt,
+          completion: e.response,
+          label: e.feedback === "positive",
+        }),
+      );
 
     writeFileSync(outputPath, lines.join("\n") + "\n");
     return outputPath;
@@ -149,8 +147,8 @@ export class FeedbackCollector {
    * Groups by prompt and pairs positive/negative responses.
    */
   exportForDPO(): string {
-    const outputPath = join(homedir(), ".wotann", "training-data", `dpo-${Date.now()}.jsonl`);
-    const dir = join(homedir(), ".wotann", "training-data");
+    const dir = resolveWotannHomeSubdir("training-data");
+    const outputPath = join(dir, `dpo-${Date.now()}.jsonl`);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     const entries = this.getAllEntries();
@@ -173,11 +171,13 @@ export class FeedbackCollector {
     for (const [prompt, group] of groups) {
       for (const chosen of group.positive) {
         for (const rejected of group.negative) {
-          lines.push(JSON.stringify({
-            prompt,
-            chosen,
-            rejected,
-          }));
+          lines.push(
+            JSON.stringify({
+              prompt,
+              chosen,
+              rejected,
+            }),
+          );
         }
       }
     }

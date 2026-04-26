@@ -21,6 +21,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ const SKILL_SOURCES: readonly SkillSource[] = [
     id: "user",
     name: "User Installed",
     type: "user",
-    path: join(homedir(), ".wotann", "marketplace"),
+    path: resolveWotannHomeSubdir("marketplace"),
     priority: 2,
   },
 ];
@@ -104,7 +105,7 @@ export class SkillMerger {
 
   constructor(builtinSkillsPath: string) {
     this.builtinPath = builtinSkillsPath;
-    this.mergedPath = join(homedir(), ".wotann", "merged-skills");
+    this.mergedPath = resolveWotannHomeSubdir("merged-skills");
     if (!existsSync(this.mergedPath)) {
       mkdirSync(this.mergedPath, { recursive: true });
     }

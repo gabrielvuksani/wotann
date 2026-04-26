@@ -5,7 +5,7 @@
 
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import type { HookHandler, HookPayload, HookResult } from "./engine.js";
 import { DoomLoopDetector } from "./doom-loop-detector.js";
 import { detectFrustration } from "../middleware/layers.js";
@@ -234,7 +234,7 @@ export const configProtection: HookHandler = {
 // blocks the pipeline.
 
 function walDir(): string {
-  const dir = join(homedir(), ".wotann", "wal");
+  const dir = resolveWotannHomeSubdir("wal");
   if (!existsSync(dir)) {
     try {
       mkdirSync(dir, { recursive: true });
@@ -282,7 +282,7 @@ export const preCompactFlush: HookHandler = {
 
 function sessionLogPath(sessionId: string | undefined): string {
   const safe = (sessionId ?? "unknown").replace(/[^a-zA-Z0-9_-]/g, "_");
-  const logDir = join(homedir(), ".wotann", "sessions");
+  const logDir = resolveWotannHomeSubdir("sessions");
   if (!existsSync(logDir)) {
     try {
       mkdirSync(logDir, { recursive: true });

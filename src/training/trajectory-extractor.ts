@@ -14,7 +14,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -39,11 +39,11 @@ export interface TrainingExample {
 }
 
 export interface ExtractionConfig {
-  readonly maxTokensPerExample: number;  // Target compressed size (default: 15250 per Hermes)
-  readonly minTurns: number;             // Minimum turns for a valid example
-  readonly requireSuccess: boolean;      // Only include successful sessions
-  readonly compressMiddle: boolean;      // Compress middle turns (Hermes pattern)
-  readonly extractDecisive: boolean;     // ATLaS-style critical step extraction
+  readonly maxTokensPerExample: number; // Target compressed size (default: 15250 per Hermes)
+  readonly minTurns: number; // Minimum turns for a valid example
+  readonly requireSuccess: boolean; // Only include successful sessions
+  readonly compressMiddle: boolean; // Compress middle turns (Hermes pattern)
+  readonly extractDecisive: boolean; // ATLaS-style critical step extraction
 }
 
 const DEFAULT_CONFIG: ExtractionConfig = {
@@ -62,7 +62,7 @@ export class TrajectoryExtractor {
 
   constructor(config?: Partial<ExtractionConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.outputDir = join(homedir(), ".wotann", "training-data");
+    this.outputDir = resolveWotannHomeSubdir("training-data");
     if (!existsSync(this.outputDir)) {
       mkdirSync(this.outputDir, { recursive: true });
     }
@@ -73,11 +73,12 @@ export class TrajectoryExtractor {
    * Reads from ~/.wotann/sessions/ and outputs to ~/.wotann/training-data/
    */
   extractFromSessions(): readonly TrainingExample[] {
-    const sessionsDir = join(homedir(), ".wotann", "sessions");
+    const sessionsDir = resolveWotannHomeSubdir("sessions");
     if (!existsSync(sessionsDir)) return [];
 
-    const sessionFiles = readdirSync(sessionsDir)
-      .filter((f) => f.endsWith(".jsonl") || f.endsWith(".json"));
+    const sessionFiles = readdirSync(sessionsDir).filter(
+      (f) => f.endsWith(".jsonl") || f.endsWith(".json"),
+    );
 
     const examples: TrainingExample[] = [];
 
@@ -119,7 +120,8 @@ export class TrajectoryExtractor {
         if (parsed.role && parsed.content) {
           entries.push({
             role: parsed.role,
-            content: typeof parsed.content === "string" ? parsed.content : JSON.stringify(parsed.content),
+            content:
+              typeof parsed.content === "string" ? parsed.content : JSON.stringify(parsed.content),
             timestamp: parsed.timestamp ?? Date.now(),
             tokens: parsed.tokens,
             toolName: parsed.toolName,
@@ -159,8 +161,8 @@ export class TrajectoryExtractor {
   private compressTrajectory(entries: readonly TrajectoryEntry[]): readonly TrajectoryEntry[] {
     if (!this.config.compressMiddle || entries.length <= 8) return entries;
 
-    const head = entries.slice(0, 3);  // Protect first 3
-    const tail = entries.slice(-3);    // Protect last 3
+    const head = entries.slice(0, 3); // Protect first 3
+    const tail = entries.slice(-3); // Protect last 3
     const middle = entries.slice(3, -3);
 
     // Filter middle: keep decisive steps, remove redundant tool calls
@@ -190,13 +192,19 @@ export class TrajectoryExtractor {
     });
 
     // Summarize if still too long
-    const estimatedTokens = [...head, ...filtered, ...tail]
-      .reduce((sum, e) => sum + (e.tokens ?? Math.ceil(e.content.length / 4)), 0);
+    const estimatedTokens = [...head, ...filtered, ...tail].reduce(
+      (sum, e) => sum + (e.tokens ?? Math.ceil(e.content.length / 4)),
+      0,
+    );
 
     if (estimatedTokens > this.config.maxTokensPerExample) {
       // Truncate middle content to fit budget
-      const budget = this.config.maxTokensPerExample -
-        [...head, ...tail].reduce((sum, e) => sum + (e.tokens ?? Math.ceil(e.content.length / 4)), 0);
+      const budget =
+        this.config.maxTokensPerExample -
+        [...head, ...tail].reduce(
+          (sum, e) => sum + (e.tokens ?? Math.ceil(e.content.length / 4)),
+          0,
+        );
 
       let used = 0;
       const trimmed: TrajectoryEntry[] = [];
@@ -231,7 +239,8 @@ export class TrajectoryExtractor {
     if (messages.length < this.config.minTurns) return null;
 
     const totalTokens = entries.reduce(
-      (sum, e) => sum + (e.tokens ?? Math.ceil(e.content.length / 4)), 0,
+      (sum, e) => sum + (e.tokens ?? Math.ceil(e.content.length / 4)),
+      0,
     );
 
     return {
@@ -251,9 +260,7 @@ export class TrajectoryExtractor {
   exportAsJsonl(examples: readonly TrainingExample[]): string {
     const outputPath = join(this.outputDir, `training-${Date.now()}.jsonl`);
 
-    const lines = examples.map((ex) =>
-      JSON.stringify({ messages: ex.messages }),
-    );
+    const lines = examples.map((ex) => JSON.stringify({ messages: ex.messages }));
 
     const content = lines.join("\n") + "\n";
     writeFileSync(outputPath, content);

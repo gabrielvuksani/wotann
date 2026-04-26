@@ -33,7 +33,7 @@
 
 import { mkdirSync, appendFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 // ── Public Types ─────────────────────────────────────────────────────
 
@@ -123,7 +123,7 @@ const SYSTEM_PROMPT = [
   "score semantics: 1.0 = no concerns, 0.7 = minor low-severity concerns, 0.4 = one high-severity concern, 0.0 = multiple critical concerns.",
 ].join("\n");
 
-const DEFAULT_PERSIST_ROOT = join(homedir(), ".wotann", "guardian-reviews");
+const DEFAULT_PERSIST_ROOT = resolveWotannHomeSubdir("guardian-reviews");
 
 /** Max characters of raw judge response to persist — keeps JSONL manageable. */
 const RAW_JUDGMENT_MAX = 4000;

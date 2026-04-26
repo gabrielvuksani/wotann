@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, totalmem } from "node:os";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import type { ProviderAuth, ProviderName, ProviderStatus } from "../core/types.js";
 
 // ── Codex Auth Reader ───────────────────────────────────────
@@ -359,7 +360,7 @@ export async function discoverProviders(
     process.env["COPILOT_GITHUB_TOKEN"] ?? process.env["GH_TOKEN"] ?? process.env["GITHUB_TOKEN"];
   if (!ghToken) {
     // Check for saved token from wotann login
-    const savedTokenPath = join(homedir(), ".wotann", "copilot-token.json");
+    const savedTokenPath = resolveWotannHomeSubdir("copilot-token.json");
     if (existsSync(savedTokenPath)) {
       try {
         const saved = JSON.parse(readFileSync(savedTokenPath, "utf-8")) as { token?: string };

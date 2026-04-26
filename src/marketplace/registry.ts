@@ -20,6 +20,7 @@ import { homedir, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import YAML from "yaml";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { generateManifest, writeManifest, type MarketplaceManifest } from "./manifest.js";
 
 const execFileAsync = promisify(execFile);
@@ -489,7 +490,7 @@ export class SkillMarketplace {
   constructor(options: SkillMarketplaceOptions = {}) {
     this.searchRoots = options.searchRoots ?? defaultSearchRoots(process.cwd());
     this.gitBinary = options.gitBinary ?? "git";
-    this.marketplaceDir = options.marketplaceDir ?? join(homedir(), ".wotann", "marketplace");
+    this.marketplaceDir = options.marketplaceDir ?? resolveWotannHomeSubdir("marketplace");
   }
 
   /**
@@ -968,7 +969,7 @@ function commandExists(command: string): boolean {
  * `WOTANN_MCP_CONFIG_PATH` env var.
  */
 function defaultMcpConfigPath(): string {
-  return process.env["WOTANN_MCP_CONFIG_PATH"] ?? join(homedir(), ".wotann", "mcp.json");
+  return process.env["WOTANN_MCP_CONFIG_PATH"] ?? resolveWotannHomeSubdir("mcp.json");
 }
 
 /**

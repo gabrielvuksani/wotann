@@ -15,12 +15,12 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHomeSubdir } from "../../utils/wotann-home.js";
 import type { PromptContext, PromptModuleEntry } from "../engine.js";
 
 function loadBootstrapFile(name: string, workingDir?: string): string | null {
   const workspacePath = workingDir ? join(workingDir, ".wotann", name) : null;
-  const homePath = join(homedir(), ".wotann", name);
+  const homePath = resolveWotannHomeSubdir(name);
   for (const path of [workspacePath, homePath]) {
     if (!path) continue;
     if (!existsSync(path)) continue;

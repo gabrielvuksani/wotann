@@ -13,8 +13,8 @@
 import { execFileSync, type ExecFileSyncOptions } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { safeWriteFile } from "../utils/path-realpath.js";
 
 import {
@@ -69,7 +69,7 @@ export interface BackgroundTaskStatus {
 // ── Background Agent Manager ─────────────────────────
 
 const MAX_PARALLEL = 8;
-const AGENT_DIR = join(homedir(), ".wotann", "agents");
+const AGENT_DIR = resolveWotannHomeSubdir("agents");
 
 export class BackgroundAgentManager {
   private readonly tasks: Map<string, BackgroundTaskStatus> = new Map();

@@ -12,8 +12,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHome, resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -35,7 +34,7 @@ interface RegistryCache {
 
 // ── Constants ──────────────────────────────────────────
 
-const CACHE_PATH = join(homedir(), ".wotann", "registry-cache.json");
+const CACHE_PATH = resolveWotannHomeSubdir("registry-cache.json");
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 /** Curated list of high-quality models to recommend for local use */
@@ -68,12 +67,14 @@ function loadCache(): RegistryCache {
     if (existsSync(CACHE_PATH)) {
       return JSON.parse(readFileSync(CACHE_PATH, "utf-8")) as RegistryCache;
     }
-  } catch { /* ignore parse errors */ }
+  } catch {
+    /* ignore parse errors */
+  }
   return { lastCheck: 0, models: [], recommendedModels: [] };
 }
 
 function saveCache(cache: RegistryCache): void {
-  const dir = join(homedir(), ".wotann");
+  const dir = resolveWotannHome();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 2));
 }
@@ -91,8 +92,14 @@ async function checkOllamaModels(ollamaHost: string): Promise<readonly ModelUpda
     const res = await fetch(`${ollamaHost}/api/tags`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return [];
 
-    const data = await res.json() as { models: Array<{ name: string; size: number; details?: { parameter_size?: string; quantization_level?: string } }> };
-    const installedNames = new Set(data.models.map(m => m.name.replace(":latest", "")));
+    const data = (await res.json()) as {
+      models: Array<{
+        name: string;
+        size: number;
+        details?: { parameter_size?: string; quantization_level?: string };
+      }>;
+    };
+    const installedNames = new Set(data.models.map((m) => m.name.replace(":latest", "")));
 
     // Check which recommended models aren't installed
     for (const rec of RECOMMENDED_OLLAMA_MODELS) {
@@ -111,11 +118,15 @@ async function checkOllamaModels(ollamaHost: string): Promise<readonly ModelUpda
 
     // Also check Ollama library for trending models
     try {
-      const libraryRes = await fetch("https://ollama.com/api/models?sort=popular&limit=10", { signal: AbortSignal.timeout(5000) });
+      const libraryRes = await fetch("https://ollama.com/api/models?sort=popular&limit=10", {
+        signal: AbortSignal.timeout(5000),
+      });
       if (libraryRes.ok) {
-        const libraryData = await libraryRes.json() as { models?: Array<{ name: string; description?: string }> };
+        const libraryData = (await libraryRes.json()) as {
+          models?: Array<{ name: string; description?: string }>;
+        };
         for (const m of libraryData.models ?? []) {
-          if (!installedNames.has(m.name) && !updates.some(u => u.id === m.name)) {
+          if (!installedNames.has(m.name) && !updates.some((u) => u.id === m.name)) {
             updates.push({
               id: m.name,
               name: m.name,
@@ -128,8 +139,12 @@ async function checkOllamaModels(ollamaHost: string): Promise<readonly ModelUpda
           }
         }
       }
-    } catch { /* trending API not available */ }
-  } catch { /* Ollama not running */ }
+    } catch {
+      /* trending API not available */
+    }
+  } catch {
+    /* Ollama not running */
+  }
 
   return updates;
 }
@@ -148,7 +163,7 @@ export async function checkForUpdates(): Promise<{
 
   // Skip if checked recently
   if (Date.now() - cache.lastCheck < CHECK_INTERVAL_MS) {
-    return { newModels: cache.models.filter(m => m.isNew), cached: true };
+    return { newModels: cache.models.filter((m) => m.isNew), cached: true };
   }
 
   const ollamaHost = process.env["OLLAMA_HOST"] ?? "http://localhost:11434";

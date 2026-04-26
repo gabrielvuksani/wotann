@@ -14,12 +14,11 @@
  */
 
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { createConnection } from "node:net";
 import type { Socket } from "node:net";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
-const IPC_SOCKET_PATH = join(homedir(), ".wotann", "kairos.sock");
+const IPC_SOCKET_PATH = resolveWotannHomeSubdir("kairos.sock");
 
 export interface ThinClientOptions {
   readonly socketPath?: string;
@@ -320,7 +319,6 @@ export async function launchOrFallback(options: ThinClientOptions = {}): Promise
     await runThinTUI(options);
     return true;
   } catch (err) {
-     
     console.error("[thin-client] fell back to full runtime:", err);
     return false;
   }

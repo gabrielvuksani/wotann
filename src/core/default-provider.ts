@@ -15,10 +15,9 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { detectProviderFromEnv, PROVIDER_DEFAULTS } from "../providers/model-defaults.js";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 export interface DefaultProvider {
   readonly provider: string;
@@ -31,7 +30,7 @@ export interface DefaultProvider {
  * providers — callers treat null as "no config yet, show onboarding."
  */
 function readYamlDefault(
-  configPath: string = join(homedir(), ".wotann", "wotann.yaml"),
+  configPath: string = resolveWotannHomeSubdir("wotann.yaml"),
 ): DefaultProvider | null {
   if (!existsSync(configPath)) return null;
   try {

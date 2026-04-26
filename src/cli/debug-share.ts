@@ -24,6 +24,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir, platform, release, type, cpus, totalmem } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 
 const run = promisify(execFile);
 
@@ -256,7 +257,7 @@ async function readWorkspaceInfo(root?: string): Promise<DebugBundle["workspace"
 }
 
 function readDaemonLogTail(maxLines: number): readonly string[] {
-  const logPath = join(homedir(), ".wotann", "logs", "daemon.log");
+  const logPath = resolveWotannHomeSubdir("logs", "daemon.log");
   if (!existsSync(logPath)) return [];
   try {
     const raw = readFileSync(logPath, "utf-8");

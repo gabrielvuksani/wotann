@@ -24,7 +24,6 @@ import type { WotannMode } from "./core/mode-cycling.js";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
 import chalk from "chalk";
 
 import { readFileSync } from "node:fs";

@@ -12,7 +12,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHome } from "../utils/wotann-home.js";
 import WebSocket from "ws";
 
 // ── Types ────────────────────────────────────────────────
@@ -63,7 +63,7 @@ export class SupabaseRelay {
   private intentionalDisconnect = false;
 
   constructor() {
-    const wotannDir = join(homedir(), ".wotann");
+    const wotannDir = resolveWotannHome();
     this.configPath = join(wotannDir, "relay.json");
   }
 
@@ -110,7 +110,7 @@ export class SupabaseRelay {
     };
 
     // Persist to disk
-    const dir = join(homedir(), ".wotann");
+    const dir = resolveWotannHome();
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }

@@ -16,9 +16,8 @@
  *   wotann design mode edit c-abc '{"kind":"rename","name":"New"}'
  */
 
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { writeFileSync } from "node:fs";
+import { resolveWotannHomeSubdir } from "../../utils/wotann-home.js";
 import { apply, type CanvasElementProps, type CanvasOperation } from "../../design/canvas.js";
 import {
   CanvasStore,
@@ -64,7 +63,7 @@ export async function runDesignModeCommand(
   const store =
     options.store ??
     new CanvasStore({
-      rootDir: options.rootDir ?? join(homedir(), ".wotann", "canvases"),
+      rootDir: options.rootDir ?? resolveWotannHomeSubdir("canvases"),
     });
   try {
     switch (options.action) {

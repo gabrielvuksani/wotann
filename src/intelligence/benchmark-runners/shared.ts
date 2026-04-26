@@ -19,7 +19,7 @@
 
 import { mkdirSync, existsSync, appendFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
+import { resolveWotannHomeSubdir } from "../../utils/wotann-home.js";
 
 // ── Blocked-corpus signal ─────────────────────────────
 
@@ -103,7 +103,7 @@ export function makeDryRunReport(args: {
  * is `tail -f`-friendly.
  */
 export function trajectoryPathForRun(runId: string): string {
-  return join(homedir(), ".wotann", "bench-runs", `${runId}.jsonl`);
+  return resolveWotannHomeSubdir("bench-runs", `${runId}.jsonl`);
 }
 
 /**

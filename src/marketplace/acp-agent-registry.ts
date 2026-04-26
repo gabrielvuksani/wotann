@@ -37,8 +37,8 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { requireSafeUrl, SSRFBlockedError } from "../security/ssrf-guard.js";
 
 // ── Wire shapes (registry JSON contract) ────────────────────
@@ -351,7 +351,7 @@ export class AcpAgentRegistry {
   private readonly commandExists: (cmd: string) => boolean;
 
   constructor(options: AcpAgentRegistryOptions = {}) {
-    this.storeDir = options.storeDir ?? join(homedir(), ".wotann", "acp-agents");
+    this.storeDir = options.storeDir ?? resolveWotannHomeSubdir("acp-agents");
     const envOverride = process.env["WOTANN_ACP_REGISTRY_URL"];
     this.registryUrls = options.registryUrls ?? (envOverride ? [envOverride] : DEFAULT_REGISTRIES);
     this.fetchJson = options.fetchJson ?? defaultFetchJson;

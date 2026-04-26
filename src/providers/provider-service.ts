@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { withRetries, defaultRetryPolicy, type RetryPolicy } from "./retry-strategies.js";
 import { CircuitBreaker, withBreaker } from "./circuit-breaker.js";
 
@@ -123,7 +124,7 @@ export class CredentialStore {
   private cache: Record<string, SavedCredential> | null = null;
 
   constructor(path?: string) {
-    this.path = path ?? join(homedir(), ".wotann", "credentials.json");
+    this.path = path ?? resolveWotannHomeSubdir("credentials.json");
   }
 
   load(): Record<string, SavedCredential> {
@@ -183,7 +184,7 @@ export class CredentialStore {
  * Does NOT mutate process.env — callers can merge if they want.
  */
 export function loadProvidersEnvFile(path?: string): Record<string, string> {
-  const resolved = path ?? join(homedir(), ".wotann", "providers.env");
+  const resolved = path ?? resolveWotannHomeSubdir("providers.env");
   if (!existsSync(resolved)) return {};
   try {
     const raw = readFileSync(resolved, "utf-8");
@@ -214,7 +215,7 @@ export function loadProvidersEnvFile(path?: string): Record<string, string> {
  * and comments. Atomic — writes to temp + rename.
  */
 export function writeProvidersEnvKey(key: string, value: string, path?: string): void {
-  const resolved = path ?? join(homedir(), ".wotann", "providers.env");
+  const resolved = path ?? resolveWotannHomeSubdir("providers.env");
   const dir = join(resolved, "..");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   let existing = "";
@@ -253,7 +254,7 @@ export function writeProvidersEnvKey(key: string, value: string, path?: string):
  * Delete a key from ~/.wotann/providers.env.
  */
 export function deleteProvidersEnvKey(key: string, path?: string): void {
-  const resolved = path ?? join(homedir(), ".wotann", "providers.env");
+  const resolved = path ?? resolveWotannHomeSubdir("providers.env");
   if (!existsSync(resolved)) return;
   const existing = readFileSync(resolved, "utf-8");
   const keyPattern = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=`);

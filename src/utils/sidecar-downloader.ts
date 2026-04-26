@@ -12,8 +12,9 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { chmod, mkdir, readFile, stat, unlink } from "node:fs/promises";
-import { homedir, platform as osPlatform, arch as osArch } from "node:os";
+import { platform as osPlatform, arch as osArch } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveWotannHomeSubdir } from "./wotann-home.js";
 import { pipeline } from "node:stream/promises";
 
 export type SidecarName = "ollama" | "whisper";
@@ -97,7 +98,7 @@ export const SIDECAR_REGISTRY: Readonly<Record<string, SidecarSpec>> = Object.fr
 
 /** Returns the on-disk cache directory for sidecar binaries. */
 export function sidecarCacheDir(): string {
-  return join(homedir(), ".wotann", "sidecars");
+  return resolveWotannHomeSubdir("sidecars");
 }
 
 /** Returns the expected on-disk path for a sidecar + triple. */
@@ -204,7 +205,7 @@ export async function ensureAllSidecars(): Promise<readonly DownloadResult[]> {
     } catch (err) {
       // Don't block daemon — log and continue. Downstream code that actually
       // tries to use the sidecar will surface a clearer error to the user.
-       
+
       console.warn(`[sidecar] ${name} (${triple}) unavailable: ${(err as Error).message}`);
     }
   }

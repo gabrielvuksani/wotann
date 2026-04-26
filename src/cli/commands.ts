@@ -181,7 +181,7 @@ export async function runDoctor(targetDir: string): Promise<void> {
 
   const { existsSync, readFileSync, statSync } = await import("node:fs");
   const { join } = await import("node:path");
-  const { homedir } = await import("node:os");
+  const { resolveWotannHomeSubdir } = await import("../utils/wotann-home.js");
   const { createConnection } = await import("node:net");
 
   // 1. Workspace
@@ -213,7 +213,7 @@ export async function runDoctor(targetDir: string): Promise<void> {
   // Ollama reachability, port conflicts, API key validity.
 
   // 4. Daemon socket reachability
-  const socketPath = join(homedir(), ".wotann", "kairos.sock");
+  const socketPath = resolveWotannHomeSubdir("kairos.sock");
   const daemonSocketExists = existsSync(socketPath);
   let daemonAlive = false;
   if (daemonSocketExists) {
@@ -245,7 +245,7 @@ export async function runDoctor(targetDir: string): Promise<void> {
   });
 
   // 5. Memory DB integrity (best-effort; skip if not present)
-  const memoryDb = join(homedir(), ".wotann", "memory.db");
+  const memoryDb = resolveWotannHomeSubdir("memory.db");
   if (existsSync(memoryDb)) {
     try {
       const { default: Database } = await import("better-sqlite3");
@@ -297,7 +297,7 @@ export async function runDoctor(targetDir: string): Promise<void> {
   }
 
   // 7. Session token perms (if present) — must be 0o600
-  const tokenPath = join(homedir(), ".wotann", "session-token.json");
+  const tokenPath = resolveWotannHomeSubdir("session-token.json");
   if (existsSync(tokenPath)) {
     try {
       const mode = statSync(tokenPath).mode & 0o777;
@@ -313,7 +313,7 @@ export async function runDoctor(targetDir: string): Promise<void> {
   }
 
   // 8. wotann.yaml perms (S0-11)
-  const yamlPath = join(homedir(), ".wotann", "wotann.yaml");
+  const yamlPath = resolveWotannHomeSubdir("wotann.yaml");
   if (existsSync(yamlPath)) {
     try {
       const mode = statSync(yamlPath).mode & 0o777;
@@ -329,7 +329,7 @@ export async function runDoctor(targetDir: string): Promise<void> {
   }
 
   // 9. Daemon PID file liveness (no zombie pid)
-  const pidFile = join(homedir(), ".wotann", "daemon.pid");
+  const pidFile = resolveWotannHomeSubdir("daemon.pid");
   if (existsSync(pidFile)) {
     try {
       const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
