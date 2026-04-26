@@ -88,6 +88,7 @@ pub fn run() {
             commands::write_file,
             commands::execute_command,
             commands::run_arena,
+            commands::rpc_call,
             commands::get_cost_details,
             commands::get_arbitrage_estimates,
             commands::get_plugins,

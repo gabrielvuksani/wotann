@@ -1896,6 +1896,28 @@ pub async fn execute_command(cmd: String, cwd: Option<String>) -> Result<ShellOu
     })
 }
 
+/// Generic JSON-RPC bridge: lets React call ANY daemon RPC method
+/// without needing a typed Rust wrapper per method. Used for surface-
+/// specific RPCs that don't justify their own command (gdpr.export,
+/// gdpr.delete, workspace.trust, channels.policy.set, etc.). Returns
+/// the raw daemon response as a serde_json::Value, which Tauri then
+/// serializes back to React.
+///
+/// The previous approach for these RPCs was clipboard-copy ("paste this
+/// command in Terminal") because no bridge existed. That was honest
+/// fallback but bad UX. This `rpc_call` is the proper wire.
+///
+/// Failure modes are surfaced verbatim: if the daemon is offline we
+/// return an Err string the React side can display in a toast.
+#[tauri::command]
+pub fn rpc_call(method: String, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos()
+        .map_err(|e| format!("daemon unreachable: {}", e))?;
+    client
+        .call(&method, params)
+        .map_err(|e| format!("rpc {} failed: {}", method, e))
+}
+
 /// Run arena comparison — routes through KAIROS
 #[tauri::command]
 pub fn run_arena(prompt: String, models: Vec<String>) -> Vec<ArenaResponseItem> {

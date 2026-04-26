@@ -1510,43 +1510,66 @@ function AdvancedSection() {
               Clear All
             </button>
           </SettingRow>
-          {/* PHASE C — GDPR Article 20 + 17. The Tauri side currently lacks
-              a generic RPC bridge; for now these buttons document the path
-              clearly + open Terminal with the daemon-CLI fallback so users
-              still have a discoverable surface. TIER 1 follow-up wires a
-              proper Tauri rpc_call command bridging React → daemon. */}
-          <SettingRow label="Export My Data (GDPR Article 20)" description="Run `wotann export` in your terminal, OR call gdpr.export via the daemon. Bundles ~/.wotann into a tar.gz.">
+          {/* PHASE C — GDPR Article 20 + 17. Calls the daemon directly via
+              the new generic Tauri rpc_call bridge — no clipboard hack. */}
+          <SettingRow label="Export My Data (GDPR Article 20)" description="Bundles ~/.wotann (memory, settings, conversations) into a tar.gz on the desktop.">
             <button
-              onClick={() => {
-                navigator.clipboard.writeText("wotann export");
-                alert("Copied `wotann export` to clipboard. Paste in Terminal to bundle ~/.wotann.");
+              onClick={async () => {
+                try {
+                  const result = (await commands.rpcCall("gdpr.export")) as
+                    | { path?: string }
+                    | null;
+                  alert(
+                    result?.path
+                      ? `Exported to: ${result.path}`
+                      : "Export started — check ~/.wotann/exports/ for the bundle.",
+                  );
+                } catch (err) {
+                  alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+                }
               }}
               style={{ fontSize: "var(--font-size-xs)", padding: "4px 12px", borderRadius: "var(--radius-md)", background: "var(--surface-2)", border: "1px solid var(--border-subtle)", color: "var(--color-text-secondary)", cursor: "pointer" }}
             >
-              Copy command
+              Export Now
             </button>
           </SettingRow>
-          <SettingRow label="Delete Everything (GDPR Article 17)" description="Run `wotann delete --yes` in your terminal, OR call gdpr.delete via the daemon. Wipes ~/.wotann.">
+          <SettingRow label="Delete Everything (GDPR Article 17)" description="Wipes ~/.wotann (memory, cache, credentials). No recovery. Run Export first if you want a backup.">
             <button
-              onClick={() => {
-                navigator.clipboard.writeText("wotann delete --yes");
-                alert("Copied `wotann delete --yes` to clipboard. Paste in Terminal — destructive!");
+              onClick={async () => {
+                if (!confirm("Permanently delete ~/.wotann? This is irreversible.")) return;
+                try {
+                  await commands.rpcCall("gdpr.delete", { confirm: true });
+                  alert("Deleted. Restart WOTANN to re-initialise from scratch.");
+                } catch (err) {
+                  alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+                }
               }}
               className="btn-danger"
               style={{ fontSize: "var(--font-size-xs)", padding: "4px 12px" }}
             >
-              Copy command
+              Delete Now
             </button>
           </SettingRow>
-          <SettingRow label="Trusted Workspaces" description="Run `wotann trust --list` to view, `wotann trust [path]` to add. Daemon RPC: workspace.trust*.">
+          <SettingRow label="Trusted Workspaces" description="View and manage which workspaces have command-execution trust on the daemon.">
             <button
-              onClick={() => {
-                navigator.clipboard.writeText("wotann trust --list");
-                alert("Copied `wotann trust --list` to clipboard.");
+              onClick={async () => {
+                try {
+                  const result = (await commands.rpcCall("workspace.trust.list")) as
+                    | { workspaces?: { path: string; trustedAt: number }[] }
+                    | null;
+                  const list = result?.workspaces ?? [];
+                  alert(
+                    list.length === 0
+                      ? "No trusted workspaces yet. Use the CLI to add one: wotann trust <path>"
+                      : `Trusted workspaces:\n${list.map((w) => "• " + w.path).join("\n")}`,
+                  );
+                } catch (err) {
+                  alert(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+                }
               }}
               style={{ fontSize: "var(--font-size-xs)", padding: "4px 12px", borderRadius: "var(--radius-md)", background: "var(--surface-2)", border: "1px solid var(--border-subtle)", color: "var(--color-text-secondary)", cursor: "pointer" }}
             >
-              Copy command
+              View List
             </button>
           </SettingRow>
         </div>

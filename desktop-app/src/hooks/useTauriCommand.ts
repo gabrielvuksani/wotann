@@ -365,6 +365,15 @@ function getDisconnectedResponse<T>(cmd: string): T {
 export const commands = {
   getStatus: () => invoke<RuntimeStatus>("get_status"),
 
+  /**
+   * Generic JSON-RPC bridge to the daemon. Use for any RPC method that
+   * doesn't have a typed wrapper here (gdpr.export, gdpr.delete,
+   * workspace.trust, channels.policy.set, etc.). Returns the daemon's
+   * raw result as `unknown` — caller does the type-narrow.
+   */
+  rpcCall: (method: string, params: Record<string, unknown> = {}) =>
+    invoke<unknown>("rpc_call", { method, params }),
+
   sendMessage: (prompt: string) =>
     invoke<string>("send_message", { prompt }),
 
