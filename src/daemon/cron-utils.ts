@@ -41,17 +41,23 @@ export function matchCronField(field: string, value: number, max: number): boole
  *
  * Format: "minute hour day-of-month month day-of-week"
  *
- * Example: `"0 9 * * 1"` = 09:00 every Monday.
+ * Example: `"0 9 * * 1"` = 09:00 UTC every Monday.
+ *
+ * Wave 3-Q: cron fields are evaluated against UTC, not local time, for
+ * DST-safety. Local-time cron skips spring-forward (e.g. 02:30 never fires)
+ * and double-fires fall-back (e.g. 01:30 fires twice). UTC has no DST so
+ * a job scheduled at "30 2 * * *" reliably fires once per day at 02:30 UTC.
  */
 export function matchesCronSchedule(schedule: string, now: Date): boolean {
   const parts = schedule.trim().split(/\s+/);
   if (parts.length < 5) return false;
 
-  const minute = now.getMinutes();
-  const hour = now.getHours();
-  const dayOfMonth = now.getDate();
-  const month = now.getMonth() + 1;
-  const dayOfWeek = now.getDay();
+  // UTC for DST-safety per Wave 3-Q
+  const minute = now.getUTCMinutes();
+  const hour = now.getUTCHours();
+  const dayOfMonth = now.getUTCDate();
+  const month = now.getUTCMonth() + 1;
+  const dayOfWeek = now.getUTCDay();
 
   return (
     matchCronField(parts[0]!, minute, 59) &&

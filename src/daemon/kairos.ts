@@ -1929,18 +1929,22 @@ export class KairosDaemon {
         });
     }
 
-    // Track C: Dream pipeline — run nightly (between 2AM-4AM, once per day)
-    if (this.dreamPipeline && now.getHours() >= 2 && now.getHours() < 4) {
+    // Track C: Dream pipeline — run nightly (between 02:00-04:00 UTC, once per day)
+    // UTC for DST-safety per Wave 3-Q — local-time windows skip the
+    // spring-forward hour and double-fire the fall-back hour.
+    if (this.dreamPipeline && now.getUTCHours() >= 2 && now.getUTCHours() < 4) {
       this.checkAndRunDreamPipeline(now);
     }
 
-    // Codebase health check — run once per day (between 3AM-5AM)
-    if (now.getHours() >= 3 && now.getHours() < 5) {
+    // Codebase health check — run once per day (between 03:00-05:00 UTC)
+    // UTC for DST-safety per Wave 3-Q
+    if (now.getUTCHours() >= 3 && now.getUTCHours() < 5) {
       this.checkAndRunCodebaseHealth(now);
     }
 
-    // Skill prompt optimization — nightly, once per day (between 2AM-4AM)
-    if (this.runtime && now.getHours() >= 2 && now.getHours() < 4) {
+    // Skill prompt optimization — nightly, once per day (between 02:00-04:00 UTC)
+    // UTC for DST-safety per Wave 3-Q
+    if (this.runtime && now.getUTCHours() >= 2 && now.getUTCHours() < 4) {
       this.checkAndRunSkillOptimization(now);
     }
 
@@ -2567,13 +2571,16 @@ export class KairosDaemon {
       return !task.lastRun || now.getTime() - task.lastRun.getTime() >= 15 * 60_000;
     }
 
+    // UTC for DST-safety per Wave 3-Q — local-time gate skips
+    // spring-forward and double-fires fall-back. The "is today" comparator
+    // already uses toISOString() (UTC), so the hour gate must match.
     if (!task.lastRun) {
-      return now.getHours() >= 2;
+      return now.getUTCHours() >= 2;
     }
 
     const lastRunDay = task.lastRun.toISOString().slice(0, 10);
     const today = now.toISOString().slice(0, 10);
-    return lastRunDay !== today && now.getHours() >= 2;
+    return lastRunDay !== today && now.getUTCHours() >= 2;
   }
 
   private executeHeartbeatTask(task: HeartbeatTask, now: Date): void {
@@ -3079,8 +3086,12 @@ function computeNextRun(schedule: HeartbeatScheduleKind, now: Date): Date | unde
     return new Date(now.getTime() + 15 * 60_000);
   }
 
+  // UTC for DST-safety per Wave 3-Q — local setHours(2) on a spring-forward
+  // day rolls forward past 02:00 entirely (the hour is skipped), and on a
+  // fall-back day produces an ambiguous wall time. UTC has no DST so 02:00
+  // UTC reliably exists exactly once per calendar day.
   const next = new Date(now);
-  next.setDate(next.getHours() >= 2 ? next.getDate() + 1 : next.getDate());
-  next.setHours(2, 0, 0, 0);
+  next.setUTCDate(next.getUTCHours() >= 2 ? next.getUTCDate() + 1 : next.getUTCDate());
+  next.setUTCHours(2, 0, 0, 0);
   return next;
 }

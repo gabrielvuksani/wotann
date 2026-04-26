@@ -13,16 +13,20 @@ import { dirname } from "node:path";
 import { writeFileAtomicSyncBestEffort } from "../utils/atomic-io.js";
 
 export interface DailyCostEntry {
-  readonly date: string; // YYYY-MM-DD in local time
+  readonly date: string; // YYYY-MM-DD in UTC (Wave 3-Q DST-safety)
   readonly costUsd: number;
 }
 
 const RETENTION_DAYS = 90;
 
+// UTC for DST-safety per Wave 3-Q — local-time bucketing on DST days
+// either skips an hour of cost (spring-forward) or double-counts an hour
+// (fall-back) into the wrong bucket. UTC has no DST so per-day totals stay
+// internally consistent across timezones.
 function formatDate(d: Date): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+  const year = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -140,11 +144,10 @@ export class DailyCostStore {
       // SECURITY (B6): atomic write + advisory lock prevents corruption when
       // multiple daemon processes or cost-tracker instances hit the store at
       // once. The file is tiny and written often, so the race window is real.
-      writeFileAtomicSyncBestEffort(
-        this.storagePath,
-        JSON.stringify(this.entries, null, 2),
-        { encoding: "utf-8", mode: 0o600 },
-      );
+      writeFileAtomicSyncBestEffort(this.storagePath, JSON.stringify(this.entries, null, 2), {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
     } catch {
       // Best-effort persistence only
     }

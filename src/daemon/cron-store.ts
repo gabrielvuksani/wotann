@@ -488,9 +488,13 @@ export function computeNextFireAt(schedule: string, after: Date): number | null 
 
   // Advance to the start of the next whole minute so the first candidate
   // is strictly in the future relative to `after`.
+  // UTC for DST-safety per Wave 3-Q — local-time advance can skip the
+  // spring-forward hour entirely or repeat the fall-back hour, which makes
+  // schedules like `"30 2 * * *"` either never-fire or fire-twice on those
+  // days. UTC has no DST so the minute counter is monotonic.
   const candidate = new Date(after.getTime());
-  candidate.setSeconds(0, 0);
-  candidate.setMinutes(candidate.getMinutes() + 1);
+  candidate.setUTCSeconds(0, 0);
+  candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
 
   const limit = after.getTime() + 400 * 24 * 60 * 60 * 1000;
 
@@ -498,7 +502,7 @@ export function computeNextFireAt(schedule: string, after: Date): number | null 
     if (matchesCronSchedule(schedule, candidate)) {
       return candidate.getTime();
     }
-    candidate.setMinutes(candidate.getMinutes() + 1);
+    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
   }
 
   return null;
