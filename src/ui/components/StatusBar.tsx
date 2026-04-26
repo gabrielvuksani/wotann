@@ -33,6 +33,24 @@ interface StatusBarProps {
   readonly turnCount?: number;
   readonly skillCount?: number;
   readonly roeSessionActive?: boolean;
+  /**
+   * Optional second line of status content rendered directly beneath
+   * the main bar. When undefined the bar renders single-row exactly as
+   * before, so existing call sites don't change visual height.
+   *
+   * Typical use: supplementary rate readouts (tokens/min, $/hr,
+   * sparkline, recent activity). Caller owns layout — pass a ReactNode
+   * (Box / Text / array of <Text/>) and the StatusBar wraps it in a
+   * matching bordered container so the visual rhythm holds.
+   */
+  readonly line2?: React.ReactNode;
+  /**
+   * Convenience props for the most common line-2 content (rates).
+   * If `line2` is provided, these are ignored. If neither `line2` nor
+   * any of these are set, line 2 is omitted entirely.
+   */
+  readonly tokensPerMinute?: number;
+  readonly costPerHour?: number;
 }
 
 /**
@@ -82,6 +100,36 @@ function modeRune(mode: string): string | undefined {
   }
 }
 
+/**
+ * Build the default line-2 content from rate props. Returns null when
+ * both rate props are undefined, so the line is suppressed entirely
+ * rather than rendering an empty bar (honest fallback per QB #6).
+ */
+function defaultLine2(
+  tone: ReturnType<typeof buildTone>,
+  tokensPerMinute: number | undefined,
+  costPerHour: number | undefined,
+): React.ReactNode | null {
+  const hasRate = tokensPerMinute !== undefined || costPerHour !== undefined;
+  if (!hasRate) return null;
+  return (
+    <Box gap={2}>
+      {tokensPerMinute !== undefined && (
+        <Box gap={1}>
+          <Text color={tone.muted}>tok/min</Text>
+          <Text color={tone.info}>{Math.round(tokensPerMinute).toLocaleString()}</Text>
+        </Box>
+      )}
+      {costPerHour !== undefined && (
+        <Box gap={1}>
+          <Text color={tone.muted}>$/hr</Text>
+          <Text color={tone.success}>${costPerHour.toFixed(2)}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 export function StatusBar({
   model,
   provider,
@@ -95,6 +143,9 @@ export function StatusBar({
   turnCount = 0,
   skillCount,
   roeSessionActive = false,
+  line2,
+  tokensPerMinute,
+  costPerHour,
 }: StatusBarProps): React.ReactElement {
   const tone = buildTone(PALETTES.dark);
   const borderColor = isStreaming ? tone.success : tone.border;
@@ -104,49 +155,66 @@ export function StatusBar({
   // Strip vendor prefixes for compact display (gpt-/claude-).
   const compactModel = model.replace("claude-", "").replace("gpt-", "");
 
+  // Resolve line-2 content. Explicit `line2` wins; otherwise build from
+  // rate props; otherwise null (line is omitted entirely).
+  const resolvedLine2 = line2 ?? defaultLine2(tone, tokensPerMinute, costPerHour);
+
   return (
-    <Box borderStyle="single" borderColor={borderColor} paddingX={1} justifyContent="space-between">
-      {/* ── Left cluster: streaming dot + model + provider ── */}
-      <Box gap={1}>
-        {isStreaming && (
-          <Text color={tone.success} bold>
-            {glyph.statusActive}
+    <Box flexDirection="column">
+      <Box
+        borderStyle="single"
+        borderColor={borderColor}
+        paddingX={1}
+        justifyContent="space-between"
+      >
+        {/* ── Left cluster: streaming dot + model + provider ── */}
+        <Box gap={1}>
+          {isStreaming && (
+            <Text color={tone.success} bold>
+              {glyph.statusActive}
+            </Text>
+          )}
+          {decorativeRune !== undefined && !isStreaming && (
+            <Text color={tone.rune} bold>
+              {decorativeRune}
+            </Text>
+          )}
+          <Text color={tone.primary} bold>
+            {compactModel}
           </Text>
-        )}
-        {decorativeRune !== undefined && !isStreaming && (
-          <Text color={tone.rune} bold>
-            {decorativeRune}
+          <Text color={tone.muted}>via</Text>
+          <Text color={tone.text}>{provider}</Text>
+        </Box>
+
+        {/* ── Center cluster: mode pill + ROE indicator + counters ── */}
+        <Box gap={1}>
+          <Pill tone={tone} label={mode} variant={variant} />
+          {mode === "guardrails-off" && roeSessionActive && (
+            <Pill tone={tone} label="ROE" variant="warn" />
+          )}
+          {mode === "guardrails-off" && !roeSessionActive && (
+            <Pill tone={tone} label="NO-ROE" variant="fail" />
+          )}
+          {turnCount > 0 && <Text color={tone.muted}>T{turnCount}</Text>}
+          {skillCount !== undefined && <Text color={tone.muted}>S{skillCount}</Text>}
+        </Box>
+
+        {/* ── Right cluster: cost + gradient context bar + tool counts ── */}
+        <Box gap={1}>
+          <Text color={tone.success}>${cost.toFixed(3)}</Text>
+          <GradientBar tone={tone} percent={contextPercent} width={12} />
+          <Text color={tone.muted}>{contextPercent}%</Text>
+          <Text color={tone.muted}>
+            R{reads} E{edits} B{bashCalls}
           </Text>
-        )}
-        <Text color={tone.primary} bold>
-          {compactModel}
-        </Text>
-        <Text color={tone.muted}>via</Text>
-        <Text color={tone.text}>{provider}</Text>
+        </Box>
       </Box>
-
-      {/* ── Center cluster: mode pill + ROE indicator + counters ── */}
-      <Box gap={1}>
-        <Pill tone={tone} label={mode} variant={variant} />
-        {mode === "guardrails-off" && roeSessionActive && (
-          <Pill tone={tone} label="ROE" variant="warn" />
-        )}
-        {mode === "guardrails-off" && !roeSessionActive && (
-          <Pill tone={tone} label="NO-ROE" variant="fail" />
-        )}
-        {turnCount > 0 && <Text color={tone.muted}>T{turnCount}</Text>}
-        {skillCount !== undefined && <Text color={tone.muted}>S{skillCount}</Text>}
-      </Box>
-
-      {/* ── Right cluster: cost + gradient context bar + tool counts ── */}
-      <Box gap={1}>
-        <Text color={tone.success}>${cost.toFixed(3)}</Text>
-        <GradientBar tone={tone} percent={contextPercent} width={12} />
-        <Text color={tone.muted}>{contextPercent}%</Text>
-        <Text color={tone.muted}>
-          R{reads} E{edits} B{bashCalls}
-        </Text>
-      </Box>
+      {/* ── Optional line-2: supplementary status (rates, sparkline, …) ── */}
+      {resolvedLine2 !== null && resolvedLine2 !== undefined && (
+        <Box borderStyle="single" borderColor={tone.border} paddingX={1}>
+          {resolvedLine2}
+        </Box>
+      )}
     </Box>
   );
 }

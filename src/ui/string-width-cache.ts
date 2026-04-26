@@ -77,10 +77,24 @@ export interface StringWidthCacheOptions {
    *  long-running daemons that render many one-off emoji.
    */
   readonly cacheAstral?: boolean;
+  /**
+   * Maximum number of entries kept in the astral-plane Map before
+   * least-recently-inserted eviction kicks in. Caps the worst-case
+   * memory footprint when a session encounters many one-off emoji
+   * (e.g. a big paste of mixed scripts). Default 1024.
+   *
+   * The BMP cache is bounded by definition (256 KiB Int32Array) and
+   * never evicts; this only affects the astral fallback Map.
+   */
+  readonly astralMaxEntries?: number;
   /** Optional ambiguous-is-narrow flag passed to the underlying impl.
    *  Defaults to string-width's own default (true). */
   readonly ambiguousIsNarrow?: boolean;
 }
+
+/** Default astral-Map cap. Approximately 1024 entries × ~16B/entry ≈
+ *  16 KiB worst case — small relative to the BMP table. */
+export const DEFAULT_ASTRAL_MAX_ENTRIES = 1024;
 
 export interface StringWidthCacheStats {
   readonly bmpFilled: number;
@@ -89,6 +103,9 @@ export interface StringWidthCacheStats {
   readonly bmpMisses: number;
   readonly astralHits: number;
   readonly astralMisses: number;
+  /** Number of LRU evictions performed against the astral Map. Will
+   *  remain 0 unless the session exceeds `astralMaxEntries`. */
+  readonly astralEvictions: number;
 }
 
 /** Result wrapper for the safe-form helpers (QB #6). */
@@ -107,6 +124,7 @@ export type CharWidthResult =
 export class StringWidthCache {
   private readonly bmp: Int32Array;
   private readonly astral: Map<number, number> | null;
+  private readonly astralMaxEntries: number;
   private readonly impl: (s: string) => number;
 
   // Stats. Counted per-instance, not via module globals (QB #7).
@@ -115,11 +133,18 @@ export class StringWidthCache {
   private bmpFilledCount = 0;
   private astralHitsCount = 0;
   private astralMissesCount = 0;
+  private astralEvictionsCount = 0;
 
   constructor(opts: StringWidthCacheOptions = {}) {
     this.bmp = new Int32Array(BMP_CACHE_SIZE);
     this.bmp.fill(WIDTH_SENTINEL);
     this.astral = (opts.cacheAstral ?? true) ? new Map() : null;
+    // Validate cap defensively; non-positive values fall back to default.
+    const requestedCap = opts.astralMaxEntries;
+    this.astralMaxEntries =
+      requestedCap !== undefined && Number.isInteger(requestedCap) && requestedCap > 0
+        ? requestedCap
+        : DEFAULT_ASTRAL_MAX_ENTRIES;
     if (opts.impl) {
       this.impl = opts.impl;
     } else {
@@ -161,14 +186,29 @@ export class StringWidthCache {
       this.bmpMissesCount++;
       return width;
     }
-    // Astral plane. Optionally cache.
+    // Astral plane. Optionally cache, with LRI eviction at cap.
     if (this.astral) {
       const cached = this.astral.get(codepoint);
       if (cached !== undefined) {
+        // Promote to most-recently-used: delete + reinsert keeps Map
+        // iteration order in LRU shape (Map preserves insertion order
+        // per ECMA-262, so the oldest entry is always `keys().next()`).
+        this.astral.delete(codepoint);
+        this.astral.set(codepoint, cached);
         this.astralHitsCount++;
         return cached;
       }
       const width = this.impl(String.fromCodePoint(codepoint));
+      // Evict the least-recently-used entry if we would exceed the cap.
+      // We evict BEFORE inserting so size never exceeds the cap, which
+      // keeps the worst-case memory footprint deterministic.
+      if (this.astral.size >= this.astralMaxEntries) {
+        const oldestKey = this.astral.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.astral.delete(oldestKey);
+          this.astralEvictionsCount++;
+        }
+      }
       this.astral.set(codepoint, width);
       this.astralMissesCount++;
       return width;
@@ -308,6 +348,7 @@ export class StringWidthCache {
     this.bmpFilledCount = 0;
     this.astralHitsCount = 0;
     this.astralMissesCount = 0;
+    this.astralEvictionsCount = 0;
   }
 
   /** Snapshot of cache stats. Useful for benchmarks + observability. */
@@ -319,6 +360,7 @@ export class StringWidthCache {
       bmpMisses: this.bmpMissesCount,
       astralHits: this.astralHitsCount,
       astralMisses: this.astralMissesCount,
+      astralEvictions: this.astralEvictionsCount,
     });
   }
 
