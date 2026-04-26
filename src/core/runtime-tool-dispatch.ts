@@ -906,27 +906,38 @@ export async function dispatchRuntimeTool(
         // when buildAuxToolDefinitions() exposes them in the schema (wired
         // from runtime.ts:2810). dispatchAuxTool returns a normalized envelope
         // we wrap into ToolDispatchResult.
-        const auxModule =
-          require("../tools/aux-tools.js") as typeof import("../tools/aux-tools.js");
-        if (auxModule.isAuxTool(toolName)) {
-          return async () => {
-            const auxResult = await auxModule.dispatchAuxTool(toolName, input, {
-              // task.spawn requires a TaskTool dep — we don't currently
-              // surface one through ToolDispatchDeps, so spawn returns an
-              // honest `not_configured` error. The other 4 aux tools
-              // (PDF, post_callback, monitor_bg) work without it.
-              taskTool: null,
-            });
-            const content = auxResult.ok
-              ? JSON.stringify(auxResult.data)
-              : `Error: ${auxResult.error}${auxResult.detail ? ` — ${auxResult.detail}` : ""}`;
-            return {
-              type: "text" as const,
-              content,
-              provider: ctx.responseProvider,
-              model: ctx.responseModel,
+        //
+        // The require + isAuxTool check is wrapped in try/catch so unknown
+        // tool names continue to return `null` even when the aux-tools
+        // module is unavailable (test environments that mock require, etc.)
+        // — matching the contract verified by tests/tools/monitor.test.ts.
+        try {
+          const auxModule =
+            require("../tools/aux-tools.js") as typeof import("../tools/aux-tools.js");
+          if (auxModule.isAuxTool(toolName)) {
+            return async () => {
+              const auxResult = await auxModule.dispatchAuxTool(toolName, input, {
+                // task.spawn requires a TaskTool dep — we don't currently
+                // surface one through ToolDispatchDeps, so spawn returns an
+                // honest `not_configured` error. The other 4 aux tools
+                // (PDF, post_callback, monitor_bg) work without it.
+                taskTool: null,
+              });
+              const content = auxResult.ok
+                ? JSON.stringify(auxResult.data)
+                : `Error: ${auxResult.error}${auxResult.detail ? ` — ${auxResult.detail}` : ""}`;
+              return {
+                type: "text" as const,
+                content,
+                provider: ctx.responseProvider,
+                model: ctx.responseModel,
+              };
             };
-          };
+          }
+        } catch {
+          // aux-tools module unavailable (test mocks, missing dist, etc.)
+          // — fall through to the null return so the dispatcher contract
+          // for unknown tool names stays intact.
         }
         return null;
       }
