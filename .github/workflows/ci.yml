@@ -77,10 +77,18 @@ jobs:
     # Each shard still gets its own clean runner (no memory
     # accumulation across the full 583-file suite).
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    # Per-shard timeout: each shard runs ~22-65 s locally; bumping
+    # to 8 min covers slow CI runners with 4× safety margin and
+    # surfaces hangs faster than the prior 15 min cap.
+    timeout-minutes: 8
     strategy:
       fail-fast: false
-      max-parallel: 3
+      # Reduced from 3 → 2: at max-parallel:3 we still saw "runner
+      # has received a shutdown signal" on shards 1+2 (GH Actions
+      # free-tier matrix-pool reclaim under contention). 2 parallel
+      # runners is the sweet spot — shards still finish in 3 waves
+      # (~6-9 min total) but no infrastructure pressure.
+      max-parallel: 2
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
