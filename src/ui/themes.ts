@@ -36,6 +36,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
+import {
+  applyColorBlindMode,
+  detectColorBlindMode,
+  type ColorBlindMode,
+} from "./themes/colorblind.js";
+
 // ── Palette ─────────────────────────────────────────────────────────────────
 
 /**
@@ -424,6 +430,13 @@ export class ThemeManager {
   private currentTheme: Theme;
   private readonly themes: Map<string, Theme>;
   private readonly storagePath?: string;
+  /**
+   * Per-instance colour-blind mode. Defaults to whatever
+   * `detectColorBlindMode(env)` returns at construction time so the
+   * remap is picked up automatically when WOTANN_COLOR_MODE is set,
+   * but tests / runtime callers can override via `setColorBlindMode`.
+   */
+  private colorBlindMode: ColorBlindMode | null;
 
   constructor(initialTheme: string = "dark", storagePath?: string) {
     this.themes = new Map(BUILTIN_THEMES.map((t) => [t.name, t]));
@@ -431,10 +444,27 @@ export class ThemeManager {
     const persisted = storagePath ? readPersistedUIState(storagePath) : {};
     const resolvedTheme = persisted.theme ?? initialTheme;
     this.currentTheme = this.themes.get(resolvedTheme) ?? this.themes.get("dark")!;
+    this.colorBlindMode = detectColorBlindMode();
   }
 
   getCurrent(): Theme {
-    return this.currentTheme;
+    if (this.colorBlindMode === null) return this.currentTheme;
+    // Apply the remap on read — keeps the stored theme intact so
+    // toggling colorBlindMode off restores the original colours.
+    return {
+      ...this.currentTheme,
+      colors: applyColorBlindMode(this.currentTheme.colors, this.colorBlindMode),
+    };
+  }
+
+  /** Active colour-blind mode for this instance (null = no remap). */
+  getColorBlindMode(): ColorBlindMode | null {
+    return this.colorBlindMode;
+  }
+
+  /** Override the colour-blind mode. Pass null to disable the remap. */
+  setColorBlindMode(mode: ColorBlindMode | null): void {
+    this.colorBlindMode = mode;
   }
 
   setTheme(name: string): boolean {
