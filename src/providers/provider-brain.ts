@@ -76,15 +76,15 @@ export class ProviderBrain {
     const candidates = this.rankProviders(task, availableProviders);
 
     if (candidates.length === 0) {
-      return {
-        provider: "anthropic",
-        model: "auto",
-        estimatedCost: 0,
-        estimatedLatencyMs: 0,
-        reason: "No available providers — using default",
-        alternatives: [],
-        fallbackChain: [],
-      };
+      // No available providers. Returning a fake "anthropic" decision
+      // here would silently pin every cold-start request to Anthropic
+      // even when the user has none configured (the v9 META-AUDIT
+      // flagged this as a hidden vendor pin). Surface the real state
+      // so the caller can prompt the user to authenticate or enable a
+      // provider rather than firing a phantom request.
+      throw new Error(
+        "ProviderBrain.route: no available providers — caller must prompt the user to configure one",
+      );
     }
 
     const best = candidates[0]!;
@@ -178,11 +178,26 @@ export class ProviderBrain {
     let type: TaskClassification["type"] = "general";
     let complexity: TaskClassification["complexity"] = "moderate";
 
-    if (lower.includes("research") || lower.includes("find") || lower.includes("search")) type = "research";
-    else if (lower.includes("write") || lower.includes("implement") || lower.includes("create") || lower.includes("build")) type = "code-gen";
-    else if (lower.includes("fix") || lower.includes("debug") || lower.includes("why") || lower.includes("explain")) type = "reasoning";
-    else if (lower.includes("classify") || lower.includes("categorize") || lower.includes("which")) type = "classification";
-    else if (lower.includes("story") || lower.includes("creative") || lower.includes("imagine")) type = "creative";
+    if (lower.includes("research") || lower.includes("find") || lower.includes("search"))
+      type = "research";
+    else if (
+      lower.includes("write") ||
+      lower.includes("implement") ||
+      lower.includes("create") ||
+      lower.includes("build")
+    )
+      type = "code-gen";
+    else if (
+      lower.includes("fix") ||
+      lower.includes("debug") ||
+      lower.includes("why") ||
+      lower.includes("explain")
+    )
+      type = "reasoning";
+    else if (lower.includes("classify") || lower.includes("categorize") || lower.includes("which"))
+      type = "classification";
+    else if (lower.includes("story") || lower.includes("creative") || lower.includes("imagine"))
+      type = "creative";
 
     if (prompt.length < 50) complexity = "simple";
     else if (prompt.length > 500) complexity = "complex";
@@ -205,7 +220,13 @@ export class ProviderBrain {
     };
 
     const ordered = preferences[task.type] ?? preferences["general"]!;
-    const results: { provider: ProviderName; model: string; cost: number; latency: number; reason: string }[] = [];
+    const results: {
+      provider: ProviderName;
+      model: string;
+      cost: number;
+      latency: number;
+      reason: string;
+    }[] = [];
 
     for (const provider of ordered) {
       if (!available.includes(provider)) continue;
@@ -249,9 +270,17 @@ export class ProviderBrain {
 
   private estimateCost(provider: ProviderName, tokens: number): number {
     const costPerMillion: Record<string, number> = {
-      anthropic: 15, openai: 10, gemini: 7, ollama: 0,
-      free: 0, azure: 12, bedrock: 15, vertex: 7,
-      codex: 0, copilot: 0, huggingface: 1,
+      anthropic: 15,
+      openai: 10,
+      gemini: 7,
+      ollama: 0,
+      free: 0,
+      azure: 12,
+      bedrock: 15,
+      vertex: 7,
+      codex: 0,
+      copilot: 0,
+      huggingface: 1,
     };
     return ((costPerMillion[provider] ?? 10) * tokens) / 1_000_000;
   }

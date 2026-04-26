@@ -42,7 +42,9 @@ struct SummarizeWithWOTANNIntent: AppIntent {
         }
 
         let prompt = "Summarize the following text in \(length.promptHint). Capture the key points without padding. Reply with ONLY the summary, no preamble.\n\n\(trimmed)"
-        let summary = await WOTANNIntentService.shared.sendPrompt(prompt, provider: "anthropic")
+        // Omit provider so the daemon uses the user's active provider —
+        // see WOTANNIntentService.sendPrompt for the rationale.
+        let summary = await WOTANNIntentService.shared.sendPrompt(prompt)
 
         // On transport failure, echo the original so Writing Tools doesn't
         // stomp the user's selection with an error string.

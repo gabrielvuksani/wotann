@@ -187,8 +187,17 @@ enum EditorThemes {
 // Runestone SPM version exposes. The property names below are stable across
 // the 0.5.x series. If the upstream API shifts we localise the change here.
 
-struct RunestoneTheme: Runestone.Theme {
+// Runestone's `Theme` is a class-bound protocol (`: AnyObject`), so
+// the adapter must be a `final class` rather than a struct. Otherwise
+// swiftc errors with "non-class type 'RunestoneTheme' cannot conform
+// to class protocol 'Theme'".
+final class RunestoneTheme: Runestone.Theme {
     let theme: EditorTheme
+
+    init(theme: EditorTheme) {
+        self.theme = theme
+    }
+
 
     var backgroundColor: UIColor            { theme.backgroundColor }
     var textColor: UIColor                  { theme.textColor }

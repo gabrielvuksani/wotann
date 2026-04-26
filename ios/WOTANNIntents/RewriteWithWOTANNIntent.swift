@@ -51,7 +51,9 @@ struct RewriteWithWOTANNIntent: AppIntent {
         // handles pairing, ECDH key rehydration, and RPC — keeping all
         // Writing Tools traffic on the same encrypted bridge as Ask / Enhance.
         let prompt = "Rewrite the following text. Tone: \(tone.rawValue). Preserve meaning and code semantics. Reply with ONLY the rewritten text, no preamble.\n\n\(trimmed)"
-        let rewritten = await WOTANNIntentService.shared.sendPrompt(prompt, provider: "anthropic")
+        // Omit provider so the daemon uses the user's active provider —
+        // see WOTANNIntentService.sendPrompt for the rationale.
+        let rewritten = await WOTANNIntentService.shared.sendPrompt(prompt)
 
         // If the service returned a human-readable error, echo the original
         // text so the Writing Tools flow doesn't corrupt the user's buffer.

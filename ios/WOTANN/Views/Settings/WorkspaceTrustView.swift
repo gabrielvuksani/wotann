@@ -65,7 +65,7 @@ struct WorkspaceTrustView: View {
                     Text(msg)
                         .font(WTheme.Typography.caption)
                         .foregroundColor(
-                            msg.starts(with: "Error") ? WTheme.Colors.danger : WTheme.Colors.success
+                            msg.starts(with: "Error") ? WTheme.Colors.error : WTheme.Colors.success
                         )
                 }
             } header: {

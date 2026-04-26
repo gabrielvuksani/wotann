@@ -366,12 +366,40 @@ export interface ResolvedAgentModel {
  * QB#7: declared `as const` so the table is structurally immutable; the
  * exported type narrows to the literal record.
  */
+// CANONICAL_FALLBACK was Anthropic-only across strong/balanced/fast — if a
+// caller hit this branch (no env var, no hint, no WOTANN_DEFAULT_PROVIDER),
+// every tier silently routed to Claude. The v9 META-AUDIT flagged this as
+// the most-hit vendor pin: any cold-start path with no provider context.
+// The new fallback derives from PROVIDER_DEFAULTS instead — see
+// `deriveCanonicalFallback` below.
 const CANONICAL_FALLBACK: Readonly<Record<AgentModel, { provider: string; model: string }>> = {
-  strong: { provider: "anthropic", model: "claude-opus-4-7" },
-  balanced: { provider: "anthropic", model: "claude-sonnet-4-7" },
-  fast: { provider: "anthropic", model: "claude-haiku-4-5" },
+  strong: { provider: "", model: "" },
+  balanced: { provider: "", model: "" },
+  fast: { provider: "", model: "" },
   local: { provider: "ollama", model: "gemma4:e4b" },
 } as const;
+
+/**
+ * Derive a no-context tier mapping from PROVIDER_DEFAULTS rather than a
+ * hard-coded vendor table. Picks the first provider whose oracle/worker/
+ * default slot exists, scanning PROVIDER_DEFAULTS in declaration order.
+ * Returns null when no provider in the table can serve the tier — caller
+ * must surface the empty state to the user.
+ */
+function deriveCanonicalFallback(tier: AgentModel): { provider: string; model: string } | null {
+  for (const [provider, defaults] of Object.entries(PROVIDER_DEFAULTS)) {
+    const model =
+      tier === "strong"
+        ? defaults.oracleModel
+        : tier === "fast"
+          ? defaults.workerModel
+          : defaults.defaultModel;
+    if (model) {
+      return { provider, model };
+    }
+  }
+  return null;
+}
 
 /**
  * Per-tier env override knob. Users can pin a specific provider+model for
@@ -464,8 +492,21 @@ export function resolveAgentModel(
           : defaults.defaultModel;
     return { provider: envDefault, model, source: "provider-default" };
   }
+  // CANONICAL_FALLBACK is the no-context resort. The static table only
+  // has a value for `local` (Ollama with gemma4:e4b — that's a real
+  // free-tier default the user can stand up locally with no key). For
+  // the other tiers, derive from PROVIDER_DEFAULTS instead of the old
+  // hard-coded Anthropic table.
   const canon = CANONICAL_FALLBACK[tier];
-  return { provider: canon.provider, model: canon.model, source: "canonical-fallback" };
+  if (canon.provider) {
+    return { provider: canon.provider, model: canon.model, source: "canonical-fallback" };
+  }
+  const derived = deriveCanonicalFallback(tier);
+  if (derived) {
+    return { provider: derived.provider, model: derived.model, source: "canonical-fallback" };
+  }
+  // Truly nothing — surface the empty state. Caller should prompt user.
+  return { provider: "", model: "", source: "canonical-fallback" };
 }
 
 // ── Registry ───────────────────────────────────────────────────

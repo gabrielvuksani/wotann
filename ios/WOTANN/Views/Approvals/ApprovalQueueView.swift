@@ -205,27 +205,9 @@ struct RiskBadge: View {
     }
 }
 
-// MARK: - ErrorBanner
-
-private struct ErrorBanner: View {
-    let message: String
-
-    var body: some View {
-        HStack(spacing: WTheme.Spacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(WTheme.Colors.error)
-            Text(message)
-                .font(WTheme.Typography.footnote)
-                .foregroundColor(WTheme.Colors.textPrimary)
-                .lineLimit(2)
-            Spacer()
-        }
-        .padding(.horizontal, WTheme.Spacing.md)
-        .padding(.vertical, WTheme.Spacing.sm)
-        .background(WTheme.Colors.error.opacity(0.12))
-        .accessibilityElement(children: .combine)
-    }
-}
+// (ApprovalErrorBanner removed — the shared `ErrorBanner` in
+// Views/Components/ErrorBanner.swift covers the same use case and was
+// duplicated here. Call sites use the shared component now.)
 
 // MARK: - Preview
 

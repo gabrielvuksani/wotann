@@ -17,8 +17,14 @@ import Observation
 final class DispatchViewModel {
     var promptText = ""
     var selectedTemplate: DispatchTemplate?
-    var selectedProvider: String = "anthropic"
-    var selectedModel: String = "claude-opus-4-6"
+    // Empty sentinels — populated from AppState.activeProvider /
+    // activeModel when the view appears. Hard-coding "anthropic" /
+    // "claude-opus-4-6" here would route every Dispatch through that
+    // vendor regardless of the user's actual configuration, AND the
+    // 4-6 model retires June 15, 2026 (so the default would also be
+    // stale). Keep empty until we read the user's real selection.
+    var selectedProvider: String = ""
+    var selectedModel: String = ""
     var isDispatching = false
     var lastDispatched: AgentTask?
     var errorMessage: String?

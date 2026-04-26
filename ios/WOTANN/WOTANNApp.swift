@@ -248,8 +248,11 @@ struct WOTANNApp: App {
                     WotannStingService.shared.playIfFirstUnlock(sessionId: stingSessionId)
                 }
             }
-            // H-J1 fix: drain the share-extension queue on EVERY foreground.
-            processPendingShares()
+            // H-J1: ContentView owns the share-extension drain function
+            // (it needs `@EnvironmentObject var appState`). The .onChange
+            // handler installed there fires on the same scenePhase==.active
+            // transition, so we don't double-drain — the call lives in
+            // ContentView, not here.
             // SB-N4 fix companion: route the 4 deep-link intent UserDefaults
             // keys (Ask/Rewrite/Summarize/Expand) stamped by AppShortcuts.
             // Without this read, the 4 new shortcuts silently no-opped.
@@ -410,6 +413,7 @@ struct WOTANNApp: App {
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var connectionManager: ConnectionManager
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Determines whether to show the full app, offline view, or pairing.
     /// Three states:
@@ -436,6 +440,15 @@ struct ContentView: View {
         .animation(WTheme.Animation.smooth, value: shouldShowMainApp)
         .task {
             processPendingShares()
+        }
+        // H-J1: re-drain on every background→foreground transition so
+        // shares queued while the app was suspended also land in the
+        // app. `.task` only fires when the view first appears; this
+        // catches the foreground re-entry path.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                processPendingShares()
+            }
         }
     }
 

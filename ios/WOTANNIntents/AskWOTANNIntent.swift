@@ -14,7 +14,7 @@ struct AskWOTANNIntent: AppIntent {
     @Parameter(title: "Prompt", description: "The question or instruction to send to WOTANN")
     var prompt: String
 
-    @Parameter(title: "Provider", description: "AI provider to use", default: "anthropic")
+    @Parameter(title: "Provider", description: "AI provider to use (leave empty for the active one)", default: "")
     var provider: String
 
     static var parameterSummary: some ParameterSummary {
@@ -24,11 +24,14 @@ struct AskWOTANNIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        // In production, this would use the shared RPCClient to communicate
-        // with the desktop WOTANN instance via the paired connection.
+        // Empty provider means "use the active provider configured in the
+        // app." Routing every Siri request to a hard-coded vendor would
+        // bias every voice interaction back toward one provider — instead,
+        // WOTANNIntentService picks the active provider from AppState.
+        let providerArg = provider.isEmpty ? nil : provider
         let response = await WOTANNIntentService.shared.sendPrompt(
             prompt,
-            provider: provider
+            provider: providerArg
         )
         return .result(value: response)
     }

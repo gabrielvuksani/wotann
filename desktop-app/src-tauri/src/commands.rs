@@ -261,10 +261,13 @@ pub fn get_status(state: State<AppState>) -> RuntimeStatus {
                     .get("activeProvider")
                     .and_then(|v| v.as_str())
                     .is_some();
+                // Empty sentinel — daemon will pick from configured providers.
+                // Hard-coding "anthropic" here would silently flip every fresh
+                // install to that vendor before the user picked one (v9 META-AUDIT).
                 let provider = result
                     .get("activeProvider")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("anthropic")
+                    .unwrap_or("")
                     .to_string();
                 // Prefer what KAIROS reports; fall back to locally-stored
                 // model selection. Prior versions hardcoded "auto" which

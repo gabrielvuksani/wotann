@@ -7,10 +7,13 @@ struct ArenaView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var connectionManager: ConnectionManager
     @State private var prompt = ""
-    @State private var selectedModels: [ArenaModel] = [
-        ArenaModel(provider: "anthropic", model: "claude-opus-4-6"),
-        ArenaModel(provider: "openai", model: "gpt-4o"),
-    ]
+    // Empty initial pair — populated from AppState.activeProvider /
+    // configuredProviders when the view appears. Hard-coding two
+    // vendors here would force every Arena session to start with that
+    // pair regardless of what the user actually configured (and would
+    // reference the stale claude-opus-4-6 model that retires Jun 15
+    // 2026). Use the model picker to choose.
+    @State private var selectedModels: [ArenaModel] = []
     @State private var responses: [ArenaResponse] = []
     @State private var isRunning = false
     @State private var showModelPicker = false

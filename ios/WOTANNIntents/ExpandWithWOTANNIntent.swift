@@ -41,7 +41,10 @@ struct ExpandWithWOTANNIntent: AppIntent {
         }
 
         let prompt = "Expand the following text into a \(style.promptHint). Preserve the original intent and add supporting context. Reply with ONLY the expanded text, no preamble.\n\n\(trimmed)"
-        let expanded = await WOTANNIntentService.shared.sendPrompt(prompt, provider: "anthropic")
+        // Omit the provider arg so the daemon picks the user's active provider —
+        // hard-coding a vendor here would route every Apple Writing Tools "Expand"
+        // through that vendor regardless of what the user actually configured.
+        let expanded = await WOTANNIntentService.shared.sendPrompt(prompt)
 
         // On transport failure, echo the original so Writing Tools doesn't
         // stomp the user's selection with an error string.

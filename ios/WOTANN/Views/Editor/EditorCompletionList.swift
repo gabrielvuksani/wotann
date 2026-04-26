@@ -75,7 +75,12 @@ struct EditorCompletionList: View {
         .shadow(color: WTheme.Shadow.md.color, radius: WTheme.Shadow.md.radius, x: WTheme.Shadow.md.x, y: WTheme.Shadow.md.y)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Code completions")
+        // `.onExitCommand` is macOS/Catalyst-only — on iOS, dismissal is
+        // handled by the parent Editor via tap-outside or the hardware
+        // Esc key on iPad keyboards.
+        #if targetEnvironment(macCatalyst)
         .onExitCommand(perform: onDismiss)
+        #endif
     }
 
     // MARK: - Row

@@ -77,7 +77,12 @@ final class WOTANNIntentService {
 
     // MARK: - Ask
 
-    func sendPrompt(_ prompt: String, provider: String) async -> String {
+    /// Send a prompt to the daemon. When `provider` is nil or empty, the
+    /// daemon uses its configured active provider — passing a hard-coded
+    /// vendor here would route every Siri / Apple Writing Tools request
+    /// to that vendor regardless of the user's actual settings, which is
+    /// the silent vendor pin the v9 META-AUDIT flagged.
+    func sendPrompt(_ prompt: String, provider: String? = nil) async -> String {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return "Please provide a prompt to send to WOTANN."
@@ -88,10 +93,11 @@ final class WOTANNIntentService {
         }
 
         do {
-            let response = try await rpcClient.send("chat.send", params: [
-                "content": .string(trimmed),
-                "provider": .string(provider),
-            ])
+            var params: [String: RPCValue] = ["content": .string(trimmed)]
+            if let provider, !provider.isEmpty {
+                params["provider"] = .string(provider)
+            }
+            let response = try await rpcClient.send("chat.send", params: params)
             return response.result?.stringValue
                 ?? "Prompt sent to WOTANN. Open the app to see the full response."
         } catch {

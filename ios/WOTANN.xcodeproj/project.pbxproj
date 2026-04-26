@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		31A56FDCE6DC4BF496DF5E44 /* Runestone in Frameworks */ = {isa = PBXBuildFile; productRef = 7605EC65D6374E8CB2FA36BC /* Runestone */; };
 		008F45FEB71084BE45811782 /* CostViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 838F52E129844764764DBF15 /* CostViewModel.swift */; };
 		01A64FB4AF8F17B7B9719282 /* ControlWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CF3ECE69388945A604D88F3 /* ControlWidgets.swift */; };
 		02AA1EFB1D3F2D56CE233C14 /* SummarizeWithWOTANNIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44D4A70E5A741B1628A2243 /* SummarizeWithWOTANNIntent.swift */; };
@@ -144,6 +145,7 @@
 		977BE94DFFE3286BA4D78D9D /* ECDHManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D3A7144D5D2C2E6EB4EF9D /* ECDHManager.swift */; };
 		9835229EE035E2B4898820FD /* WebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614A3CF377AB282F4EC259AA /* WebSocketClient.swift */; };
 		990C890CAE5FBECE7E2E4F4F /* OfflineQueueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A75380AA0684C081EB6D23C /* OfflineQueueService.swift */; };
+		8E0AB6D3F4CF4F41B9C51FE2 /* OfflineQueueDLQ.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1666D3E8D5C94EC785F8C707 /* OfflineQueueDLQ.swift */; };
 		993CFBFB8CAE451C9E1EF8F9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF2C467534932F2AF3DCB79A /* SettingsView.swift */; };
 		998D71138E45B7A604532EEB /* ArtifactView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B9CB078FE7FC0A34309DE0 /* ArtifactView.swift */; };
 		9B588BC0138AD9FF2BD6DE77 /* CodePlaygroundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0179DCE406DE010D855EF594 /* CodePlaygroundView.swift */; };
@@ -349,6 +351,7 @@
 		47FE4319C176ED7030945350 /* EditorStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorStatusBar.swift; sourceTree = "<group>"; };
 		49CEAA7515F27EDBDD03C465 /* ConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
 		4A75380AA0684C081EB6D23C /* OfflineQueueService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineQueueService.swift; sourceTree = "<group>"; };
+		1666D3E8D5C94EC785F8C707 /* OfflineQueueDLQ.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineQueueDLQ.swift; sourceTree = "<group>"; };
 		4B51AA79482C2489AC5AEAA5 /* HitTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HitTarget.swift; sourceTree = "<group>"; };
 		4C56C340F9DDD344E0CBCE44 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		4E80A34FF0260230786838F6 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
@@ -651,6 +654,7 @@
 				1A50EEF44FF6EB36A0F0148B /* NorseSoundCues.swift */,
 				125D3C15B8578307FEF2095C /* NotificationService.swift */,
 				4A75380AA0684C081EB6D23C /* OfflineQueueService.swift */,
+				1666D3E8D5C94EC785F8C707 /* OfflineQueueDLQ.swift */,
 				3D49F04230915DCF8EF70FF8 /* OnDeviceModelService.swift */,
 				2E83842536E65E46408B77A0 /* VoiceService.swift */,
 				F9A710340FD9555B23051765 /* WotannStingService.swift */,
@@ -1200,6 +1204,7 @@
 			buildConfigurationList = B0F5DEF458467161C83D1E74 /* Build configuration list for PBXNativeTarget "WOTANN" */;
 			buildPhases = (
 				C6035D241C600C863AB0FD65 /* Sources */,
+				7E1D71B5621848708B76AB11 /* Frameworks */,
 				2727459C025A05DAE4EE5B95 /* Resources */,
 				297392390CACD18E2A62C1A9 /* Embed Foundation Extensions */,
 			);
@@ -1212,6 +1217,7 @@
 			);
 			name = WOTANN;
 			packageProductDependencies = (
+				7605EC65D6374E8CB2FA36BC /* Runestone */,
 			);
 			productName = WOTANN;
 			productReference = 43A84DF0B729ED60922A2B55 /* WOTANN.app */;
@@ -1313,6 +1319,9 @@
 				en,
 			);
 			mainGroup = 1B31F7EBAF893729C6723F2B;
+			packageReferences = (
+				62AA6155797545C5B5098F2B /* XCRemoteSwiftPackageReference "Runestone" */,
+			);
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3F7295AD78E6B01E782B45A0 /* Products */;
@@ -1536,6 +1545,7 @@
 				864813A7534355CE58542EA5 /* NotificationService.swift in Sources */,
 				8340D1E69B31722DA04724B4 /* NotificationSettings.swift in Sources */,
 				990C890CAE5FBECE7E2E4F4F /* OfflineQueueService.swift in Sources */,
+				8E0AB6D3F4CF4F41B9C51FE2 /* OfflineQueueDLQ.swift in Sources */,
 				144B74393C2F8D782E60B893 /* OnDeviceAIView.swift in Sources */,
 				058CFF3CBE328B3860E9C89B /* OnDeviceModelService.swift in Sources */,
 				B332DB97CAE8EE6EC894FAC0 /* OnboardingView.swift in Sources */,
@@ -2107,6 +2117,36 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		62AA6155797545C5B5098F2B /* XCRemoteSwiftPackageReference "Runestone" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/simonbs/Runestone.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.5.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7605EC65D6374E8CB2FA36BC /* Runestone */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 62AA6155797545C5B5098F2B /* XCRemoteSwiftPackageReference "Runestone" */;
+			productName = Runestone;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7E1D71B5621848708B76AB11 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				31A56FDCE6DC4BF496DF5E44 /* Runestone in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 	};
 	rootObject = 2C087ECC97BEADD530602CB3 /* Project object */;
 }

@@ -24,37 +24,43 @@ import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 
 // ── Safety Instruction Constants (per provider) ──────────
+//
+// HISTORICAL NOTE: previous versions defaulted these constants to non-empty
+// strings that injected an additional layer of safety guidance on top of
+// each provider's RLHF. The user explicitly directed (v9 closeout): "let
+// the user do whatever they want, so there shouldn't be such a thing as
+// 'safeguards for model misuse'." Layering CLI-side safety prompts on top
+// of the model's own training is paternalism the user pays tokens for and
+// did not opt into.
+//
+// The harness still ships USER-protecting guards (workspace trust, secret
+// scanner, prompt-injection quarantine, command sandbox, approval queue) —
+// those defend the user from a confused/compromised agent and stay on by
+// default. The constants below are the MODEL-protecting layer that has
+// been collapsed: the "default" path is now the same as the "off" path,
+// so the harness adds nothing beyond what the provider itself enforces.
 
-/**
- * Claude's cyber risk instruction — the system prompt section that constrains
- * security-related behaviors. Set to empty in guardrails-off mode.
- * (From OpenClaude: src/constants/cyberRiskInstruction.ts)
- */
-export const CYBER_RISK_INSTRUCTION_DEFAULT = [
-  "When asked about security topics, focus on defensive techniques and",
-  "responsible disclosure. Do not provide complete exploit code without",
-  "clear defensive context.",
-].join(" ");
-
-/** Empty version used in guardrails-off mode */
+/** Empty in both modes — harness no longer injects extra cyber-risk guidance. */
+export const CYBER_RISK_INSTRUCTION_DEFAULT = "";
 export const CYBER_RISK_INSTRUCTION_OFF = "";
 
-/**
- * OpenAI's safety instruction preamble. Omitted in guardrails-off mode.
- */
-export const OPENAI_SAFETY_INSTRUCTION_DEFAULT =
-  "Follow OpenAI usage policies. Decline requests for malicious code.";
+/** Empty in both modes — harness no longer injects extra OpenAI safety preamble. */
+export const OPENAI_SAFETY_INSTRUCTION_DEFAULT = "";
 export const OPENAI_SAFETY_INSTRUCTION_OFF = "";
 
 /**
- * Gemini harm block settings. Set to BLOCK_NONE in guardrails-off mode.
+ * Gemini harm block threshold. Both modes pass BLOCK_NONE so the harness
+ * does NOT tighten Google's own moderation; whatever Google's API enforces
+ * is what the user gets. (Previous default tightened from Google's own
+ * permissive baseline up to BLOCK_MEDIUM_AND_ABOVE — that's the harness
+ * second-guessing the provider on the user's behalf without consent.)
  */
 export type GeminiHarmBlockThreshold =
   | "BLOCK_NONE"
   | "BLOCK_LOW_AND_ABOVE"
   | "BLOCK_MEDIUM_AND_ABOVE"
   | "BLOCK_ONLY_HIGH";
-export const GEMINI_HARM_BLOCK_DEFAULT: GeminiHarmBlockThreshold = "BLOCK_MEDIUM_AND_ABOVE";
+export const GEMINI_HARM_BLOCK_DEFAULT: GeminiHarmBlockThreshold = "BLOCK_NONE";
 export const GEMINI_HARM_BLOCK_OFF: GeminiHarmBlockThreshold = "BLOCK_NONE";
 
 // ── Configuration ────────────────────────────────────────
