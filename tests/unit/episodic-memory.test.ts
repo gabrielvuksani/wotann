@@ -1,8 +1,18 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises EpisodicMemory event recording,
+ * persistence, and lookup. Provider/model are episode metadata; the
+ * test never asserts on a specific model id.
+ *
+ * Wave DH-3: tier helper for the recurring "claude-opus-4-7" mock.
+ */
 import { describe, it, expect, beforeEach } from "vitest";
 import { EpisodicMemory } from "../../src/memory/episodic-memory.js";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const STRONG = getTierModel("strong");
 
 describe("Episodic Memory", () => {
   let memory: EpisodicMemory;
@@ -15,7 +25,7 @@ describe("Episodic Memory", () => {
 
   describe("episode lifecycle", () => {
     it("starts a new episode", () => {
-      const id = memory.startEpisode("Fix auth middleware", "anthropic", "claude-opus-4-6");
+      const id = memory.startEpisode("Fix auth middleware", STRONG.provider, STRONG.model);
       expect(id).toMatch(/^ep_/);
       const current = memory.getCurrentEpisode();
       expect(current?.title).toBe("Fix auth middleware");
@@ -23,7 +33,7 @@ describe("Episodic Memory", () => {
     });
 
     it("records events to the current episode", () => {
-      memory.startEpisode("Some task", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Some task", STRONG.provider, STRONG.model);
       memory.recordEvent("plan", "Will modify auth.ts");
       memory.recordEvent("edit", "Changed auth.ts", { file: "src/auth.ts" });
 
@@ -41,7 +51,7 @@ describe("Episodic Memory", () => {
     });
 
     it("records strategies", () => {
-      memory.startEpisode("Complex task", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Complex task", STRONG.provider, STRONG.model);
       memory.recordStrategy("decompose");
       memory.recordStrategy("research-first");
 
@@ -51,7 +61,7 @@ describe("Episodic Memory", () => {
     });
 
     it("records lessons learned", () => {
-      memory.startEpisode("Learning task", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Learning task", STRONG.provider, STRONG.model);
       memory.recordLesson("Always check both import and export when debugging module errors");
 
       const current = memory.getCurrentEpisode();
@@ -59,7 +69,7 @@ describe("Episodic Memory", () => {
     });
 
     it("completes an episode and persists it", () => {
-      memory.startEpisode("Persisted task", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Persisted task", STRONG.provider, STRONG.model);
       memory.recordEvent("edit", "Changed files");
       const completed = memory.completeEpisode("success");
 
@@ -69,7 +79,7 @@ describe("Episodic Memory", () => {
     });
 
     it("accumulates cost and tokens", () => {
-      memory.startEpisode("Cost tracking", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Cost tracking", STRONG.provider, STRONG.model);
       memory.recordEvent("edit", "Edit 1", { tokensUsed: 1000, cost: 0.01 });
       memory.recordEvent("edit", "Edit 2", { tokensUsed: 2000, cost: 0.02 });
 
@@ -81,7 +91,7 @@ describe("Episodic Memory", () => {
 
   describe("search", () => {
     it("searches by text", () => {
-      memory.startEpisode("Fix authentication bug in middleware", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Fix authentication bug in middleware", STRONG.provider, STRONG.model);
       memory.completeEpisode("success");
 
       memory.startEpisode("Add database migration", "openai", "gpt-5.4");
@@ -93,10 +103,10 @@ describe("Episodic Memory", () => {
     });
 
     it("searches by outcome", () => {
-      memory.startEpisode("Success task", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Success task", STRONG.provider, STRONG.model);
       memory.completeEpisode("success");
 
-      memory.startEpisode("Failed task", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Failed task", STRONG.provider, STRONG.model);
       memory.completeEpisode("failure");
 
       const successes = memory.search({ outcome: "success" });
@@ -104,7 +114,7 @@ describe("Episodic Memory", () => {
     });
 
     it("searches by tags", () => {
-      memory.startEpisode("Fix auth login bug", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Fix auth login bug", STRONG.provider, STRONG.model);
       memory.completeEpisode("success");
 
       memory.startEpisode("Deploy new release", "openai", "gpt-5.4");
@@ -117,7 +127,7 @@ describe("Episodic Memory", () => {
 
   describe("recall and lessons", () => {
     it("recalls a specific episode by ID", () => {
-      const id = memory.startEpisode("Recallable task", "anthropic", "claude-opus-4-6");
+      const id = memory.startEpisode("Recallable task", STRONG.provider, STRONG.model);
       memory.recordLesson("Test first!");
       memory.completeEpisode("success");
 
@@ -131,7 +141,7 @@ describe("Episodic Memory", () => {
     });
 
     it("gets lessons for similar tasks", () => {
-      memory.startEpisode("Fix auth token validation", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Fix auth token validation", STRONG.provider, STRONG.model);
       memory.recordLesson("Always verify token expiration separately from signature");
       memory.completeEpisode("success");
 
@@ -140,7 +150,7 @@ describe("Episodic Memory", () => {
     });
 
     it("gets cost/time estimates for similar tasks", () => {
-      memory.startEpisode("Fix database migration script", "anthropic", "claude-opus-4-6");
+      memory.startEpisode("Fix database migration script", STRONG.provider, STRONG.model);
       memory.recordEvent("edit", "Fix", { tokensUsed: 5000, cost: 0.05 });
       memory.completeEpisode("success");
 

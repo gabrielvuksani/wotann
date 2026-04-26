@@ -6,37 +6,43 @@ import { tmpdir } from "node:os";
 
 describe("KAIROS Daemon (Phase 10)", () => {
   describe("matchesCronSchedule", () => {
+    // Wave DH-3: matchesCronSchedule reads UTC components from the Date
+    // (src/daemon/cron-utils.ts uses getUTCMinutes/getUTCHours/etc.). Tests
+    // MUST construct Dates with explicit UTC strings — `new Date(year, mo,
+    // day, hour, min)` constructs in LOCAL time, which makes the test
+    // tz-dependent and breaks on any non-UTC machine. ISO "Z" suffix pins
+    // the instant to UTC so the assertion is deterministic everywhere.
     it("matches wildcard (every minute)", () => {
-      const now = new Date(2026, 3, 1, 8, 30);
+      const now = new Date("2026-04-01T08:30:00Z");
       expect(matchesCronSchedule("* * * * *", now)).toBe(true);
     });
 
     it("matches specific minute and hour", () => {
-      const now = new Date(2026, 3, 1, 8, 0);
+      const now = new Date("2026-04-01T08:00:00Z");
       expect(matchesCronSchedule("0 8 * * *", now)).toBe(true);
       expect(matchesCronSchedule("30 8 * * *", now)).toBe(false);
     });
 
     it("matches step values (every 5 minutes)", () => {
-      expect(matchesCronSchedule("*/5 * * * *", new Date(2026, 0, 1, 0, 0))).toBe(true);
-      expect(matchesCronSchedule("*/5 * * * *", new Date(2026, 0, 1, 0, 5))).toBe(true);
-      expect(matchesCronSchedule("*/5 * * * *", new Date(2026, 0, 1, 0, 3))).toBe(false);
+      expect(matchesCronSchedule("*/5 * * * *", new Date("2026-01-01T00:00:00Z"))).toBe(true);
+      expect(matchesCronSchedule("*/5 * * * *", new Date("2026-01-01T00:05:00Z"))).toBe(true);
+      expect(matchesCronSchedule("*/5 * * * *", new Date("2026-01-01T00:03:00Z"))).toBe(false);
     });
 
     it("matches range values", () => {
-      expect(matchesCronSchedule("0 9-17 * * *", new Date(2026, 0, 1, 10, 0))).toBe(true);
-      expect(matchesCronSchedule("0 9-17 * * *", new Date(2026, 0, 1, 20, 0))).toBe(false);
+      expect(matchesCronSchedule("0 9-17 * * *", new Date("2026-01-01T10:00:00Z"))).toBe(true);
+      expect(matchesCronSchedule("0 9-17 * * *", new Date("2026-01-01T20:00:00Z"))).toBe(false);
     });
 
     it("matches list values", () => {
-      expect(matchesCronSchedule("0 8,12,18 * * *", new Date(2026, 0, 1, 12, 0))).toBe(true);
-      expect(matchesCronSchedule("0 8,12,18 * * *", new Date(2026, 0, 1, 14, 0))).toBe(false);
+      expect(matchesCronSchedule("0 8,12,18 * * *", new Date("2026-01-01T12:00:00Z"))).toBe(true);
+      expect(matchesCronSchedule("0 8,12,18 * * *", new Date("2026-01-01T14:00:00Z"))).toBe(false);
     });
 
     it("matches day of week", () => {
-      // April 1, 2026 is a Wednesday (day 3)
-      expect(matchesCronSchedule("0 8 * * 3", new Date(2026, 3, 1, 8, 0))).toBe(true);
-      expect(matchesCronSchedule("0 8 * * 1", new Date(2026, 3, 1, 8, 0))).toBe(false);
+      // April 1, 2026 (UTC) is a Wednesday (day 3)
+      expect(matchesCronSchedule("0 8 * * 3", new Date("2026-04-01T08:00:00Z"))).toBe(true);
+      expect(matchesCronSchedule("0 8 * * 1", new Date("2026-04-01T08:00:00Z"))).toBe(false);
     });
 
     it("rejects invalid format", () => {

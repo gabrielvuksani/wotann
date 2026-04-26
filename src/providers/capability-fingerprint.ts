@@ -10,7 +10,15 @@
  * 2. Fall back gracefully when a capability is missing
  * 3. Detect new capabilities as models are updated
  * 4. Generate provider-specific prompts that leverage unique strengths
+ *
+ * Wave DH-1: scoped per-provider model id consts. The STATIC_CAPABILITIES
+ * keys embed `provider:model` ids — keep the model halves in named consts
+ * so future bumps stay in one block.
  */
+
+// Anthropic-native namespace ids used in static capability keys.
+const ANTHROPIC_OPUS = "claude-opus-4-7";
+const ANTHROPIC_SONNET = "claude-sonnet-4-7";
 
 export type CapabilityId =
   | "structured-output"
@@ -90,7 +98,7 @@ const CAPABILITY_PROBES: readonly CapabilityProbe[] = [
 // ── Static Capabilities (known from docs, no probing needed) ──
 
 const STATIC_CAPABILITIES: Record<string, readonly CapabilityId[]> = {
-  "anthropic:claude-opus-4-7": [
+  [`anthropic:${ANTHROPIC_OPUS}`]: [
     "tool-calling",
     "vision",
     "extended-thinking",
@@ -103,7 +111,7 @@ const STATIC_CAPABILITIES: Record<string, readonly CapabilityId[]> = {
     "parallel-tool-calls",
     "multi-modal",
   ],
-  "anthropic:claude-sonnet-4-7": [
+  [`anthropic:${ANTHROPIC_SONNET}`]: [
     "tool-calling",
     "vision",
     "extended-thinking",

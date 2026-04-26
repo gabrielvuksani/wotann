@@ -9,7 +9,7 @@ import {
 describe("Extended Thinking", () => {
   describe("getThinkingMethod", () => {
     it("returns native_thinking_blocks for Anthropic", () => {
-      expect(getThinkingMethod("anthropic", "claude-opus-4-6")).toBe("native_thinking_blocks");
+      expect(getThinkingMethod("anthropic", "claude-opus-4-7")).toBe("native_thinking_blocks");
     });
 
     it("returns native_reasoning for OpenAI o-series", () => {
@@ -32,7 +32,7 @@ describe("Extended Thinking", () => {
 
   describe("buildThinkingParams", () => {
     it("builds Anthropic thinking params", () => {
-      const params = buildThinkingParams("anthropic", "claude-opus-4-6", { budgetTokens: 32_000 });
+      const params = buildThinkingParams("anthropic", "claude-opus-4-7", { budgetTokens: 32_000 });
       expect(params).toHaveProperty("thinking");
       const thinking = params["thinking"] as Record<string, unknown>;
       expect(thinking["type"]).toBe("enabled");

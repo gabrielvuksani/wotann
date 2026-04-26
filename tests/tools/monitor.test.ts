@@ -23,12 +23,16 @@ import {
 } from "../../src/core/runtime-tool-dispatch.js";
 import type { MonitorEvent, MonitorOptions, MonitorSession } from "../../src/tools/monitor.js";
 import type { ProviderName } from "../../src/core/types.js";
+import { getTierModel } from "../_helpers/model-tier.js";
 
 // ── Test helpers ────────────────────────────────────────────
 
+// PROVIDER-AGNOSTIC: dispatch context's provider/model are passed
+// through but never asserted on by the monitor tests. Wave DH-3.
+const _tier = getTierModel("strong");
 const ctx: ToolDispatchContext = {
-  responseProvider: "anthropic" as ProviderName,
-  responseModel: "claude-opus-4-7",
+  responseProvider: _tier.provider as ProviderName,
+  responseModel: _tier.model,
 };
 
 function makeFakeSession(events: readonly MonitorEvent[], opts: { id?: string } = {}): MonitorSession {

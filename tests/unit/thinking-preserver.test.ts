@@ -1,5 +1,13 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises ThinkingPreserver extract/restore
+ * round-trip. Model id is associated with the thinking-block but never
+ * asserted as a specific value.
+ */
 import { describe, it, expect } from "vitest";
 import { ThinkingPreserver } from "../../src/providers/thinking-preserver.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const STRONG_MODEL = getTierModel("strong").model;
 
 describe("ThinkingPreserver", () => {
   it("extracts thinking blocks and stores them", () => {
@@ -9,7 +17,7 @@ describe("ThinkingPreserver", () => {
       { type: "text", text: "The answer is 42." },
     ];
 
-    const preserved = preserver.extractAndStore("session-1", 0, content, "claude-opus-4-6");
+    const preserved = preserver.extractAndStore("session-1", 0, content, STRONG_MODEL);
     expect(preserved.length).toBe(1); // Only text, thinking removed
     expect(preserved[0]!.type).toBe("text");
 

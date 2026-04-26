@@ -17,7 +17,20 @@
  * Programmatic:
  *   const profile = resolveProfile("fast-cheap");
  *   runtime.query({ prompt, provider: profile.provider, model: profile.model });
+ *
+ * Wave DH-1: scoped per-provider model id consts. Profiles are named
+ * shortcuts whose `provider` + `model` pair is a *default* the user can
+ * override via the profile-update RPC. The literals below pin the canonical
+ * Anthropic ids in one block so future bumps stay in one place; profiles
+ * that map to the dynamic "strong/balanced/fast/local" tiers should call
+ * `resolveAgentModel(tier, {providerHint})` from agent-registry.ts at
+ * dispatch time — this file declares static defaults only.
  */
+
+// Anthropic-native namespace ids used in built-in profile defaults.
+const ANTHROPIC_OPUS = "claude-opus-4-7";
+const ANTHROPIC_SONNET = "claude-sonnet-4-7";
+const ANTHROPIC_HAIKU = "claude-haiku-4-5-20251001";
 
 import type { ProviderName } from "../core/types.js";
 
@@ -44,7 +57,7 @@ export const BUILT_IN_PROFILES: Record<string, HarnessProfile> = {
     description:
       "Haiku + Cerebras fallback — sub-second responses for quick edits, under $0.50 / hour.",
     provider: "anthropic",
-    model: "claude-haiku-4-5-20251001",
+    model: ANTHROPIC_HAIKU,
     tags: ["cheap", "fast", "daily-driver"],
     temperature: 0.2,
     fallbacks: [
@@ -61,7 +74,7 @@ export const BUILT_IN_PROFILES: Record<string, HarnessProfile> = {
     description:
       "Opus 4.7 + 128k thinking — use when the task is ambiguous, architectural, or mission-critical.",
     provider: "anthropic",
-    model: "claude-opus-4-7",
+    model: ANTHROPIC_OPUS,
     tags: ["smart", "expensive", "deep-reasoning"],
     thinkingTokens: 128_000,
     temperature: 0.3,
@@ -91,7 +104,7 @@ export const BUILT_IN_PROFILES: Record<string, HarnessProfile> = {
     model: "sonar-pro",
     tags: ["web-search", "citations", "research"],
     temperature: 0.2,
-    fallbacks: [{ provider: "anthropic", model: "claude-sonnet-4-7" }],
+    fallbacks: [{ provider: "anthropic", model: ANTHROPIC_SONNET }],
     toolScope: "read-only",
   },
 
@@ -130,7 +143,7 @@ export const BUILT_IN_PROFILES: Record<string, HarnessProfile> = {
     description:
       "Read-only Opus — analyse but cannot mutate. For code review, audit, or exploring unfamiliar code.",
     provider: "anthropic",
-    model: "claude-opus-4-7",
+    model: ANTHROPIC_OPUS,
     tags: ["safe", "read-only", "audit"],
     temperature: 0.2,
     toolScope: "read-only",
@@ -141,7 +154,7 @@ export const BUILT_IN_PROFILES: Record<string, HarnessProfile> = {
     description:
       "Offensive-security profile — MITRE ATT&CK prompts, no tool limits, requires explicit --exploit flag.",
     provider: "anthropic",
-    model: "claude-opus-4-7",
+    model: ANTHROPIC_OPUS,
     tags: ["security", "offensive", "ctf"],
     temperature: 0.3,
     toolScope: "full",

@@ -1,9 +1,19 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises self-healing pipeline strategy
+ * dispatch and history tracking. Provider/model in execution context
+ * are passed through, never asserted on.
+ *
+ * Wave DH-3: tier helper for the recurring "claude-opus-4-7" mock.
+ */
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   classifyError,
   detectErrorRepetition,
   SelfHealingPipeline,
 } from "../../src/orchestration/self-healing-pipeline.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const STRONG = getTierModel("strong");
 
 describe("Self-Healing Pipeline", () => {
   describe("classifyError", () => {
@@ -112,8 +122,8 @@ describe("Self-Healing Pipeline", () => {
         taskId: "t1",
         taskDescription: "Fix type errors",
         workingDir: "/tmp/test",
-        provider: "anthropic",
-        model: "claude-opus-4-6",
+        provider: STRONG.provider,
+        model: STRONG.model,
       });
       expect(result.strategy).toBe("prompt-fix");
       expect(result.success).toBe(true);
@@ -124,8 +134,8 @@ describe("Self-Healing Pipeline", () => {
         taskId: "t1",
         taskDescription: "Fix errors",
         workingDir: "/tmp/test",
-        provider: "anthropic" as const,
-        model: "claude-opus-4-6",
+        provider: STRONG.provider as import("../../src/core/types.js").ProviderName,
+        model: STRONG.model,
       };
 
       // Feed 3 same-category errors
@@ -143,8 +153,8 @@ describe("Self-Healing Pipeline", () => {
         {
           taskId: "t1",
           workingDir: "/tmp/test",
-          provider: "anthropic",
-          model: "claude-opus-4-6",
+          provider: STRONG.provider,
+          model: STRONG.model,
         },
       );
 
@@ -164,8 +174,8 @@ describe("Self-Healing Pipeline", () => {
         {
           taskId: "t1",
           workingDir: "/tmp/test",
-          provider: "anthropic",
-          model: "claude-opus-4-6",
+          provider: STRONG.provider,
+          model: STRONG.model,
         },
       );
 
@@ -178,8 +188,8 @@ describe("Self-Healing Pipeline", () => {
         taskId: "t1",
         taskDescription: "Fix stuff",
         workingDir: "/tmp/test",
-        provider: "anthropic",
-        model: "claude-opus-4-6",
+        provider: STRONG.provider,
+        model: STRONG.model,
       });
 
       expect(pipeline.getErrorHistory()).toHaveLength(1);
@@ -191,8 +201,8 @@ describe("Self-Healing Pipeline", () => {
         taskId: "t1",
         taskDescription: "Fix",
         workingDir: "/tmp/test",
-        provider: "anthropic",
-        model: "claude-opus-4-6",
+        provider: STRONG.provider,
+        model: STRONG.model,
       });
 
       pipeline.reset();

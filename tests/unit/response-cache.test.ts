@@ -1,5 +1,10 @@
 /**
  * Tests for Response Cache — Query Deduplication Layer.
+ *
+ * PROVIDER-AGNOSTIC: model id in makeQuery() is the cache key, not an
+ * assertion target. Wave DH-3: tier helper for the default; the
+ * "openai/gpt-5.4" in the invalidateByProvider test stays literal
+ * because the test specifically verifies cross-provider behavior.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -8,11 +13,14 @@ import {
   classifyQueryCacheType,
   type CacheableQuery,
 } from "../../src/middleware/response-cache.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const DEFAULT_TIER = getTierModel("strong");
 
 function makeQuery(overrides: Partial<CacheableQuery> = {}): CacheableQuery {
   return {
-    model: "claude-opus-4-6",
-    provider: "anthropic",
+    model: DEFAULT_TIER.model,
+    provider: DEFAULT_TIER.provider,
     systemPrompt: "You are a helpful assistant.",
     messages: [{ role: "user", content: "What is 2+2?" }],
     temperature: 0,

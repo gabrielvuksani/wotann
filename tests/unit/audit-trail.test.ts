@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AuditTrail } from "../../src/telemetry/audit-trail.js";
+import { getTierModel } from "../_helpers/model-tier.js";
 
 describe("Audit Trail", () => {
   let trail: AuditTrail;
@@ -68,17 +69,20 @@ describe("Audit Trail", () => {
   });
 
   it("records token usage and cost", () => {
+    // PROVIDER-AGNOSTIC: model id is round-tripped audit data, not asserted
+    // for behavior. Wave DH-3: tier helper.
+    const { provider: prov, model: mdl } = getTierModel("balanced");
     trail.record({
       id: "a1", sessionId: "s1", timestamp: "2026-04-01T12:00:00Z",
       tool: "Query", riskLevel: "medium", success: true,
       tokensUsed: 1500, costUsd: 0.045, durationMs: 2300,
-      model: "claude-sonnet-4-6", provider: "anthropic",
+      model: mdl, provider: prov,
     });
 
     const entries = trail.query({ tool: "Query" });
     expect(entries[0]!.tokensUsed).toBe(1500);
     expect(entries[0]!.costUsd).toBeCloseTo(0.045);
-    expect(entries[0]!.model).toBe("claude-sonnet-4-6");
+    expect(entries[0]!.model).toBe(mdl);
   });
 
   it("verifies entry integrity", () => {

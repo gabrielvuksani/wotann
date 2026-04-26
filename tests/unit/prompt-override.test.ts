@@ -1,8 +1,12 @@
 /**
  * C12 — per-prompt provider/model/effort override tests.
+ *
+ * PROVIDER-AGNOSTIC: applyOverride tests verify the merge algebra
+ * (defaults + override = result), not specific model behavior.
  */
 
 import { describe, it, expect } from "vitest";
+import { getTierModel } from "../_helpers/model-tier.js";
 import {
   applyOverride,
   extractOverride,
@@ -98,9 +102,12 @@ describe("extractOverride", () => {
 });
 
 describe("applyOverride", () => {
+  // PROVIDER-AGNOSTIC: defaults are round-tripped; the test asserts
+  // the override-merging algebra, not a specific model. Wave DH-3.
+  const { provider: defaultProvider, model: defaultModel } = getTierModel("strong");
   const defaults: TurnDispatchConfig = {
-    provider: "anthropic",
-    model: "claude-opus-4-7",
+    provider: defaultProvider,
+    model: defaultModel,
     effort: "medium",
     thinking: "medium",
     temperature: 0.7,
@@ -129,8 +136,8 @@ describe("applyOverride", () => {
   it("falls back to defaults when override fields omitted", () => {
     const r = applyOverride(defaults, { effort: "high" });
     expect(r.effort).toBe("high");
-    expect(r.provider).toBe("anthropic");
-    expect(r.model).toBe("claude-opus-4-7");
+    expect(r.provider).toBe(defaultProvider);
+    expect(r.model).toBe(defaultModel);
   });
 });
 

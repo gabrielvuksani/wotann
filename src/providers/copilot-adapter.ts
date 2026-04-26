@@ -28,7 +28,22 @@
  *
  * Dynamic model listing: GET /models from the Copilot API returns the actual
  * model catalog for the user's subscription tier.
+ *
+ * Wave DH-1: scoped per-provider model id consts. Copilot uses its own
+ * dotted-version namespace ("claude-opus-4.7" vs Anthropic-native
+ * "claude-opus-4-7"), so these are kept distinct from anthropic-adapter's
+ * consts. When the Copilot proxy bumps a model, this single block updates
+ * everywhere in the file.
  */
+
+// Copilot proxies these third-party models under its own dotted-version
+// namespace. Each provider here ships its own model id format; they are
+// NOT cross-provider — Copilot's "claude-opus-4.7" maps to Anthropic's
+// "claude-opus-4-7" inside Copilot's routing layer.
+const COPILOT_GPT_DEFAULT = "gpt-4.1";
+const COPILOT_CLAUDE_OPUS = "claude-opus-4.7";
+const COPILOT_CLAUDE_SONNET = "claude-sonnet-4.7";
+const COPILOT_CLAUDE_HAIKU = "claude-haiku-4.5";
 
 /**
  * First-use flag for the experimental banner — printed once per process
@@ -272,13 +287,17 @@ const FALLBACK_MODELS: readonly string[] = [
   "o3-mini",
   // Anthropic models (via Copilot). V14.3: dropped bare "claude-sonnet-4"
   // (retires June 15, 2026); kept 4.5/4.6 for backward compat; added 4.7.
+  // The current-flagship ids reference the per-file consts at top so future
+  // bumps stay in one block; the older 4.5/4.6 remain as historical literals
+  // because they're explicitly NOT the canonical pick — they're kept only
+  // for backward-compat and will eventually be removed.
   "claude-sonnet-4.5",
   "claude-sonnet-4.6",
-  "claude-sonnet-4.7",
+  COPILOT_CLAUDE_SONNET,
   "claude-opus-4.5",
   "claude-opus-4.6",
-  "claude-opus-4.7",
-  "claude-haiku-4.5",
+  COPILOT_CLAUDE_OPUS,
+  COPILOT_CLAUDE_HAIKU,
   // Google models (via Copilot)
   "gemini-2.5-pro",
   "gemini-2.5-flash",
@@ -319,7 +338,7 @@ export function createCopilotAdapter(ghToken: string): ProviderAdapter {
       return;
     }
 
-    const model = options.model ?? "gpt-4.1";
+    const model = options.model ?? COPILOT_GPT_DEFAULT;
     const url = `${auth.baseUrl}/chat/completions`;
 
     // OpenAI Chat-Completions-compatible messages array. Previously this

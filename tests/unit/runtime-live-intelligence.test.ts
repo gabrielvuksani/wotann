@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WotannRuntime } from "../../src/core/runtime.js";
 import { addMessage, createSession } from "../../src/core/session.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const STRONG = getTierModel("strong");
 
 describe("Runtime live intelligence wiring", () => {
   let tempDir: string;
@@ -80,7 +83,9 @@ describe("Runtime live intelligence wiring", () => {
 
     const runtime = new WotannRuntime({ workingDir: tempDir });
 
-    let session = createSession("anthropic", "claude-opus-4-6");
+    // PROVIDER-AGNOSTIC: model id is unused by the compaction logic
+    // under test; pull from the helper to avoid a stale literal.
+    let session = createSession(STRONG.provider, STRONG.model);
     for (let index = 0; index < 16; index++) {
       session = addMessage(session, {
         role: index % 2 === 0 ? "user" : "assistant",

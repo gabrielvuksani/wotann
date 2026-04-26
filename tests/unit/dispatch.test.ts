@@ -1,9 +1,20 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises ChannelDispatchManager routing
+ * machinery. Model id is incidental mock metadata; the test verifies
+ * runtime reuse, sender isolation, and session restoration —
+ * none of which depend on a specific model.
+ *
+ * Wave DH-3: tier helper for the mock model field.
+ */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ChannelDispatchManager } from "../../src/channels/dispatch.js";
 import { createSession, saveSession } from "../../src/core/session.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const { provider: PROVIDER, model: MODEL } = getTierModel("balanced");
 
 describe("ChannelDispatchManager", () => {
   let tempDir: string;
@@ -44,8 +55,8 @@ describe("ChannelDispatchManager", () => {
       errors: [],
       tokensUsed: 12,
       costUsd: 0,
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
+      provider: PROVIDER,
+      model: MODEL,
     }));
 
     const dispatch = new ChannelDispatchManager({
@@ -97,8 +108,8 @@ describe("ChannelDispatchManager", () => {
       errors: [],
       tokensUsed: 12,
       costUsd: 0,
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
+      provider: PROVIDER,
+      model: MODEL,
     }));
 
     const dispatch = new ChannelDispatchManager({
@@ -118,7 +129,7 @@ describe("ChannelDispatchManager", () => {
     tempDir = mkdtempSync(join(tmpdir(), "wotann-dispatch-"));
     mkdirSync(join(tempDir, ".wotann", "sessions"), { recursive: true });
 
-    const sessionPath = saveSession(createSession("anthropic", "claude-sonnet-4-6"), join(tempDir, ".wotann", "sessions"));
+    const sessionPath = saveSession(createSession(PROVIDER, MODEL), join(tempDir, ".wotann", "sessions"));
     const restoreSessionSpy = vi.fn();
     const createRuntime = vi.fn(async () => ({
       query: async function* () {},
@@ -145,8 +156,8 @@ describe("ChannelDispatchManager", () => {
       errors: [],
       tokensUsed: 0,
       costUsd: 0,
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
+      provider: PROVIDER,
+      model: MODEL,
     }));
 
     const manifestPath = join(tempDir, ".wotann", "dispatch", "routes.json");
@@ -159,8 +170,8 @@ describe("ChannelDispatchManager", () => {
         channelType: "telegram",
         sessionId: "persisted",
         sessionPath,
-        provider: "anthropic",
-        model: "claude-sonnet-4-6",
+        provider: PROVIDER,
+        model: MODEL,
         messageCount: 1,
         lastActiveAt: new Date().toISOString(),
       }],

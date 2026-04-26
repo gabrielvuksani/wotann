@@ -21,8 +21,8 @@ describe("Provider Adapters", () => {
     it("lists Claude models", async () => {
       const adapter = createAnthropicAdapter("sk-test");
       const models = await adapter.listModels();
-      expect(models).toContain("claude-opus-4-6");
-      expect(models).toContain("claude-sonnet-4-6");
+      expect(models).toContain("claude-opus-4-7");
+      expect(models).toContain("claude-sonnet-4-7");
       expect(models).toContain("claude-haiku-4-5");
     });
   });

@@ -1,7 +1,17 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises runRuntimeQuery aggregation,
+ * token deltas, error capture. Provider/model are mock metadata; the
+ * test verifies the aggregation logic, not provider-specific behavior.
+ *
+ * Wave DH-3: tier helper for the strong-tier mock.
+ */
 import { describe, expect, it, vi } from "vitest";
 import { runRuntimeQuery } from "../../src/cli/runtime-query.js";
 import type { RuntimeStatus } from "../../src/core/runtime.js";
 import type { StreamChunk } from "../../src/providers/types.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const { provider: PROVIDER, model: MODEL } = getTierModel("balanced");
 
 describe("runRuntimeQuery", () => {
   function createStatus(overrides: Partial<RuntimeStatus> = {}): RuntimeStatus {
@@ -24,8 +34,8 @@ describe("runRuntimeQuery", () => {
 
   it("aggregates output and derives token/cost deltas from runtime status", async () => {
     const chunks: readonly StreamChunk[] = [
-      { type: "text", content: "Hello ", provider: "anthropic", model: "claude-sonnet-4-6" },
-      { type: "text", content: "world", provider: "anthropic", model: "claude-sonnet-4-6", tokensUsed: 33 },
+      { type: "text", content: "Hello ", provider: PROVIDER, model: MODEL },
+      { type: "text", content: "world", provider: PROVIDER, model: MODEL, tokensUsed: 33 },
     ];
     const statuses = [
       createStatus({ totalTokens: 120, totalCost: 0.4 }),
@@ -48,8 +58,8 @@ describe("runRuntimeQuery", () => {
     expect(result.errors).toEqual([]);
     expect(result.tokensUsed).toBe(33);
     expect(result.costUsd).toBeCloseTo(0.06, 6);
-    expect(result.provider).toBe("anthropic");
-    expect(result.model).toBe("claude-sonnet-4-6");
+    expect(result.provider).toBe(PROVIDER);
+    expect(result.model).toBe(MODEL);
     expect(textSink).toHaveBeenCalledTimes(2);
   });
 

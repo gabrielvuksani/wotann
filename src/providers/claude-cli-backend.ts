@@ -17,7 +17,14 @@
  *
  * Replaces src/providers/anthropic-subscription.ts (self-token-using
  * antipattern deleted per V9 T0.1).
+ *
+ * Wave DH-1: scoped per-provider consts. When Anthropic ships new versions,
+ * this single block updates everywhere this adapter references them.
  */
+
+const ANTHROPIC_OPUS = "claude-opus-4-7";
+const ANTHROPIC_SONNET = "claude-sonnet-4-7";
+const ANTHROPIC_HAIKU = "claude-haiku-4-5";
 
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, existsSync, renameSync, mkdirSync } from "node:fs";
@@ -539,7 +546,7 @@ export async function startAnthropicLogin(): Promise<AnthropicCliLoginResult> {
  *   - error        per terminal `result` message (subtype != "success") or parse failure
  */
 export function createAnthropicCliAdapter(): ProviderAdapter {
-  const defaultConfig = getModelContextConfig("claude-sonnet-4-7", "anthropic");
+  const defaultConfig = getModelContextConfig(ANTHROPIC_SONNET, "anthropic");
   const capabilities: ProviderCapabilities = {
     supportsComputerUse: true,
     supportsToolCalling: true,
@@ -704,7 +711,7 @@ export function createAnthropicCliAdapter(): ProviderAdapter {
     transport: "anthropic",
     capabilities,
     query,
-    listModels: async () => ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
+    listModels: async () => [ANTHROPIC_OPUS, ANTHROPIC_SONNET, ANTHROPIC_HAIKU],
     isAvailable: async () => isClaudeCliAvailable(),
   };
 }

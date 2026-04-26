@@ -7,7 +7,16 @@
  *
  * Classification uses pattern matching against known task indicators.
  * Model selection uses a preference matrix keyed by task type + complexity.
+ *
+ * V9 DEHARDCODE: TRIVIAL_MODELS is derived from PROVIDER_DEFAULTS.workerModel
+ * across all known providers — adding a new provider/model happens in
+ * model-defaults.ts only and the router picks it up automatically. The
+ * MODEL_PREFERENCES table still lists per-task ranked models because each
+ * entry encodes a quality-per-task ranking that isn't expressible as a
+ * single tier name; see the comment above each entry for rationale.
  */
+
+import { PROVIDER_DEFAULTS } from "../providers/model-defaults.js";
 
 // -- Task types --------------------------------------------------------------
 
@@ -197,8 +206,29 @@ const MODEL_PREFERENCES: ReadonlyMap<TaskType, ModelPreferenceList> = new Map([
   ["image-understanding", ["claude-sonnet-4-7", "gpt-5", "gemini-3.1-pro"]],
 ]);
 
-/** Cheap models for trivial tasks -- cost optimization. Sonnet, not Haiku. */
-const TRIVIAL_MODELS: readonly string[] = ["gemma4:e4b", "gemini-2.5-flash", "claude-sonnet-4-7"];
+/**
+ * Cheap models for trivial tasks -- cost optimization.
+ *
+ * V9 DEHARDCODE: derived from each provider's `workerModel` (the
+ * cheap-but-capable tier in PROVIDER_DEFAULTS). We dedupe by model id
+ * because some providers point at the same underlying model (e.g.
+ * anthropic and anthropic-cli both use claude-sonnet-4-7). Adding a new
+ * provider in model-defaults.ts automatically extends this list.
+ *
+ * The historical Sonnet-not-Haiku rule is preserved because Anthropic's
+ * `workerModel` is Sonnet (not Haiku) — see model-defaults.ts:24.
+ */
+const TRIVIAL_MODELS: readonly string[] = (() => {
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const defaults of Object.values(PROVIDER_DEFAULTS)) {
+    if (!seen.has(defaults.workerModel)) {
+      seen.add(defaults.workerModel);
+      list.push(defaults.workerModel);
+    }
+  }
+  return list;
+})();
 
 // -- Cost estimates (USD per 1M tokens, rough averages) ---------------------
 // V14.1+V14.3: bumped 4-6 → 4-7 (4-6 retires June 15, 2026). Pricing unchanged.
@@ -213,8 +243,17 @@ const COST_PER_1K_TOKENS: ReadonlyMap<string, number> = new Map([
   ["gemma4:e4b", 0],
 ]);
 
+/**
+ * Conservative per-1K-token rate used when a model isn't in the lookup
+ * table. Picked to roughly match the most expensive flagship in the
+ * cost matrix so an unknown model is over-estimated, never under (QB#6
+ * honest fallback — surface cost rather than hide it). NOT a vendor
+ * default: this is a numeric safety net, not a model-id literal.
+ */
+const FALLBACK_COST_PER_1K = 0.015;
+
 function estimateCost(model: string, tokens: number): number {
-  const rate = COST_PER_1K_TOKENS.get(model) ?? 0.015;
+  const rate = COST_PER_1K_TOKENS.get(model) ?? FALLBACK_COST_PER_1K;
   return Math.round(((rate * tokens) / 1000) * 10000) / 10000;
 }
 

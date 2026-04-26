@@ -6,6 +6,7 @@
  */
 
 import type { ProviderName } from "../core/types.js";
+import { PROVIDER_DEFAULTS, getProviderDefaults } from "../providers/model-defaults.js";
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -207,10 +208,28 @@ export class CostOracle {
 
   /**
    * Estimate cost of an autonomous run (multiple turns).
+   *
+   * V9 DEHARDCODE: defaults to the active provider's `defaultModel`
+   * (cheap-but-capable tier per PROVIDER_DEFAULTS) instead of forcing
+   * Anthropic Sonnet on every caller. Pass `provider`/`model` to pin
+   * the estimate to a specific pair; omitting them lets the resolver
+   * pick using the provider hint or the canonical first-provider order.
    */
-  estimateAutonomousCost(task: string, maxCycles: number): CostEstimate {
-    // Autonomous runs use the default model (Sonnet)
-    const singleEstimate = this.estimateTaskCost(task, "anthropic", "claude-sonnet-4-7");
+  estimateAutonomousCost(
+    task: string,
+    maxCycles: number,
+    options?: { provider?: ProviderName; model?: string },
+  ): CostEstimate {
+    // Autonomous runs use the active provider's default (worker-tier)
+    // model. When no hint is supplied we walk the canonical order in
+    // PROVIDER_DEFAULTS — the first entry is the system's preferred
+    // provider, NOT a hardcoded vendor pick.
+    const resolvedProvider: ProviderName =
+      options?.provider ?? ((Object.keys(PROVIDER_DEFAULTS)[0] ?? "ollama") as ProviderName);
+    const defaults = getProviderDefaults(resolvedProvider);
+    const resolvedModel = options?.model ?? defaults.defaultModel;
+
+    const singleEstimate = this.estimateTaskCost(task, resolvedProvider, resolvedModel);
 
     // Each cycle roughly doubles context (previous turns become input)
     // Use a growth factor of 1.3x per cycle (input accumulates)
@@ -227,7 +246,7 @@ export class CostOracle {
     }
 
     const pricing = PRICING_TABLE.find(
-      (p) => p.provider === "anthropic" && p.model === "claude-sonnet-4-7",
+      (p) => p.provider === resolvedProvider && p.model === resolvedModel,
     );
 
     const inputCost = pricing ? (totalInput / 1000) * pricing.inputPer1k : 0;
@@ -235,8 +254,8 @@ export class CostOracle {
     const thinkingCost = pricing ? (totalThinking / 1000) * pricing.thinkingPer1k : 0;
 
     return {
-      provider: "anthropic",
-      model: "claude-sonnet-4-7",
+      provider: resolvedProvider,
+      model: resolvedModel,
       estimatedInputTokens: Math.round(totalInput),
       estimatedOutputTokens: Math.round(totalOutput),
       estimatedCostUsd: inputCost + outputCost + thinkingCost,

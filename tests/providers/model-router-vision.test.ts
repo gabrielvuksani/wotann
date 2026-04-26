@@ -41,7 +41,7 @@ describe("ModelRouter — vision routing (Phase 4 Sprint B2 item 16)", () => {
       const router = makeRouter(["anthropic", "openai"]);
       const decision = router.route(makeTask({ requiresVision: true }));
       expect(decision.provider).toBe("anthropic");
-      expect(decision.model).toBe("claude-sonnet-4-6");
+      expect(decision.model).toBe("claude-sonnet-4-7");
     });
 
     it("falls back to GPT-5.4 when only OpenAI available", () => {

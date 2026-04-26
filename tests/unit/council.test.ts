@@ -17,7 +17,7 @@ describe("Council Mode", () => {
   };
 
   const providers: readonly { provider: ProviderName; model: string }[] = [
-    { provider: "anthropic", model: "claude-opus-4-6" },
+    { provider: "anthropic", model: "claude-opus-4-7" },
     { provider: "openai", model: "gpt-5.4" },
     { provider: "gemini", model: "gemini-3.1-pro-preview" },
   ];
@@ -123,7 +123,7 @@ describe("Council Mode", () => {
       });
       leaderboard.recordResult(result);
 
-      const entry = leaderboard.getEntry("anthropic", "claude-opus-4-6");
+      const entry = leaderboard.getEntry("anthropic", "claude-opus-4-7");
       expect(entry).toBeDefined();
       expect(entry!.provider).toBe("anthropic");
     });

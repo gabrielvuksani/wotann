@@ -469,9 +469,20 @@ function pickEnv(
 
 // ── Built-in Provider Specs ────────────────────────────────────
 
+// Wave DH-1: scoped per-provider model id consts. Each provider in this
+// file's PROVIDER_SPECS table owns its own namespace; pinning the canonical
+// ids here keeps future model bumps to a 1-line change. Other provider
+// modules (anthropic-adapter, claude-cli-backend, copilot-adapter, discovery)
+// declare their own copies of the relevant Anthropic ids — there's no
+// cross-module sharing because each module owns its slice of the namespace
+// (QB#7 — no module-globals across provider boundaries).
+const ANTHROPIC_OPUS = "claude-opus-4-7";
+const ANTHROPIC_SONNET = "claude-sonnet-4-7";
+const ANTHROPIC_HAIKU = "claude-haiku-4-5-20251001";
+
 const ANTHROPIC_FALLBACK: readonly ProviderModel[] = [
   {
-    id: "claude-opus-4-7",
+    id: ANTHROPIC_OPUS,
     name: "Claude Opus 4.7",
     contextWindow: 200_000,
     costPerMTokInput: 15,
@@ -481,7 +492,7 @@ const ANTHROPIC_FALLBACK: readonly ProviderModel[] = [
     supportsThinking: true,
   },
   {
-    id: "claude-sonnet-4-7",
+    id: ANTHROPIC_SONNET,
     name: "Claude Sonnet 4.7",
     contextWindow: 200_000,
     costPerMTokInput: 3,
@@ -491,7 +502,7 @@ const ANTHROPIC_FALLBACK: readonly ProviderModel[] = [
     supportsThinking: true,
   },
   {
-    id: "claude-haiku-4-5-20251001",
+    id: ANTHROPIC_HAIKU,
     name: "Claude Haiku 4.5",
     contextWindow: 200_000,
     costPerMTokInput: 0.25,

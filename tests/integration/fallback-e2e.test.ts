@@ -74,7 +74,7 @@ describe("Integration: End-to-End Provider Fallback", () => {
   });
 
   it("fallback chain routes past a rate-limited provider without scrubbing it from the chain", () => {
-    // Previously this test asserted `const userRequestedModel === "claude-opus-4-6"`
+    // Previously this test asserted `const userRequestedModel === "claude-opus-4-7"`
     // — a tautology against a locally-declared value. The real invariants are:
     //   1. When `anthropic` is rate-limited, the next-available provider is `openai`.
     //   2. `anthropic` is STILL in the chain but marked `rateLimited: true` — rate

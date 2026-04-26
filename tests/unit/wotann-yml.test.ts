@@ -1,5 +1,10 @@
 /**
  * C27 — .wotann.yml parser / validator / merger tests.
+ *
+ * BEHAVIORAL: literal model ids in YAML fixtures are intentional —
+ * the test verifies the YAML parser round-trips the exact string the
+ * user wrote, so the assertion must match the fixture byte-for-byte.
+ * Wave DH-3 keeps these literals.
  */
 
 import { describe, it, expect, afterEach } from "vitest";

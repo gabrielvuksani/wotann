@@ -1,7 +1,17 @@
 /**
  * Anthropic provider adapter. Uses @anthropic-ai/sdk for the Messages API.
  * Supports streaming, vision, extended thinking, and tool calling.
+ *
+ * Wave DH-1: scoped per-provider consts. When Anthropic ships new versions,
+ * this single block updates everywhere this adapter references them. Other
+ * provider adapters declare their own ANTHROPIC_* / OPENAI_* / etc. consts
+ * at their own top-of-file — there's no cross-provider sharing of these
+ * literals (each provider's namespace is independent).
  */
+
+const ANTHROPIC_OPUS = "claude-opus-4-7";
+const ANTHROPIC_SONNET = "claude-sonnet-4-7";
+const ANTHROPIC_HAIKU = "claude-haiku-4-5";
 
 import Anthropic from "@anthropic-ai/sdk";
 import type {
@@ -117,7 +127,7 @@ export function getAnthropicCacheTracker(): CacheHitTracker {
 }
 
 export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
-  const defaultConfig = getModelContextConfig("claude-sonnet-4-7", "anthropic");
+  const defaultConfig = getModelContextConfig(ANTHROPIC_SONNET, "anthropic");
   const capabilities: ProviderCapabilities = {
     supportsComputerUse: true,
     supportsToolCalling: true,
@@ -132,7 +142,7 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
   }
 
   async function* query(options: UnifiedQueryOptions): AsyncGenerator<StreamChunk> {
-    const model = options.model ?? "claude-sonnet-4-7";
+    const model = options.model ?? ANTHROPIC_SONNET;
     const maxTokens = options.maxTokens ?? 4096;
     // V9 Wave 6-MM: track the active token so a mid-stream 401 can flag
     // it as expired (and key rotation can avoid handing back the same
@@ -474,7 +484,7 @@ export function createAnthropicAdapter(apiKey: string): ProviderAdapter {
   }
 
   async function listModels(): Promise<readonly string[]> {
-    return ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"];
+    return [ANTHROPIC_OPUS, ANTHROPIC_SONNET, ANTHROPIC_HAIKU];
   }
 
   async function isAvailable(): Promise<boolean> {

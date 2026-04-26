@@ -10,6 +10,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runIntentCommand } from "../../src/cli/commands/intent.js";
+import { getTierModel } from "../_helpers/model-tier.js";
 import type { ByoaValidator } from "../../src/intent/byoa-detector.js";
 
 describe("wotann intent CLI handler", () => {
@@ -107,9 +108,11 @@ describe("wotann intent CLI handler", () => {
   describe("byoa test", () => {
     it("reports success when validator returns 200", async () => {
       const secret = "sk-ant-api03-VALID-test-1234";
+      // PROVIDER-AGNOSTIC: model id is mock fixture; the CLI test
+      // asserts on validator response handling, not the model.
       const validator: ByoaValidator = async () => ({
         status: 200,
-        body: { data: [{ id: "claude-sonnet-4-6" }] },
+        body: { data: [{ id: getTierModel("balanced").model }] },
       });
       const result = await runIntentCommand({
         action: "byoa-test",

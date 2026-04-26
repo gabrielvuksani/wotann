@@ -1,12 +1,20 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises PromptEnhancer round-trip
+ * (executor returns model/provider, enhancer surfaces them on result).
+ * Wave DH-3: tier helper.
+ */
 import { describe, it, expect } from "vitest";
 import { PromptEnhancer, getStylePrompt, listEnhancementStyles } from "../../src/desktop/prompt-enhancer.js";
 import type { EnhancementStyle } from "../../src/desktop/types.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const MOCK = getTierModel("strong");
 
 describe("PromptEnhancer", () => {
   const mockExecutor = async (prompt: string, _systemPrompt: string) => ({
     response: "Enhanced: " + prompt.split("---")[1]?.trim()?.slice(0, 50) + " with more detail and specificity",
-    model: "claude-opus-4-6",
-    provider: "anthropic",
+    model: MOCK.model,
+    provider: MOCK.provider,
     tokensUsed: 150,
     durationMs: 500,
   });
@@ -18,8 +26,8 @@ describe("PromptEnhancer", () => {
     expect(result.originalPrompt).toBe("Fix the login bug");
     expect(result.enhancedPrompt).toBeTruthy();
     expect(result.style).toBe("detailed");
-    expect(result.model).toBe("claude-opus-4-6");
-    expect(result.provider).toBe("anthropic");
+    expect(result.model).toBe(MOCK.model);
+    expect(result.provider).toBe(MOCK.provider);
     expect(result.tokensUsed).toBe(150);
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
@@ -40,8 +48,8 @@ describe("PromptEnhancer", () => {
   it("should detect improvements", async () => {
     const longEnhancer = async (_prompt: string, _sys: string) => ({
       response: "Fix the login bug by checking the authentication middleware for expired JWT tokens. Handle edge cases where the refresh token is also expired. Add proper error handling with user-friendly messages. Verify with integration tests.",
-      model: "claude-opus-4-6",
-      provider: "anthropic",
+      model: MOCK.model,
+      provider: MOCK.provider,
       tokensUsed: 200,
       durationMs: 800,
     });

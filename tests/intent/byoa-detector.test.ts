@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { getTierModel } from "../_helpers/model-tier.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,9 +127,12 @@ describe("BYOA detector — Bring Your Own Anthropic", () => {
 
   describe("validateByoaKey", () => {
     it("returns success when validator responds 200", async () => {
+      // PROVIDER-AGNOSTIC: model id is fixture data inside the validator
+      // response body; the test asserts on `result.ok` and key masking,
+      // not the model id itself.
       const validator: ByoaValidator = async () => ({
         status: 200,
-        body: { data: [{ id: "claude-sonnet-4-6" }] },
+        body: { data: [{ id: getTierModel("balanced").model }] },
       });
       const result = await validateByoaKey(
         "sk-ant-api03-good-key-aaaabbbb",

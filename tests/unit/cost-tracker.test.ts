@@ -1,3 +1,14 @@
+/**
+ * BILLING TEST — uses literal model IDs ("claude-opus-4-7",
+ * "claude-sonnet-4-7") because CostTracker.estimateCost reads the
+ * model id directly into the COST_TABLE lookup. The per-token rate
+ * being asserted is keyed off the literal id, so a tier-resolver
+ * would mask regressions in pricing for specific models.
+ *
+ * Wave DH-3: literals are intentional here; see
+ * tests/_helpers/model-tier.ts header comment for the BEHAVIORAL vs
+ * BILLING vs PROVIDER-AGNOSTIC classification.
+ */
 import { describe, it, expect, afterEach } from "vitest";
 import { CostTracker } from "../../src/telemetry/cost-tracker.js";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,7 +24,7 @@ describe("CostTracker", () => {
 
   it("estimates cost based on model pricing", () => {
     const tracker = new CostTracker();
-    const cost = tracker.estimateCost("claude-sonnet-4-6", 1000, 500);
+    const cost = tracker.estimateCost("claude-sonnet-4-7", 1000, 500);
 
     // $0.003/1K input + $0.015/1K output = 0.003 + 0.0075 = 0.0105
     expect(cost).toBeCloseTo(0.0105, 3);
@@ -21,8 +32,8 @@ describe("CostTracker", () => {
 
   it("tracks total cost across requests", () => {
     const tracker = new CostTracker();
-    tracker.record("anthropic", "claude-sonnet-4-6", 1000, 500);
-    tracker.record("anthropic", "claude-sonnet-4-6", 2000, 1000);
+    tracker.record("anthropic", "claude-sonnet-4-7", 1000, 500);
+    tracker.record("anthropic", "claude-sonnet-4-7", 2000, 1000);
 
     expect(tracker.getTotalCost()).toBeGreaterThan(0);
     expect(tracker.getEntryCount()).toBe(2);
@@ -30,7 +41,7 @@ describe("CostTracker", () => {
 
   it("tracks cost by provider", () => {
     const tracker = new CostTracker();
-    tracker.record("anthropic", "claude-sonnet-4-6", 1000, 500);
+    tracker.record("anthropic", "claude-sonnet-4-7", 1000, 500);
     tracker.record("openai", "gpt-4.1", 1000, 500);
 
     const byProvider = tracker.getCostByProvider();
@@ -42,13 +53,13 @@ describe("CostTracker", () => {
     const tracker = new CostTracker();
     tracker.setBudget(0.01);
 
-    tracker.record("anthropic", "claude-opus-4-6", 5000, 2000);
+    tracker.record("anthropic", "claude-opus-4-7", 5000, 2000);
     expect(tracker.isOverBudget()).toBe(true);
   });
 
   it("returns false for over-budget when no budget set", () => {
     const tracker = new CostTracker();
-    tracker.record("anthropic", "claude-opus-4-6", 100000, 50000);
+    tracker.record("anthropic", "claude-opus-4-7", 100000, 50000);
     expect(tracker.isOverBudget()).toBe(false);
   });
 
@@ -63,7 +74,7 @@ describe("CostTracker", () => {
     const costPath = join(tempDir, "cost.json");
 
     const writer = new CostTracker(costPath);
-    writer.record("anthropic", "claude-sonnet-4-6", 1000, 500);
+    writer.record("anthropic", "claude-sonnet-4-7", 1000, 500);
     writer.record("openai", "gpt-4.1", 500, 250);
 
     const reader = new CostTracker(costPath);
@@ -90,7 +101,7 @@ describe("CostTracker", () => {
   // flow through to both `getEntries()` and `getCacheHitRatio()`.
   it("preserves 0-token records as honest data (no silent success)", () => {
     const tracker = new CostTracker();
-    const entry = tracker.record("anthropic", "claude-sonnet-4-6", 0, 0);
+    const entry = tracker.record("anthropic", "claude-sonnet-4-7", 0, 0);
     expect(entry.inputTokens).toBe(0);
     expect(entry.outputTokens).toBe(0);
     expect(entry.cost).toBe(0);
@@ -99,7 +110,7 @@ describe("CostTracker", () => {
 
   it("records cache read/write tokens via record() cacheTokens arg", () => {
     const tracker = new CostTracker();
-    tracker.record("anthropic", "claude-sonnet-4-6", 1000, 500, {
+    tracker.record("anthropic", "claude-sonnet-4-7", 1000, 500, {
       cacheReadTokens: 400,
       cacheWriteTokens: 200,
     });
@@ -110,7 +121,7 @@ describe("CostTracker", () => {
 
   it("recordTurn() accepts TurnUsage and feeds cache fields", () => {
     const tracker = new CostTracker();
-    tracker.recordTurn("anthropic", "claude-sonnet-4-6", {
+    tracker.recordTurn("anthropic", "claude-sonnet-4-7", {
       inputTokens: 1000,
       outputTokens: 500,
       cacheReadTokens: 800,
@@ -124,7 +135,7 @@ describe("CostTracker", () => {
 
   it("getCacheHitRatio() computes cached/(cached+input)", () => {
     const tracker = new CostTracker();
-    tracker.recordTurn("anthropic", "claude-sonnet-4-6", {
+    tracker.recordTurn("anthropic", "claude-sonnet-4-7", {
       inputTokens: 1000,
       outputTokens: 500,
       cacheReadTokens: 1000,
@@ -135,13 +146,13 @@ describe("CostTracker", () => {
 
   it("getCacheHitRatio() returns 0 when no cache telemetry recorded", () => {
     const tracker = new CostTracker();
-    tracker.record("anthropic", "claude-sonnet-4-6", 1000, 500);
+    tracker.record("anthropic", "claude-sonnet-4-7", 1000, 500);
     expect(tracker.getCacheHitRatio()).toBe(0);
   });
 
   it("getEntries() returns a snapshot, not the live array", () => {
     const tracker = new CostTracker();
-    tracker.record("anthropic", "claude-sonnet-4-6", 1000, 500);
+    tracker.record("anthropic", "claude-sonnet-4-7", 1000, 500);
     const snap = tracker.getEntries();
     expect(snap.length).toBe(1);
     tracker.record("openai", "gpt-4.1", 200, 100);

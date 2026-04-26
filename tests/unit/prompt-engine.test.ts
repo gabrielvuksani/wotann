@@ -11,10 +11,16 @@ describe("Prompt Engine", () => {
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "wotann-prompt-test-"));
     createWorkspace({ targetDir: tempDir });
+    // Wave 6.5-XX integrator: workspace trust gate blocks workspace
+    // instruction loading by default (closes CVE-2026-33068). Test
+    // workspaces opt out via env so the gate doesn't break the test
+    // contract. Production users keep the gate.
+    process.env["WOTANN_WORKSPACE_TRUST_OFF"] = "1";
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
+    delete process.env["WOTANN_WORKSPACE_TRUST_OFF"];
   });
 
   it("assembles from bootstrap files", () => {

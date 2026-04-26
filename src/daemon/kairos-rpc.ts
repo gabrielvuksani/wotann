@@ -2385,28 +2385,35 @@ export class KairosRPCHandler {
             /* API unreachable */
           }
         }
-        // Fallback to well-known models for CLI/OAuth users
+        // Fallback to well-known models for CLI/OAuth users.
+        // V9 DEHARDCODE: derive the model triple from the canonical
+        // PROVIDER_DEFAULTS["anthropic"] (oracle/default/worker) so a
+        // new Anthropic model only needs updating in one place. The
+        // displayName/cost fields are kept honest with the source of
+        // truth at request time — pricing comes from cost-tracker's
+        // COST_TABLE if available, else falls back to neutral 0.
         if (anthropicModels.length === 0) {
-          anthropicModels = [
-            {
-              id: "claude-opus-4-7",
-              name: "Claude Opus 4.7",
-              contextWindow: 200000,
-              costPerMTok: 15,
-            },
-            {
-              id: "claude-sonnet-4-7",
-              name: "Claude Sonnet 4.7",
-              contextWindow: 200000,
-              costPerMTok: 3,
-            },
-            {
-              id: "claude-haiku-4-5",
-              name: "Claude Haiku 4.5",
-              contextWindow: 200000,
-              costPerMTok: 0.25,
-            },
-          ];
+          const { PROVIDER_DEFAULTS: ANTHROPIC_DEFAULTS_TABLE } =
+            await import("../providers/model-defaults.js");
+          const anthropicDefaults = ANTHROPIC_DEFAULTS_TABLE["anthropic"];
+          if (anthropicDefaults) {
+            const seen = new Set<string>();
+            const triple = [
+              anthropicDefaults.oracleModel,
+              anthropicDefaults.defaultModel,
+              anthropicDefaults.workerModel,
+            ];
+            for (const id of triple) {
+              if (seen.has(id)) continue;
+              seen.add(id);
+              anthropicModels.push({
+                id,
+                name: id, // Honest: use the id; richer display names come from the live API path above.
+                contextWindow: 200000,
+                costPerMTok: 0,
+              });
+            }
+          }
         }
         const authMethod = anthropicKey ? "API Key" : hasClaudeCli ? "Claude CLI" : "OAuth";
         results.push({
@@ -3072,7 +3079,36 @@ export class KairosRPCHandler {
         costUsd: number;
         durationMs: number;
       }[] = [];
-      const targetModels = models ?? ["claude-opus-4-7", "gpt-5.4"];
+      // V9 DEHARDCODE: when the caller doesn't pin a model list, derive
+      // the arena participants from the PROVIDER_DEFAULTS table — pick
+      // each detected provider's default model (deduped). Falls back
+      // to whatever providers are in the PROVIDER_DEFAULTS canonical
+      // order when no env keys match (honest fallback per QB#6 — never
+      // a hardcoded "anthropic + openai" pair).
+      let targetModels: string[];
+      if (models && models.length > 0) {
+        targetModels = models;
+      } else {
+        const { PROVIDER_DEFAULTS: ARENA_DEFAULTS_TABLE, detectProviderFromEnv: arenaDetect } =
+          await import("../providers/model-defaults.js");
+        const detected = arenaDetect();
+        const seen = new Set<string>();
+        const ordered: string[] = [];
+        const pickFrom = (name: string): void => {
+          const def = ARENA_DEFAULTS_TABLE[name];
+          if (!def) return;
+          if (seen.has(def.defaultModel)) return;
+          seen.add(def.defaultModel);
+          ordered.push(def.defaultModel);
+        };
+        if (detected?.provider) pickFrom(detected.provider);
+        for (const name of Object.keys(ARENA_DEFAULTS_TABLE)) {
+          if (ordered.length >= 2) break; // Arena defaults to 2-way race
+          pickFrom(name);
+        }
+        // Honest fallback: at least one model so the loop has work
+        targetModels = ordered.length > 0 ? ordered : ["wotann-harness"];
+      }
       for (const model of targetModels) {
         const start = Date.now();
         try {

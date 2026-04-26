@@ -23,7 +23,7 @@ describe("Provider Auth Integration", () => {
       expect(infra.bridge.getAvailableProviders()).toContain("anthropic");
 
       // Context limits — 1M is GA since March 13, 2026
-      const opusConfig = getModelContextConfig("claude-opus-4-6", "anthropic");
+      const opusConfig = getModelContextConfig("claude-opus-4-7", "anthropic");
       expect(opusConfig.maxContextTokens).toBe(1_000_000);
       expect(opusConfig.documentedMaxContextTokens).toBe(1_000_000);
     });

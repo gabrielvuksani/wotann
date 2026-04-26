@@ -154,9 +154,9 @@ describe("DoomLoopFingerprinter", () => {
 // ── Technique 3: Model-Specific Harness Adaptation ────────
 
 describe("getModelProfile", () => {
-  it("returns known profile for claude-opus-4-6", () => {
-    const profile = getModelProfile("anthropic", "claude-opus-4-6");
-    expect(profile.model).toBe("claude-opus-4-6");
+  it("returns known profile for claude-opus-4-7", () => {
+    const profile = getModelProfile("anthropic", "claude-opus-4-7");
+    expect(profile.model).toBe("claude-opus-4-7");
     expect(profile.provider).toBe("anthropic");
     expect(profile.promptStyle).toBe("xml");
     expect(profile.thinkingStyle).toBe("native-extended");

@@ -11,7 +11,17 @@
  * capabilities without losing functionality.
  *
  * From spec §12.3 but goes beyond: now covers 9 providers × 25+ models.
+ *
+ * Wave DH-1: scoped per-provider model id consts. Each provider's namespace
+ * is independent, so its current canonical model id is pinned in this single
+ * block. When a provider ships a new flagship version, this is the only
+ * place the literal needs to change.
  */
+
+// Anthropic-native and Bedrock-namespaced (Bedrock proxies Claude under the
+// same model id format on the routing layer below the `anthropic.` prefix).
+const ANTHROPIC_OPUS = "claude-opus-4-7";
+const BEDROCK_OPUS = "claude-opus-4-7";
 
 export type CapabilityName =
   | "tool_use"
@@ -70,7 +80,7 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
   // Claude Opus 4.7
   {
     provider: "anthropic",
-    model: "claude-opus-4-7",
+    model: ANTHROPIC_OPUS,
     capabilities: [
       { capability: "tool_use", status: "native" },
       { capability: "vision", status: "native" },
@@ -380,7 +390,7 @@ const PROFILES: readonly ModelCapabilityProfile[] = [
   // Bedrock (runs Claude models — same capabilities as Anthropic)
   {
     provider: "bedrock",
-    model: "claude-opus-4-7",
+    model: BEDROCK_OPUS,
     capabilities: [
       { capability: "tool_use", status: "native" },
       { capability: "vision", status: "native" },

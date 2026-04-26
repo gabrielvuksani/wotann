@@ -4,7 +4,7 @@ import { getProviderHeaders, buildProviderUrl } from "../../src/providers/header
 describe("Provider Header Injection", () => {
   describe("getProviderHeaders", () => {
     it("adds beta headers for Anthropic Opus with extended context", () => {
-      const { headers } = getProviderHeaders("anthropic", "claude-opus-4-6", { enableExtendedContext: true });
+      const { headers } = getProviderHeaders("anthropic", "claude-opus-4-7", { enableExtendedContext: true });
       expect(headers["anthropic-version"]).toBe("2024-10-22");
       expect(headers["anthropic-beta"]).toContain("extended-context");
       expect(headers["anthropic-beta"]).toContain("extended-thinking");
@@ -19,7 +19,7 @@ describe("Provider Header Injection", () => {
       delete process.env["ANTHROPIC_ENABLE_1M_CONTEXT"];
 
       try {
-        const { headers } = getProviderHeaders("anthropic", "claude-opus-4-6", { enableExtendedContext: false });
+        const { headers } = getProviderHeaders("anthropic", "claude-opus-4-7", { enableExtendedContext: false });
         expect(headers["anthropic-beta"]).not.toContain("extended-context");
         expect(headers["anthropic-beta"]).toContain("extended-thinking");
       } finally {
@@ -52,7 +52,7 @@ describe("Provider Header Injection", () => {
 
   describe("buildProviderUrl", () => {
     it("builds Anthropic URL", () => {
-      expect(buildProviderUrl("https://api.anthropic.com", "anthropic", "claude-opus-4-6"))
+      expect(buildProviderUrl("https://api.anthropic.com", "anthropic", "claude-opus-4-7"))
         .toBe("https://api.anthropic.com/v1/messages");
     });
 

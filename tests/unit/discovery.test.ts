@@ -47,7 +47,7 @@ describe("Provider Discovery", () => {
       );
       expect(anthropic).toBeDefined();
       expect(anthropic?.billing).toBe("subscription");
-      expect(anthropic?.models).toContain("claude-opus-4-6");
+      expect(anthropic?.models).toContain("claude-opus-4-7");
     });
 
     it("detects Anthropic API key", async () => {
@@ -89,9 +89,15 @@ describe("Provider Discovery", () => {
       const copilot = providers.find((p) => p.provider === "copilot");
       expect(copilot).toBeDefined();
       expect(copilot?.billing).toBe("subscription");
-      // Verify expanded model list includes models from multiple vendors
+      // Verify expanded model list includes models from multiple vendors.
+      // Wave DH-3: Copilot catalog uses dotted minor version naming
+      // ("claude-sonnet-4.7", not the Anthropic-direct "claude-sonnet-4-7"),
+      // matching the GA SKUs Copilot exposes (V14.3 dropped bare
+      // "claude-sonnet-4" — retired June 15, 2026). Per-provider literal IDs
+      // are correct here because this test asserts the Copilot-specific
+      // catalog, not a tier-driven generic selection.
       expect(copilot?.models).toContain("gpt-4.1");
-      expect(copilot?.models).toContain("claude-sonnet-4");
+      expect(copilot?.models).toContain("claude-sonnet-4.7");
       expect(copilot?.models).toContain("gemini-2.5-pro");
     });
 

@@ -7,22 +7,22 @@ import {
 describe("CapabilityEqualizer", () => {
   it("returns capability profile for known models", () => {
     const eq = new CapabilityEqualizer();
-    const profile = eq.getProfile("anthropic", "claude-opus-4-6");
+    const profile = eq.getProfile("anthropic", "claude-opus-4-7");
     expect(profile).not.toBeNull();
     expect(profile!.capabilities.length).toBeGreaterThan(10);
   });
 
   it("checks individual capabilities", () => {
     const eq = new CapabilityEqualizer();
-    expect(eq.hasCapability("anthropic", "claude-opus-4-6", "tool_use")).toBe("native");
-    expect(eq.hasCapability("anthropic", "claude-opus-4-6", "thinking")).toBe("native");
-    expect(eq.hasCapability("anthropic", "claude-opus-4-6", "json_mode")).toBe("emulated");
-    expect(eq.hasCapability("anthropic", "claude-opus-4-6", "logprobs")).toBe("unavailable");
+    expect(eq.hasCapability("anthropic", "claude-opus-4-7", "tool_use")).toBe("native");
+    expect(eq.hasCapability("anthropic", "claude-opus-4-7", "thinking")).toBe("native");
+    expect(eq.hasCapability("anthropic", "claude-opus-4-7", "json_mode")).toBe("emulated");
+    expect(eq.hasCapability("anthropic", "claude-opus-4-7", "logprobs")).toBe("unavailable");
   });
 
   it("computes gaps when switching providers", () => {
     const eq = new CapabilityEqualizer();
-    const gaps = eq.computeGaps("anthropic", "claude-opus-4-6", "ollama", "qwen3-coder-next");
+    const gaps = eq.computeGaps("anthropic", "claude-opus-4-7", "ollama", "qwen3-coder-next");
 
     expect(gaps.length).toBeGreaterThan(0);
     // Ollama doesn't have vision
@@ -33,7 +33,7 @@ describe("CapabilityEqualizer", () => {
 
   it("builds adapter prompt for high-impact gaps", () => {
     const eq = new CapabilityEqualizer();
-    const gaps = eq.computeGaps("anthropic", "claude-opus-4-6", "ollama", "qwen3-coder-next");
+    const gaps = eq.computeGaps("anthropic", "claude-opus-4-7", "ollama", "qwen3-coder-next");
     const prompt = eq.buildAdapterPrompt(gaps);
 
     // Should have content since there are real gaps
@@ -45,7 +45,7 @@ describe("CapabilityEqualizer", () => {
 
   it("returns empty gaps for same provider swap", () => {
     const eq = new CapabilityEqualizer();
-    const gaps = eq.computeGaps("anthropic", "claude-opus-4-6", "anthropic", "claude-opus-4-6");
+    const gaps = eq.computeGaps("anthropic", "claude-opus-4-7", "anthropic", "claude-opus-4-7");
     expect(gaps.length).toBe(0);
   });
 

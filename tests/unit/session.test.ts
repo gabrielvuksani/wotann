@@ -1,15 +1,27 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises createSession/addMessage/updateModel
+ * round-trip semantics. The model id is incidental (any string passes
+ * through the session record unchanged); the test is verifying the
+ * session machinery, not a specific model's behavior.
+ *
+ * Wave DH-3: uses getTierModel() so a model rename in PROVIDER_DEFAULTS
+ * automatically flows through — no second source-of-truth.
+ */
 import { describe, it, expect } from "vitest";
 import { createSession, addMessage, updateModel, formatSessionStats } from "../../src/core/session.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const { provider: PROVIDER, model: MODEL } = getTierModel("balanced");
 
 describe("Session", () => {
   describe("createSession", () => {
     it("creates a session with UUID and timestamp", () => {
-      const session = createSession("anthropic", "claude-sonnet-4-6");
+      const session = createSession(PROVIDER, MODEL);
 
       expect(session.id).toMatch(/^[0-9a-f-]{36}$/);
       expect(session.startedAt).toBeInstanceOf(Date);
-      expect(session.provider).toBe("anthropic");
-      expect(session.model).toBe("claude-sonnet-4-6");
+      expect(session.provider).toBe(PROVIDER);
+      expect(session.model).toBe(MODEL);
       expect(session.totalTokens).toBe(0);
       expect(session.totalCost).toBe(0);
       expect(session.toolCalls).toBe(0);
@@ -19,7 +31,7 @@ describe("Session", () => {
 
   describe("addMessage", () => {
     it("adds message immutably", () => {
-      const session = createSession("anthropic", "claude-sonnet-4-6");
+      const session = createSession(PROVIDER, MODEL);
       const updated = addMessage(session, {
         role: "user",
         content: "Hello",
@@ -33,7 +45,7 @@ describe("Session", () => {
     });
 
     it("tracks token usage", () => {
-      const session = createSession("anthropic", "claude-sonnet-4-6");
+      const session = createSession(PROVIDER, MODEL);
       const updated = addMessage(session, {
         role: "assistant",
         content: "Hi there",
@@ -46,7 +58,7 @@ describe("Session", () => {
     });
 
     it("counts tool calls", () => {
-      const session = createSession("anthropic", "claude-sonnet-4-6");
+      const session = createSession(PROVIDER, MODEL);
       const updated = addMessage(session, {
         role: "tool",
         content: "file contents",
@@ -59,10 +71,10 @@ describe("Session", () => {
 
   describe("updateModel", () => {
     it("updates model immutably", () => {
-      const session = createSession("anthropic", "claude-sonnet-4-6");
+      const session = createSession(PROVIDER, MODEL);
       const updated = updateModel(session, "ollama", "qwen3-coder-next");
 
-      expect(session.provider).toBe("anthropic");
+      expect(session.provider).toBe(PROVIDER);
       expect(updated.provider).toBe("ollama");
       expect(updated.model).toBe("qwen3-coder-next");
     });
@@ -70,11 +82,11 @@ describe("Session", () => {
 
   describe("formatSessionStats", () => {
     it("formats stats as readable string", () => {
-      const session = createSession("anthropic", "claude-sonnet-4-6");
+      const session = createSession(PROVIDER, MODEL);
       const stats = formatSessionStats(session);
 
-      expect(stats).toContain("anthropic");
-      expect(stats).toContain("claude-sonnet-4-6");
+      expect(stats).toContain(PROVIDER);
+      expect(stats).toContain(MODEL);
       expect(stats).toContain("Tokens:");
       expect(stats).toContain("Cost:");
     });

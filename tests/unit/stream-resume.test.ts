@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createSession } from "../../src/core/session.js";
 import { StreamCheckpointStore, buildResumeQuery } from "../../src/core/stream-resume.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+// PROVIDER-AGNOSTIC: session model is checkpoint metadata; the test
+// asserts on resume-query construction and lastError, not the model.
+const STREAM_TIER = getTierModel("balanced");
 
 describe("Stream resume", () => {
   it("builds a resume query from an interrupted checkpoint", () => {
@@ -12,7 +17,7 @@ describe("Stream resume", () => {
     try {
       mkdirSync(join(tempDir, ".wotann"), { recursive: true });
       const store = new StreamCheckpointStore(join(tempDir, ".wotann", "streams"));
-      const session = createSession("anthropic", "claude-sonnet-4-6");
+      const session = createSession(STREAM_TIER.provider, STREAM_TIER.model);
       const checkpoint = store.start({
         prompt: "Explain the architecture",
         systemPrompt: "Be concise.",

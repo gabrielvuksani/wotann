@@ -11,7 +11,7 @@ describe("Context Window Intelligence", () => {
   });
 
   beforeEach(() => {
-    cwi = new ContextWindowIntelligence("anthropic", "claude-opus-4-6");
+    cwi = new ContextWindowIntelligence("anthropic", "claude-opus-4-7");
   });
 
   describe("budget tracking", () => {
@@ -28,7 +28,7 @@ describe("Context Window Intelligence", () => {
 
     it("enables Anthropic Sonnet 1M when explicitly requested", () => {
       vi.stubEnv("ANTHROPIC_ENABLE_1M_CONTEXT", "1");
-      const anthropic = new ContextWindowIntelligence("anthropic", "claude-sonnet-4-6");
+      const anthropic = new ContextWindowIntelligence("anthropic", "claude-sonnet-4-7");
       expect(anthropic.getBudget().totalTokens).toBe(1_000_000);
     });
 
@@ -198,12 +198,12 @@ describe("Context Window Intelligence", () => {
     });
 
     it("uses the GA 1M budget for Anthropic Opus 4.6", () => {
-      cwi.adaptToProvider("anthropic", "claude-opus-4-6");
+      cwi.adaptToProvider("anthropic", "claude-opus-4-7");
       expect(cwi.getTotalBudget()).toBe(1_000_000);
     });
 
     it("exposes capability profile metadata", () => {
-      const profile = new ContextWindowIntelligence("anthropic", "claude-sonnet-4-6").getCapabilityProfile();
+      const profile = new ContextWindowIntelligence("anthropic", "claude-sonnet-4-7").getCapabilityProfile();
       expect(profile.activationMode).toBe("default"); // GA since March 2026
       expect(profile.documentedMaxTokens).toBe(1_000_000);
     });

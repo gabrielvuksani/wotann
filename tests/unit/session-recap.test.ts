@@ -10,6 +10,11 @@ import {
   slugifyTitle,
 } from "../../src/core/session-recap.js";
 import type { SessionSnapshot } from "../../src/core/session-resume.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+// PROVIDER-AGNOSTIC: snapshot's provider/model are unused by the recap
+// logic — the test verifies title-naming, not model behavior.
+const { provider: SNAP_PROVIDER, model: SNAP_MODEL } = getTierModel("strong");
 
 function mkSnapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
   const now = Date.now();
@@ -18,8 +23,8 @@ function mkSnapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
     sessionId: "test-session",
     createdAt: now - 10_000,
     savedAt: now,
-    provider: "anthropic",
-    model: "claude-opus-4-7",
+    provider: SNAP_PROVIDER,
+    model: SNAP_MODEL,
     workingDir: "/tmp/wotann-harness",
     conversation: [],
     activeTasks: [],

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { CredentialPool } from "../../src/providers/credential-pool.js";
 import { AccountPool } from "../../src/providers/account-pool.js";
+import { getTierModel } from "../_helpers/model-tier.js";
 
 describe("CredentialPool", () => {
   function createPoolWithAccounts(): CredentialPool {
@@ -62,9 +63,12 @@ describe("CredentialPool", () => {
   });
 
   it("generates deterministic call IDs", () => {
+    // PROVIDER-AGNOSTIC: model id is one of several inputs to the hash;
+    // the test asserts the call-id format, not a specific model.
+    const { provider: prov, model: mdl } = getTierModel("strong");
     const pool = createPoolWithAccounts();
-    const id1 = pool.generateCallId("anthropic", "claude-opus-4-6", 0);
-    const id2 = pool.generateCallId("anthropic", "claude-opus-4-6", 0);
+    const id1 = pool.generateCallId(prov, mdl, 0);
+    const id2 = pool.generateCallId(prov, mdl, 0);
 
     expect(id1).toMatch(/^call_/);
     expect(id2).toMatch(/^call_/);

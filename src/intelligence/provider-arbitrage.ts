@@ -6,6 +6,7 @@
  */
 
 import type { ProviderName } from "../core/types.js";
+import { PROVIDER_DEFAULTS, getProviderDefaults } from "../providers/model-defaults.js";
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -160,13 +161,24 @@ export class ProviderArbitrageEngine {
     );
 
     if (eligible.length === 0) {
+      // QB#6 honest fallback: when no provider in the capability table
+      // meets the minimum tier, fall back to whichever provider the
+      // session/runtime would pick by default — not a hardcoded vendor.
+      // We use the FIRST entry in PROVIDER_DEFAULTS (insertion order is
+      // the canonical priority list) and pull its `defaultModel`. This
+      // avoids "default to Anthropic" leaking into a multi-provider
+      // build where the user has only configured Gemini or Ollama.
+      const firstProviderName = Object.keys(PROVIDER_DEFAULTS)[0];
+      const firstDefaults = firstProviderName
+        ? getProviderDefaults(firstProviderName)
+        : getProviderDefaults("ollama");
       return {
-        provider: "anthropic",
-        model: "claude-sonnet-4-7",
-        estimatedCostPer1kTokens: 0.009,
-        qualityScore: 0.85,
+        provider: (firstProviderName ?? "ollama") as ProviderName,
+        model: firstDefaults.defaultModel,
+        estimatedCostPer1kTokens: 0,
+        qualityScore: 0.7,
         latencyMs: 1500,
-        reason: "No eligible providers found; defaulting to Sonnet",
+        reason: `No eligible providers met min tier ${minCapability}; fell back to ${firstDefaults.label}`,
       };
     }
 

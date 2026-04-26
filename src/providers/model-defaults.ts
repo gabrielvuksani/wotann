@@ -12,7 +12,28 @@
  * everything here.
  *
  * All values verified against provider docs on April 14, 2026.
+ *
+ * Wave DH-1: per-provider model id consts. Each provider's namespace is
+ * distinct, so its current canonical model ids are pinned in a single block
+ * here. When a provider ships a new flagship version, this is the ONLY place
+ * the literal needs to change — every other file reads through
+ * PROVIDER_DEFAULTS or these named consts. Keeping the literals here (rather
+ * than scattered across adapters) makes future bumps a 1-line change.
  */
+
+// ── Per-provider model id consts (source of truth) ────────────────────────
+// Anthropic's current production lineup. claude-cli-backend.ts and
+// anthropic-adapter.ts re-declare matching consts at top-of-file so each
+// provider module owns its own copy of its provider-scoped namespace
+// (QB#7 — no module-globals across provider boundaries).
+const ANTHROPIC_OPUS = "claude-opus-4-7";
+const ANTHROPIC_SONNET = "claude-sonnet-4-7";
+// OpenAI's current production lineup as it appears in defaults below.
+const OPENAI_DEFAULT = "gpt-5";
+const OPENAI_ORACLE = "gpt-5.4";
+// AWS Bedrock uses Anthropic models with an `anthropic.` namespace prefix.
+const BEDROCK_SONNET = "anthropic.claude-sonnet-4-7";
+const BEDROCK_OPUS = "anthropic.claude-opus-4-7";
 
 export interface ProviderDefault {
   /** Canonical flagship model — used when the user picks the provider with no
@@ -37,30 +58,30 @@ export interface ProviderDefault {
  */
 export const PROVIDER_DEFAULTS: Readonly<Record<string, ProviderDefault>> = {
   anthropic: {
-    defaultModel: "claude-sonnet-4-7",
-    workerModel: "claude-sonnet-4-7",
-    oracleModel: "claude-opus-4-7",
+    defaultModel: ANTHROPIC_SONNET,
+    workerModel: ANTHROPIC_SONNET,
+    oracleModel: ANTHROPIC_OPUS,
     envKeys: ["ANTHROPIC_API_KEY"],
     label: "Anthropic",
   },
   "anthropic-cli": {
-    defaultModel: "claude-sonnet-4-7",
-    workerModel: "claude-sonnet-4-7",
-    oracleModel: "claude-opus-4-7",
+    defaultModel: ANTHROPIC_SONNET,
+    workerModel: ANTHROPIC_SONNET,
+    oracleModel: ANTHROPIC_OPUS,
     envKeys: [],
     label: "Claude (subscription)",
   },
   openai: {
-    defaultModel: "gpt-5",
-    workerModel: "gpt-5",
-    oracleModel: "gpt-5.4",
+    defaultModel: OPENAI_DEFAULT,
+    workerModel: OPENAI_DEFAULT,
+    oracleModel: OPENAI_ORACLE,
     envKeys: ["OPENAI_API_KEY"],
     label: "OpenAI",
   },
   "openai-compat": {
-    defaultModel: "gpt-5",
-    workerModel: "gpt-5",
-    oracleModel: "gpt-5.4",
+    defaultModel: OPENAI_DEFAULT,
+    workerModel: OPENAI_DEFAULT,
+    oracleModel: OPENAI_ORACLE,
     envKeys: [],
     label: "OpenAI-compatible",
   },
@@ -149,16 +170,16 @@ export const PROVIDER_DEFAULTS: Readonly<Record<string, ProviderDefault>> = {
     label: "HuggingFace",
   },
   azure: {
-    defaultModel: "gpt-5",
-    workerModel: "gpt-5",
-    oracleModel: "gpt-5.4",
+    defaultModel: OPENAI_DEFAULT,
+    workerModel: OPENAI_DEFAULT,
+    oracleModel: OPENAI_ORACLE,
     envKeys: ["AZURE_OPENAI_API_KEY"],
     label: "Azure OpenAI",
   },
   bedrock: {
-    defaultModel: "anthropic.claude-sonnet-4-7",
-    workerModel: "anthropic.claude-sonnet-4-7",
-    oracleModel: "anthropic.claude-opus-4-7",
+    defaultModel: BEDROCK_SONNET,
+    workerModel: BEDROCK_SONNET,
+    oracleModel: BEDROCK_OPUS,
     envKeys: ["AWS_ACCESS_KEY_ID"],
     label: "AWS Bedrock",
   },

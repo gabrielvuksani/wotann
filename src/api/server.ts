@@ -28,6 +28,10 @@ import { URL } from "node:url";
 // events to phone/desktop/CLI subscribers without polling.
 import { handleComputerSessionSseRequest } from "./sse-computer-session.js";
 import type { ComputerSessionStore } from "../session/computer-session-store.js";
+// V9 DEHARDCODE: drive the OpenAI-compatible /v1/models response from
+// the canonical provider table instead of a hardcoded Anthropic+OpenAI
+// pair. Adding a provider in model-defaults.ts surfaces it here.
+import { PROVIDER_DEFAULTS, detectProviderFromEnv } from "../providers/model-defaults.js";
 
 export interface APIServerConfig {
   readonly port: number;
@@ -302,13 +306,45 @@ export class WotannAPIServer {
   }
 
   private handleListModels(res: ServerResponse): void {
-    const models = [
-      { id: "wotann-harness", object: "model", created: Date.now(), owned_by: "wotann" },
-      { id: "claude-opus-4-7", object: "model", created: Date.now(), owned_by: "anthropic" },
-      { id: "claude-sonnet-4-7", object: "model", created: Date.now(), owned_by: "anthropic" },
-      { id: "gpt-5.4", object: "model", created: Date.now(), owned_by: "openai" },
-      { id: "gemini-2.5-pro", object: "model", created: Date.now(), owned_by: "google" },
-    ];
+    // V9 DEHARDCODE: enumerate from PROVIDER_DEFAULTS so adding a new
+    // provider/model in model-defaults.ts automatically advertises it
+    // through the OpenAI-compatible API. We surface the default,
+    // worker, and oracle tier of every provider; clients pick by id.
+    // Detection of which provider is "active" via env vars determines
+    // sort order (active provider's models first).
+    const created = Date.now();
+    const detected = detectProviderFromEnv();
+    const activeProvider = detected?.provider;
+
+    const models: Array<{
+      id: string;
+      object: "model";
+      created: number;
+      owned_by: string;
+    }> = [{ id: "wotann-harness", object: "model", created, owned_by: "wotann" }];
+
+    // Dedupe model ids across the (default/worker/oracle) tiers because
+    // many providers point all three at the same model.
+    const seen = new Set<string>();
+    const orderedNames = activeProvider
+      ? [activeProvider, ...Object.keys(PROVIDER_DEFAULTS).filter((n) => n !== activeProvider)]
+      : Object.keys(PROVIDER_DEFAULTS);
+
+    for (const providerName of orderedNames) {
+      const defaults = PROVIDER_DEFAULTS[providerName];
+      if (!defaults) continue;
+      for (const modelId of [defaults.defaultModel, defaults.workerModel, defaults.oracleModel]) {
+        if (seen.has(modelId)) continue;
+        seen.add(modelId);
+        models.push({
+          id: modelId,
+          object: "model",
+          created,
+          owned_by: providerName,
+        });
+      }
+    }
+
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ object: "list", data: models }));
   }

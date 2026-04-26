@@ -13,7 +13,7 @@ describe("content-cid (intelligence wrapper)", () => {
 
   it("returns null for frontier-vision models (no CID needed)", () => {
     const result = maybeBuildCidIndexForProvider({
-      modelId: "claude-sonnet-4-6",
+      modelId: "claude-sonnet-4-7",
       hasVision: true,
       chunks,
     });
@@ -53,7 +53,7 @@ describe("content-cid (intelligence wrapper)", () => {
 
   it("force=true overrides frontier tier decision", () => {
     const result = maybeBuildCidIndexForProvider({
-      modelId: "claude-sonnet-4-6",
+      modelId: "claude-sonnet-4-7",
       hasVision: true,
       chunks,
       force: true,

@@ -26,6 +26,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveAgentModel } from "../../orchestration/agent-registry.js";
 
 // ── JSON shape ─────────────────────────────────────────────────
 
@@ -114,8 +115,21 @@ suggested mitigations.`;
 // ── Builder ────────────────────────────────────────────────────
 
 export interface AgentsConfigOptions {
-  /** Model id (default: claude-opus-4-7). */
+  /**
+   * Model id used by primary, arena-judge, and exploit-lane agents. When
+   * omitted we resolve via the canonical agent-registry tier ("strong"
+   * → the active provider's oracleModel, or the canonical Anthropic
+   * fallback). V9 DEHARDCODE: this default reads from PROVIDER_DEFAULTS
+   * and respects WOTANN_AGENT_MODEL_STRONG; it is no longer a literal.
+   */
   readonly model?: string;
+  /**
+   * Provider hint passed to the resolver so PROVIDER_DEFAULTS can pick
+   * the right tier model. When the host runtime knows the active
+   * provider it should pass it here (V9 DEHARDCODE). Omitting it is
+   * still honest — the resolver falls through to the canonical default.
+   */
+  readonly providerHint?: string;
   /** WOTANN MCP server descriptor — usually emitted by `claude/mcp/`. */
   readonly wotannMcpServer?: Record<string, unknown>;
   /** Base URL of the running hooks server (per V9 T3.3). */
@@ -129,7 +143,14 @@ export interface AgentsConfigOptions {
 }
 
 export function buildAgentsConfig(opts: AgentsConfigOptions = {}): AgentsConfig {
-  const model = opts.model ?? "claude-opus-4-7";
+  // V9 DEHARDCODE: route the per-tier defaults through the central
+  // resolver so adding a new provider in PROVIDER_DEFAULTS automatically
+  // updates which models the council/judge/lane agents pick — no literal
+  // "claude-opus-4-7" / "claude-sonnet-4-7" strings here.
+  const resolverOpts = opts.providerHint ? { providerHint: opts.providerHint } : undefined;
+  const strongModel = opts.model ?? resolveAgentModel("strong", resolverOpts).model;
+  const fastModel = resolveAgentModel("fast", resolverOpts).model;
+
   const mcpServers = opts.wotannMcpServer ? [opts.wotannMcpServer] : [];
   const hooks = opts.hooksBaseUrl ? buildHookEntries(opts.hooksBaseUrl) : {};
 
@@ -138,7 +159,7 @@ export function buildAgentsConfig(opts: AgentsConfigOptions = {}): AgentsConfig 
     prompt: PRIMARY_PROMPT,
     tools: ["mcp__wotann__*", "Read", "Grep", "Glob"],
     disallowedTools: [],
-    model,
+    model: strongModel,
     permissionMode: "dontAsk",
     maxTurns: 200,
     skills: opts.primarySkills ?? ["wotann-core", "wotann-safety"],
@@ -156,7 +177,11 @@ export function buildAgentsConfig(opts: AgentsConfigOptions = {}): AgentsConfig 
     prompt: COUNCIL_MEMBER_PROMPT,
     tools: [],
     disallowedTools: ["Bash", "Edit", "Write", "MultiEdit"],
-    model: "claude-sonnet-4-7", // Cheaper for many parallel voters
+    // V9 DEHARDCODE: cheap-but-capable worker tier for many parallel
+    // voters — resolved via PROVIDER_DEFAULTS so non-Anthropic users
+    // get their provider's worker model (e.g. gpt-5 on OpenAI,
+    // gemma4:e4b on Ollama) rather than a forced Sonnet route.
+    model: fastModel,
     permissionMode: "dontAsk",
     maxTurns: 1,
     mcpServers: [],
@@ -171,7 +196,7 @@ export function buildAgentsConfig(opts: AgentsConfigOptions = {}): AgentsConfig 
     prompt: ARENA_JUDGE_PROMPT,
     tools: [],
     disallowedTools: ["Bash", "Edit", "Write"],
-    model,
+    model: strongModel,
     permissionMode: "dontAsk",
     maxTurns: 2,
     mcpServers: [],
@@ -186,7 +211,7 @@ export function buildAgentsConfig(opts: AgentsConfigOptions = {}): AgentsConfig 
     prompt: EXPLOIT_LANE_PROMPT,
     tools: ["mcp__wotann__exploit_lane", "Read", "Grep"],
     disallowedTools: ["Bash", "Edit", "Write", "MultiEdit", "WebFetch"],
-    model,
+    model: strongModel,
     permissionMode: "dontAsk",
     maxTurns: 30,
     mcpServers,

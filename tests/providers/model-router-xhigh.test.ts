@@ -24,14 +24,19 @@ describe("supportsXhighEffort", () => {
     expect(supportsXhighEffort("claude-opus-4-7-latest")).toBe(true);
   });
 
-  it("returns false for older Opus models", () => {
+  it("returns false for older Opus models (pre-4-7)", () => {
+    // Wave 9 V14+ integrator: claude-opus-4-6 retired June 15 2026.
+    // The "older" test target stays at 4-6 because the contract is
+    // "should return false for the version that was current BEFORE
+    // the xhigh-bump"; bulk-sed bumped this to 4-7 which the source
+    // legitimately now treats as TRUE (current Opus). Restored.
     expect(supportsXhighEffort("claude-opus-4-6")).toBe(false);
     expect(supportsXhighEffort("claude-opus-4-5")).toBe(false);
     expect(supportsXhighEffort("claude-opus-3")).toBe(false);
   });
 
   it("returns false for Sonnet / Haiku family", () => {
-    expect(supportsXhighEffort("claude-sonnet-4-6")).toBe(false);
+    expect(supportsXhighEffort("claude-sonnet-4-7")).toBe(false);
     expect(supportsXhighEffort("claude-haiku-4-5")).toBe(false);
   });
 
@@ -51,14 +56,14 @@ describe("clampEffortForModel", () => {
   it("clamps xhigh down to high when the model doesn't support it", () => {
     // Explicitly high, not max — per the documented rationale that
     // we never silently upgrade the user to a 4x-budget tier.
-    expect(clampEffortForModel("xhigh", "claude-sonnet-4-6")).toBe("high");
+    expect(clampEffortForModel("xhigh", "claude-sonnet-4-7")).toBe("high");
     expect(clampEffortForModel("xhigh", "gpt-5")).toBe("high");
   });
 
   it("passes every other effort level through unchanged", () => {
     const levels = ["low", "medium", "high", "max"] as const;
     for (const effort of levels) {
-      expect(clampEffortForModel(effort, "claude-sonnet-4-6")).toBe(effort);
+      expect(clampEffortForModel(effort, "claude-sonnet-4-7")).toBe(effort);
       expect(clampEffortForModel(effort, "claude-opus-4-7")).toBe(effort);
     }
   });

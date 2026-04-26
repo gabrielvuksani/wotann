@@ -1,8 +1,18 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises save/restore round-trip for any
+ * provider+model combo. Wave DH-3: tier helper for the "balanced"
+ * default + literal Codex/Ollama strings where the test specifically
+ * asserts non-default providers (preservation across providers is
+ * the contract being verified).
+ */
 import { describe, it, expect, afterEach } from "vitest";
 import { createSession, addMessage, saveSession, restoreSession, formatSessionStats } from "../../src/core/session.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const { provider: PROVIDER, model: MODEL } = getTierModel("balanced");
 
 describe("Session Persistence", () => {
   let tempDir: string;
@@ -13,7 +23,7 @@ describe("Session Persistence", () => {
 
   it("saves and restores a session", () => {
     tempDir = mkdtempSync(join(tmpdir(), "wotann-session-test-"));
-    const session = createSession("anthropic", "claude-sonnet-4-6");
+    const session = createSession(PROVIDER, MODEL);
     const withMessage = addMessage(session, {
       role: "user",
       content: "Hello world",
@@ -25,8 +35,8 @@ describe("Session Persistence", () => {
     const restored = restoreSession(filePath);
     expect(restored).not.toBeNull();
     expect(restored?.id).toBe(withMessage.id);
-    expect(restored?.provider).toBe("anthropic");
-    expect(restored?.model).toBe("claude-sonnet-4-6");
+    expect(restored?.provider).toBe(PROVIDER);
+    expect(restored?.model).toBe(MODEL);
     expect(restored?.messages).toHaveLength(1);
     expect(restored?.messages[0]?.content).toBe("Hello world");
   });

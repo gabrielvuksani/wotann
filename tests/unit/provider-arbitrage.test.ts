@@ -1,5 +1,15 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises ProviderArbitrageEngine cost
+ * recording and report shape. Model id is stored as outcome metadata
+ * but never consulted by the arbitrage math; the test asserts on
+ * cost/quality aggregation, not the model. Wave DH-3.
+ */
 import { describe, it, expect } from "vitest";
 import { ProviderArbitrageEngine } from "../../src/intelligence/provider-arbitrage.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const SONNET = getTierModel("balanced").model;
+const OPUS = getTierModel("strong").model;
 
 describe("ProviderArbitrageEngine", () => {
   describe("findCheapestRoute", () => {
@@ -56,7 +66,7 @@ describe("ProviderArbitrageEngine", () => {
     it("records outcome and reflects in cost report", () => {
       const engine = new ProviderArbitrageEngine();
 
-      engine.recordOutcome("anthropic", "claude-sonnet-4-6", 0.05, 0.9);
+      engine.recordOutcome("anthropic", SONNET, 0.05, 0.9);
       engine.recordOutcome("openai", "gpt-4.1", 0.03, 0.85);
 
       const report = engine.getCostReport();
@@ -68,8 +78,8 @@ describe("ProviderArbitrageEngine", () => {
     it("clamps quality to [0, 1]", () => {
       const engine = new ProviderArbitrageEngine();
 
-      engine.recordOutcome("anthropic", "claude-sonnet-4-6", 0.05, 1.5);
-      engine.recordOutcome("anthropic", "claude-sonnet-4-6", 0.05, -0.5);
+      engine.recordOutcome("anthropic", SONNET, 0.05, 1.5);
+      engine.recordOutcome("anthropic", SONNET, 0.05, -0.5);
 
       const report = engine.getCostReport();
       const anthropic = report.providerBreakdown.find(
@@ -99,7 +109,7 @@ describe("ProviderArbitrageEngine", () => {
       // Cheap + high quality = best value
       engine.recordOutcome("gemini", "gemini-2.5-flash", 0.001, 0.8);
       // Expensive + high quality = not best value
-      engine.recordOutcome("anthropic", "claude-opus-4-6", 0.50, 0.95);
+      engine.recordOutcome("anthropic", OPUS, 0.50, 0.95);
 
       const report = engine.getCostReport();
       expect(report.bestValueProvider).toBe("gemini");
@@ -108,9 +118,9 @@ describe("ProviderArbitrageEngine", () => {
     it("computes total savings vs most expensive", () => {
       const engine = new ProviderArbitrageEngine();
 
-      engine.recordOutcome("anthropic", "claude-sonnet-4-6", 0.01, 0.85);
-      engine.recordOutcome("anthropic", "claude-sonnet-4-6", 0.01, 0.85);
-      engine.recordOutcome("anthropic", "claude-opus-4-6", 0.10, 0.95);
+      engine.recordOutcome("anthropic", SONNET, 0.01, 0.85);
+      engine.recordOutcome("anthropic", SONNET, 0.01, 0.85);
+      engine.recordOutcome("anthropic", OPUS, 0.10, 0.95);
 
       const report = engine.getCostReport();
       expect(report.totalSaved).toBeGreaterThanOrEqual(0);
@@ -119,8 +129,8 @@ describe("ProviderArbitrageEngine", () => {
     it("includes provider breakdown with per-provider stats", () => {
       const engine = new ProviderArbitrageEngine();
 
-      engine.recordOutcome("anthropic", "claude-sonnet-4-6", 0.05, 0.9);
-      engine.recordOutcome("anthropic", "claude-sonnet-4-6", 0.04, 0.85);
+      engine.recordOutcome("anthropic", SONNET, 0.05, 0.9);
+      engine.recordOutcome("anthropic", SONNET, 0.04, 0.85);
       engine.recordOutcome("openai", "gpt-4.1", 0.03, 0.8);
 
       const report = engine.getCostReport();

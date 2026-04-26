@@ -10,7 +10,7 @@ function makeSession(overrides: Partial<SessionState> = {}): SessionState {
     id: "test-session",
     startedAt: new Date(),
     provider: "anthropic",
-    model: "claude-opus-4-6",
+    model: "claude-opus-4-7",
     totalTokens: 5000,
     totalCost: 0.05,
     toolCalls: 3,
@@ -47,7 +47,7 @@ describe("ModelSwitcher", () => {
 
   describe("switchModel", () => {
     it("successfully switches between compatible providers", () => {
-      const session = makeSession({ provider: "anthropic", model: "claude-opus-4-6" });
+      const session = makeSession({ provider: "anthropic", model: "claude-opus-4-7" });
       const context = {
         messages: makeMessages(4),
         tools: makeTools(2),
@@ -58,7 +58,7 @@ describe("ModelSwitcher", () => {
 
       expect(result.success).toBe(true);
       expect(result.fromProvider).toBe("anthropic");
-      expect(result.fromModel).toBe("claude-opus-4-6");
+      expect(result.fromModel).toBe("claude-opus-4-7");
       expect(result.toProvider).toBe("openai");
       expect(result.toModel).toBe("gpt-5.4");
     });
@@ -87,7 +87,7 @@ describe("ModelSwitcher", () => {
     });
 
     it("produces warnings for capability gaps", () => {
-      const session = makeSession({ provider: "anthropic", model: "claude-opus-4-6" });
+      const session = makeSession({ provider: "anthropic", model: "claude-opus-4-7" });
       const context = {
         messages: makeMessages(2),
         tools: [],
@@ -140,9 +140,9 @@ describe("ModelSwitcher", () => {
     it("reports full compatibility for same provider", () => {
       const compat = switcher.canSwitch(
         "anthropic",
-        "claude-opus-4-6",
+        "claude-opus-4-7",
         "anthropic",
-        "claude-opus-4-6",
+        "claude-opus-4-7",
       );
 
       expect(compat.compatible).toBe(true);
@@ -153,7 +153,7 @@ describe("ModelSwitcher", () => {
     it("reports gaps between different providers", () => {
       const compat = switcher.canSwitch(
         "anthropic",
-        "claude-opus-4-6",
+        "claude-opus-4-7",
         "ollama",
         "qwen3-coder-next",
       );
@@ -178,7 +178,7 @@ describe("ModelSwitcher", () => {
       const customSwitcher = new ModelSwitcher(equalizer);
       const compat = customSwitcher.canSwitch(
         "anthropic",
-        "claude-opus-4-6",
+        "claude-opus-4-7",
         "minimal",
         "basic",
       );
@@ -191,7 +191,7 @@ describe("ModelSwitcher", () => {
     it("provides a recommendation string", () => {
       const compat = switcher.canSwitch(
         "anthropic",
-        "claude-opus-4-6",
+        "claude-opus-4-7",
         "openai",
         "gpt-5.4",
       );

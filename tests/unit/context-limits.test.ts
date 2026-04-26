@@ -15,7 +15,7 @@ describe("Context Limits Registry", () => {
 
   describe("getModelContextConfig", () => {
     it("returns exact match for known model+provider", () => {
-      const config = getModelContextConfig("claude-opus-4-6", "anthropic");
+      const config = getModelContextConfig("claude-opus-4-7", "anthropic");
       // 1M context GA since March 13, 2026 — no activation needed
       expect(config.maxContextTokens).toBe(1_000_000);
       expect(config.documentedMaxContextTokens).toBe(1_000_000);
@@ -37,7 +37,7 @@ describe("Context Limits Registry", () => {
 
     it("promotes Sonnet to 1M when extended context is explicitly enabled", () => {
       vi.stubEnv("ANTHROPIC_ENABLE_1M_CONTEXT", "1");
-      const config = getModelContextConfig("claude-sonnet-4-6", "anthropic");
+      const config = getModelContextConfig("claude-sonnet-4-7", "anthropic");
       expect(config.maxContextTokens).toBe(1_000_000);
     });
 
@@ -127,7 +127,7 @@ describe("Context Limits Registry", () => {
 
   describe("isExtendedContextEnabled", () => {
     it("detects explicit model aliases", () => {
-      expect(isExtendedContextEnabled("anthropic", "claude-opus-4-6 [1m]")).toBe(true);
+      expect(isExtendedContextEnabled("anthropic", "claude-opus-4-7 [1m]")).toBe(true);
     });
   });
 });

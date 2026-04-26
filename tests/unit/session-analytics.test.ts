@@ -1,5 +1,13 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises SessionAnalytics aggregation.
+ * Provider/model are mock metadata; the test asserts on counts and
+ * aggregate stats, not on a specific model id.
+ */
 import { describe, it, expect, beforeEach } from "vitest";
 import { SessionAnalytics } from "../../src/telemetry/session-analytics.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const STRONG = getTierModel("strong");
 
 describe("Session Analytics", () => {
   let analytics: SessionAnalytics;
@@ -11,8 +19,8 @@ describe("Session Analytics", () => {
   describe("request tracking", () => {
     it("records requests", () => {
       analytics.recordRequest({
-        provider: "anthropic",
-        model: "claude-opus-4-6",
+        provider: STRONG.provider,
+        model: STRONG.model,
         tokensIn: 1000,
         tokensOut: 500,
         tokensCached: 200,

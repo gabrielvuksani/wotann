@@ -1,12 +1,23 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises SessionRecorder/SessionPlayer
+ * round-trip semantics. Model id is round-tripped data, not a behavior
+ * the test asserts about. Wave DH-3: tier helper for the strong-tier
+ * recorder; remaining literals (gpt-5.4, qwen, etc.) are intentional
+ * because the test specifically verifies cross-provider behavior.
+ */
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SessionRecorder, SessionPlayer } from "../../src/telemetry/session-replay.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const STRONG = getTierModel("strong");
+const BALANCED = getTierModel("balanced");
 
 describe("SessionRecorder", () => {
   it("records events when started", () => {
-    const recorder = new SessionRecorder("anthropic", "claude-opus-4-6");
+    const recorder = new SessionRecorder(STRONG.provider, STRONG.model);
     recorder.start();
 
     recorder.recordPrompt("What is 2+2?", "You are a math tutor");
@@ -16,8 +27,8 @@ describe("SessionRecorder", () => {
 
     const session = recorder.getSession();
     expect(session.events.length).toBe(4);
-    expect(session.provider).toBe("anthropic");
-    expect(session.model).toBe("claude-opus-4-6");
+    expect(session.provider).toBe(STRONG.provider);
+    expect(session.model).toBe(STRONG.model);
   });
 
   it("does not record when stopped", () => {
@@ -64,12 +75,12 @@ describe("SessionRecorder", () => {
   // breakdown. This is the data source for `wotann cost today` and
   // `wotann telemetry tail`, so the shape is load-bearing.
   it("records structured turn events with full usage + cost breakdown", () => {
-    const recorder = new SessionRecorder("anthropic", "claude-sonnet-4-6");
+    const recorder = new SessionRecorder(BALANCED.provider, BALANCED.model);
     recorder.start();
 
     recorder.recordTurn({
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
+      provider: BALANCED.provider,
+      model: BALANCED.model,
       promptTokens: 1200,
       completionTokens: 450,
       cacheReadTokens: 800,
@@ -82,7 +93,7 @@ describe("SessionRecorder", () => {
     expect(session.events.length).toBe(1);
     const event = session.events[0]!;
     expect(event.type).toBe("turn");
-    expect(event.data["provider"]).toBe("anthropic");
+    expect(event.data["provider"]).toBe(BALANCED.provider);
     expect(event.data["promptTokens"]).toBe(1200);
     expect(event.data["completionTokens"]).toBe(450);
     expect(event.data["cacheReadTokens"]).toBe(800);
@@ -108,14 +119,14 @@ describe("SessionRecorder events sink", () => {
     tempDir = mkdtempSync(join(tmpdir(), "wotann-events-"));
     const path = join(tempDir, ".wotann", "events.jsonl");
 
-    const recorder = new SessionRecorder("anthropic", "claude-sonnet-4-6", "sess-xyz");
+    const recorder = new SessionRecorder(BALANCED.provider, BALANCED.model, "sess-xyz");
     recorder.setEventsSink(path);
     recorder.start();
 
     recorder.recordPrompt("hello");
     recorder.recordTurn({
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
+      provider: BALANCED.provider,
+      model: BALANCED.model,
       promptTokens: 10,
       completionTokens: 5,
       costUsd: 0.001,

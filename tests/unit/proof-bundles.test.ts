@@ -3,6 +3,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeAutonomousProofBundle } from "../../src/orchestration/proof-bundles.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+// PROVIDER-AGNOSTIC: model id is fixture metadata for the proof bundle;
+// the test asserts on summary/sessionId/verificationOutput fields, not
+// on a specific model. Wave DH-3.
+const FIXTURE_TIER = getTierModel("balanced");
 
 describe("Autonomous proof bundles", () => {
   it("writes a machine-readable proof bundle for autonomous runs", () => {
@@ -63,8 +69,8 @@ describe("Autonomous proof bundles", () => {
           pressureLevel: "green",
         },
         contextCapability: {
-          provider: "anthropic",
-          model: "claude-sonnet-4-6",
+          provider: FIXTURE_TIER.provider,
+          model: FIXTURE_TIER.model,
           totalTokens: 200_000,
           documentedMaxTokens: 1_000_000,
           reservedOutputTokens: 8_000,
@@ -74,7 +80,7 @@ describe("Autonomous proof bundles", () => {
           extendedContextEnabled: false,
         },
         providerOverride: "anthropic",
-        modelOverride: "claude-sonnet-4-6",
+        modelOverride: FIXTURE_TIER.model,
       });
 
       expect(existsSync(path)).toBe(true);

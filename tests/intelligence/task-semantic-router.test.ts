@@ -9,8 +9,8 @@ describe("TaskSemanticRouter", () => {
   const router = new TaskSemanticRouter();
 
   const ALL_MODELS: readonly string[] = [
-    "claude-opus-4-6",
-    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+    "claude-sonnet-4-7",
     "gpt-5.4",
     "gpt-5",
     "gemini-3.1-pro",
@@ -124,18 +124,18 @@ describe("TaskSemanticRouter", () => {
   describe("selectModel", () => {
     it("selects opus for code-generation at complex level", () => {
       const model = router.selectModel("code-generation", "complex", ALL_MODELS);
-      expect(model).toBe("claude-opus-4-6");
+      expect(model).toBe("claude-opus-4-7");
     });
 
     it("selects cheap models for trivial tasks", () => {
       const model = router.selectModel("code-generation", "trivial", ALL_MODELS);
-      expect(["gemma4:e4b", "gemini-2.5-flash", "claude-sonnet-4-6"]).toContain(model);
+      expect(["gemma4:e4b", "gemini-2.5-flash", "claude-sonnet-4-7"]).toContain(model);
     });
 
     it("skips most expensive model for simple tasks", () => {
       // For code-generation, opus is first; simple should skip it
       const model = router.selectModel("code-generation", "simple", ALL_MODELS);
-      expect(model).not.toBe("claude-opus-4-6");
+      expect(model).not.toBe("claude-opus-4-7");
     });
 
     it("selects gemini for research tasks", () => {
@@ -145,12 +145,12 @@ describe("TaskSemanticRouter", () => {
 
     it("selects sonnet for creative writing", () => {
       const model = router.selectModel("creative-writing", "moderate", ALL_MODELS);
-      expect(model).toBe("claude-sonnet-4-6");
+      expect(model).toBe("claude-sonnet-4-7");
     });
 
     it("selects opus for math reasoning", () => {
       const model = router.selectModel("math-reasoning", "complex", ALL_MODELS);
-      expect(model).toBe("claude-opus-4-6");
+      expect(model).toBe("claude-opus-4-7");
     });
 
     it("falls back to first available model when no preferences match", () => {
@@ -185,7 +185,7 @@ describe("TaskSemanticRouter", () => {
     it("returns a non-empty preference list for known task types", () => {
       const prefs = router.getPreferences("code-generation");
       expect(prefs.length).toBeGreaterThan(0);
-      expect(prefs[0]).toBe("claude-opus-4-6");
+      expect(prefs[0]).toBe("claude-opus-4-7");
     });
 
     it("returns empty array for unknown task types", () => {

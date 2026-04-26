@@ -116,7 +116,7 @@ describe("wire-level tools serialization — every adapter family", () => {
     const adapter = createAnthropicAdapter("sk-ant-test");
     const opts: UnifiedQueryOptions = {
       prompt: "hi",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-7",
       tools: [TEST_TOOL],
       stream: true,
     };

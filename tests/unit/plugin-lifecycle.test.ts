@@ -1,11 +1,19 @@
+/**
+ * PROVIDER-AGNOSTIC TEST — exercises PluginLifecycle hook ordering and
+ * payload mutation. Provider/model in mockContext are unused by the
+ * lifecycle dispatch logic. Wave DH-3: tier helper.
+ */
 import { describe, it, expect } from "vitest";
 import { PluginLifecycle, PromptQueue } from "../../src/plugins/lifecycle.js";
 import type { LifecycleContext, PreLLMCallPayload } from "../../src/plugins/lifecycle.js";
+import { getTierModel } from "../_helpers/model-tier.js";
+
+const _tier = getTierModel("strong");
 
 const mockContext: LifecycleContext = {
   sessionId: "test-session",
-  provider: "anthropic",
-  model: "claude-opus-4-6",
+  provider: _tier.provider,
+  model: _tier.model,
   mode: "code",
   timestamp: Date.now(),
 };

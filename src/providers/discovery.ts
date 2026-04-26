@@ -1,7 +1,30 @@
 /**
  * Provider discovery: auto-detect the supported providers from env vars and local state.
  * Returns immutable ProviderAuth objects for each detected provider.
+ *
+ * Wave DH-1: scoped per-provider model id consts. Each provider has its own
+ * model namespace, so the canonical ids are pinned in dedicated blocks here.
+ * Future model bumps update one const, not the dozens of scattered string
+ * literals Wave 9 left behind.
  */
+
+// ── Anthropic-native namespace (api.anthropic.com Messages API) ──────────
+const ANTHROPIC_OPUS = "claude-opus-4-7";
+const ANTHROPIC_SONNET = "claude-sonnet-4-7";
+const ANTHROPIC_HAIKU = "claude-haiku-4-5";
+const ANTHROPIC_MODELS: readonly string[] = [ANTHROPIC_OPUS, ANTHROPIC_SONNET, ANTHROPIC_HAIKU];
+
+// ── Copilot-proxied namespace (api.githubcopilot.com — dotted versions) ──
+const COPILOT_CLAUDE_OPUS = "claude-opus-4.7";
+const COPILOT_CLAUDE_SONNET = "claude-sonnet-4.7";
+const COPILOT_CLAUDE_HAIKU = "claude-haiku-4.5";
+
+// ── AWS Bedrock namespace (anthropic.* prefix) ────────────────────────────
+const BEDROCK_SONNET = "anthropic.claude-sonnet-4-7";
+const BEDROCK_HAIKU = "anthropic.claude-haiku-4-5";
+
+// ── Google Vertex namespace (Anthropic publishes to Vertex with -native ids) ─
+const VERTEX_SONNET = "claude-sonnet-4-7";
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -306,7 +329,7 @@ export async function discoverProviders(
       label: "Claude Subscription",
       priority: 1,
       transport: "anthropic",
-      models: ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
+      models: ANTHROPIC_MODELS,
     });
   }
 
@@ -321,7 +344,7 @@ export async function discoverProviders(
       label: "Claude API",
       priority: oauthToken ? 2 : 1,
       transport: "anthropic",
-      models: ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
+      models: ANTHROPIC_MODELS,
     });
   }
 
@@ -388,9 +411,9 @@ export async function discoverProviders(
         "gpt-5.4",
         "o4-mini",
         "o3",
-        "claude-sonnet-4.7",
-        "claude-opus-4.7",
-        "claude-haiku-4.5",
+        COPILOT_CLAUDE_SONNET,
+        COPILOT_CLAUDE_OPUS,
+        COPILOT_CLAUDE_HAIKU,
         "gemini-2.5-pro",
         "gemini-2.5-flash",
         "grok-code-fast-1",
@@ -509,7 +532,7 @@ export async function discoverProviders(
       billing: "api-key",
       label: "AWS Bedrock",
       transport: "chat_completions",
-      models: ["anthropic.claude-sonnet-4-7", "anthropic.claude-haiku-4-5"],
+      models: [BEDROCK_SONNET, BEDROCK_HAIKU],
     });
   }
 
@@ -524,7 +547,7 @@ export async function discoverProviders(
       billing: "api-key",
       label: "Google Vertex AI",
       transport: "chat_completions",
-      models: ["claude-sonnet-4-7", "gemini-2.5-pro"],
+      models: [VERTEX_SONNET, "gemini-2.5-pro"],
     });
   }
 

@@ -9,11 +9,11 @@ describe("CostOracle", () => {
       const estimate = oracle.estimateTaskCost(
         "fix typo in readme",
         "anthropic",
-        "claude-sonnet-4-6",
+        "claude-sonnet-4-7",
       );
 
       expect(estimate.provider).toBe("anthropic");
-      expect(estimate.model).toBe("claude-sonnet-4-6");
+      expect(estimate.model).toBe("claude-sonnet-4-7");
       expect(estimate.estimatedCostUsd).toBeGreaterThan(0);
       expect(estimate.confidencePercent).toBeGreaterThan(0);
       expect(estimate.estimatedInputTokens).toBeGreaterThan(0);
@@ -23,12 +23,12 @@ describe("CostOracle", () => {
       const simple = oracle.estimateTaskCost(
         "fix typo",
         "anthropic",
-        "claude-sonnet-4-6",
+        "claude-sonnet-4-7",
       );
       const complex = oracle.estimateTaskCost(
         "implement the complete user authentication feature with OAuth2 and SSO",
         "anthropic",
-        "claude-sonnet-4-6",
+        "claude-sonnet-4-7",
       );
 
       expect(complex.estimatedCostUsd).toBeGreaterThan(simple.estimatedCostUsd);
@@ -62,12 +62,12 @@ describe("CostOracle", () => {
       const opus = oracle.estimateTaskCost(
         "implement feature X",
         "anthropic",
-        "claude-opus-4-6",
+        "claude-opus-4-7",
       );
       const sonnet = oracle.estimateTaskCost(
         "implement feature X",
         "anthropic",
-        "claude-sonnet-4-6",
+        "claude-sonnet-4-7",
       );
 
       expect(opus.estimatedCostUsd).toBeGreaterThan(sonnet.estimatedCostUsd);
@@ -77,7 +77,7 @@ describe("CostOracle", () => {
       const estimate = oracle.estimateTaskCost(
         "implement feature",
         "anthropic",
-        "claude-sonnet-4-6",
+        "claude-sonnet-4-7",
       );
 
       expect(estimate.breakdown.inputCost).toBeGreaterThan(0);
@@ -113,7 +113,7 @@ describe("CostOracle", () => {
     it("uses anthropic/sonnet as default model", () => {
       const estimate = oracle.estimateAutonomousCost("do something", 5);
       expect(estimate.provider).toBe("anthropic");
-      expect(estimate.model).toBe("claude-sonnet-4-6");
+      expect(estimate.model).toBe("claude-sonnet-4-7");
     });
 
     it("estimates non-zero input tokens", () => {

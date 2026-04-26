@@ -28,13 +28,13 @@ describe("ui helpers", () => {
   });
 
   it("cycles through available models", () => {
-    const next = cycleModel("claude-sonnet-4-6", [
+    const next = cycleModel("claude-sonnet-4-7", [
       {
         provider: "anthropic",
         available: true,
         authMethod: "api-key",
         billing: "api-key",
-        models: ["claude-sonnet-4-6", "claude-opus-4-6"],
+        models: ["claude-sonnet-4-7", "claude-opus-4-7"],
         label: "Anthropic",
       },
       {
@@ -47,7 +47,7 @@ describe("ui helpers", () => {
       },
     ]);
 
-    expect(next).toBe("claude-opus-4-6");
+    expect(next).toBe("claude-opus-4-7");
   });
 
   it("resolves @file attachments into prompt context", () => {

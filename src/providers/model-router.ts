@@ -1,17 +1,51 @@
 /**
  * 5-tier model router with health scoring and goal-based recommendation.
  * Routes tasks to the optimal model/provider based on category and health.
+ *
+ * Wave DH-1: task-routing tables derive their model ids from
+ * `PROVIDER_DEFAULTS` (see model-defaults.ts) at construction time rather
+ * than embedding the literal strings. When a provider ships a new flagship
+ * model, only model-defaults.ts changes — every routing table reads through
+ * the central table. The Copilot-proxied "claude-*-copilot" aliases stay as
+ * literals here because they're a Copilot-internal routing convention (not
+ * an Anthropic-facing model id) and aren't surfaced in PROVIDER_DEFAULTS.
  */
 
 import type { ProviderName, RoutingDecision, TaskDescriptor, ModelTier } from "../core/types.js";
 import type { ProviderHealthScore } from "./types.js";
 import type { RepoModelOutcome, RepoModelPerformanceRecord } from "./model-performance.js";
+import { PROVIDER_DEFAULTS } from "./model-defaults.js";
 import {
   decideModel,
   buildTierMap,
   type ModelTierInfo,
   type DowngradeDecision,
 } from "./budget-downgrader.js";
+
+// ── Per-provider default lookups (single source: PROVIDER_DEFAULTS) ──────
+// `oracleModel` is the heavyweight (e.g. Anthropic Opus, OpenAI gpt-5.4).
+// `defaultModel` is the daily-driver (e.g. Anthropic Sonnet, OpenAI gpt-5).
+// `workerModel` is the cheap-but-capable tier used inside oracle/worker
+// loops. Reading these at module load means every routing table picks up
+// the new id the moment PROVIDER_DEFAULTS changes — no separate const bumps.
+const ANTHROPIC_DEFAULTS = PROVIDER_DEFAULTS["anthropic"]!;
+const OPENAI_DEFAULTS = PROVIDER_DEFAULTS["openai"]!;
+const GEMINI_DEFAULTS = PROVIDER_DEFAULTS["gemini"]!;
+const VERTEX_DEFAULTS = PROVIDER_DEFAULTS["vertex"]!;
+
+// Copilot-internal alias used as the canonical routing target when the
+// router picks Copilot for an Anthropic-shaped task. Copilot exposes Claude
+// Sonnet under this proxy id; it is NOT a real Anthropic model and so
+// stays here rather than in PROVIDER_DEFAULTS (which tracks each provider's
+// real catalogue).
+const COPILOT_CLAUDE_SONNET_ALIAS = "claude-sonnet-4-copilot";
+const COPILOT_GPT_ALIAS = "gpt-5-copilot";
+
+// Ollama coder default — chosen at routing time when the user has Ollama
+// installed and the task category is "code". Future: derive from the
+// installed model list rather than hardcoding.
+const OLLAMA_CODER_DEFAULT = "qwen3-coder-next";
+const OLLAMA_VISION_DEFAULT = "qwen3.5";
 
 interface RouterConfig {
   readonly availableProviders: ReadonlySet<ProviderName>;
@@ -227,8 +261,8 @@ export class ModelRouter {
     // BUDGET ENFORCEMENT: if budget exceeded, force free providers only
     if (this.isBudgetExceeded()) {
       return this.findBestAvailable([
-        { provider: "ollama", model: "qwen3-coder-next", tier: 1 },
-        { provider: "gemini", model: "gemini-2.5-flash", tier: 1 },
+        { provider: "ollama", model: OLLAMA_CODER_DEFAULT, tier: 1 },
+        { provider: "gemini", model: GEMINI_DEFAULTS.workerModel, tier: 1 },
         { provider: "free", model: "auto", tier: 1 },
       ]);
     }
@@ -248,64 +282,65 @@ export class ModelRouter {
       }
     }
 
-    // Computer use → Claude Sonnet (only Claude supports native CU)
+    // Computer use → Anthropic default (only Claude supports native CU);
+    // Copilot proxy as fallback (also routes Claude under the hood).
     if (task.requiresComputerUse) {
       return this.findBestAvailable([
-        { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
-        { provider: "copilot", model: "claude-sonnet-4-copilot", tier: 2 },
+        { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
+        { provider: "copilot", model: COPILOT_CLAUDE_SONNET_ALIAS, tier: 2 },
       ]);
     }
 
-    // Vision → Gemini 3.1 Pro first (free tier, 1M context, native vision).
+    // Vision → Gemini's default first (free tier, 1M context, native vision).
     // Fall through to paid Claude/GPT only when Gemini is unavailable or
     // health-degraded. Phase 4 Sprint B2 item 16: vision-model routing.
     if (task.requiresVision) {
       return this.findBestAvailable([
-        { provider: "gemini", model: "gemini-3.1-pro", tier: 1 },
-        { provider: "vertex", model: "gemini-3.1-pro", tier: 1 },
-        { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
-        { provider: "openai", model: "gpt-5.4", tier: 2 },
-        { provider: "ollama", model: "qwen3.5", tier: 1 },
+        { provider: "gemini", model: GEMINI_DEFAULTS.defaultModel, tier: 1 },
+        { provider: "vertex", model: VERTEX_DEFAULTS.defaultModel, tier: 1 },
+        { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
+        { provider: "openai", model: OPENAI_DEFAULTS.oracleModel, tier: 2 },
+        { provider: "ollama", model: OLLAMA_VISION_DEFAULT, tier: 1 },
       ]);
     }
 
-    // Long-context (>128k est. tokens) → Gemini 3.1 Pro (1M context free).
+    // Long-context (>128k est. tokens) → Gemini's default (1M context free).
     // Without this, a long-horizon task falls back to 200k-context models
     // and starts losing context mid-run. Phase 4 Sprint B2 item 16.
     if (task.estimatedTokens > 128_000) {
       return this.findBestAvailable([
-        { provider: "gemini", model: "gemini-3.1-pro", tier: 1 },
-        { provider: "vertex", model: "gemini-3.1-pro", tier: 1 },
-        { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
+        { provider: "gemini", model: GEMINI_DEFAULTS.defaultModel, tier: 1 },
+        { provider: "vertex", model: VERTEX_DEFAULTS.defaultModel, tier: 1 },
+        { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
       ]);
     }
 
     // Tier 2: Fast frontier for coding/execution
     if (task.priority === "latency" || task.category === "code") {
       return this.findBestAvailable([
-        { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
-        { provider: "copilot", model: "claude-sonnet-4-copilot", tier: 2 },
-        { provider: "openai", model: "gpt-5.3-codex", tier: 2 },
-        { provider: "ollama", model: "qwen3-coder-next", tier: 1 },
+        { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
+        { provider: "copilot", model: COPILOT_CLAUDE_SONNET_ALIAS, tier: 2 },
+        { provider: "openai", model: OPENAI_DEFAULTS.workerModel, tier: 2 },
+        { provider: "ollama", model: OLLAMA_CODER_DEFAULT, tier: 1 },
       ]);
     }
 
     // Tier 3: Deep frontier for planning/review
     if (task.category === "plan" || task.category === "review") {
       return this.findBestAvailable([
-        { provider: "anthropic", model: "claude-opus-4-7", tier: 3 },
-        { provider: "openai", model: "gpt-5.4", tier: 3 },
-        { provider: "copilot", model: "gpt-5-copilot", tier: 3 },
+        { provider: "anthropic", model: ANTHROPIC_DEFAULTS.oracleModel, tier: 3 },
+        { provider: "openai", model: OPENAI_DEFAULTS.oracleModel, tier: 3 },
+        { provider: "copilot", model: COPILOT_GPT_ALIAS, tier: 3 },
       ]);
     }
 
     // Default: balanced selection
     return this.findBestAvailable([
-      { provider: "anthropic", model: "claude-sonnet-4-7", tier: 2 },
-      { provider: "openai", model: "gpt-4.1", tier: 2 },
-      { provider: "copilot", model: "claude-sonnet-4-copilot", tier: 2 },
-      { provider: "gemini", model: "gemini-2.5-flash", tier: 2 },
-      { provider: "ollama", model: "qwen3-coder-next", tier: 1 },
+      { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
+      { provider: "openai", model: OPENAI_DEFAULTS.workerModel, tier: 2 },
+      { provider: "copilot", model: COPILOT_CLAUDE_SONNET_ALIAS, tier: 2 },
+      { provider: "gemini", model: GEMINI_DEFAULTS.workerModel, tier: 2 },
+      { provider: "ollama", model: OLLAMA_CODER_DEFAULT, tier: 1 },
     ]);
   }
 

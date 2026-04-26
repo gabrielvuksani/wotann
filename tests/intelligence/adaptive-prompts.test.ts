@@ -17,7 +17,7 @@ describe("AdaptivePromptGenerator", () => {
   describe("classifyModel", () => {
     it("classifies opus models as frontier", () => {
       expect(generator.classifyModel("claude-opus-4")).toBe("frontier");
-      expect(generator.classifyModel("claude-opus-4-6")).toBe("frontier");
+      expect(generator.classifyModel("claude-opus-4-7")).toBe("frontier");
     });
 
     it("classifies gpt-5 as frontier", () => {

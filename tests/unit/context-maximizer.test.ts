@@ -16,10 +16,10 @@ import {
 describe("Context Maximizer", () => {
   describe("maximizeContext", () => {
     it("returns 1M tokens for Anthropic Claude Opus", () => {
-      const result = maximizeContext("claude-opus-4-6", "anthropic");
+      const result = maximizeContext("claude-opus-4-7", "anthropic");
 
       expect(result.effectiveTokens).toBeGreaterThanOrEqual(200_000);
-      expect(result.model).toBe("claude-opus-4-6");
+      expect(result.model).toBe("claude-opus-4-7");
       expect(result.provider).toBe("anthropic");
       expect(result.probeResult).toBeDefined();
     });
@@ -46,7 +46,7 @@ describe("Context Maximizer", () => {
     });
 
     it("includes activation headers for Anthropic", () => {
-      const result = maximizeContext("claude-opus-4-6", "anthropic");
+      const result = maximizeContext("claude-opus-4-7", "anthropic");
 
       expect(result.activationHeaders).toBeDefined();
       // Anthropic should have beta headers
@@ -56,7 +56,7 @@ describe("Context Maximizer", () => {
     });
 
     it("reports caching capabilities", () => {
-      const result = maximizeContext("claude-opus-4-6", "anthropic");
+      const result = maximizeContext("claude-opus-4-7", "anthropic");
 
       expect(typeof result.cachingEnabled).toBe("boolean");
       if (result.cachingEnabled) {
@@ -65,7 +65,7 @@ describe("Context Maximizer", () => {
     });
 
     it("includes output token limits", () => {
-      const result = maximizeContext("claude-opus-4-6", "anthropic");
+      const result = maximizeContext("claude-opus-4-7", "anthropic");
 
       expect(result.outputTokens).toBeGreaterThan(0);
     });
@@ -126,7 +126,7 @@ describe("Context Maximizer", () => {
 
   describe("getMaxContextHeaders", () => {
     it("returns beta headers for Anthropic", () => {
-      const headers = getMaxContextHeaders("anthropic", "claude-opus-4-6");
+      const headers = getMaxContextHeaders("anthropic", "claude-opus-4-7");
 
       expect(typeof headers).toBe("object");
     });
@@ -140,7 +140,7 @@ describe("Context Maximizer", () => {
 
   describe("getMaxContextBody", () => {
     it("returns body modifications for Anthropic", () => {
-      const body = getMaxContextBody("anthropic", "claude-opus-4-6");
+      const body = getMaxContextBody("anthropic", "claude-opus-4-7");
 
       expect(typeof body).toBe("object");
     });
@@ -162,7 +162,7 @@ describe("Context Maximizer", () => {
 
   describe("planContextBudget", () => {
     it("allocates budget correctly", () => {
-      const budget = planContextBudget("claude-opus-4-6", "anthropic", 5000, 2000, 1000);
+      const budget = planContextBudget("claude-opus-4-7", "anthropic", 5000, 2000, 1000);
 
       expect(budget.totalTokens).toBeGreaterThan(0);
       expect(budget.systemPromptTokens).toBe(5000);
@@ -174,14 +174,14 @@ describe("Context Maximizer", () => {
     });
 
     it("reserves space for output", () => {
-      const budget = planContextBudget("claude-opus-4-6", "anthropic", 100, 100, 100);
+      const budget = planContextBudget("claude-opus-4-7", "anthropic", 100, 100, 100);
 
       expect(budget.reservedForOutput).toBeGreaterThan(0);
       expect(budget.totalTokens - budget.reservedForOutput).toBeGreaterThan(0);
     });
 
     it("allocates 60% of flexible budget to code context", () => {
-      const budget = planContextBudget("claude-opus-4-6", "anthropic", 1000, 500, 500);
+      const budget = planContextBudget("claude-opus-4-7", "anthropic", 1000, 500, 500);
 
       // Code context should be roughly 60% of available flexible space
       if (budget.available > 0) {
@@ -191,7 +191,7 @@ describe("Context Maximizer", () => {
     });
 
     it("handles oversized fixed costs gracefully", () => {
-      const budget = planContextBudget("claude-opus-4-6", "anthropic", 999_999, 1, 1);
+      const budget = planContextBudget("claude-opus-4-7", "anthropic", 999_999, 1, 1);
 
       // Should not have negative values
       expect(budget.codeContextTokens).toBeGreaterThanOrEqual(0);
