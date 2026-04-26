@@ -160,6 +160,21 @@ export function createOtelExporter(config: OtelExporterConfig): OtelExporter {
   }
 
   async function flush(): Promise<OtelExportResult> {
+    // Wave 6.5-YY (H-17): honor user telemetry opt-out. The hard
+    // `disabled` flag below is for runtime-config disabling; this is
+    // the user-respecting global gate that ALSO short-circuits even
+    // when the exporter was constructed without the disabled flag.
+    // Lazy-import keeps the otel module independent of telemetry/.
+    const { isTelemetryOptedOut } = await import("../telemetry/opt-out.js");
+    if (isTelemetryOptedOut()) {
+      const optOutResult: OtelExportResult = {
+        ok: false,
+        reason: "disabled",
+        message: "telemetry opt-out is active (~/.wotann/telemetry-opt-out)",
+      };
+      config.onResult?.(optOutResult);
+      return optOutResult;
+    }
     if (config.disabled === true) {
       const disabledResult: OtelExportResult = {
         ok: false,
