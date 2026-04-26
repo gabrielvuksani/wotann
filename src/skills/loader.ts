@@ -22,6 +22,7 @@ import {
   type SkillDescriptor,
   type ExecutionResult as CompositorExecutionResult,
 } from "./skill-compositor.js";
+import { SkillsGuard, type SkillScanResult } from "../security/skills-guard.js";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -271,18 +272,82 @@ const BUILT_IN_SKILLS: readonly SkillMetadata[] = [
 
 // ── Skill Registry ──────────────────────────────────────────
 
+/**
+ * Result of a rejected-skill registration attempt. Surfaces the file path
+ * and the worst severity discovered so callers can log/audit. Stored in
+ * the registry's `getRejectedSkills()` cache for one process lifetime so
+ * `wotann doctor` (or a future TUI) can show the user why a marketplace
+ * skill never loaded.
+ */
+export interface RejectedSkill {
+  readonly filePath: string;
+  readonly skillName: string | null;
+  readonly result: SkillScanResult;
+}
+
+/**
+ * H-16 fix (Wave 6.5-XX): SkillsGuard is wired into every skill load path
+ * BEFORE the skill content is stored. Skills containing CRITICAL or HIGH
+ * severity patterns (eval, dynamic Function, child_process, exfiltration,
+ * sudo, rm -rf, etc.) are rejected fail-CLOSED. Set WOTANN_SKILL_GUARD_OFF=1
+ * to opt out (NOT recommended — prior behavior loaded skills with ZERO
+ * verification at 8 cross-tool dirs).
+ *
+ * QB#15: source-verified — `SkillsGuard.scanSkill(content) → { safe, severity }`
+ * (src/security/skills-guard.ts:288-314). `safe` is `false` whenever severity
+ * is `critical` or `high`.
+ *
+ * QB#7: the guard instance is per-registry (per-process), not module-global,
+ * so concurrent registries don't share custom-pattern state.
+ */
 export class SkillRegistry {
   private readonly skills: Map<string, SkillMetadata> = new Map();
   private readonly loadedContent: Map<string, string> = new Map();
   private readonly skillSources: Map<string, SkillSource> = new Map();
   private readonly searchPaths: readonly string[];
+  private readonly guard: SkillsGuard;
+  private readonly rejected: RejectedSkill[] = [];
+  private readonly guardEnabled: boolean;
 
   constructor(searchPaths: readonly string[] = []) {
     this.searchPaths = searchPaths;
+    this.guard = new SkillsGuard();
+    // Default ON for safety. Opt-out only via explicit env var.
+    this.guardEnabled = process.env["WOTANN_SKILL_GUARD_OFF"] !== "1";
 
     for (const skill of BUILT_IN_SKILLS) {
       this.skills.set(skill.name, skill);
     }
+  }
+
+  /**
+   * Returns skills that were rejected by the guard during this process
+   * lifetime. Useful for `wotann doctor` and audit trails.
+   */
+  getRejectedSkills(): readonly RejectedSkill[] {
+    return this.rejected;
+  }
+
+  /**
+   * Whether the SkillsGuard is currently enforcing on registerFromFile.
+   * Returns false only when WOTANN_SKILL_GUARD_OFF=1 was set at construction.
+   */
+  isGuardEnabled(): boolean {
+    return this.guardEnabled;
+  }
+
+  /**
+   * Internal helper: scan content via SkillsGuard. Returns true when the
+   * content is safe (or the guard is disabled). Records the rejection
+   * for audit when unsafe. Used by both `registerFromFile` and the
+   * deferred-load fallback in `loadSkill` so all paths fail-CLOSED.
+   */
+  private passesGuard(content: string, filePath: string, name: string | null): boolean {
+    if (!this.guardEnabled) return true;
+    const scan = this.guard.scanSkill(content);
+    if (scan.safe) return true;
+    this.rejected.push({ filePath, skillName: name, result: scan });
+    return false;
   }
 
   /**
@@ -447,7 +512,7 @@ export class SkillRegistry {
     const registeredSource = this.skillSources.get(name);
     if (registeredSource) {
       const resolved = resolveSkillEntry(registeredSource.entryPath);
-      if (resolved) {
+      if (resolved && this.passesGuard(resolved.content, resolved.source.skillFilePath, name)) {
         this.loadedContent.set(name, resolved.content);
         this.skillSources.set(name, resolved.source);
         return { metadata, content: resolved.content, filePath: resolved.source.skillFilePath };
@@ -459,7 +524,7 @@ export class SkillRegistry {
       if (!source) continue;
 
       const resolved = resolveSkillEntry(source.entryPath);
-      if (resolved) {
+      if (resolved && this.passesGuard(resolved.content, resolved.source.skillFilePath, name)) {
         this.loadedContent.set(name, resolved.content);
         this.skillSources.set(name, resolved.source);
         return {
@@ -479,10 +544,28 @@ export class SkillRegistry {
 
   /**
    * Register a custom skill from a SKILL.md file.
+   *
+   * H-16 fix: scans content via SkillsGuard before storing. Skills with
+   * critical or high severity patterns are rejected fail-CLOSED — they do
+   * NOT enter the registry's `skills` / `loadedContent` / `skillSources`
+   * maps, so a later `loadSkill(name)` returns null instead of dangerous
+   * content. Override via WOTANN_SKILL_GUARD_OFF=1 (not recommended).
+   *
+   * Sibling-site coverage: this function is the single funnel for both
+   * `scanDirectory()` and `discoverCrossToolSkills()`, so guarding here
+   * covers the 8 cross-tool dirs (.claude/, .cursor/, .gemini/, etc.)
+   * that previously loaded skills with ZERO signature verification.
    */
   registerFromFile(filePath: string): boolean {
     const resolved = resolveSkillEntry(filePath);
     if (!resolved) return false;
+
+    // Fail-CLOSED: never store content the guard rejected.
+    if (
+      !this.passesGuard(resolved.content, resolved.source.skillFilePath, resolved.metadata.name)
+    ) {
+      return false;
+    }
 
     this.skills.set(resolved.metadata.name, resolved.metadata);
     this.loadedContent.set(resolved.metadata.name, resolved.content);
