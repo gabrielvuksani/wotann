@@ -5541,6 +5541,73 @@ export class KairosRPCHandler {
           } catch (execErr) {
             actionError = execErr instanceof Error ? execErr.message : "executeDesktopAction threw";
           }
+
+          // V9 GA-01 — cursor stream emit bridge.
+          //
+          // Pointer-affecting routes (click / scroll / move) must mirror to
+          // the cross-surface cursor stream so phones rendering
+          // CursorOverlayView see the agent's pointer trail without the
+          // agent having to also call `cursor.emit` explicitly. Gating:
+          //   1. executeDesktopAction must have succeeded (success === true)
+          //      — a backend miss / failure means no real pointer movement,
+          //      so a mirrored event would be a lie (QB #6: honest behavior).
+          //   2. action must map to a CursorAction (click/scroll/move).
+          //   3. coordinates must be finite numbers — defends against
+          //      agents passing string coords that fail Number() coercion.
+          //      Better to drop the mirror than to fail the whole step.
+          //
+          // cursorStream.record may throw (invalid coords post-validation,
+          // session-not-found race). We log + continue — the action result
+          // already flowed back to the caller, rolling that back because a
+          // mirror failed would be dishonest.
+          if (execution?.success === true) {
+            const cursorAction: CursorAction | null =
+              rawAction === "click"
+                ? "click"
+                : rawAction === "scroll"
+                  ? "scroll"
+                  : rawAction === "move-mouse" || rawAction === "move"
+                    ? "move"
+                    : null;
+            if (cursorAction !== null) {
+              const rawXY =
+                rawParams && typeof rawParams === "object" && !Array.isArray(rawParams)
+                  ? (rawParams as Record<string, unknown>)
+                  : null;
+              const cx = rawXY ? Number(rawXY["x"]) : NaN;
+              const cy = rawXY ? Number(rawXY["y"]) : NaN;
+              if (Number.isFinite(cx) && Number.isFinite(cy)) {
+                const sample: {
+                  sessionId: string;
+                  deviceId: string;
+                  x: number;
+                  y: number;
+                  action: CursorAction;
+                  button?: string;
+                } = {
+                  sessionId,
+                  deviceId,
+                  x: cx,
+                  y: cy,
+                  action: cursorAction,
+                };
+                // button only on click — scroll/move omit it so consumers
+                // don't see stale button data on non-click events.
+                if (cursorAction === "click" && rawXY && typeof rawXY["button"] === "string") {
+                  sample.button = rawXY["button"] as string;
+                }
+                try {
+                  this.cursorStream.record(sample);
+                } catch (cursorErr) {
+                  console.warn(
+                    `[kairos-rpc] cursor.record failed for session ${sessionId} (${cursorAction}): ${
+                      cursorErr instanceof Error ? cursorErr.message : String(cursorErr)
+                    }`,
+                  );
+                }
+              }
+            }
+          }
         }
 
         // Return shape preserves backward-compat with existing callers
@@ -6553,6 +6620,55 @@ export class KairosRPCHandler {
       } catch (err) {
         throw toRpcError(err);
       }
+    });
+
+    // V9 GA-15 (T5.4): `creations.watch` is the subscribe-confirm RPC
+    // iOS `CreationsView.swift:280` calls before listening for the
+    // `creations.updated` push topic. Before this wire-up the method
+    // was unregistered and `try? await rpcClient.send("creations.watch")`
+    // silently swallowed the "method not found" error — the iOS UI
+    // never failed loud, but it also never received the push events
+    // the user expected.
+    //
+    // The handler does NOT hold per-session subscription state of its
+    // own (per QB#7 — push fan-out is owned by the CompanionBridge +
+    // CompanionServer pair, which already track subscribers per WS
+    // connection). It returns the canonical topic name so iOS knows
+    // exactly what channel to listen on, plus a `bridged:true` flag
+    // so the iOS surface can detect that push delivery is live (vs.
+    // an honest stub). Push fan-out flows through:
+    //
+    //   CreationsStore.save/delete
+    //     -> UnifiedDispatchPlane.broadcastUnifiedEvent
+    //     -> CompanionBridge maps creation-saved/-deleted/file-write
+    //        -> "creations.updated"
+    //     -> CompanionServer.broadcastNotification (WS push)
+    //     -> iOS RPCClient.subscribe("creations.updated") -> handler
+    //
+    // The optional `sessionId` param is a filter HINT — the bridge
+    // does not currently pre-filter on the daemon side (broadcast is
+    // workspace-wide), but echoing it back keeps the contract honest
+    // and lets future iterations narrow the fan-out without an iOS
+    // re-roll. Non-string sessionId is a hard reject (QB#6 honest
+    // validation rather than silent coerce).
+    this.handlers.set("creations.watch", async (params) => {
+      const sessionIdRaw = params["sessionId"];
+      let sessionId: string | undefined;
+      if (sessionIdRaw !== undefined && sessionIdRaw !== null) {
+        if (typeof sessionIdRaw !== "string") {
+          throw new Error("sessionId must be a string when present");
+        }
+        sessionId = sessionIdRaw;
+      }
+      const result: Record<string, unknown> = {
+        ok: true,
+        topic: "creations.updated",
+        bridged: true,
+      };
+      if (sessionId !== undefined) {
+        result["sessionId"] = sessionId;
+      }
+      return result;
     });
   }
 
