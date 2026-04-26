@@ -30,6 +30,15 @@ import chalk from "chalk";
 import { readFileSync } from "node:fs";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { setupProxyFromEnv } from "./utils/proxy-setup.js";
+import { resolveWotannHome, resolveWotannHomeSubdir } from "./utils/wotann-home.js";
+import { installProcessHandlers } from "./utils/process-handlers.js";
+
+// V9 Wave 6-RR (SB-9): install uncaughtException + unhandledRejection
+// handlers BEFORE any subsystem boots. Without this, a single async
+// rejection silently exits the CLI under Node ≥15 default behavior with
+// no log entry at all. Idempotent — safe even if a sub-process re-loads
+// this module.
+installProcessHandlers({ tag: "wotann-cli" });
 
 // Corporate-proxy support: install undici EnvHttpProxyAgent BEFORE any
 // network code (provider clients, daemon IPC, marketplace fetch) loads.
@@ -265,7 +274,7 @@ program
         }
         const init = buildShellInit(shell);
         const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
-        const shellDir = join(homedir(), ".wotann", "shell");
+        const shellDir = resolveWotannHomeSubdir("shell");
         if (!existsSync(shellDir)) {
           mkdirSync(shellDir, { recursive: true });
         }
@@ -434,11 +443,9 @@ program
   .action(async () => {
     const { TaskIsolationManager } = await import("./sandbox/task-isolation.js");
     const { buildBoard, renderBoard } = await import("./orchestration/worktree-kanban.js");
-    const { homedir } = await import("node:os");
-    const { join: pathJoin } = await import("node:path");
 
     const repoRoot = process.cwd();
-    const isolationDir = pathJoin(homedir(), ".wotann", "isolation");
+    const isolationDir = resolveWotannHomeSubdir("isolation");
     const mgr = new TaskIsolationManager(repoRoot, isolationDir);
     const tasks = mgr.listAll();
     const board = buildBoard(tasks);
@@ -1326,8 +1333,9 @@ daemonCmd
   .action(async () => {
     const { KairosDaemon } = await import("./daemon/kairos.js");
     const daemon = new KairosDaemon();
-    const { existsSync, mkdirSync, writeFileSync, unlinkSync } = await import("node:fs");
-    const daemonDir = join(homedir(), ".wotann");
+    const { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } =
+      await import("node:fs");
+    const daemonDir = resolveWotannHome();
     const projectWotannDir = join(process.cwd(), ".wotann");
     const pidPath = join(daemonDir, "daemon.pid");
     const statusPath = join(daemonDir, "daemon.status.json");
@@ -1335,6 +1343,35 @@ daemonCmd
 
     if (!existsSync(daemonDir)) {
       mkdirSync(daemonDir, { recursive: true });
+    }
+
+    // SB-11: stale-pidfile check. The `wotann daemon worker` entry was
+    // silently overwriting whatever PID lived in `daemon.pid`, including
+    // the PID of an already-running daemon — at which point both
+    // processes were live but only the loser had its PID on disk, so
+    // `wotann daemon stop` could only kill one of them. Mirror the
+    // `src/daemon/start.ts:88-167` pattern: if the existing PID is
+    // alive, refuse to start; if it's stale, remove and continue.
+    if (existsSync(pidPath)) {
+      try {
+        const raw = readFileSync(pidPath, "utf-8").trim();
+        const existing = parseInt(raw, 10);
+        if (Number.isFinite(existing) && existing !== process.pid && isProcessAlive(existing)) {
+          console.error(
+            `[KAIROS] Daemon worker already running (PID ${existing}). ` +
+              `Use 'wotann daemon stop' first, or delete ${pidPath} if the PID is a leftover.`,
+          );
+          process.exit(1);
+        }
+        // Stale pid file — clean up before we write our own.
+        try {
+          unlinkSync(pidPath);
+        } catch {
+          /* best-effort: we'll overwrite below anyway */
+        }
+      } catch {
+        // Unreadable pid file — treat as stale.
+      }
     }
 
     const heartbeatTasks = daemon.loadHeartbeatTasksFromFile(heartbeatPath);
@@ -4613,7 +4650,7 @@ function getDaemonPaths(): { pidPath: string; statusPath: string } {
   // Daemon state lives in ~/.wotann/ regardless of cwd — the prior
   // signature took a `workingDir` arg but ignored it, confusing
   // readers and failing lint. Removed session-5.
-  const wotannDir = join(homedir(), ".wotann");
+  const wotannDir = resolveWotannHome();
   return {
     pidPath: join(wotannDir, "daemon.pid"),
     statusPath: join(wotannDir, "daemon.status.json"),
@@ -5769,7 +5806,7 @@ program
     const baseDir =
       opts.out !== undefined
         ? resolve(process.cwd(), opts.out)
-        : join(homedir(), ".wotann", "imported-designs", bundle.manifest.name);
+        : resolveWotannHomeSubdir("imported-designs", bundle.manifest.name);
     const componentsDir = join(baseDir, "components");
     const tokensPath = join(baseDir, "tokens.css");
     const manifestPath = join(baseDir, "manifest.json");
@@ -6169,7 +6206,7 @@ shellSnapshotCmd
     const session = new UnifiedExecSession();
     const snapshot = session.shellSnapshot();
     const serialized = serializeShellSnapshot(snapshot);
-    const dir = join(homedir(), ".wotann", "shell-snapshots");
+    const dir = resolveWotannHomeSubdir("shell-snapshots");
     mkdirSync(dir, { recursive: true });
     const path = join(dir, `${name}.json`);
     writeFileSync(path, serialized, "utf-8");
@@ -6183,7 +6220,7 @@ shellSnapshotCmd
     const { UnifiedExecSession, deserializeShellSnapshot } =
       await import("./sandbox/unified-exec.js");
     const { readFileSync, existsSync } = await import("node:fs");
-    const path = join(homedir(), ".wotann", "shell-snapshots", `${name}.json`);
+    const path = resolveWotannHomeSubdir("shell-snapshots", `${name}.json`);
     if (!existsSync(path)) {
       console.error(chalk.red(`✗ Snapshot "${name}" not found at ${path}`));
       process.exit(1);
@@ -6493,7 +6530,7 @@ const DEFAULT_RULES_INDEX_URL =
   "https://raw.githubusercontent.com/gabrielvuksani/wotann-rules/main/index.json";
 
 function rulesLayout() {
-  return { rulesDir: join(homedir(), ".wotann", "rules") };
+  return { rulesDir: resolveWotannHomeSubdir("rules") };
 }
 
 rulesCmd

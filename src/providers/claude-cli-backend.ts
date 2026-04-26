@@ -23,6 +23,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, existsSync, renameSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, platform } from "node:os";
+import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import type {
   ProviderAdapter,
   UnifiedQueryOptions,
@@ -44,8 +45,8 @@ const CLAUDE_KEYCHAIN_ACCOUNT = "Claude Code";
 
 /** Legacy file written by previous WOTANN versions. Migrated on first
  *  read post-upgrade to `.legacy/` with a timestamp suffix. */
-const WOTANN_LEGACY_OAUTH_FILE = join(homedir(), ".wotann", "anthropic-oauth.json");
-const WOTANN_LEGACY_ARCHIVE_DIR = join(homedir(), ".wotann", ".legacy");
+const WOTANN_LEGACY_OAUTH_FILE = resolveWotannHomeSubdir("anthropic-oauth.json");
+const WOTANN_LEGACY_ARCHIVE_DIR = resolveWotannHomeSubdir(".legacy");
 
 // ── Env scrub list ────────────────────────────────────────────────────────
 
@@ -106,6 +107,37 @@ export const CLAUDE_CLI_CLEAR_ENV = [
   "OTEL_PROPAGATORS",
   "OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
   "OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT",
+  // V9 Wave 6-RR (H-4): proxy + module-injection vars stripped from the
+  // SPAWNED claude binary's environment. Note: this is intentional and
+  // distinct from Wave 3-R proxy support — that path installs an undici
+  // EnvHttpProxyAgent on the WOTANN PROCESS's global fetch dispatcher
+  // (see src/utils/proxy-setup.ts) and only affects WOTANN's own outbound
+  // calls. The child `claude` binary, by contrast, ships its own Node
+  // runtime and honors these env vars directly; leaving them set lets a
+  // malicious upstream env (poisoned shell rc, supervisor, CI runner)
+  // MITM the binary's traffic to api.anthropic.com or inject arbitrary
+  // code via NODE_OPTIONS=--require=/tmp/evil.js.
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+  "NODE_OPTIONS",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "REQUESTS_CA_BUNDLE",
+  "CURL_CA_BUNDLE",
+  "npm_config_proxy",
+  "npm_config_https_proxy",
+  "npm_config_http_proxy",
+  "npm_config_registry",
+  "npm_config_strict_ssl",
+  "npm_config_cafile",
 ] as const;
 
 // ── Public types ──────────────────────────────────────────────────────────

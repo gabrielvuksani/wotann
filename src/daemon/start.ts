@@ -8,7 +8,6 @@
 
 import { KairosDaemon } from "./kairos.js";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import {
   readFileSync,
   writeFileSync,
@@ -16,13 +15,50 @@ import {
   existsSync,
   unlinkSync,
   renameSync,
+  appendFileSync,
 } from "node:fs";
 import { ensureAllSidecars } from "../utils/sidecar-downloader.js";
+import { resolveWotannHome } from "../utils/wotann-home.js";
+import { installProcessHandlers } from "../utils/process-handlers.js";
 
-const wotannDir = join(homedir(), ".wotann");
+const wotannDir = resolveWotannHome();
 if (!existsSync(wotannDir)) {
   mkdirSync(wotannDir, { recursive: true });
 }
+
+// V9 Wave 6-RR (SB-9): install uncaughtException + unhandledRejection
+// handlers in the DAEMON worker entry. The daemon is a long-running
+// process — without these handlers a single unhandled rejection in any
+// codepath (cron tick, IPC handler, channel adapter) silently kills the
+// daemon under Node ≥15 default with no log entry. We append to the
+// daily JSONL log via direct appendFileSync rather than holding a
+// reference to KairosDaemon's appendLog (the daemon may not yet be
+// constructed when an early-boot fault fires).
+const daemonLogDir = join(wotannDir, "logs");
+if (!existsSync(daemonLogDir)) {
+  try {
+    mkdirSync(daemonLogDir, { recursive: true });
+  } catch {
+    // Best-effort: handlers will still write to stderr.
+  }
+}
+installProcessHandlers({
+  tag: "kairos-daemon",
+  appendLog: (entry) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const logFile = join(daemonLogDir, `${today}.jsonl`);
+      const line =
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          ...entry,
+        }) + "\n";
+      appendFileSync(logFile, line);
+    } catch {
+      // stderr line was already emitted by installProcessHandlers.
+    }
+  },
+});
 
 /**
  * Load ~/.wotann/providers.env into process.env BEFORE the daemon constructs

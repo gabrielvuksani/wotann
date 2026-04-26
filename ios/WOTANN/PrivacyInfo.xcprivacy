@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      WOTANN iOS Privacy Manifest — V9 Wave 6-RR (SB-17 audit fix).
+
+      App Store has required this file for new submissions and updates
+      since Q3 2024. Apps without it are auto-rejected at upload time.
+      WOTANN does NOT track users or collect PII; the file declares the
+      "required reason" API categories the app exercises so Apple's
+      static analyzer can validate the listed reasons match what the
+      binary actually calls.
+
+      Reason codes are from Apple's published list:
+        https://developer.apple.com/documentation/bundleresources/privacy_manifest_files
+
+      Categories declared:
+        - UserDefaults (CA92.1) — app-level settings persistence
+        - DiskSpace (E174.1)    — pre-write checks for memory/cache files
+        - FileTimestamp (DDA9.1)— last-modified comparisons for cache freshness
+        - SystemBootTime (35F9.1) — uptime measurement for telemetry/resume
+
+      No tracking, no advertising, no third-party analytics.
+    -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>E174.1</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>DDA9.1</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>35F9.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

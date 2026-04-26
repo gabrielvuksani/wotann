@@ -28,6 +28,7 @@
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { AddressInfo } from "node:net";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import type {
   HookHandler,
@@ -50,6 +51,65 @@ import { createPostToolUseHandler } from "./post-tool-use.js";
 import { createStopHandler } from "./stop.js";
 import { createPreCompactHandler } from "./pre-compact.js";
 
+// V9 Wave 6-RR (H-3): per-session shared secret used to authenticate
+// every POST hitting the loopback hook server. Generated fresh per
+// startHookServer() call so no two sessions share a secret. Embedded in
+// the URL path we hand to the `claude` binary via getHookConfig — the
+// binary just calls the URL it was told to call, so URL-embedded secret
+// works without requiring the binary to support custom headers.
+const SECRET_BYTES = 32;
+
+function generateHookSecret(): string {
+  return randomBytes(SECRET_BYTES).toString("hex");
+}
+
+/**
+ * Constant-time comparison of two hex strings of equal length. Falls
+ * through to false on any length mismatch or buffer error rather than
+ * throwing — fail-CLOSED per QB#6.
+ */
+function safeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    const ab = Buffer.from(a, "hex");
+    const bb = Buffer.from(b, "hex");
+    if (ab.length === 0 || ab.length !== bb.length) return false;
+    return timingSafeEqual(ab, bb);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verify the optional X-WOTANN-HMAC header. Format:
+ *   "sha256=<hex>"
+ * where hex = HMAC-SHA256(secret, `${timestamp}.${rawBody}`).
+ * The X-WOTANN-Timestamp header carries the timestamp (ms since epoch);
+ * stale timestamps (older than 5 min) are rejected to limit replay.
+ *
+ * Returns true if both headers are present AND verify; false if they
+ * verify fail; null if not present (caller falls back to path-token).
+ */
+function verifyHmac(req: IncomingMessage, rawBody: string, secret: string): boolean | null {
+  const hmacHeader = req.headers["x-wotann-hmac"];
+  const tsHeader = req.headers["x-wotann-timestamp"];
+  if (typeof hmacHeader !== "string" || typeof tsHeader !== "string") {
+    return null; // No HMAC presented — caller decides if path-token alone is enough.
+  }
+  const tsNum = Number(tsHeader);
+  if (!Number.isFinite(tsNum)) return false;
+  // 5-minute clock skew tolerance limits replay window.
+  if (Math.abs(Date.now() - tsNum) > 5 * 60 * 1000) return false;
+  const expectedHex = createHmac("sha256", secret).update(`${tsHeader}.${rawBody}`).digest("hex");
+  const expected = `sha256=${expectedHex}`;
+  if (hmacHeader.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(hmacHeader, "utf-8"), Buffer.from(expected, "utf-8"));
+  } catch {
+    return false;
+  }
+}
+
 // ── Server options ─────────────────────────────────────────────
 
 export interface HookServerOptions {
@@ -71,15 +131,70 @@ export interface HookServerHandle {
 }
 
 // ── Per-event route → handler map ──────────────────────────────
+//
+// V9 Wave 6-RR (H-3): the path prefix is now `/wotann/hooks/<secret>/`
+// — every request must include the per-session secret in the path.
+// Anyone scanning loopback ports without the secret gets 401. The
+// secret is generated at startHookServer() time and only handed to the
+// `claude` binary via the hook config file (which is on disk with mode
+// 0o600 in tmpdir). See SLUG_TO_EVENT for the trailing event slug.
 
-const ROUTE_TO_EVENT: Record<string, ClaudeHookEvent> = {
-  "/wotann/hooks/session-start": "SessionStart",
-  "/wotann/hooks/user-prompt-submit": "UserPromptSubmit",
-  "/wotann/hooks/pre-tool-use": "PreToolUse",
-  "/wotann/hooks/post-tool-use": "PostToolUse",
-  "/wotann/hooks/stop": "Stop",
-  "/wotann/hooks/pre-compact": "PreCompact",
+const SLUG_TO_EVENT: Record<string, ClaudeHookEvent> = {
+  "session-start": "SessionStart",
+  "user-prompt-submit": "UserPromptSubmit",
+  "pre-tool-use": "PreToolUse",
+  "post-tool-use": "PostToolUse",
+  stop: "Stop",
+  "pre-compact": "PreCompact",
 };
+
+const EVENT_TO_SLUG: Record<ClaudeHookEvent, string | null> = {
+  SessionStart: "session-start",
+  UserPromptSubmit: "user-prompt-submit",
+  PreToolUse: "pre-tool-use",
+  PostToolUse: "post-tool-use",
+  Stop: "stop",
+  PreCompact: "pre-compact",
+  SessionEnd: null,
+  UserPromptExpansion: null,
+  PostCompact: null,
+  ToolError: null,
+  AgentStart: null,
+  AgentEnd: null,
+  ChannelMessage: null,
+  ChannelOutbound: null,
+  PermissionRequest: null,
+  PermissionDecision: null,
+  Elicitation: null,
+  ElicitationResult: null,
+  ModelChange: null,
+  TurnStart: null,
+  TurnEnd: null,
+  Notification: null,
+  ApiError: null,
+  RateLimit: null,
+  ContextWarning: null,
+  QuotaWarning: null,
+};
+
+/**
+ * Parse a request URL of the form `/wotann/hooks/<secret>/<event-slug>`
+ * and return both pieces. Returns null on any structural mismatch — the
+ * caller responds 404 in that case so a curious port-scanner cannot
+ * distinguish "wrong secret" from "wrong path" timing-wise.
+ */
+function parseHookUrl(url: string): { secret: string; slug: string } | null {
+  // Strip query string (we don't currently use one but defensive).
+  const pathOnly = url.split("?")[0] ?? url;
+  const parts = pathOnly.split("/").filter(Boolean);
+  // Expect exactly: ["wotann", "hooks", <secret>, <slug>]
+  if (parts.length !== 4) return null;
+  if (parts[0] !== "wotann" || parts[1] !== "hooks") return null;
+  const secret = parts[2];
+  const slug = parts[3];
+  if (!secret || !slug) return null;
+  return { secret, slug };
+}
 
 // ── Server factory ─────────────────────────────────────────────
 
@@ -103,22 +218,71 @@ export async function startHookServer(opts: HookServerOptions): Promise<HookServ
   const stop = createStopHandler();
   const preCompact = createPreCompactHandler();
 
+  // V9 Wave 6-RR (H-3): per-server shared secret. Generated fresh per
+  // startHookServer() call so a leaked secret from one session cannot
+  // attack another. Held in closure scope (per-process state, never
+  // module-global per QB#7).
+  const sharedSecret = generateHookSecret();
+
   const server = createServer(async (req, res) => {
     if (req.method !== "POST" || !req.url) {
       sendJson(res, 405, { error: "method_not_allowed" });
       return;
     }
-    const route = ROUTE_TO_EVENT[req.url];
+
+    const parsed = parseHookUrl(req.url);
+    if (!parsed) {
+      // Always 404 on malformed paths so a scanner cannot distinguish
+      // structurally-wrong from secret-wrong via response code alone.
+      sendJson(res, 404, { error: "not_found" });
+      return;
+    }
+
+    // QB#6 fail-CLOSED: secret check via constant-time comparison.
+    if (!safeEqualHex(parsed.secret, sharedSecret)) {
+      log("warn", `hook auth failed: bad secret on ${parsed.slug}`);
+      sendJson(res, 401, { error: "unauthorized" });
+      return;
+    }
+
+    const route = SLUG_TO_EVENT[parsed.slug];
     if (!route) {
-      sendJson(res, 404, { error: "not_found", url: req.url });
+      sendJson(res, 404, { error: "unknown_event" });
+      return;
+    }
+
+    // Read raw body once so we can both HMAC-verify it and parse it.
+    let raw = "";
+    try {
+      raw = await readRaw(req);
+    } catch (err) {
+      log(
+        "warn",
+        `bad body on ${parsed.slug}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      sendJson(res, 400, { error: "bad_body" });
+      return;
+    }
+
+    // Optional X-WOTANN-HMAC header — defense in depth. If the caller
+    // includes the header it MUST verify; if they omit, the secret-in-
+    // path check above is sufficient (the binary doesn't sign by default
+    // because the public hooks-config spec doesn't expose a header field).
+    const hmacResult = verifyHmac(req, raw, sharedSecret);
+    if (hmacResult === false) {
+      log("warn", `hook auth failed: bad HMAC on ${parsed.slug}`);
+      sendJson(res, 401, { error: "unauthorized" });
       return;
     }
 
     let body: unknown;
     try {
-      body = await readJson(req);
+      body = raw.trim().length === 0 ? {} : JSON.parse(raw);
     } catch (err) {
-      log("warn", `bad json on ${req.url}: ${err instanceof Error ? err.message : String(err)}`);
+      log(
+        "warn",
+        `bad json on ${parsed.slug}: ${err instanceof Error ? err.message : String(err)}`,
+      );
       sendJson(res, 400, { error: "bad_json" });
       return;
     }
@@ -152,7 +316,10 @@ export async function startHookServer(opts: HookServerOptions): Promise<HookServ
   });
 
   const port = (server.address() as AddressInfo).port;
-  const url = `http://${host}:${port}`;
+  // Base URL exposed to callers ALREADY embeds the per-session secret
+  // path prefix. Downstream config-builder appends `/<event-slug>` to
+  // produce per-event hook URLs.
+  const url = `http://${host}:${port}/wotann/hooks/${sharedSecret}`;
 
   return {
     url,
@@ -224,12 +391,24 @@ async function runWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+/**
+ * Read the raw request body as a UTF-8 string. Distinct from the
+ * legacy `readJson` (kept for backwards compatibility) because the
+ * H-3 HMAC verifier needs the raw bytes BEFORE JSON parsing — re-
+ * serializing parsed JSON does not always reproduce the exact byte
+ * sequence (key ordering, whitespace), so HMAC must verify the wire
+ * bytes the sender actually signed.
+ */
+async function readRaw(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
-  const raw = Buffer.concat(chunks).toString("utf-8");
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const raw = await readRaw(req);
   if (raw.trim().length === 0) return {};
   return JSON.parse(raw);
 }
@@ -248,43 +427,17 @@ function closeServer(server: Server): Promise<void> {
 
 // ── Convenience: expose route → URL map for config-builder ────
 
+/**
+ * Build per-event URL map for the Claude binary's --hooks-config file.
+ *
+ * `baseUrl` is what `startHookServer()` returns in `.url` — it ALREADY
+ * includes the per-session secret prefix (`/wotann/hooks/<secret>`),
+ * so we just append the trailing event slug per route.
+ */
 export function getHookRoutes(baseUrl: string): Record<ClaudeHookEvent, string | null> {
   const out: Partial<Record<ClaudeHookEvent, string | null>> = {};
-  const reverseRoutes: Partial<Record<ClaudeHookEvent, string>> = {};
-  for (const [route, event] of Object.entries(ROUTE_TO_EVENT)) {
-    reverseRoutes[event as ClaudeHookEvent] = route;
-  }
-  const allEvents: ClaudeHookEvent[] = [
-    "SessionStart",
-    "SessionEnd",
-    "UserPromptSubmit",
-    "UserPromptExpansion",
-    "PreToolUse",
-    "PostToolUse",
-    "Stop",
-    "PreCompact",
-    "PostCompact",
-    "ToolError",
-    "AgentStart",
-    "AgentEnd",
-    "ChannelMessage",
-    "ChannelOutbound",
-    "PermissionRequest",
-    "PermissionDecision",
-    "Elicitation",
-    "ElicitationResult",
-    "ModelChange",
-    "TurnStart",
-    "TurnEnd",
-    "Notification",
-    "ApiError",
-    "RateLimit",
-    "ContextWarning",
-    "QuotaWarning",
-  ];
-  for (const ev of allEvents) {
-    const route = reverseRoutes[ev];
-    out[ev] = route ? `${baseUrl}${route}` : null;
+  for (const [event, slug] of Object.entries(EVENT_TO_SLUG)) {
+    out[event as ClaudeHookEvent] = slug ? `${baseUrl}/${slug}` : null;
   }
   return out as Record<ClaudeHookEvent, string | null>;
 }

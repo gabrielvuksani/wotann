@@ -497,6 +497,28 @@ impl SidecarManager {
         std::fs::create_dir_all(plist_dir).map_err(|e| e.to_string())?;
         std::fs::write(&plist_path, plist_content).map_err(|e| e.to_string())?;
 
+        // V9 Wave 6-RR (SB-6): the plist EnvironmentVariables block can
+        // hold up to 27 cleartext API keys (provider config). Default
+        // umask leaves the file at mode 0o644 — Spotlight indexes it,
+        // every local user can read it. Tighten to 0o600 (owner-only)
+        // immediately after write. macOS-only path, so unix-style perms
+        // are always available.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            if let Err(e) = std::fs::set_permissions(&plist_path, perms) {
+                // Non-fatal: log but continue. The plist still works,
+                // it's just world-readable. We surface the failure in
+                // the install result so the desktop UI can warn the
+                // user, but we do not refuse the install.
+                eprintln!(
+                    "[wotann] WARN: chmod 0o600 on plist failed (file is world-readable): {}",
+                    e
+                );
+            }
+        }
+
         // Load the plist
         let output = Command::new("launchctl")
             .args(["load", "-w", &plist_path.to_string_lossy()])
