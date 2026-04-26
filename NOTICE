@@ -1,0 +1,110 @@
+WOTANN
+Copyright (c) 2026 Gabriel Vuksani / WOTANN Project
+
+This product is licensed under the MIT License — see the LICENSE file at
+the repository root for the full text.
+
+This NOTICE file is provided pursuant to Section 4(c) of the Apache License,
+Version 2.0, and to acknowledge the upstream projects whose code, designs,
+or research patterns are included in this distribution. The presence of an
+entry below does not imply endorsement of WOTANN by the listed project.
+
+────────────────────────────────────────────────────────────────────────────
+Direct ports of source code (with attribution)
+────────────────────────────────────────────────────────────────────────────
+
+NousResearch / Hermes Agent (MIT)
+  Function `convert_tools_to_anthropic` ported into
+  `src/providers/tool-serializer.ts`. Original: https://github.com/NousResearch/Hermes-Function-Calling
+  Header attribution preserved in source. License text in LICENSE-Hermes.
+
+Letta (formerly MemGPT) (Apache-2.0)
+  Sleep-time-Compute paper pattern adapted in
+  `src/learning/sleep-time-agent.ts`. Memory-tool naming conventions in
+  `src/memory/memory-tools.ts` and bi-temporal edge model in
+  `src/memory/bi-temporal-edges.ts`. Original: https://github.com/letta-ai/letta
+  License text in LICENSE-Letta-Apache-2.0.
+
+OpenClaw — 10 ported skills (Apache-2.0)
+  The following skills under `skills/` are derivative works of OpenClaw
+  skill files; each skill carries `source: openclaw` in its YAML frontmatter
+  and Apache-2.0 modified-files notice in its header:
+    - turing-pyramid
+    - proactive-agent-v3 (WAL Protocol pattern)
+    - elite-longterm-memory
+    - agent-autonomy-kit
+    - ai-humanizer
+    - boost-prompt
+    - capability-evolver
+    - compaction-ui-enhancements
+    - context-engine
+    - governance
+  Original: https://github.com/openclaw/openclaw
+  License text in LICENSE-OpenClaw.
+
+────────────────────────────────────────────────────────────────────────────
+Significant runtime dependencies (Apache-2.0 — NOTICE acknowledgement)
+────────────────────────────────────────────────────────────────────────────
+
+  TypeScript (Apache-2.0)                  © Microsoft Corporation
+  qrcode-terminal (Apache-2.0)             © gtanner et al.
+  @humanfs/* (Apache-2.0)                  © Nicholas C. Zakas
+  @img/sharp-* (Apache-2.0 + LGPL parts)   © Lovell Fuller et al.
+  @eslint/config-* (Apache-2.0)            © OpenJS Foundation
+  expect-type (Apache-2.0)                 © Misha Kaletsky
+  tunnel-agent (Apache-2.0)                © Mikeal Rogers
+
+────────────────────────────────────────────────────────────────────────────
+Significant Rust dependencies (selected)
+────────────────────────────────────────────────────────────────────────────
+
+  Tauri (Apache-2.0 OR MIT)                © Tauri Programme within The Commons Conservancy
+  tauri-plugin-* (Apache-2.0 OR MIT)       © Tauri Programme within The Commons Conservancy
+  rustls / rustls-webpki (Apache-2.0 OR ISC OR MIT)  © Rustls authors
+  reqwest (Apache-2.0 OR MIT)              © Sean McArthur
+
+────────────────────────────────────────────────────────────────────────────
+iOS Swift Package Manager dependencies (selected)
+────────────────────────────────────────────────────────────────────────────
+
+  swift-system / swift-collections /       © Apple Inc.   (Apache-2.0)
+    swift-numerics (Apache-2.0)
+  swift-transformers (Apache-2.0)          © Hugging Face Inc.
+  Runestone (MIT)                          © Simon Støvring
+  mlx-swift / mlx-swift-examples (MIT)     © Apple Inc.
+  Jinja (MIT)                              © Hugging Face Inc.
+  GzipSwift (zlib)                         © 1995-2017 Jean-loup Gailly & Mark Adler
+
+────────────────────────────────────────────────────────────────────────────
+LGPL-3 dynamic dependency
+────────────────────────────────────────────────────────────────────────────
+
+@img/sharp-libvips-darwin-arm64 (LGPL-3.0-or-later) is a transitive optional
+dependency pulled by the Anthropic claude-agent-sdk. It is dynamically loaded
+at runtime as a separate native binary (.node file), NOT statically linked
+into any WOTANN bundle. End-users may replace this binary with any other
+LGPL-compatible build of libvips per LGPL-3 §6. Source for libvips:
+https://github.com/libvips/libvips
+
+────────────────────────────────────────────────────────────────────────────
+Trademarks
+────────────────────────────────────────────────────────────────────────────
+
+"Claude" is a trademark of Anthropic PBC. References to Claude in WOTANN's
+documentation and code use Claude's API and CLI under their respective
+terms; Anthropic is not affiliated with WOTANN and does not endorse it.
+"OpenAI" and "GPT" are trademarks of OpenAI, L.L.C. "Gemini" is a trademark
+of Google LLC. All other trademarks are the property of their respective
+owners.
+
+────────────────────────────────────────────────────────────────────────────
+Citations
+────────────────────────────────────────────────────────────────────────────
+
+Substantial pattern citations exist in source comments throughout
+`src/`, generally tagged as `// Inspired by`, `// Pattern from`, or
+`// Port from`. Sources include (non-exhaustive): Perplexity, Goose,
+ByteRover, SuperMemory, KiloCode, NemoClaw, OpenClaude, GSD, DeerFlow,
+Onyx, LightRAG, memvid, ruflo, oh-my-pi, oh-my-openagent, Karpathy
+nanochat / autoresearch, and Windsurf. Each citation in source carries
+the relevant repo link.

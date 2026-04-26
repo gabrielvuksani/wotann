@@ -107,10 +107,14 @@ fi
 
 # ── Step 4: Archive + checksum ────────────────────────────────────
 log "step 4/4: archive + checksum"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+[ -f "$ROOT/LICENSE" ] || fail "LICENSE missing at repo root: $ROOT/LICENSE" 1
+[ -f "$ROOT/NOTICE" ] || fail "NOTICE missing at repo root: $ROOT/NOTICE" 1
 (
   cd "$DIST"
   BASENAME="$(basename "$ART")"
-  tar -czf "${BASENAME}.tar.gz" "$BASENAME"
+  cp "$ROOT/LICENSE" "$ROOT/NOTICE" .
+  tar -czf "${BASENAME}.tar.gz" "$BASENAME" LICENSE NOTICE
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "${BASENAME}.tar.gz" > "${BASENAME}.tar.gz.sha256"
   elif command -v sha256sum >/dev/null 2>&1; then

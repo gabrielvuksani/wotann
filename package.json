@@ -14,7 +14,8 @@
   "files": [
     "dist/",
     "skills/",
-    "install.sh"
+    "install.sh",
+    "NOTICE"
   ],
   "publishConfig": {
     "access": "public"
