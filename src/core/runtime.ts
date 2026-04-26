@@ -173,6 +173,7 @@ import { HASH_ANCHORED_EDIT_TOOL_SCHEMA } from "../tools/hash-anchored-edit.js";
 import { ImageGenRouter } from "../tools/image-gen-router.js";
 import { compileAmbientContext, type AmbientContext } from "../intelligence/ambient-awareness.js";
 import { generateFakeTools } from "../security/anti-distillation.js";
+import { assembleClaudeBridgeDeps } from "../claude/bridge-deps.js";
 import { UnifiedDispatchPlane } from "../channels/unified-dispatch.js";
 import { writeAutonomousProofBundle } from "../orchestration/proof-bundles.js";
 import type { AutonomousResult } from "../orchestration/autonomous.js";
@@ -1933,7 +1934,7 @@ export class WotannRuntime {
         try {
           const { startBridge } = await import("../claude/index.js");
           this.claudeBridge = await startBridge({
-            deps: {},
+            deps: assembleClaudeBridgeDeps(this),
             sessionId: this.session.id,
             log: (level, msg) =>
               level === "error"

@@ -131,6 +131,26 @@ export interface ClaudeInvokeOptions {
   readonly sessionId?: string;
   readonly mcpConfigPath?: string;
   readonly pluginDir?: string;
+  /**
+   * Path to a JSON hooks-config file the spawned `claude` binary should
+   * load (mirrors `claude --hooks-config <path>`). When provided, paired
+   * with `assembleClaudeBridgeDeps()` on the WOTANN side so the in-process
+   * bridge and the CLI agree on hook ownership. Optional — omitted means
+   * the CLI uses its own default discovery.
+   */
+  readonly hooksConfig?: string;
+  /**
+   * Path to an agents directory the spawned `claude` binary should load
+   * (mirrors `claude --agents <path>`). Optional. When set, exposes the
+   * WOTANN-curated agent set to the subprocess.
+   */
+  readonly agents?: string;
+  /**
+   * Path to a channels config the spawned `claude` binary should load
+   * (mirrors `claude --channels <path>`). Optional. When set, surfaces
+   * Telegram/Discord/iMessage adapters to the subprocess.
+   */
+  readonly channels?: string;
 }
 
 export interface ClaudeCliChild {
@@ -300,6 +320,9 @@ export function invokeClaudeCli(opts: ClaudeInvokeOptions): ClaudeCliChild {
   if (opts.systemPrompt) args.push("--append-system-prompt", opts.systemPrompt);
   if (opts.mcpConfigPath) args.push("--mcp-config", opts.mcpConfigPath);
   if (opts.pluginDir) args.push("--plugin-dir", opts.pluginDir);
+  if (opts.hooksConfig) args.push("--hooks-config", opts.hooksConfig);
+  if (opts.agents) args.push("--agents", opts.agents);
+  if (opts.channels) args.push("--channels", opts.channels);
 
   const env = scrubClaudeEnv(process.env);
   const child = spawn("claude", args, {
