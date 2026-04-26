@@ -58,6 +58,39 @@ export interface CostPrediction {
   readonly recommendation: string;
 }
 
+/**
+ * V9 GA-07 (T11.3) — payload broadcast to `onWarning` subscribers when the
+ * running session cost crosses one of the threshold ladder rungs (75/90/95
+ * percent of the configured budget). Each rung fires AT MOST ONCE per
+ * ladder lifetime; the ledger resets when {@link CostTracker.setBudget}
+ * is called with a NEW value or {@link CostTracker.resetThresholds} is
+ * invoked explicitly. See `tests/telemetry/cost-threshold.test.ts` for
+ * the pinned contract.
+ */
+export interface CostWarningEvent {
+  /** Threshold rung that just fired (75 | 90 | 95). */
+  readonly threshold: number;
+  /** Cumulative cost across all entries at the moment of the crossing. */
+  readonly currentCostUsd: number;
+  /** Active budget the threshold is computed against. */
+  readonly budgetUsd: number;
+  /** `currentCostUsd / budgetUsd * 100` at the moment of the crossing. */
+  readonly percentUsed: number;
+  /** ISO-8601 wall-clock timestamp at the moment of the crossing. */
+  readonly timestamp: string;
+}
+
+/** Subscriber callback invoked once per threshold crossing. */
+export type CostWarningHandler = (event: CostWarningEvent) => void;
+
+/**
+ * Threshold ladder for cost warnings. Kept in ascending order so the
+ * fire-loop can short-circuit once it hits a rung above the current
+ * percent. Frozen so accidental mutation can't corrupt the ladder
+ * across CostTracker instances.
+ */
+const COST_WARNING_THRESHOLDS: readonly number[] = Object.freeze([75, 90, 95]);
+
 // Approximate costs per 1K tokens (USD). S2-32: expanded from 6 to 20+
 // entries covering all 17 providers with April 2026 verified rates. The
 // previous table silently fell through to $0 for anything not listed
@@ -194,6 +227,20 @@ export class CostTracker {
   private readonly sessionStartIndex: number;
   private budgetUsd: number | null = null;
   private readonly dailyStore: DailyCostStore;
+  /**
+   * V9 GA-07 (T11.3) — per-instance ledger of which threshold rungs have
+   * already fired since the last ladder reset. QB #7: per-tracker state,
+   * NEVER module-global. Sorted ascending to mirror
+   * {@link COST_WARNING_THRESHOLDS}.
+   */
+  private firedThresholds: number[] = [];
+  /**
+   * V9 GA-07 (T11.3) — per-instance subscriber set. QB #7: per-tracker
+   * state. Each handler is wrapped in a try/catch at fire-time so a
+   * throwing subscriber can't poison the broadcast (QB #6 honest
+   * behavior — log + continue, don't silently swallow other handlers).
+   */
+  private readonly warningHandlers: Set<CostWarningHandler> = new Set();
 
   constructor(storagePath?: string) {
     this.storagePath = storagePath;
@@ -308,6 +355,10 @@ export class CostTracker {
     if (cost > 0) {
       this.dailyStore.addCost(cost);
     }
+    // V9 GA-07 (T11.3): emit cost.warning events for any newly-crossed
+    // threshold rungs. Honest stub: silent default when no budget is
+    // set or the budget is degenerate (<=0).
+    this.maybeFireThresholdWarnings();
     return entry;
   }
 
@@ -353,7 +404,15 @@ export class CostTracker {
   }
 
   setBudget(usd: number): void {
+    // V9 GA-07 (T11.3): a new budget defines a new ladder. Reset the
+    // fired-threshold ledger ONLY when the value actually changes; the
+    // test suite pins this as idempotent (re-setting the same value
+    // does not re-arm previously-fired rungs).
+    const previous = this.budgetUsd;
     this.budgetUsd = usd;
+    if (previous !== usd) {
+      this.firedThresholds = [];
+    }
     this.save();
   }
 
@@ -411,6 +470,106 @@ export class CostTracker {
 
   getBudget(): number | null {
     return this.budgetUsd;
+  }
+
+  /**
+   * V9 GA-07 (T11.3) — register a callback for cost.warning events.
+   *
+   * The handler is invoked once per crossed threshold rung
+   * (75/90/95% of the active budget) and AT MOST ONCE per rung per
+   * ladder lifetime. Multiple handlers may be registered; one
+   * subscriber throwing does not poison the broadcast to others
+   * (QB #6 honest behavior — log + continue).
+   *
+   * @returns A disposer that removes the handler when called. Calling
+   *   the disposer twice is a no-op. Disposers are safe to call from
+   *   inside a handler (they take effect on the next fire).
+   */
+  onWarning(handler: CostWarningHandler): () => void {
+    this.warningHandlers.add(handler);
+    return () => {
+      this.warningHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * V9 GA-07 (T11.3) — return a snapshot of which threshold rungs have
+   * already fired since the last ladder reset. Late subscribers can
+   * use this to introspect what they missed.
+   *
+   * The returned array is a fresh copy in ascending order; mutating it
+   * does not affect tracker state (immutability per coding-style.md).
+   */
+  getFiredThresholds(): number[] {
+    return [...this.firedThresholds];
+  }
+
+  /**
+   * V9 GA-07 (T11.3) — explicitly clear the fired-threshold ledger so
+   * any future crossing can re-emit. Useful for long-running sessions
+   * that want to re-arm warnings after the user acknowledges the
+   * previous batch. Does NOT touch the budget itself or the cost
+   * entries — only the ledger of which rungs have already fired.
+   */
+  resetThresholds(): void {
+    this.firedThresholds = [];
+  }
+
+  /**
+   * V9 GA-07 (T11.3) — internal: walk the threshold ladder and fire
+   * any newly-crossed rungs to all registered subscribers in
+   * ascending threshold order. Honest stub: silent default when no
+   * budget is set or the budget is degenerate (<=0). Per-handler
+   * error isolation via try/catch — one throwing handler does not
+   * block others.
+   */
+  private maybeFireThresholdWarnings(): void {
+    const budget = this.budgetUsd;
+    // Honest stub: no warnings when budget is null, zero, or negative.
+    // The 0 / negative guards both prevent divide-by-zero and treat a
+    // degenerate budget as "no budget configured" rather than as
+    // "every record crosses every threshold."
+    if (budget === null || budget <= 0) return;
+
+    const currentCost = this.getTotalCost();
+    const percentUsed = (currentCost / budget) * 100;
+    const timestamp = new Date().toISOString();
+
+    // Walk ascending so a single record() that jumps past multiple
+    // rungs fires them in 75 -> 90 -> 95 order. Short-circuit once we
+    // hit a rung above the current percent (ladder is sorted).
+    for (const threshold of COST_WARNING_THRESHOLDS) {
+      if (percentUsed < threshold) break;
+      if (this.firedThresholds.includes(threshold)) continue;
+
+      this.firedThresholds.push(threshold);
+
+      const event: CostWarningEvent = {
+        threshold,
+        currentCostUsd: currentCost,
+        budgetUsd: budget,
+        percentUsed,
+        timestamp,
+      };
+
+      // Snapshot the handler set before iterating so a handler that
+      // dispose()s itself (or registers a new one) doesn't perturb
+      // the in-flight broadcast — Set iteration would otherwise
+      // observe the mutation on the same tick.
+      for (const handler of [...this.warningHandlers]) {
+        try {
+          handler(event);
+        } catch (err) {
+          // QB #6: don't silently swallow. Surface to stderr so the
+          // operator can see which subscriber misbehaved, but
+          // continue broadcasting so other subscribers still receive
+          // the event. Avoid throwing — record() must remain
+          // best-effort with respect to telemetry side-effects.
+          // eslint-disable-next-line no-console
+          console.error(`[CostTracker] cost.warning handler threw at threshold=${threshold}:`, err);
+        }
+      }
+    }
   }
 
   /**
