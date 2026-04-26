@@ -31,7 +31,6 @@
 		1930CD58A874F7A219589044 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E80A34FF0260230786838F6 /* DashboardView.swift */; };
 		19922111F7A0157B18CDB60F /* TaskProgressActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3061F59CE68677C13F467CDB /* TaskProgressActivity.swift */; };
 		1ACAA26D9B2B944B12E16D80 /* ExploitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39F66594637AB0E2C571DC49 /* ExploitView.swift */; };
-		1B56EBCCAA296B201D4AF8A7 /* CrossDeviceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E64BDB7DBE8104D59B6AD95 /* CrossDeviceService.swift */; };
 		1B889BCE6A9F558698678104 /* AgentDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970D819FAD2DACD72B9298A0 /* AgentDetailView.swift */; };
 		1BB450DCEECB895E0324D45A /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E75044FBE1D670D8A9CC7A8 /* ErrorBanner.swift */; };
 		1BDBB088DD994B355F2460D9 /* DuplexVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF46B6C92C6DF4852A033775 /* DuplexVoiceSession.swift */; };
@@ -381,7 +380,6 @@
 		6BBC6FB23CC47F27B73087F3 /* StatusRibbon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusRibbon.swift; sourceTree = "<group>"; };
 		6C2E6003195A7CA1822E3D6A /* BudgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetView.swift; sourceTree = "<group>"; };
 		6D955C9817EEC3AFA6ECCF1F /* ConnectivityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityMonitor.swift; sourceTree = "<group>"; };
-		6E64BDB7DBE8104D59B6AD95 /* CrossDeviceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDeviceService.swift; sourceTree = "<group>"; };
 		6F3586AA87EDF65718D19D45 /* EditorInlineAIMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorInlineAIMenu.swift; sourceTree = "<group>"; };
 		773471553AF410408E96A632 /* AgentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRow.swift; sourceTree = "<group>"; };
 		7AC0FC0180D8891370210124 /* MeetModeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetModeView.swift; sourceTree = "<group>"; };
@@ -640,7 +638,6 @@
 				B9F53FC677404A7A92EC0DA5 /* ComputerSessionService.swift */,
 				6D955C9817EEC3AFA6ECCF1F /* ConnectivityMonitor.swift */,
 				9BA0CD3724CA1F7EC99FA705 /* ContinuityCameraService.swift */,
-				6E64BDB7DBE8104D59B6AD95 /* CrossDeviceService.swift */,
 				EF46B6C92C6DF4852A033775 /* DuplexVoiceSession.swift */,
 				1A970BCCA60E9BE6DC6C23B5 /* EditorService.swift */,
 				E35578B937A1B6B65955180A /* Haptics.swift */,
@@ -1484,7 +1481,6 @@
 				008F45FEB71084BE45811782 /* CostViewModel.swift in Sources */,
 				5CF789F3290B13B16BBC8FA3 /* CouncilView.swift in Sources */,
 				A9196DBD23B63979E2169C5C /* CreationsView.swift in Sources */,
-				1B56EBCCAA296B201D4AF8A7 /* CrossDeviceService.swift in Sources */,
 				B30108A450FFF40ABC15EFBF /* DaemonOfflineView.swift in Sources */,
 				1930CD58A874F7A219589044 /* DashboardView.swift in Sources */,
 				2011416DD966342A47EF1027 /* DiagnosticLogger.swift in Sources */,

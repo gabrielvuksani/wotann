@@ -296,6 +296,11 @@ export function WotannApp({
   initialMessages = [],
   runtime,
 }: WotannAppProps): React.ReactElement {
+  // First-run onboarding detection: if NO provider in the providers
+  // list is `available`, the user has nothing configured. Show the
+  // onboarding banner instead of silently routing to a phantom
+  // ollama+gemma4 default that will fail on first message.
+  const needsOnboarding = providers.length === 0 || providers.every((p) => p.available === false);
   const { exit } = useApp();
   const workingDir = runtime?.getWorkingDir() ?? process.cwd();
   const uiStatePath = join(workingDir, ".wotann", "ui-state.json");
@@ -3386,6 +3391,25 @@ export function WotannApp({
   return (
     <Box flexDirection="column" height="100%">
       {showStartup && <StartupScreen version={version} providers={providers} />}
+
+      {needsOnboarding && (
+        <Box
+          flexDirection="column"
+          paddingX={2}
+          paddingY={1}
+          borderStyle="round"
+          borderColor="yellow"
+          marginBottom={1}
+        >
+          <Text bold color="yellow">
+            ⚠ No providers configured
+          </Text>
+          <Text color="gray">
+            Run `wotann init` to set up a provider, or run `wotann login &lt;provider&gt;` to add
+            one. Free options: Ollama (local), Google Gemini (free tier), Groq (free tier).
+          </Text>
+        </Box>
+      )}
 
       <ContextHUD
         usedTokens={runtimeStatus?.totalTokens ?? 0}
