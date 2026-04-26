@@ -1,6 +1,8 @@
 /**
  * Windows Job Object sandbox backend.
  *
+ * STATUS (V9, H-27): NOT IMPLEMENTED — honest stub only.
+ *
  * Windows ships kernel-level process isolation via Job Objects (since
  * NT 4.0) plus AppContainer (since Windows 8) and modern AICs (Windows
  * 10+). A native implementation requires:
@@ -12,20 +14,32 @@
  *     CreateAppContainerProfile + capability SIDs (userenv.dll)
  *
  * None of those primitives are exposed in pure Node.js; binding to
- * them requires a native addon (n-api). Rather than ship a half-built
- * implementation that pretends to enforce policies it does not, this
- * backend ships an HONEST stub:
+ * them requires a native addon (n-api, ~150 LOC of Win32 binding code).
+ * Rather than ship a half-built implementation that pretends to enforce
+ * policies it does not, this backend ships an HONEST stub:
  *   - On Windows: returns {ok: false, reason: "windows-jobobject backend
  *     requires a native addon that is not bundled"}.
  *   - On non-Windows: returns {ok: false, reason: "not Windows"}.
  *
- * The facade in kernel-sandbox.ts will see this and degrade gracefully
- * (typically falling through to docker, or surfacing a clear error to
- * the operator).
+ * OPERATIONAL CONSEQUENCE — READ THIS:
+ *   - The facade in kernel-sandbox.ts sees this stub's isAvailable=false
+ *     and degrades to the next available enforcement layer. In WOTANN's
+ *     current chain that means falling through to the docker backend.
+ *   - If docker is ALSO unavailable (most Windows users do not run Docker
+ *     Desktop), the sandbox is effectively OFF on Windows. The runtime
+ *     will surface this via the executor's enforcement-required gate;
+ *     callers that demand enforcement will see ok=false with a clear
+ *     reason and refuse to execute.
+ *   - There is NO silent unsandboxed fallback. Callers must explicitly
+ *     opt in via runUnsandboxed() (kernel-sandbox.ts) and the result is
+ *     marked enforced=false.
  *
- * Future: when a native addon is bundled (e.g. via node-gyp targeting
- * win32), the stub here can be replaced. The shape of `KernelSandboxBackend`
- * is the contract — the addon must satisfy it.
+ * ROADMAP: v0.7+ — bundle a native addon (likely via node-gyp targeting
+ * win32-x64 + win32-arm64) that calls AssignProcessToJobObject and
+ * SetInformationJobObject with the JobObjectBasicLimits computed below.
+ * The shape of `KernelSandboxBackend` is the contract — the addon must
+ * satisfy it. Tests can already inject an `addonRunner` to validate the
+ * limits-translation path.
  */
 
 import {
@@ -124,7 +138,7 @@ export function createWindowsJobObjectBackend(opts: WindowsOptions = {}): Kernel
     unavailableReason: !isWindows
       ? `Windows Job Objects only available on win32; current platform is ${process.platform}`
       : !addonAvailable
-        ? "windows-jobobject backend requires a native addon that is not bundled"
+        ? "windows-jobobject backend NOT IMPLEMENTED in this WOTANN build (native addon deferred to v0.7+); kernel sandbox will fall through to docker. If docker is unavailable, no enforcement is applied — callers requiring sandbox MUST refuse to execute"
         : undefined,
     async isAvailable() {
       if (!isWindows) return false;
@@ -192,6 +206,9 @@ export function createWindowsJobObjectBackend(opts: WindowsOptions = {}): Kernel
       }
 
       // Honest stub: we are on Windows but no native addon is bundled.
+      // Caller (kernel-sandbox.ts) sees enforced=false and ok=false and
+      // either falls through to docker or refuses to execute. There is
+      // NO silent unsandboxed run.
       return {
         ok: false,
         exitCode: null,
@@ -201,7 +218,7 @@ export function createWindowsJobObjectBackend(opts: WindowsOptions = {}): Kernel
         enforced: false,
         backend: BACKEND_NAME,
         reason:
-          "windows-jobobject backend requires a native addon (kernel32.AssignProcessToJobObject) that is not bundled in this WOTANN build",
+          "windows-jobobject NOT IMPLEMENTED in this WOTANN build — requires a native addon (kernel32.AssignProcessToJobObject + SetInformationJobObject) deferred to v0.7+. Kernel sandbox will attempt docker fallback; if docker is unavailable, sandboxed execution is refused on Windows",
       };
     },
   };

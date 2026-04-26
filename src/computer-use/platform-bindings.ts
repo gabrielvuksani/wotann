@@ -91,10 +91,49 @@ export function detectAvailableTools(): readonly string[] {
     if (isAvailable("screencapture")) tools.push("screencapture");
     tools.push("osascript"); // Always available on macOS
   } else if (os === "linux") {
+    // H-30: detect Wayland session FIRST. On Fedora 40+, Ubuntu 23.10+,
+    // and Debian 13 the default session is Wayland and X11 input tools
+    // (xdotool) are silently broken (xdotool only works on X11; on
+    // Wayland it controls only the Xwayland surfaces which most native
+    // apps do not use). We surface Wayland-native tools when available
+    // and fall through to xdotool only after acknowledging Xwayland's
+    // partial coverage.
+    const onWayland =
+      typeof process.env["WAYLAND_DISPLAY"] === "string" &&
+      process.env["WAYLAND_DISPLAY"]!.length > 0;
+    if (onWayland) {
+      // Wayland-native input. wtype handles typing only; ydotool handles
+      // mouse + keyboard via uinput (requires the ydotoold daemon).
+      if (isAvailable("wtype")) tools.push("wtype");
+      if (isAvailable("ydotool")) tools.push("ydotool");
+      // wlrctl helps on wlroots-based compositors (Sway, Hyprland, etc.).
+      if (isAvailable("wlrctl")) tools.push("wlrctl");
+      // grim is the Wayland screenshot tool; slurp picks regions.
+      if (isAvailable("grim")) tools.push("grim");
+      if (isAvailable("slurp")) tools.push("slurp");
+      // wl-clipboard provides wl-copy/wl-paste.
+      if (isAvailable("wl-copy")) tools.push("wl-copy");
+    }
+    // X11 tools — still attempt to detect, but they degrade on Wayland
+    // (xdotool only reaches Xwayland surfaces; maim partially works under
+    // Xwayland but misses native Wayland windows).
     if (isAvailable("xdotool")) tools.push("xdotool");
     if (isAvailable("maim")) tools.push("maim");
     if (isAvailable("xclip")) tools.push("xclip");
     if (isAvailable("xprop")) tools.push("xprop");
+    // Honest stub: if we are on Wayland AND found neither wtype/ydotool
+    // nor xdotool, the desktop control surface is essentially OFF. Warn
+    // operator so they can install the missing tools; do not crash.
+    if (
+      onWayland &&
+      !tools.includes("wtype") &&
+      !tools.includes("ydotool") &&
+      !tools.includes("xdotool")
+    ) {
+      console.warn(
+        "[platform-bindings] Wayland session detected but no input tools found (tried wtype, ydotool, xdotool). Computer-use is disabled until you install one of: wtype + ydotool (Wayland-native) or xdotool (X11/Xwayland fallback).",
+      );
+    }
   }
 
   return tools;

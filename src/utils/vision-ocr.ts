@@ -66,6 +66,50 @@ function materializeImage(input: string): { path: string; cleanup: () => void } 
   };
 }
 
+/**
+ * Resolve a python3 binary on PATH or in well-known install locations.
+ *
+ * Hardcoding /usr/bin/python3 broke on:
+ *   - NixOS (everything in /run/current-system/sw/bin)
+ *   - Termux/Android (/data/data/com.termux/files/usr/bin)
+ *   - Linux distros where python3 only exists at /usr/local/bin
+ *   - Apple Silicon Homebrew (/opt/homebrew/bin)
+ *
+ * Returns the first absolute path that exists, or null when no python3
+ * is available. Order is "PATH-resolved first" so user PATH wins over
+ * platform defaults.
+ */
+function resolvePython3(): string | null {
+  // 1. PATH resolution via `command -v` (POSIX) or `where` (win32). On
+  //    macOS this is the canonical way to find python3 even when it's
+  //    actually a Homebrew shim under /opt/homebrew.
+  try {
+    const finder = process.platform === "win32" ? "where" : "command";
+    const args = process.platform === "win32" ? ["python3"] : ["-v", "python3"];
+    const out = execFileSync(finder, args, {
+      timeout: 3_000,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform !== "win32", // `command -v` is a shell builtin
+    });
+    const resolved = out.toString("utf-8").trim().split(/\r?\n/)[0]?.trim();
+    if (resolved && existsSync(resolved)) return resolved;
+  } catch {
+    /* PATH lookup failed — fall through to well-known paths */
+  }
+
+  // 2. Well-known install locations as a defensive fallback.
+  const candidates = [
+    "/usr/bin/python3",
+    "/usr/local/bin/python3",
+    "/opt/homebrew/bin/python3", // Apple Silicon Homebrew
+    "/data/data/com.termux/files/usr/bin/python3", // Termux
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return null;
+}
+
 /** Attempt OCR via macOS Vision.framework. */
 function tryMacOSVision(imagePath: string): string | null {
   if (platform() !== "darwin") return null;
@@ -91,8 +135,20 @@ for obs in (req.results() or []):
         out.append(cand[0].string())
 print("\\n".join(out))
 `.trim();
+  // H-26: PATH-resolve python3 instead of hardcoding /usr/bin/python3.
+  // On stripped/customized macOS images (or Apple Silicon Homebrew where
+  // /usr/bin/python3 may not exist), the hardcoded path silently fails.
+  // Honest fallback: when no python3 exists, return null and let the
+  // caller surface "[OCR unavailable]" rather than crashing.
+  const python = resolvePython3();
+  if (!python) {
+    console.warn(
+      "[vision-ocr] no python3 found on PATH or known locations; macOS Vision OCR disabled",
+    );
+    return null;
+  }
   try {
-    const out = execFileSync("/usr/bin/python3", ["-c", script, imagePath], {
+    const out = execFileSync(python, ["-c", script, imagePath], {
       timeout: 30_000,
       stdio: ["ignore", "pipe", "pipe"],
     });

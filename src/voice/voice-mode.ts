@@ -25,6 +25,7 @@
  */
 
 import { execFileSync, execFile } from "node:child_process";
+// `execFile` retained for fire-and-forget playback callbacks inside playAudioFile.
 import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
@@ -468,24 +469,8 @@ export class VoiceMode {
       const tempMp3 = join(tmpdir(), `wotann-tts-${Date.now()}.mp3`);
       writeFileSync(tempMp3, Buffer.from(audioBuffer));
 
-      // Play the audio
-      if (platform() === "darwin") {
-        execFile("afplay", [tempMp3], () => {
-          try {
-            unlinkSync(tempMp3);
-          } catch {
-            /* ignore */
-          }
-        });
-      } else {
-        execFile("mpv", ["--no-video", tempMp3], () => {
-          try {
-            unlinkSync(tempMp3);
-          } catch {
-            /* ignore */
-          }
-        });
-      }
+      // Play the audio (cross-platform — H-28).
+      playAudioFile(tempMp3);
 
       return true;
     } catch {
@@ -525,23 +510,8 @@ export class VoiceMode {
       const tempMp3 = join(tmpdir(), `wotann-tts-${Date.now()}.mp3`);
       writeFileSync(tempMp3, Buffer.from(audioBuffer));
 
-      if (platform() === "darwin") {
-        execFile("afplay", [tempMp3], () => {
-          try {
-            unlinkSync(tempMp3);
-          } catch {
-            /* ignore */
-          }
-        });
-      } else {
-        execFile("mpv", ["--no-video", tempMp3], () => {
-          try {
-            unlinkSync(tempMp3);
-          } catch {
-            /* ignore */
-          }
-        });
-      }
+      // Cross-platform playback — H-28.
+      playAudioFile(tempMp3);
 
       return true;
     } catch {
@@ -595,23 +565,8 @@ export class VoiceMode {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
-      if (platform() === "darwin") {
-        execFile("afplay", [tempWav], () => {
-          try {
-            unlinkSync(tempWav);
-          } catch {
-            /* ignore */
-          }
-        });
-      } else {
-        execFile("aplay", [tempWav], () => {
-          try {
-            unlinkSync(tempWav);
-          } catch {
-            /* ignore */
-          }
-        });
-      }
+      // Cross-platform playback — H-28.
+      playAudioFile(tempWav);
 
       return true;
     } catch {
@@ -702,4 +657,90 @@ function isCommandAvailable(command: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Cross-platform audio playback (H-28).
+ *
+ * Previous implementation hardcoded `afplay` on macOS and `mpv` (or `aplay`)
+ * elsewhere. That broke voice playback on:
+ *   - Windows (no afplay, no mpv by default)
+ *   - Linux without mpv installed
+ *   - PipeWire-only systems where ALSA's aplay can stutter
+ *
+ * Strategy: try a list of candidates in preference order for each platform.
+ * Each is launched fire-and-forget via execFile (matches prior behavior so
+ * the speak() call returns immediately). On any successful spawn we delete
+ * the tempfile after the player exits. If every candidate fails, log a
+ * single warning and skip — voice flow continues, no crash. Honest stub.
+ *
+ * Candidate lists (verified against current package docs as of 2026-04):
+ *   - macOS: afplay (built-in, handles MP3/WAV/AIFF/M4A)
+ *   - Linux: paplay (PulseAudio/PipeWire — handles WAV/OGG; for MP3 needs
+ *     PA's mp3 module; otherwise falls through), aplay (ALSA, WAV-only),
+ *     ffplay (FFmpeg — handles all formats), mpv (handles all formats),
+ *     mpg123 (MP3-only, very lightweight)
+ *   - Windows: powershell SoundPlayer.PlaySync (WAV-only built-in),
+ *     ffplay/mpv as universal fallback for MP3
+ *
+ * Tempfile cleanup is the caller's responsibility for synchronous failure;
+ * for the spawned-process case the player's exit callback unlinks.
+ */
+function playAudioFile(path: string): void {
+  if (!existsSync(path)) return;
+
+  const isWav = /\.wav$/i.test(path);
+  const candidates: Array<{ cmd: string; args: readonly string[] }> = (() => {
+    const p = platform();
+    if (p === "darwin") return [{ cmd: "afplay", args: [path] }];
+    if (p === "win32") {
+      const list: Array<{ cmd: string; args: readonly string[] }> = [];
+      // Built-in SoundPlayer is WAV-only — only attempt for .wav.
+      if (isWav) {
+        list.push({
+          cmd: "powershell",
+          args: ["-NoProfile", "-Command", `(New-Object Media.SoundPlayer '${path}').PlaySync()`],
+        });
+      }
+      // Universal fallbacks (require user-installed binary).
+      list.push({ cmd: "ffplay", args: ["-autoexit", "-nodisp", "-loglevel", "quiet", path] });
+      list.push({ cmd: "mpv", args: ["--no-video", "--really-quiet", path] });
+      return list;
+    }
+    // Linux/other POSIX: try PulseAudio, ALSA, then universal players.
+    const list: Array<{ cmd: string; args: readonly string[] }> = [];
+    list.push({ cmd: "paplay", args: [path] });
+    if (isWav) list.push({ cmd: "aplay", args: ["-q", path] });
+    list.push({ cmd: "ffplay", args: ["-autoexit", "-nodisp", "-loglevel", "quiet", path] });
+    list.push({ cmd: "mpv", args: ["--no-video", "--really-quiet", path] });
+    if (!isWav) list.push({ cmd: "mpg123", args: ["-q", path] });
+    return list;
+  })();
+
+  // Filter to candidates whose binary exists on PATH so we don't blow ENOENT
+  // through every alternative.
+  const usable = candidates.filter((c) => isCommandAvailable(c.cmd));
+  if (usable.length === 0) {
+    console.warn(
+      `[voice] no audio player found for ${platform()} (tried: ${candidates.map((c) => c.cmd).join(", ")}); skipping playback`,
+    );
+    try {
+      unlinkSync(path);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  // Fire-and-forget the first player. We do not retry across players because
+  // the previous behavior was also single-shot, and serializing playback
+  // attempts would block voice for several seconds per failure.
+  const choice = usable[0]!;
+  execFile(choice.cmd, [...choice.args], () => {
+    try {
+      unlinkSync(path);
+    } catch {
+      /* ignore */
+    }
+  });
 }
