@@ -231,7 +231,6 @@
 		A800000000000000000A0002 /* ApprovalQueueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0001 /* ApprovalQueueService.swift */; };
 		A800000000000000000A0004 /* ApprovalQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0003 /* ApprovalQueueView.swift */; };
 		A800000000000000000A0006 /* ApprovalDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0005 /* ApprovalDetailView.swift */; };
-		A800000000000000000A0008 /* EditorLSPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0007 /* EditorLSPService.swift */; };
 		A800000000000000000A000A /* PairingProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A800000000000000000A0009 /* PairingProviderConfig.swift */; };
 /* End PBXBuildFile section */
 
@@ -486,7 +485,6 @@
 		A800000000000000000A0001 /* ApprovalQueueService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalQueueService.swift; sourceTree = "<group>"; };
 		A800000000000000000A0003 /* ApprovalQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalQueueView.swift; sourceTree = "<group>"; };
 		A800000000000000000A0005 /* ApprovalDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalDetailView.swift; sourceTree = "<group>"; };
-		A800000000000000000A0007 /* EditorLSPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorLSPService.swift; sourceTree = "<group>"; };
 		A800000000000000000A0009 /* PairingProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingProviderConfig.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -643,7 +641,6 @@
 				6E64BDB7DBE8104D59B6AD95 /* CrossDeviceService.swift */,
 				EF46B6C92C6DF4852A033775 /* DuplexVoiceSession.swift */,
 				1A970BCCA60E9BE6DC6C23B5 /* EditorService.swift */,
-				A800000000000000000A0007 /* EditorLSPService.swift */,
 				E35578B937A1B6B65955180A /* Haptics.swift */,
 				8F6F9658FE45E7FE8311F9EB /* HapticService.swift */,
 				36E5C03AEA8B07FACAC501D6 /* HealthKitService.swift */,
@@ -1502,7 +1499,6 @@
 				769400F88A9E4EB69F2718D1 /* EditorHoverCard.swift in Sources */,
 				257CA59CB07AFE462CF99428 /* EditorInlineAIMenu.swift in Sources */,
 				42F9D7D152939A7052AED056 /* EditorLSPBridge.swift in Sources */,
-				A800000000000000000A0008 /* EditorLSPService.swift in Sources */,
 				C7A1F0C0983AC2309DC883F4 /* EditorLanguages.swift in Sources */,
 				406704D6B31A083DC6E4526F /* EditorMinimap.swift in Sources */,
 				6D83206B8D48FF7E6C8483C3 /* EditorService.swift in Sources */,
