@@ -383,6 +383,15 @@ export class KairosDaemon {
   // auto_capture rows and 0 memory_entries.
   private consolidationTickCounter = 0;
 
+  // Wave 4-AA: tick() reentrancy guard. The tick body fires async work
+  // (proactiveCheck, dreamPipeline, codebase health, sleep-time consumer)
+  // and the daemon interval is 15s — when downstream work crosses the
+  // next interval, two ticks would interleave. That double-fires cron
+  // jobs (state.cronJobs.shouldRunCron), corrupts tickCount, and races
+  // against this.state assignment. Skip the new tick if the prior one
+  // is still running; the next interval picks up cleanly.
+  private tickInFlight = false;
+
   // Phase B Bug #2 fix: track shutdown handlers so we install them at most
   // once per daemon instance (tests that spin up multiple daemons would
   // otherwise leak SIGINT/SIGTERM/exit listeners across the process).
@@ -1804,6 +1813,24 @@ export class KairosDaemon {
   }
 
   private tick(): void {
+    // Wave 4-AA: reentrancy guard. If the prior tick's async work is still
+    // running (e.g. dream pipeline, codebase health, sleep-time consumer),
+    // skip this scheduled invocation rather than double-fire. The setInterval
+    // contract is "every Nms attempt a tick", not "every Nms guarantee a tick",
+    // so dropping a single tick under load is the honest behaviour.
+    if (this.tickInFlight) {
+      console.warn("[KAIROS] skip tick — previous tick still running");
+      return;
+    }
+    this.tickInFlight = true;
+    try {
+      this.tickBody();
+    } finally {
+      this.tickInFlight = false;
+    }
+  }
+
+  private tickBody(): void {
     this.state = {
       ...this.state,
       tickCount: this.state.tickCount + 1,

@@ -694,9 +694,29 @@ export class CompanionServer {
       const wss = new WebSocketServer({ server: this.httpServer });
       this.wsServer = wss;
 
+      // Wave 4-AA: server-level 'error' handler — without this an EADDRINUSE
+      // or socket-layer fault on the WebSocketServer would emit an
+      // unhandled 'error' event and crash the Node process. Log instead.
+      wss.on("error", (...errArgs: unknown[]) => {
+        const err = errArgs[0];
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[CompanionServer] WSServer error: ${msg}`);
+      });
+
       wss.on("connection", (...args: unknown[]) => {
         const ws = args[0] as WebSocketLike;
         this.connectedClients.add(ws);
+
+        // Wave 4-AA: per-connection 'error' handler. WebSocket emits 'error'
+        // on protocol violations, frame errors, or socket failures. Without
+        // a listener, Node treats it as unhandled and crashes the daemon.
+        // Log + drop the client silently so other peers stay live.
+        ws.on("error", (...errArgs: unknown[]) => {
+          const err = errArgs[0];
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[CompanionServer] WS error: ${msg}`);
+          this.connectedClients.delete(ws);
+        });
 
         ws.on("message", (...msgArgs: unknown[]) => {
           const data = msgArgs[0];
@@ -814,7 +834,14 @@ export class CompanionServer {
   stop(): void {
     this.running = false;
     for (const client of this.connectedClients) {
-      (client as WebSocketLike).close?.();
+      // Wave 4-AA: per-client close wrapped — a peer that has already
+      // disconnected can throw on close(), and one bad socket must not
+      // leave the rest of the set un-closed.
+      try {
+        (client as WebSocketLike).close?.();
+      } catch {
+        /* per-client close failure is non-fatal during shutdown */
+      }
     }
     this.connectedClients.clear();
     if (this.httpServer) {
@@ -1232,6 +1259,11 @@ export class CompanionServer {
 
   /**
    * Broadcast a haptic event to all connected iOS clients.
+   *
+   * Wave 4-AA: per-client send wrapped in try/catch — one bad socket
+   * (closed mid-broadcast, backpressure error, etc.) must not abort the
+   * loop and starve every other connected client. Mirrors the same
+   * resilience pattern already present in broadcastNotification.
    */
   broadcastHaptic(trigger: string): void {
     const pattern = resolveHaptic(trigger);
@@ -1244,17 +1276,29 @@ export class CompanionServer {
     });
 
     for (const client of this.connectedClients) {
-      (client as WebSocketLike).send(event);
+      try {
+        (client as WebSocketLike).send(event);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[CompanionServer] broadcastHaptic send failed: ${msg}`);
+      }
     }
   }
 
   /**
    * Broadcast a stream event to all connected clients.
+   *
+   * Wave 4-AA: per-client send wrapped in try/catch — see broadcastHaptic.
    */
   broadcastStreamEvent(event: StreamEvent): void {
     const data = JSON.stringify({ jsonrpc: "2.0", ...event });
     for (const client of this.connectedClients) {
-      (client as WebSocketLike).send(data);
+      try {
+        (client as WebSocketLike).send(data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[CompanionServer] broadcastStreamEvent send failed: ${msg}`);
+      }
     }
   }
 

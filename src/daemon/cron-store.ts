@@ -98,6 +98,11 @@ export class CronStore {
   private executeHandler: CronExecuteHandler | null = null;
   private stuckJobHandler: StuckJobHandler | null = null;
   private running = false;
+  // Wave 4-AA: tick reentrancy guard. tick() is async — if a job handler
+  // takes longer than the 60s interval, the next setInterval invocation
+  // would race the prior tick and double-fire any due jobs. Skip the
+  // reentrant tick; the next interval picks it up cleanly.
+  private tickInFlight = false;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -366,53 +371,69 @@ export class CronStore {
    * Exposed for tests so they can drive the tick deterministically.
    */
   async tick(now: Date = new Date()): Promise<readonly CronJobRecord[]> {
-    const nowMs = now.getTime();
-    const due = this.db
-      .prepare(
-        `SELECT * FROM cron_jobs
-         WHERE enabled = 1
-           AND next_fire_at IS NOT NULL
-           AND next_fire_at <= ?
-         ORDER BY next_fire_at ASC`,
-      )
-      .all(nowMs) as Array<Record<string, unknown>>;
+    // Wave 4-AA: reentrancy guard. tick() is async and may await a
+    // user-supplied executeHandler that takes longer than the 60s
+    // interval. Without this guard, the next setInterval fire would
+    // race the prior tick and double-execute due jobs (cron at-most-once
+    // becomes at-least-twice). Returning empty preserves the contract:
+    // tick() returns the records fired *this invocation*, and the
+    // skipped records will fire on the next clean interval.
+    if (this.tickInFlight) {
+      console.warn("[CronStore] skip tick — previous tick still running");
+      return [];
+    }
+    this.tickInFlight = true;
+    try {
+      const nowMs = now.getTime();
+      const due = this.db
+        .prepare(
+          `SELECT * FROM cron_jobs
+           WHERE enabled = 1
+             AND next_fire_at IS NOT NULL
+             AND next_fire_at <= ?
+           ORDER BY next_fire_at ASC`,
+        )
+        .all(nowMs) as Array<Record<string, unknown>>;
 
-    const fired: CronJobRecord[] = [];
+      const fired: CronJobRecord[] = [];
 
-    for (const row of due) {
-      const job = rowToRecord(row);
+      for (const row of due) {
+        const job = rowToRecord(row);
 
-      // Belt-and-suspenders: also check the cron expression against
-      // `now`. In practice next_fire_at was computed from the same
-      // parser, so matchesCronSchedule should agree — but a malformed
-      // expression should be rejected honestly rather than fired
-      // blindly. If it fails, disable the job and skip.
-      if (!isScheduleValid(job.schedule)) {
-        this.db
-          .prepare("UPDATE cron_jobs SET enabled = 0, updated_at = ? WHERE id = ?")
-          .run(nowMs, job.id);
-        continue;
-      }
+        // Belt-and-suspenders: also check the cron expression against
+        // `now`. In practice next_fire_at was computed from the same
+        // parser, so matchesCronSchedule should agree — but a malformed
+        // expression should be rejected honestly rather than fired
+        // blindly. If it fails, disable the job and skip.
+        if (!isScheduleValid(job.schedule)) {
+          this.db
+            .prepare("UPDATE cron_jobs SET enabled = 0, updated_at = ? WHERE id = ?")
+            .run(nowMs, job.id);
+          continue;
+        }
 
-      let result: "success" | "failure" = "success";
+        let result: "success" | "failure" = "success";
 
-      if (this.executeHandler) {
-        try {
-          await this.executeHandler(job);
-        } catch {
+        if (this.executeHandler) {
+          try {
+            await this.executeHandler(job);
+          } catch {
+            result = "failure";
+          }
+        } else {
+          // No handler wired — that's not success, it's an honest skip.
+          // Record as failure so the operator knows something is wrong.
           result = "failure";
         }
-      } else {
-        // No handler wired — that's not success, it's an honest skip.
-        // Record as failure so the operator knows something is wrong.
-        result = "failure";
+
+        this.recordFired(job.id, result);
+        fired.push({ ...job, lastFiredAt: nowMs, lastResult: result });
       }
 
-      this.recordFired(job.id, result);
-      fired.push({ ...job, lastFiredAt: nowMs, lastResult: result });
+      return fired;
+    } finally {
+      this.tickInFlight = false;
     }
-
-    return fired;
   }
 
   // ── Inspection ──────────────────────────────────────────
