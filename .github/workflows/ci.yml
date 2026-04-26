@@ -67,17 +67,20 @@ jobs:
   # explicitly here AND re-open the regression-visibility tracking issue.
   test:
     name: Tests (shard ${{ matrix.shard }}/6)
-    # MATRIX-PARALLEL APPROACH after web-research found ubuntu-latest
-    # SIGKILLs vitest at ~88s with no error message — known issue
-    # (github actions/runner#2128, vitest-dev/vitest#7288). Splitting
-    # into 6 SEPARATE jobs gives each shard its own runner with its
-    # own 16 GB / 4 CPU budget. No memory accumulation across shards.
-    # Pin to ubuntu-22.04 (was: ubuntu-latest) — multiple reports of
-    # ubuntu-latest pipelines flaking that resolve when pinned to 22.04.
+    # MATRIX-PARALLEL APPROACH — each shard is a separate runner.
+    # First attempt with all 6 shards firing simultaneously got 3
+    # successes + 3 "runner has received a shutdown signal" errors,
+    # which suggests GitHub's free-tier parallel-job pressure was
+    # causing some runners to be reclaimed. Cap max-parallel at 3
+    # so the runner pool stays warm without hitting the contention
+    # cliff. Total wall time: ~6-9 min for 2 waves of 3 shards each.
+    # Each shard still gets its own clean runner (no memory
+    # accumulation across the full 583-file suite).
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:

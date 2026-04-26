@@ -425,8 +425,10 @@ private struct LogRow: View {
             title: "Fix integration test suite",
             status: .running,
             progress: 0.65,
+            // Preview-only — current model ID (4-7) so the preview
+            // renders representative metadata after the 4-6 retire date.
             provider: "anthropic",
-            model: "claude-opus-4-6",
+            model: "claude-opus-4-7",
             cost: 0.087,
             logs: [
                 TaskLog(level: .info, message: "Analyzing test failures..."),

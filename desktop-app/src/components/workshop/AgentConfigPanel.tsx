@@ -30,26 +30,46 @@ interface WorkerStatus {
 
 // ── Provider/model dropdown catalogue ────────────────────
 //
-// Static list lets the UI offer a full override surface without depending on
-// a provider-discovery RPC. Daemons that support `providers.list` will still
-// surface the same names for each of these options.
+// Dynamic-only: we fetch the catalogue from the daemon's `providers.list`
+// RPC via the Tauri `getProviders` command. The previous static list rotted
+// every time a vendor renamed/retired a model and biased users toward the
+// hard-coded vendor order. Now: whatever the user has configured + whatever
+// each provider's adapter returns from its own listModels() call.
 //
-// v9 META-AUDIT: previous list put Anthropic's three Claude variants
-// FIRST and used `claude-opus-4-6` / `-sonnet-4-6` / `-haiku-4-6`,
-// which all retire June 15, 2026. Updated to alphabetic vendor order
-// (anthropic, google, ollama, openai) and current-generation model IDs
-// so neither the visual ordering nor the default selection biases the
-// user back toward Anthropic.
-const MODEL_CHOICES: readonly { readonly provider: string; readonly model: string }[] = [
-  { provider: "anthropic", model: "claude-opus-4-7" },
-  { provider: "anthropic", model: "claude-sonnet-4-7" },
-  { provider: "anthropic", model: "claude-haiku-4-5" },
-  { provider: "google", model: "gemini-2.5-pro" },
-  { provider: "ollama", model: "qwen3-coder:30b" },
-  { provider: "ollama", model: "devstral:24b" },
-  { provider: "openai", model: "gpt-4.1" },
-  { provider: "openai", model: "o4-mini" },
-];
+// Empty fallback is intentional: if the daemon is unreachable, the picker
+// shows "no models loaded — start the engine" instead of a stale catalog.
+
+interface ModelChoice {
+  readonly provider: string;
+  readonly model: string;
+}
+
+interface ProviderInfoResponse {
+  readonly id: string;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly models: readonly { readonly id: string; readonly name: string }[];
+  readonly defaultModel: string;
+}
+
+async function fetchModelChoices(): Promise<readonly ModelChoice[]> {
+  const list = await safeInvoke<readonly ProviderInfoResponse[]>("getProviders");
+  if (!list || list.length === 0) return [];
+  const choices: ModelChoice[] = [];
+  for (const p of list) {
+    if (!p.enabled || !Array.isArray(p.models)) continue;
+    for (const m of p.models) {
+      if (m && typeof m.id === "string") {
+        choices.push({ provider: p.id, model: m.id });
+      }
+    }
+  }
+  // Sort by provider then model id for consistent ordering across renders.
+  return choices.sort((a, b) => {
+    if (a.provider !== b.provider) return a.provider.localeCompare(b.provider);
+    return a.model.localeCompare(b.model);
+  });
+}
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -74,6 +94,7 @@ export function AgentConfigPanel(): JSX.Element {
   const [configs, setConfigs] = useState<Record<string, AgentConfig>>({});
   const [skills, setSkills] = useState<readonly SkillInfo[]>([]);
   const [workers, setWorkers] = useState<readonly WorkerStatus[]>([]);
+  const [modelChoices, setModelChoices] = useState<readonly ModelChoice[]>([]);
   const [skillSearch, setSkillSearch] = useState("");
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
@@ -82,14 +103,16 @@ export function AgentConfigPanel(): JSX.Element {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [cfgResult, skillList, workerResult] = await Promise.all([
+      const [cfgResult, skillList, workerResult, models] = await Promise.all([
         safeInvoke<Record<string, AgentConfig>>("agentsConfig"),
         commands.getSkills().catch(() => [] as readonly SkillInfo[]),
         safeInvoke<{ workers: readonly WorkerStatus[] }>("workersStatus"),
+        fetchModelChoices(),
       ]);
       if (cfgResult) setConfigs(cfgResult);
       setSkills(skillList);
       if (workerResult) setWorkers(workerResult.workers ?? []);
+      setModelChoices(models);
     } finally {
       setLoading(false);
     }
@@ -158,6 +181,7 @@ export function AgentConfigPanel(): JSX.Element {
                 agent={agent}
                 config={configs[agent.id]}
                 selected={selectedAgent === agent.id}
+                modelChoices={modelChoices}
                 onSelect={() => setSelectedAgent(agent.id)}
                 override={overrides[agent.id]}
                 onOverrideChange={(value) =>
@@ -300,10 +324,11 @@ function AgentRow(props: {
   readonly config?: AgentConfig;
   readonly selected: boolean;
   readonly override?: string;
+  readonly modelChoices: readonly ModelChoice[];
   readonly onSelect: () => void;
   readonly onOverrideChange: (value: string) => void;
 }): JSX.Element {
-  const { agent, config, selected, override, onSelect, onOverrideChange } = props;
+  const { agent, config, selected, override, modelChoices, onSelect, onOverrideChange } = props;
   const currentKey = override ?? (config ? `${config.provider}:${config.model}` : "");
   return (
     <div
@@ -351,11 +376,17 @@ function AgentRow(props: {
         aria-label={`Model override for ${agent.id}`}
       >
         <option value="">(use default)</option>
-        {MODEL_CHOICES.map((m) => (
-          <option key={`${m.provider}:${m.model}`} value={`${m.provider}:${m.model}`}>
-            {m.provider} / {m.model}
+        {modelChoices.length === 0 ? (
+          <option value="" disabled>
+            no models loaded — start the engine
           </option>
-        ))}
+        ) : (
+          modelChoices.map((m) => (
+            <option key={`${m.provider}:${m.model}`} value={`${m.provider}:${m.model}`}>
+              {m.provider} / {m.model}
+            </option>
+          ))
+        )}
       </select>
     </div>
   );

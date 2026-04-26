@@ -560,68 +560,121 @@ private struct StatPill: View {
 }
 
 // MARK: - ModelPickerSheet
+//
+// Dynamic model picker: queries the daemon's `providers.list` RPC at
+// view appearance and renders whatever the user actually has configured.
+// Previously hard-coded ~7 vendors × 2-3 models per vendor — that list
+// rotted whenever a vendor renamed/retired a model (claude-opus-4-6
+// retires Jun 15 2026; gpt-5.4 etc. ships and the picker doesn't show
+// it). The daemon already calls `provider.listModels(credential)` on
+// each adapter — Ollama hits /api/tags, Anthropic calls
+// `client.models.list()`, etc. — so the freshness comes for free.
 
 struct ModelPickerSheet: View {
+    @EnvironmentObject var connectionManager: ConnectionManager
     @Binding var selectedModels: [ArenaModel]
     let onDismiss: () -> Void
 
-    private let availableModels: [(provider: String, models: [String])] = [
-        ("anthropic", ["claude-opus-4-6", "claude-sonnet-4-5", "claude-haiku-3-5"]),
-        ("openai", ["gpt-4o", "gpt-4o-mini", "o1-preview"]),
-        ("google", ["gemini-2.0-flash", "gemini-1.5-pro"]),
-        ("mistral", ["mistral-large", "mistral-medium"]),
-        ("groq", ["llama-3.1-70b", "mixtral-8x7b"]),
-        ("deepseek", ["deepseek-v3", "deepseek-r1"]),
-        ("xai", ["grok-2"]),
-    ]
+    @State private var providerGroups: [(provider: String, models: [String])] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Text("Select 2 or more models to compare side by side.")
-                        .font(WTheme.Typography.subheadline)
-                        .foregroundColor(WTheme.Colors.textSecondary)
-                        .listRowBackground(Color.clear)
-                }
-
-                ForEach(availableModels, id: \.provider) { group in
-                    Section {
-                        ForEach(group.models, id: \.self) { model in
-                            let isSelected = selectedModels.contains {
-                                $0.provider == group.provider && $0.model == model
-                            }
-
-                            Button {
-                                toggleModel(provider: group.provider, model: model)
-                            } label: {
-                                HStack {
-                                    ProviderBadge(provider: group.provider, size: .small)
-
-                                    Text(model)
-                                        .font(WTheme.Typography.subheadline)
-                                        .foregroundColor(WTheme.Colors.textPrimary)
-
-                                    Spacer()
-
-                                    if isSelected {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(WTheme.Colors.primary)
-                                    } else {
-                                        Image(systemName: "circle")
-                                            .foregroundColor(WTheme.Colors.textTertiary)
-                                    }
-                                }
-                            }
-                        }
-                    } header: {
-                        Text(group.provider.capitalized)
+            Group {
+                if isLoading {
+                    VStack {
+                        Spacer()
+                        ProgressView().tint(WTheme.Colors.primary)
+                        Text("Loading models from desktop…")
                             .font(WTheme.Typography.caption)
                             .foregroundColor(WTheme.Colors.textSecondary)
+                            .padding(.top, WTheme.Spacing.sm)
+                        Spacer()
                     }
+                } else if let err = errorMessage {
+                    VStack(spacing: WTheme.Spacing.md) {
+                        Spacer()
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.largeTitle)
+                            .foregroundColor(WTheme.Colors.warning)
+                        Text("Couldn't load models")
+                            .font(WTheme.Typography.headline)
+                            .foregroundColor(WTheme.Colors.textPrimary)
+                        Text(err)
+                            .font(WTheme.Typography.caption)
+                            .foregroundColor(WTheme.Colors.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        Button("Retry") { Task { await loadModels() } }
+                            .buttonStyle(.bordered)
+                        Spacer()
+                    }
+                } else if providerGroups.isEmpty {
+                    VStack(spacing: WTheme.Spacing.md) {
+                        Spacer()
+                        Image(systemName: "rectangle.stack.badge.minus")
+                            .font(.largeTitle)
+                            .foregroundColor(WTheme.Colors.textTertiary)
+                        Text("No providers configured")
+                            .font(WTheme.Typography.headline)
+                            .foregroundColor(WTheme.Colors.textPrimary)
+                        Text("Configure a provider on your desktop to compare models from it here.")
+                            .font(WTheme.Typography.caption)
+                            .foregroundColor(WTheme.Colors.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        Spacer()
+                    }
+                } else {
+                    List {
+                        Section {
+                            Text("Select 2 or more models to compare side by side.")
+                                .font(WTheme.Typography.subheadline)
+                                .foregroundColor(WTheme.Colors.textSecondary)
+                                .listRowBackground(Color.clear)
+                        }
+
+                        ForEach(providerGroups, id: \.provider) { group in
+                            Section {
+                                ForEach(group.models, id: \.self) { model in
+                                    let isSelected = selectedModels.contains {
+                                        $0.provider == group.provider && $0.model == model
+                                    }
+
+                                    Button {
+                                        toggleModel(provider: group.provider, model: model)
+                                    } label: {
+                                        HStack {
+                                            ProviderBadge(provider: group.provider, size: .small)
+
+                                            Text(model)
+                                                .font(WTheme.Typography.subheadline)
+                                                .foregroundColor(WTheme.Colors.textPrimary)
+
+                                            Spacer()
+
+                                            if isSelected {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundColor(WTheme.Colors.primary)
+                                            } else {
+                                                Image(systemName: "circle")
+                                                    .foregroundColor(WTheme.Colors.textTertiary)
+                                            }
+                                        }
+                                    }
+                                }
+                            } header: {
+                                Text(group.provider.capitalized)
+                                    .font(WTheme.Typography.caption)
+                                    .foregroundColor(WTheme.Colors.textSecondary)
+                            }
+                        }
+                    }
+                    .scrollContentBackground(.hidden)
+                    .background(WTheme.Colors.background)
                 }
             }
-            .scrollContentBackground(.hidden)
             .background(WTheme.Colors.background)
             .navigationTitle("Select Models")
             .navigationBarTitleDisplayMode(.inline)
@@ -632,6 +685,41 @@ struct ModelPickerSheet: View {
                         .disabled(selectedModels.count < 2)
                 }
             }
+            .task { await loadModels() }
+        }
+    }
+
+    @MainActor
+    private func loadModels() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            let response = try await connectionManager.rpcClient.send("providers.list", params: [:])
+            // Expected shape: { providers: [{ id, name, models: [{ id, name, ... }], ... }] }
+            guard case let .object(result) = response.result ?? .null,
+                  case let .array(providers) = result["providers"] ?? .null else {
+                providerGroups = []
+                return
+            }
+            var parsed: [(provider: String, models: [String])] = []
+            for p in providers {
+                guard case let .object(obj) = p,
+                      case let .string(provider) = obj["id"] ?? .null,
+                      case let .array(modelsArr) = obj["models"] ?? .null else { continue }
+                let modelIds: [String] = modelsArr.compactMap { m in
+                    guard case let .object(mObj) = m,
+                          case let .string(mid) = mObj["id"] ?? .null else { return nil }
+                    return mid
+                }
+                if !modelIds.isEmpty {
+                    parsed.append((provider: provider, models: modelIds))
+                }
+            }
+            providerGroups = parsed.sorted { $0.provider < $1.provider }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -663,8 +751,9 @@ struct ModelPickerSheet: View {
     VStack(spacing: 16) {
         ArenaResponseCard(
             item: ArenaResponse(
+                // Preview-only — current model ID after 4-6 retire date.
                 provider: "anthropic",
-                model: "claude-opus-4-6",
+                model: "claude-opus-4-7",
                 content: "Here is a detailed comparison of the two approaches...",
                 tokenCount: 342,
                 cost: 0.0123,

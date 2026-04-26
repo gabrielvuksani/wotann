@@ -89,17 +89,15 @@ describe("runGrep — basic dispatch (N=1)", () => {
   });
 
   it("defaults to process.cwd() when no paths supplied", async () => {
-    // We don't care about hits; we care that the shell substitutes cwd
-    // as the root. Use an empty scratch dir with cwd set elsewhere.
-    const originalCwd = process.cwd();
-    process.chdir(scratch);
-    try {
-      seedAuthFixture(scratch);
-      const result = await runGrep("login", []);
-      expect(result.report.roots).toEqual([process.cwd()]);
-    } finally {
-      process.chdir(originalCwd);
-    }
+    // We care that the shell substitutes cwd as the root. Avoid
+    // `process.chdir()` — it throws in vitest's threads pool with
+    // "process.chdir() is not supported in workers". The contract
+    // we're testing (no paths => roots == [cwd]) does not require
+    // mutating cwd; we just call runGrep without paths and verify
+    // the report roots match whatever the current cwd already is.
+    const result = await runGrep("login", []);
+    expect(result.report.roots).toEqual([process.cwd()]);
+    expect(result.report.perRoot).toHaveLength(1);
   });
 });
 

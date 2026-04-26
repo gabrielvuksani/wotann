@@ -314,8 +314,10 @@ struct TaskRow: View {
         title: "Fix all failing integration tests",
         status: .running,
         progress: 0.65,
+        // Preview-only — keep current model ID (4-7) so the preview
+        // renders representative metadata after the 4-6 retire date.
         provider: "anthropic",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-7",
         cost: 0.087
     ))
     .padding()
