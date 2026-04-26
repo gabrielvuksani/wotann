@@ -38,10 +38,10 @@ import {
 } from "node:crypto";
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
-import type { Server as HTTPServer } from "node:http";
+import type { IncomingMessage, Server as HTTPServer } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { execFileSync, spawn } from "node:child_process";
-import { hostname, networkInterfaces } from "node:os";
+import { hostname, networkInterfaces, platform as osPlatform } from "node:os";
 import { join as pathJoin } from "node:path";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
 import { createSqliteKvStore, type SQLiteKvStore } from "../utils/sqlite-kv-store.js";
@@ -765,16 +765,59 @@ export class CompanionServer {
     readonly deviceId: string;
     readonly outcome: "ok" | "rate_limited" | "invalid_pin" | "expired" | "missing_args";
   }> = [];
+  /**
+   * SECURITY (SB-4): Per-instance audit log for WebSocket Origin-check
+   * decisions (CSWSH protection). Bounded to 256 entries. QB#7: per-instance
+   * (not module-global) so concurrent test daemons do not share state.
+   */
+  private readonly wsOriginAuditLog: Array<{
+    readonly ts: number;
+    readonly origin: string;
+    readonly sourceIp: string;
+    readonly outcome: "accepted" | "rejected_cross_origin";
+  }> = [];
 
   constructor(config?: Partial<CompanionServerConfig>) {
+    // SECURITY (SB-3): default to loopback-only to prevent the companion
+    // server from being reachable on every network interface (incl. public
+    // Wi-Fi / hotel networks). The composite SB-1+SB-3+SB-9 attack chain
+    // is `browser-tab → host RCE`; closing the public bind shuts the front
+    // door. Opt-in to LAN binding via `WOTANN_COMPANION_HOST` for the
+    // legitimate phone-discovery use case (handled below). Explicit
+    // `config.host` still wins for tests and embedded callers.
+    const envHost = (process.env.WOTANN_COMPANION_HOST ?? "").trim().toLowerCase();
+    const envBindAll =
+      envHost === "0.0.0.0" || envHost === "::" || envHost === "lan" || envHost === "all";
+    const envExplicitHost =
+      envHost.length > 0 && !envBindAll && envHost !== "127.0.0.1" && envHost !== "localhost"
+        ? envHost
+        : undefined;
+    const envResolvedHost = envBindAll ? "0.0.0.0" : (envExplicitHost ?? "127.0.0.1");
+
     this.config = {
       port: 3849,
-      host: "0.0.0.0",
+      host: envResolvedHost,
       maxDevices: 3,
       sessionTimeoutMs: 24 * 60 * 60_000, // 24 hours
       enableTLS: true,
       ...config,
     };
+
+    // QB#6: clear, non-silent logging of which host is bound. The LAN-bind
+    // case is loud ("WARNING: bound to all interfaces…") so operators on a
+    // public network notice immediately if WOTANN_COMPANION_HOST leaked in.
+    if (this.config.host === "0.0.0.0" || this.config.host === "::") {
+      console.warn(
+        `[CompanionServer] WARNING: binding to all interfaces (${this.config.host}). ` +
+          `WebSocket reachable from every network this host is on. ` +
+          `Unset WOTANN_COMPANION_HOST or set to "127.0.0.1" to restrict to loopback.`,
+      );
+    } else {
+      console.log(
+        `[CompanionServer] bound to ${this.config.host} (loopback-only by default; ` +
+          `set WOTANN_COMPANION_HOST=lan to enable LAN phone discovery).`,
+      );
+    }
 
     this.pairingManager = new PairingManager(this.config.maxDevices);
     this.rpcHandler = new CompanionRPCHandler();
@@ -820,7 +863,65 @@ export class CompanionServer {
     }
 
     try {
-      const wss = new WebSocketServer({ server: this.httpServer });
+      // SECURITY (SB-4): CSWSH protection. Without `verifyClient` the `ws`
+      // package upgrades any incoming WebSocket regardless of Origin, which
+      // means any HTTP page the user visits in a regular browser tab can
+      // open `new WebSocket("ws://localhost:3849")` and ride the user's
+      // ambient host trust to issue commands (composes with SB-1 to drive
+      // keyboard/mouse). Reject any cross-origin upgrade unless the Origin
+      // is on a small allowlist (Tauri webview, custom scheme, dev-server
+      // localhost). QB#7: closure captures `this` for per-instance audit.
+      const verifyOrigin = (
+        info: { origin: string; secure: boolean; req: IncomingMessage },
+        cb: (verified: boolean, code?: number, message?: string) => void,
+      ): void => {
+        const rawOrigin = typeof info.origin === "string" ? info.origin : "";
+        const sourceIp = info.req?.socket?.remoteAddress ?? "unknown";
+
+        // Empty Origin: native client (iOS app, CLI, Tauri runtime). Allow.
+        // Browsers always send Origin on cross-origin WS upgrade requests,
+        // so an absent header is a strong "not a hostile browser tab" signal.
+        if (rawOrigin.length === 0) {
+          this.logWsOriginAttempt(rawOrigin, sourceIp, "accepted");
+          cb(true);
+          return;
+        }
+
+        const allowed =
+          rawOrigin === "wotann://" ||
+          rawOrigin.startsWith("wotann://") ||
+          rawOrigin === "file://" ||
+          rawOrigin.startsWith("file://") ||
+          rawOrigin === "tauri://localhost" ||
+          rawOrigin.startsWith("tauri://") ||
+          /^https?:\/\/localhost(?::\d+)?$/.test(rawOrigin) ||
+          /^https?:\/\/127\.0\.0\.1(?::\d+)?$/.test(rawOrigin) ||
+          /^https?:\/\/\[::1\](?::\d+)?$/.test(rawOrigin);
+
+        if (allowed) {
+          this.logWsOriginAttempt(rawOrigin, sourceIp, "accepted");
+          cb(true);
+          return;
+        }
+
+        // Cross-origin from a real browser. This is the CSWSH attempt
+        // (e.g. `http://attacker.example.com`). Reject with HTTP 403.
+        this.logWsOriginAttempt(rawOrigin, sourceIp, "rejected_cross_origin");
+        cb(false, 403, "Forbidden: cross-origin WebSocket rejected");
+      };
+
+      // SECURITY (SB-4): pass `verifyClient` to enable the CSWSH guard.
+      // The `ws` package's `ServerOptions` type is namespaced inside the
+      // module-level CJS `export = WebSocket` declaration, which TypeScript
+      // cannot re-import as a value-position type via ESM syntax in this
+      // codebase's import style. The cast below is safe because the runtime
+      // option name `verifyClient` is part of the documented public API
+      // (https://github.com/websockets/ws/blob/master/doc/ws.md#new-websocketserveroptions-callback).
+      const wssOptions = {
+        server: this.httpServer,
+        verifyClient: verifyOrigin,
+      } as ConstructorParameters<typeof WebSocketServer>[0];
+      const wss = new WebSocketServer(wssOptions);
       this.wsServer = wss;
 
       // Wave 4-AA: server-level 'error' handler — without this an EADDRINUSE
@@ -933,42 +1034,90 @@ export class CompanionServer {
   }
 
   /**
-   * Advertise the companion server as a Bonjour service (_wotann._tcp)
+   * Advertise the companion server as a Bonjour/mDNS service (_wotann._tcp)
    * so the iOS app can discover it via BonjourDiscovery.
-   * Uses dns-sd CLI on macOS (zero dependencies).
+   *
+   * H-29: previously macOS-only via `dns-sd`. iOS↔Desktop pairing silently
+   * died on Linux hosts because Avahi (the Linux mDNS responder) was never
+   * attempted. Now:
+   *   - macOS: dns-sd (built-in, zero deps)
+   *   - Linux: avahi-publish-service (from avahi-utils)
+   *   - Windows / no advertiser available: skip with a clear warning;
+   *     manual pairing via PIN still works (no crash).
+   *
+   * Both `dns-sd` and `avahi-publish-service` block in the foreground while
+   * the service is registered, so we spawn detached and unref.
    */
   private advertiseBonjourService(): void {
-    try {
-      // dns-sd is built into macOS — no npm package needed
-      const proc = spawn(
-        "dns-sd",
-        [
-          "-R", // Register a service
-          `WOTANN (${hostname()})`, // Service name
-          "_wotann._tcp", // Service type
-          "local", // Domain
-          String(this.config.port), // Port
-        ],
-        {
+    const serviceName = `WOTANN (${hostname()})`;
+    const serviceType = "_wotann._tcp";
+    const port = String(this.config.port);
+    const os = osPlatform();
+
+    let proc: ReturnType<typeof spawn> | null = null;
+    let advertiser = "";
+
+    if (os === "darwin") {
+      try {
+        // dns-sd is built into macOS — no npm package needed.
+        proc = spawn("dns-sd", ["-R", serviceName, serviceType, "local", port], {
           stdio: "ignore",
           detached: true,
-        },
-      );
-      proc.unref(); // Don't block daemon shutdown
-      // Store reference for cleanup
-      (this as Record<string, unknown>)._bonjourProc = proc;
-
-      // Write PID for orphan cleanup on restart
-      const pidPath = resolveWotannHomeSubdir("bonjour.pid");
-      if (proc.pid) {
-        try {
-          writeFileSync(pidPath, String(proc.pid));
-        } catch {
-          /* ignore write errors */
-        }
+        });
+        advertiser = "dns-sd";
+      } catch {
+        proc = null;
       }
-    } catch {
-      // dns-sd not available (non-macOS) — skip Bonjour advertisement
+    } else if (os === "linux") {
+      // Avahi: avahi-publish-service NAME TYPE PORT [TXT...] — foreground
+      // process; we detach so it survives daemon parent. Package is
+      // typically `avahi-utils` (Debian/Ubuntu) or `avahi` (Arch/Fedora).
+      try {
+        proc = spawn("avahi-publish-service", [serviceName, serviceType, port], {
+          stdio: "ignore",
+          detached: true,
+        });
+        advertiser = "avahi-publish-service";
+      } catch {
+        proc = null;
+      }
+    }
+    // Other platforms (win32, etc.) intentionally fall through — no widely-
+    // available CLI mDNS responder exists out-of-the-box.
+
+    if (!proc) {
+      const tried =
+        os === "darwin" ? "dns-sd" : os === "linux" ? "avahi-publish-service" : "(none)";
+      console.warn(
+        `[CompanionServer] no mDNS advertiser available on ${os} (tried: ${tried}); iOS auto-discovery disabled. Manual PIN pairing still works.`,
+      );
+      return;
+    }
+
+    // The spawn syscall succeeded but the binary may not exist on PATH —
+    // node will then emit an 'error' event asynchronously. Catch it so an
+    // unhandled error does not crash the daemon, AND clear the proc ref
+    // so cleanup logic in stop() does not try to kill a non-existent pid.
+    proc.on("error", (err: NodeJS.ErrnoException) => {
+      const reason = err.code === "ENOENT" ? `${advertiser} not installed` : err.message;
+      console.warn(
+        `[CompanionServer] mDNS advertiser failed (${reason}); iOS auto-discovery disabled. Manual PIN pairing still works.`,
+      );
+      (this as Record<string, unknown>)._bonjourProc = undefined;
+    });
+
+    proc.unref(); // Don't block daemon shutdown
+    // Store reference for cleanup
+    (this as Record<string, unknown>)._bonjourProc = proc;
+
+    // Write PID for orphan cleanup on restart
+    const pidPath = resolveWotannHomeSubdir("bonjour.pid");
+    if (proc.pid) {
+      try {
+        writeFileSync(pidPath, String(proc.pid));
+      } catch {
+        /* ignore write errors */
+      }
     }
   }
 
@@ -1196,6 +1345,41 @@ export class CompanionServer {
     readonly outcome: "ok" | "rate_limited" | "invalid_pin" | "expired" | "missing_args";
   }> {
     return this.pairLocalAuditLog;
+  }
+
+  /**
+   * SECURITY (SB-4): record a WebSocket Origin-check decision to the
+   * per-instance CSWSH audit log. Bounded to 256 entries. Surfaces all
+   * rejections to the operator console via warn (QB#6) so a sudden burst
+   * of cross-origin attempts is visible without parsing the audit log.
+   */
+  private logWsOriginAttempt(
+    origin: string,
+    sourceIp: string,
+    outcome: "accepted" | "rejected_cross_origin",
+  ): void {
+    this.wsOriginAuditLog.push({ ts: Date.now(), origin, sourceIp, outcome });
+    if (this.wsOriginAuditLog.length > 256) {
+      this.wsOriginAuditLog.splice(0, this.wsOriginAuditLog.length - 256);
+    }
+    if (outcome === "rejected_cross_origin") {
+      console.warn(
+        `[CompanionServer] WS upgrade REJECTED (CSWSH guard): origin=${origin || "<empty>"} src=${sourceIp}`,
+      );
+    }
+  }
+
+  /**
+   * Read-only view of the WebSocket Origin-check audit log (for tests and
+   * observability). Each entry records a single upgrade-attempt decision.
+   */
+  getWsOriginAuditLog(): ReadonlyArray<{
+    readonly ts: number;
+    readonly origin: string;
+    readonly sourceIp: string;
+    readonly outcome: "accepted" | "rejected_cross_origin";
+  }> {
+    return this.wsOriginAuditLog;
   }
 
   /**
