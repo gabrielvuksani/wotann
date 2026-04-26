@@ -1,0 +1,52 @@
+# desktop-app/src-tauri/audit.toml — H-K2 fix.
+#
+# `cargo audit` ignore list for advisories that ARE NOT actionable from the
+# WOTANN codebase. Each entry must include a reason + remediation note so
+# this list never silently grows. Re-evaluate every Tauri minor version bump.
+#
+# Run `cargo audit` from desktop-app/src-tauri/ to see the active state.
+# `cargo audit ignore` is non-destructive — listed advisories still appear
+# in JSON/SARIF output but exit code drops to 0.
+
+[advisories]
+ignore = [
+    # gtk-rs GTK3 bindings are unmaintained (upstream gtk-rs migrated to gtk4).
+    # ALL of these are transitive deps of `wry` (Tauri's Linux WebView). Fixing
+    # requires Tauri 2.x → wry 0.55+ → gtk4 migration. Track upstream:
+    # https://github.com/tauri-apps/tauri/issues?q=gtk4
+    "RUSTSEC-2024-0411",  # gdkwayland-sys
+    "RUSTSEC-2024-0412",  # gdk
+    "RUSTSEC-2024-0413",  # atk
+    "RUSTSEC-2024-0414",  # gdkx11-sys
+    "RUSTSEC-2024-0415",  # gtk
+    "RUSTSEC-2024-0416",  # atk-sys
+    "RUSTSEC-2024-0417",  # gdkx11
+    "RUSTSEC-2024-0418",  # gdk-sys
+    "RUSTSEC-2024-0419",  # gtk3-macros
+    "RUSTSEC-2024-0420",  # gtk-sys
+
+    # proc-macro-error unmaintained. Used transitively by tauri-macros.
+    # Maintained fork is `proc-macro-error2`; Tauri team has migrated in
+    # tauri 2.11+ — bump our tauri dep when we adopt 2.11+.
+    "RUSTSEC-2024-0370",
+
+    # fxhash unmaintained — transitive from wry. Same Tauri-update remediation.
+    "RUSTSEC-2025-0057",
+
+    # unic-* family unmaintained — transitive from wry/regex internals.
+    # Same Tauri-update remediation.
+    "RUSTSEC-2025-0075",  # unic-char-range
+    "RUSTSEC-2025-0080",  # unic-common
+    "RUSTSEC-2025-0081",  # unic-char-property
+    "RUSTSEC-2025-0098",  # unic-ucd-version
+    "RUSTSEC-2025-0100",  # unic-ucd-ident
+
+    # glib unmaintained — transitive from gtk-rs (Linux WebView). Same
+    # Tauri/wry → gtk4 migration remediation.
+    "RUSTSEC-2024-0429",
+
+    # rand 0.8 advisory — superseded by rand 0.9. Tauri tracking upstream
+    # bump; harmless transitive (used for non-cryptographic randomness in
+    # tao + winit).
+    "RUSTSEC-2026-0097",
+]

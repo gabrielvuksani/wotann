@@ -19,6 +19,44 @@ import { AccountPool } from "../providers/account-pool.js";
 import { SemanticCache, bigramEmbedding } from "../memory/semantic-cache.js";
 import { estimatePromptTokens, estimateCost } from "../telemetry/token-estimator.js";
 
+/**
+ * SB-NEW-6 helper: does a given provider's adapter support the requested
+ * model? Substring-match against the well-known model-family prefixes so we
+ * don't have to hard-code every catalogue entry. Conservative: when in
+ * doubt, return false so the adapter uses its own default rather than
+ * pretending to support a foreign model.
+ */
+function providerSupportsModel(provider: string, model: string | undefined): boolean {
+  if (!model) return false;
+  const lower = model.toLowerCase();
+  // Provider proxies / catalogue families that are deterministic across hops.
+  const families: Record<string, readonly string[]> = {
+    anthropic: ["claude-"],
+    "anthropic-cli": ["claude-"],
+    copilot: ["claude-", "gpt-"],
+    openai: ["gpt-", "o1-", "o3-"],
+    codex: ["codex"],
+    gemini: ["gemini-"],
+    vertex: ["gemini-"],
+    deepseek: ["deepseek-"],
+    xai: ["grok-"],
+    mistral: ["mistral-", "codestral", "mixtral-"],
+    ollama: ["llama-", "qwen", "gemma", "mistral-", "deepseek-", "nemotron", "hermes", "phi-"],
+    together: ["meta-llama/", "mistralai/", "qwen/"],
+    fireworks: ["accounts/fireworks/", "llama-"],
+    huggingface: ["meta-llama/", "qwen/", "mistralai/"],
+    groq: ["llama-", "mixtral-", "gemma-"],
+    perplexity: ["sonar"],
+    azure: ["gpt-", "o1-", "o3-"],
+    bedrock: ["claude-", "llama-", "mistral.", "amazon.titan", "cohere."],
+    sambanova: ["llama-", "deepseek-", "qwen"],
+    cerebras: ["llama-", "qwen", "deepseek-"],
+  };
+  const prefixes = families[provider];
+  if (!prefixes) return false;
+  return prefixes.some((p) => lower.startsWith(p) || lower.includes(p));
+}
+
 export interface AgentBridgeConfig {
   readonly adapters: ReadonlyMap<ProviderName, ProviderAdapter>;
   readonly router: ModelRouter;
@@ -176,11 +214,22 @@ export class AgentBridge {
         }
         if (account) triedAccountIds.add(account.id);
 
-        // For non-preferred providers, clear the model so the adapter uses its default
+        // SB-NEW-6 fix: only strip the model on cross-provider hops when the
+        // requested model is provider-specific (e.g. claude-* on openai). When
+        // the model is supported by the new provider — e.g. user requested
+        // claude-sonnet-4-7 and we're hopping anthropic → copilot which proxies
+        // Claude — preserve the user's explicit choice. Without this, every
+        // fallback hop silently downgraded to the new provider's default model
+        // even when the user's choice was actually available.
         const baseOptions: UnifiedQueryOptions =
           entry.provider === preferredProvider
             ? queryOptions
-            : { ...queryOptions, model: undefined };
+            : {
+                ...queryOptions,
+                model: providerSupportsModel(entry.provider, queryOptions.model)
+                  ? queryOptions.model
+                  : undefined,
+              };
 
         // Apply capability augmentation — makes tool calling, vision, thinking work
         // across ALL providers via prompt injection for models that lack native support

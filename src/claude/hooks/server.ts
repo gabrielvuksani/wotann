@@ -122,6 +122,11 @@ export interface HookServerOptions {
   readonly handlerTimeoutMs?: number;
   /** Optional logger; default no-op. */
   readonly log?: (level: "info" | "warn" | "error", msg: string) => void;
+  /**
+   * H-K7: max requests per peer IP per 60s window. Default 100.
+   * Tune higher in load tests; tune lower in shared/multi-tenant deployments.
+   */
+  readonly rateLimitMax?: number;
 }
 
 export interface HookServerHandle {
@@ -224,9 +229,52 @@ export async function startHookServer(opts: HookServerOptions): Promise<HookServ
   // module-global per QB#7).
   const sharedSecret = generateHookSecret();
 
+  // H-K7 fix: per-peer token-bucket rate limiter so a runaway/buggy
+  // hook producer can't flood the server. 100 requests / 60s window per
+  // remote IP — tuned for Claude CLI burst patterns (each tool call
+  // fires PreToolUse + PostToolUse so a 50-tool-call session generates
+  // ~100 hook invocations in normal use). The window is per-instance
+  // (closure-scoped) per QB#7, never module-global.
+  const RATE_WINDOW_MS = 60_000;
+  const RATE_MAX_REQUESTS = opts.rateLimitMax ?? 100;
+  const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+  function checkRateLimit(remoteAddr: string): { allowed: boolean; retryAfterSeconds: number } {
+    const now = Date.now();
+    const bucket = rateLimitBuckets.get(remoteAddr);
+    if (!bucket || bucket.resetAt <= now) {
+      rateLimitBuckets.set(remoteAddr, { count: 1, resetAt: now + RATE_WINDOW_MS });
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
+    bucket.count += 1;
+    if (bucket.count > RATE_MAX_REQUESTS) {
+      return { allowed: false, retryAfterSeconds: Math.ceil((bucket.resetAt - now) / 1000) };
+    }
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  // Periodic cleanup of stale buckets so memory doesn't grow unbounded
+  // when many short-lived peers connect (test fixtures, CI runs).
+  const rateLimitSweepHandle = setInterval(() => {
+    const now = Date.now();
+    for (const [addr, bucket] of rateLimitBuckets) {
+      if (bucket.resetAt <= now) rateLimitBuckets.delete(addr);
+    }
+  }, RATE_WINDOW_MS);
+  rateLimitSweepHandle.unref();
+
   const server = createServer(async (req, res) => {
     if (req.method !== "POST" || !req.url) {
       sendJson(res, 405, { error: "method_not_allowed" });
+      return;
+    }
+
+    // H-K7 rate limit check — cheap, runs before HMAC + body parse so a
+    // flood can be rejected without spending CPU on cryptographic verify.
+    const remoteAddr = req.socket.remoteAddress ?? "unknown";
+    const rl = checkRateLimit(remoteAddr);
+    if (!rl.allowed) {
+      log("warn", `rate-limit: ${remoteAddr} exceeded ${RATE_MAX_REQUESTS}/${RATE_WINDOW_MS}ms`);
+      res.setHeader("Retry-After", String(rl.retryAfterSeconds));
+      sendJson(res, 429, { error: "too_many_requests", retryAfterSeconds: rl.retryAfterSeconds });
       return;
     }
 

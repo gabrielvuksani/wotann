@@ -21,8 +21,10 @@
  *   - tools/list
  *   - tools/call
  *   - prompts/list — when a SkillRegistry is wired into the server,
- *     this returns the user-invocable subset of WOTANN's 142 skills as
- *     MCP prompt definitions (Wave 6.9-AG follow-up). Without a
+ *     this returns the user-invocable subset of WOTANN's discoverable
+ *     skills as MCP prompt definitions (Wave 6.9-AG follow-up). Skill
+ *     count is dynamic — the registry counts what's actually in
+ *     skills/ + .wotann/skills/ + BUILT_IN at registry init. Without a
  *     registry, the handler returns `[]` and the capability is NOT
  *     advertised in `initialize` per QB#6 (don't advertise capabilities
  *     you can't honor). See skills-as-prompts.ts for the mapping.

@@ -28,11 +28,22 @@
 		<string>$(PRODUCT_MODULE_NAME).WOTANNIntentService</string>
 		<key>NSExtensionAttributes</key>
 		<dict>
+			<!--
+				H-J2 fix: every AppIntent the extension exposes MUST be listed
+				here so iOS dispatches them via the WOTANNIntentService entry
+				point. Previously only Ask/CheckCost/EnhancePrompt were
+				registered — Apple Intelligence Writing Tools silently dropped
+				the Rewrite/Summarize/Expand actions despite the structs being
+				compiled into the extension target.
+			-->
 			<key>IntentsSupported</key>
 			<array>
 				<string>AskWOTANNIntent</string>
 				<string>CheckCostIntent</string>
 				<string>EnhancePromptIntent</string>
+				<string>RewriteWithWOTANNIntent</string>
+				<string>SummarizeWithWOTANNIntent</string>
+				<string>ExpandWithWOTANNIntent</string>
 			</array>
 		</dict>
 	</dict>

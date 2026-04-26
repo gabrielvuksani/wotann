@@ -449,6 +449,21 @@ export function resolveAgentModel(
   }
 
   // 3. Canonical fallback — only reached when no provider context exists.
+  // SB-NEW-7 fix: honor WOTANN_DEFAULT_PROVIDER for the no-hint path so users
+  // running Ollama-only (or any non-Anthropic provider) don't silently get
+  // pointed at claude-* models. When the env var matches a known provider,
+  // re-derive the tier mapping via that provider's PROVIDER_DEFAULTS.
+  const envDefault = env["WOTANN_DEFAULT_PROVIDER"];
+  if (envDefault && PROVIDER_DEFAULTS[envDefault]) {
+    const defaults = PROVIDER_DEFAULTS[envDefault]!;
+    const model =
+      tier === "strong"
+        ? defaults.oracleModel
+        : tier === "fast"
+          ? defaults.workerModel
+          : defaults.defaultModel;
+    return { provider: envDefault, model, source: "provider-default" };
+  }
   const canon = CANONICAL_FALLBACK[tier];
   return { provider: canon.provider, model: canon.model, source: "canonical-fallback" };
 }

@@ -123,8 +123,42 @@ export class CronStore {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");
-    this.db.pragma("user_version"); // read for migration check
     this.initialize();
+    this.migrateLegacy();
+  }
+
+  /**
+   * H-K6 fix: schema migration entry point. Reads `user_version` PRAGMA;
+   * applies migrations from saved → current schema in order. New schema
+   * versions add a numbered `case` here; the cascade pattern means a v0
+   * install upgrading to v3 runs v0→v1, v1→v2, v2→v3 in sequence so
+   * intermediate transformations always apply.
+   *
+   * Current schema version: 1 (initial table). Bump SCHEMA_VERSION + add
+   * a `case 1:` block when introducing a backwards-incompatible change.
+   * Idempotent: a fresh install reads user_version=0, applies the
+   * conceptual v0→v1 (which is a no-op because initialize() already
+   * created v1 tables), then stores user_version=1.
+   */
+  private migrateLegacy(): void {
+    const SCHEMA_VERSION = 1;
+    const rows = this.db.pragma("user_version") as Array<{ user_version: number }>;
+    const current = rows[0]?.user_version ?? 0;
+    if (current >= SCHEMA_VERSION) return;
+    const tx = this.db.transaction(() => {
+      for (let v = current; v < SCHEMA_VERSION; v++) {
+        switch (v) {
+          case 0:
+            // v0 → v1: initial schema. initialize() above already created
+            // the table; this branch exists so future v1 → v2 migrations
+            // can chain.
+            break;
+          // case 1: example for future evolution.
+        }
+      }
+      this.db.pragma(`user_version = ${SCHEMA_VERSION}`);
+    });
+    tx();
   }
 
   /**

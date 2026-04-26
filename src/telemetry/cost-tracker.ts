@@ -179,6 +179,40 @@ const COST_TABLE: Record<string, { input: number; output: number }> = {
   // Gemini short-form alias — some callers use the version-less name.
   "gemini-3-pro": { input: 0.002, output: 0.012 }, // alias of gemini-3.1-pro
   "gemini-3-flash": { input: 0.00025, output: 0.0015 }, // alias of gemini-3.1-flash
+
+  // SB-NEW-8 fix: hosted-OpenAI-clone catalogues. Without these entries
+  // every cost prediction silently zeroed out for users on Azure/Bedrock/
+  // SambaNova/Cerebras — making "wotann cost" lie about real spend.
+  // Pricing as of April 2026; aliases use the same numbers as the upstream
+  // model (Bedrock-hosted Claude charges the same as Anthropic-direct).
+
+  // Azure OpenAI (region-priced; values match East US standard tier)
+  "azure/gpt-5": { input: 0.00125, output: 0.01 },
+  "azure/gpt-5-mini": { input: 0.00025, output: 0.002 },
+  "azure/gpt-4.1": { input: 0.002, output: 0.008 },
+  "azure/gpt-4.1-mini": { input: 0.0004, output: 0.0016 },
+  "azure/o3-mini": { input: 0.0011, output: 0.0044 },
+
+  // AWS Bedrock (us-east-1 on-demand pricing)
+  "bedrock/anthropic.claude-opus-4-7": { input: 0.015, output: 0.075 },
+  "bedrock/anthropic.claude-sonnet-4-7": { input: 0.003, output: 0.015 },
+  "bedrock/anthropic.claude-haiku-4-5": { input: 0.0008, output: 0.004 },
+  "bedrock/meta.llama-3.3-70b": { input: 0.00072, output: 0.00072 },
+  "bedrock/mistral.mistral-large-3": { input: 0.0008, output: 0.0024 },
+  "bedrock/amazon.titan-text-express": { input: 0.0002, output: 0.0006 },
+  "bedrock/cohere.command-r-plus": { input: 0.0025, output: 0.01 },
+
+  // SambaNova Cloud (open-model hosting at high-throughput; pricing per Mtoken)
+  "sambanova/llama-3.3-70b": { input: 0.0006, output: 0.0012 },
+  "sambanova/llama-3.1-405b": { input: 0.005, output: 0.01 },
+  "sambanova/deepseek-v4": { input: 0.0008, output: 0.0024 },
+  "sambanova/qwen3.5-coder": { input: 0.0004, output: 0.0008 },
+
+  // Cerebras (wafer-scale inference; ultra-low latency, premium pricing)
+  "cerebras/llama-3.3-70b": { input: 0.00085, output: 0.0012 },
+  "cerebras/llama-3.1-8b": { input: 0.0001, output: 0.0001 },
+  "cerebras/qwen3-coder": { input: 0.0004, output: 0.0008 },
+  "cerebras/deepseek-v4": { input: 0.0008, output: 0.0024 },
 };
 
 // Provider-to-model mapping for cost predictions. Expanded in S2-32.
@@ -199,6 +233,27 @@ const PROVIDER_MODELS: Record<string, readonly string[]> = {
   together: ["meta-llama/Llama-3.3-70B-Instruct-Turbo"],
   fireworks: ["accounts/fireworks/models/llama-v3p3-70b-instruct"],
   huggingface: ["meta-llama/Meta-Llama-3.1-70B-Instruct"],
+  // SB-NEW-8: 4 additional providers added so cost prediction works.
+  azure: ["azure/gpt-5", "azure/gpt-5-mini", "azure/gpt-4.1", "azure/o3-mini"],
+  bedrock: [
+    "bedrock/anthropic.claude-opus-4-7",
+    "bedrock/anthropic.claude-sonnet-4-7",
+    "bedrock/anthropic.claude-haiku-4-5",
+    "bedrock/meta.llama-3.3-70b",
+    "bedrock/mistral.mistral-large-3",
+  ],
+  sambanova: [
+    "sambanova/llama-3.3-70b",
+    "sambanova/llama-3.1-405b",
+    "sambanova/deepseek-v4",
+    "sambanova/qwen3.5-coder",
+  ],
+  cerebras: [
+    "cerebras/llama-3.3-70b",
+    "cerebras/llama-3.1-8b",
+    "cerebras/qwen3-coder",
+    "cerebras/deepseek-v4",
+  ],
 };
 
 // Extended pricing kept for downstream code that reads from it by name.

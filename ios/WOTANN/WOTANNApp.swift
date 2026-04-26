@@ -243,6 +243,11 @@ struct WOTANNApp: App {
                     WotannStingService.shared.playIfFirstUnlock(sessionId: stingSessionId)
                 }
             }
+            // H-J1 fix: drain the share-extension queue on EVERY foreground,
+            // not just on first ContentView mount. Previously a user dropping
+            // in a share while the app was at the PairingView/DaemonOfflineView
+            // got their share stranded until the next cold start.
+            processPendingShares()
         default:
             break
         }
@@ -404,6 +409,16 @@ struct ContentView: View {
     // MARK: - Share Extension Queue
 
     /// Process shares queued by the Share Extension via the app group.
+    ///
+    /// H-J1 fix:
+    ///   1. Drain trigger moved to scenePhase==.active so re-foregrounding
+    ///      always catches in-flight shares (was previously only on the
+    ///      first ContentView mount, which stranded shares behind the
+    ///      pairing/daemon-offline screens).
+    ///   2. Honor the optional `conversation` payload field — when present
+    ///      the share is appended to the named conversation instead of
+    ///      creating a new one. This matches the Share Extension's own
+    ///      "send to current chat" affordance.
     private func processPendingShares() {
         guard let defaults = UserDefaults(suiteName: "group.com.wotann.shared") else { return }
         guard let queue = defaults.array(forKey: "pendingShares") as? [Data], !queue.isEmpty else { return }
@@ -414,12 +429,24 @@ struct ContentView: View {
             guard let payload = try? decoder.decode([String: String].self, from: data),
                   let content = payload["content"], !content.isEmpty else { continue }
 
-            let title = String(content.prefix(50))
-            let conversation = Conversation(
-                title: title,
-                messages: [Message(role: .user, content: content)]
-            )
-            appState.addConversation(conversation)
+            // H-J1: route into an existing conversation when the share extension
+            // included a `conversation` UUID; otherwise create a new one.
+            let conversationIdString = payload["conversation"]
+            let conversationId = conversationIdString.flatMap(UUID.init(uuidString:))
+            if let cid = conversationId,
+               appState.conversations.contains(where: { $0.id == cid }) {
+                appState.updateConversation(cid) { existing in
+                    existing.messages.append(Message(role: .user, content: content))
+                    existing.updatedAt = Date()
+                }
+            } else {
+                let title = String(content.prefix(50))
+                let conversation = Conversation(
+                    title: title,
+                    messages: [Message(role: .user, content: content)]
+                )
+                appState.addConversation(conversation)
+            }
         }
 
         // Clear the queue after processing

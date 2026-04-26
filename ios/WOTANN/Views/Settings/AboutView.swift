@@ -55,6 +55,28 @@ struct AboutView: View {
                 }
                 .wCard()
 
+                // H-K8 fix: Open Source Acknowledgements. Apple App Review
+                // expects MIT/Apache/BSD-licensed third-party code to be
+                // attributable from the binary itself. Link to a dedicated
+                // view rather than dumping ~100 entries inline.
+                VStack(spacing: WTheme.Spacing.sm) {
+                    NavigationLink(destination: OpenSourceLicensesView()) {
+                        HStack(spacing: WTheme.Spacing.sm) {
+                            Image(systemName: "scroll")
+                                .foregroundColor(WTheme.Colors.primary)
+                                .frame(width: 24)
+                            Text("Open Source Licenses")
+                                .font(WTheme.Typography.subheadline)
+                                .foregroundColor(WTheme.Colors.textPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(WTheme.Colors.textTertiary)
+                        }
+                    }
+                }
+                .wCard()
+
                 // Credits
                 Text("Built with care by Gabriel Vuksani")
                     .font(WTheme.Typography.caption)

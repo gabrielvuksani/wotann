@@ -1,34 +1,29 @@
 /**
  * Wave 6-QQ — Linux/macOS/Windows secure-store with file fallback.
  *
- * Tries the OS keychain first (via `keytar` — an optionalDependency so an
- * `npm install` failure on Linux without `libsecret-1-dev` won't brick the
- * install). On any keytar failure (module missing, native bindings missing,
- * libsecret unavailable, denied by user), falls back to the existing
- * file-backed store at `~/.wotann/credentials.json` with mode 0600.
+ * H-K1 fix: prefers `@napi-rs/keyring` (current, MIT, last published 2026)
+ * over `keytar` (archived 2022-12-15) for fresh installs. Both are kept as
+ * optionalDependencies so existing installs continue to work and the
+ * Linux-without-libsecret path still degrades gracefully.
  *
- * Wave 3-P labelled all stored creds as `source: "stored-file"` because that
- * is what the codebase actually did. Wave 6-QQ inverts that label *only when*
- * keytar succeeds, so the UI/diagnostics report the truth: "via macOS
- * Keychain" / "via libsecret" / "via Credential Vault" vs "via ~/.wotann
- * file".
+ * Resolution order on each call:
+ *   1. @napi-rs/keyring (current, native, sync API wrapped in Promise)
+ *   2. keytar (legacy fallback for environments where @napi-rs/keyring's
+ *      prebuilt binary doesn't ship; Node 16-18 on some musl/Alpine images)
+ *   3. file fallback at `~/.wotann/credentials.json` with mode 0600
  *
  * Design notes:
- *   - Dynamic `import("keytar")` so the module load works even when the
- *     optional native build failed.
- *   - Per-process state — no module-global cache for the resolved keytar
- *     handle (QB#7). Each call re-resolves so install/uninstall mid-session
- *     is observable. The dynamic-import cost is negligible vs a network call.
+ *   - Dynamic `import()` so the optionalDeps stay truly optional.
+ *   - Per-process state — no module-global cache (QB#7).
  *   - File fallback uses the SAME `~/.wotann/credentials.json` path so the
  *     existing `CredentialStore` data survives the migration.
- *   - Honest fallback chain (QB#6): keytar → file → return failure result.
- *     We never silently swallow a keytar error — it's reported in the
- *     `error` field so callers can log it.
- *   - QB#15: keytar API source-verified against
- *     https://github.com/atom/node-keytar
- *       getPassword(service, account)   → Promise<string|null>
- *       setPassword(service, account, password) → Promise<void>
- *       deletePassword(service, account) → Promise<boolean>
+ *   - Honest fallback chain (QB#6): keyring → keytar → file → failure result.
+ *   - QB#15: APIs source-verified:
+ *       @napi-rs/keyring  https://github.com/Brooooooklyn/keyring-node
+ *         new Entry(service, account)
+ *         entry.setPassword(p) / entry.getPassword() / entry.deletePassword()
+ *       keytar           https://github.com/atom/node-keytar
+ *         getPassword/setPassword/deletePassword(service, account, ...)
  */
 
 import { readFileSync, existsSync, mkdirSync, chmodSync } from "node:fs";
@@ -50,26 +45,60 @@ interface KeytarApi {
 }
 
 /**
- * Best-effort dynamic import of keytar. Returns null when:
- *   - the optionalDependency isn't installed,
- *   - native bindings failed to build (e.g. Linux without libsecret-1-dev),
- *   - or the runtime denies access (sandbox / portable env).
+ * H-K1 fix: prefer @napi-rs/keyring (current MIT package, last released 2026)
+ * by adapting its `Entry`-class API to the same KeytarApi shape consumed
+ * downstream. Falls through to legacy keytar when @napi-rs/keyring isn't
+ * available on this platform.
  *
  * Per-call resolution (no caching) so install/uninstall mid-session is
  * observable. Dynamic-import overhead is irrelevant next to OS keychain IPC.
  */
-async function loadKeytar(): Promise<KeytarApi | null> {
+async function loadKeyringApi(): Promise<KeytarApi | null> {
+  // 1. @napi-rs/keyring (preferred). Class-based sync API; we wrap in
+  //    Promise so callers stay async-uniform.
   try {
-    // Dynamic import keeps the optionalDep truly optional — if `keytar`
-    // wasn't built, we just hit the catch below and return null. The
-    // module specifier is computed (not a string literal) so the TS
-    // compiler doesn't try to resolve it at build time — keytar may
-    // legitimately not be installed in CI / Linux-without-libsecret.
+    const moduleId = "@napi-rs/keyring";
+    type EntryCtor = new (
+      service: string,
+      account: string,
+    ) => {
+      setPassword: (p: string) => void;
+      getPassword: () => string | null;
+      deletePassword: () => boolean;
+    };
+    const mod = (await import(moduleId)) as { Entry?: EntryCtor; default?: { Entry?: EntryCtor } };
+    const Entry = mod.Entry ?? mod.default?.Entry;
+    if (typeof Entry === "function") {
+      return {
+        async getPassword(service, account) {
+          try {
+            return new Entry(service, account).getPassword();
+          } catch {
+            return null;
+          }
+        },
+        async setPassword(service, account, password) {
+          new Entry(service, account).setPassword(password);
+        },
+        async deletePassword(service, account) {
+          try {
+            return new Entry(service, account).deletePassword();
+          } catch {
+            return false;
+          }
+        },
+      };
+    }
+  } catch {
+    // @napi-rs/keyring not installed or failed to load — fall through.
+  }
+
+  // 2. Legacy keytar (archived 2022-12-15 — kept for backwards compat).
+  try {
     const moduleId = "keytar";
     const mod = (await import(moduleId)) as unknown as KeytarApi & {
       default?: KeytarApi;
     };
-    // Some bundlers wrap the export in `default` — accept either.
     const api = (mod.default ?? mod) as KeytarApi;
     if (
       typeof api.getPassword !== "function" ||
@@ -82,6 +111,11 @@ async function loadKeytar(): Promise<KeytarApi | null> {
   } catch {
     return null;
   }
+}
+
+/** Backwards-compat alias — keep the name external callers may still use. */
+async function loadKeytar(): Promise<KeytarApi | null> {
+  return loadKeyringApi();
 }
 
 // ── File-fallback store ────────────────────────────────────────

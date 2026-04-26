@@ -86,7 +86,8 @@ import { MCPRegistry, SkillMarketplace } from "../marketplace/registry.js";
 import { DockerSandbox } from "../sandbox/docker-backend.js";
 import { TaskIsolationManager } from "../sandbox/task-isolation.js";
 import { TerminalManager } from "../sandbox/terminal-backends.js";
-import { PluginScanner } from "../security/plugin-scanner.js";
+// TIER 2 cleanup: PluginScanner import removed — zombie instance stripped.
+// Class stays exported via src/lib.ts for external scanning use cases.
 import { ReasoningEngine } from "../identity/reasoning-engine.js";
 import { UserModel } from "../identity/user-model.js";
 import { PerceptionEngine } from "../computer-use/perception-engine.js";
@@ -326,7 +327,10 @@ export class KairosDaemon {
   private readonly dockerSandbox = new DockerSandbox();
   private taskIsolation: TaskIsolationManager | null = null;
   private readonly terminalManager = new TerminalManager();
-  private readonly pluginScanner = new PluginScanner();
+  // TIER 2 cleanup: PluginScanner zombie instance removed (per META-AUDIT-I).
+  // The class itself remains exported from src/lib.ts; no production caller
+  // ever invoked .scanPlugin() through the kairos getter. Construct directly
+  // when the marketplace plugin loader gets wired in TIER 1.
   private reasoningEngine: ReasoningEngine | null = null;
   private userModel: UserModel | null = null;
   private readonly perceptionEngine = new PerceptionEngine();
@@ -1299,9 +1303,9 @@ export class KairosDaemon {
   getTerminalManager(): TerminalManager {
     return this.terminalManager;
   }
-  getPluginScanner(): PluginScanner {
-    return this.pluginScanner;
-  }
+  // TIER 2 cleanup: getPluginScanner() removed alongside the zombie instance
+  // (0 callers verified per QB#19). Call sites should construct
+  // PluginScanner directly from src/lib.ts when wiring plugin scanning.
   getReasoningEngine(): ReasoningEngine | null {
     return this.reasoningEngine;
   }

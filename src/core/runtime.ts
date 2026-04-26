@@ -209,7 +209,9 @@ import { TaskDelegationManager } from "../orchestration/task-delegation.js";
 // Phase E: Auto-features
 import { AutoClassifier } from "../security/auto-classifier.js";
 import { IntentVerifier } from "../security/intent-verifier.js";
-import { PrivacyRouter } from "../security/privacy-router.js";
+// TIER 2 cleanup: PrivacyRouter import removed — zombie instance was
+// constructed but never invoked from production. Class stays exported
+// from src/lib.ts for external callers.
 import { AutoVerifier } from "../intelligence/auto-verify.js";
 
 // Intelligence modules (wired into query pipeline)
@@ -793,7 +795,11 @@ export class WotannRuntime {
   // Phase E: Auto-features
   private autoClassifier: AutoClassifier;
   private intentVerifier: IntentVerifier;
-  private privacyRouter: PrivacyRouter;
+  // TIER 2 cleanup: PrivacyRouter zombie instance removed (per META-AUDIT-I).
+  // The class itself remains as a public API export from src/lib.ts so
+  // external callers can construct + drive it themselves; the runtime no
+  // longer holds a stale instance whose getter had 0 callers and whose
+  // .route() method was never invoked from production code.
   private autoVerifier: AutoVerifier;
 
   // Tools
@@ -1588,7 +1594,7 @@ export class WotannRuntime {
       blockDestructive: true,
     });
     this.intentVerifier = new IntentVerifier();
-    this.privacyRouter = new PrivacyRouter();
+    // TIER 2 cleanup: PrivacyRouter instance removed (zombie per META-AUDIT-I).
     this.autoVerifier = new AutoVerifier(config.workingDir);
     this.imageGenRouter = new ImageGenRouter();
 
@@ -4948,12 +4954,10 @@ export class WotannRuntime {
     return this.intentVerifier;
   }
 
-  /**
-   * Get the privacy router for PII-based provider routing.
-   */
-  getPrivacyRouter(): PrivacyRouter {
-    return this.privacyRouter;
-  }
+  // TIER 2 cleanup: getPrivacyRouter() removed alongside the zombie
+  // instance (0 external callers verified per QB#19). Construct
+  // PrivacyRouter directly from `import { PrivacyRouter } from "wotann/lib"`
+  // when the routing logic is needed.
 
   /**
    * Get the auto-verifier for post-edit verification.

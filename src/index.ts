@@ -21,12 +21,12 @@ import { Command } from "commander";
 // import { runSandboxedCommandSync } from "./sandbox/executor.js";          // → autonomous
 import type { ProviderName } from "./core/types.js";
 import type { WotannMode } from "./core/mode-cycling.js";
-import { dirname, join, resolve } from "node:path";
+import { dirname, basename, join, resolve } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { setupProxyFromEnv } from "./utils/proxy-setup.js";
 import { resolveWotannHome, resolveWotannHomeSubdir } from "./utils/wotann-home.js";
@@ -502,6 +502,78 @@ program
     }
   });
 
+// ── wotann export (GDPR Right to Data Portability — H-K5) ────
+//
+// Bundles every WOTANN-owned artifact (memory DBs, conversation cache,
+// config, session logs) under WOTANN_HOME (~/.wotann by default) into a
+// timestamped tar.gz so the user can carry their data to another machine
+// or hand it over after a deletion request. Honest stub when tar isn't
+// available on PATH (Windows users may lack it).
+program
+  .command("export [outPath]")
+  .description("GDPR Article 20: bundle ~/.wotann into a tar.gz archive (data portability)")
+  .action(async (outPathArg: string | undefined) => {
+    const { resolveWotannHome } = await import("./utils/wotann-home.js");
+    const wotannHome = resolveWotannHome();
+    if (!existsSync(wotannHome)) {
+      console.log(chalk.yellow(`No WOTANN home found at ${wotannHome} — nothing to export.`));
+      return;
+    }
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const outPath = outPathArg ?? join(process.cwd(), `wotann-export-${ts}.tar.gz`);
+    const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+    const result = await execFileNoThrow("tar", [
+      "-czf",
+      outPath,
+      "-C",
+      dirname(wotannHome),
+      basename(wotannHome),
+    ]);
+    if (result.exitCode !== 0) {
+      console.error(
+        chalk.red(
+          `error: tar exited ${result.exitCode}: ${result.stderr.trim() || "unknown error"}`,
+        ),
+      );
+      process.exit(1);
+    }
+    console.log(chalk.green(`Exported ${wotannHome} → ${outPath}`));
+    console.log(chalk.dim("Hand this archive to the data subject per GDPR Article 20."));
+  });
+
+// ── wotann delete (GDPR Right to Erasure — H-K5) ─────────────
+//
+// Removes every WOTANN-owned artifact under WOTANN_HOME. Requires --yes
+// because this destroys local memory + conversations + auth tokens with
+// no recovery (run `wotann export` first if you need a backup).
+program
+  .command("delete")
+  .description("GDPR Article 17: erase ~/.wotann contents (right to erasure)")
+  .option("--yes", "Skip the confirmation prompt (destructive — no recovery)")
+  .action(async (options: { yes?: boolean }) => {
+    const { resolveWotannHome } = await import("./utils/wotann-home.js");
+    const wotannHome = resolveWotannHome();
+    if (!existsSync(wotannHome)) {
+      console.log(chalk.yellow(`No WOTANN home at ${wotannHome} — nothing to delete.`));
+      return;
+    }
+    if (!options.yes) {
+      console.error(
+        chalk.red(
+          `error: refusing to wipe ${wotannHome} without --yes (destructive — no recovery).`,
+        ),
+      );
+      console.error(
+        chalk.dim("  Run `wotann export` first to back up, then re-run `wotann delete --yes`."),
+      );
+      process.exit(2);
+    }
+    const fsPromises = await import("node:fs/promises");
+    await fsPromises.rm(wotannHome, { recursive: true, force: true });
+    console.log(chalk.green(`Deleted ${wotannHome}.`));
+    console.log(chalk.dim("Re-run `wotann init` to start fresh."));
+  });
+
 // ── wotann kanban (worktree board — C19) ─────────────────────
 
 program
@@ -951,6 +1023,92 @@ voiceCmd
     console.log(chalk.dim(`  Can speak: ${result.canSpeak ? "yes" : "no"}\n`));
   });
 
+// H-J3 fix: voice CLI was minimal (only `status`). Add ask/listen/speak so
+// the CLI surface mirrors what the iOS Voice card already exposes.
+//
+// Each subcommand probes the voice status first and exits with an honest
+// error when the platform lacks STT/TTS rather than silently no-op-ing.
+
+voiceCmd
+  .command("speak <text...>")
+  .description("Read text aloud via the detected TTS backend")
+  .action(async (textWords: string[]) => {
+    const text = textWords.join(" ").trim();
+    if (!text) {
+      process.stderr.write(chalk.red("error: text to speak is required\n"));
+      process.exit(2);
+    }
+    const { getVoiceStatusReport } = await import("./cli/voice.js");
+    const status = await getVoiceStatusReport();
+    if (!status.canSpeak) {
+      process.stderr.write(
+        chalk.red(`error: no TTS backend detected (${status.tts ?? "none"}).\n`),
+      );
+      process.stderr.write(
+        chalk.dim("  macOS: `say` is built-in. Linux: install espeak / festival.\n"),
+      );
+      process.exit(1);
+    }
+    const { runTtsSpeak } = await import("./cli/voice-cmds.js");
+    await runTtsSpeak(text);
+  });
+
+voiceCmd
+  .command("listen")
+  .description("Record audio + transcribe via the detected STT backend")
+  .option("-d, --duration <seconds>", "Recording duration", (v) => Number(v), 5)
+  .action(async (options: { duration: number }) => {
+    const { getVoiceStatusReport } = await import("./cli/voice.js");
+    const status = await getVoiceStatusReport();
+    if (!status.canListen) {
+      process.stderr.write(
+        chalk.red(`error: no STT backend detected (${status.stt ?? "none"}).\n`),
+      );
+      process.stderr.write(
+        chalk.dim("  Install whisper.cpp, faster-whisper, or set up VibeVoice/MLX.\n"),
+      );
+      process.exit(1);
+    }
+    const { runSttListen } = await import("./cli/voice-cmds.js");
+    const transcript = await runSttListen(options.duration);
+    process.stdout.write(`${transcript}\n`);
+  });
+
+voiceCmd
+  .command("ask [prompt...]")
+  .description("Speak a prompt (or capture one), send to runtime, speak the response")
+  .option(
+    "-d, --duration <seconds>",
+    "Recording duration when no prompt given",
+    (v) => Number(v),
+    5,
+  )
+  .action(async (promptWords: string[], options: { duration: number }) => {
+    const { getVoiceStatusReport } = await import("./cli/voice.js");
+    const status = await getVoiceStatusReport();
+    if (!status.canSpeak || !status.canListen) {
+      process.stderr.write(
+        chalk.red(
+          `error: voice ask requires both STT (${status.stt ?? "none"}) and TTS (${status.tts ?? "none"}).\n`,
+        ),
+      );
+      process.exit(1);
+    }
+    const { runVoiceAsk } = await import("./cli/voice-cmds.js");
+    let prompt = promptWords.join(" ").trim();
+    if (!prompt) {
+      const { runSttListen } = await import("./cli/voice-cmds.js");
+      console.log(chalk.dim(`Listening for ${options.duration}s...`));
+      prompt = await runSttListen(options.duration);
+      if (!prompt) {
+        process.stderr.write(chalk.red("error: could not transcribe input\n"));
+        process.exit(1);
+      }
+      console.log(chalk.dim(`Heard: ${prompt}`));
+    }
+    await runVoiceAsk(prompt);
+  });
+
 // ── wotann local ────────────────────────────────────────────
 
 const localCmd = program.command("local").description("Local model and workstation utilities");
@@ -1019,6 +1177,14 @@ program
       const { runRuntimeQuery } = await import("./cli/runtime-query.js");
       const runtime = await createRuntime(process.cwd());
 
+      // SB-NEW-10 fix: track errors emitted via the cascading-fallback chain
+      // so the process exits non-zero when every provider failed (QB#10
+      // honest stub > silent success). Without this, `wotann run` returned
+      // exit 0 even when all 4 fallback hops errored, breaking shell-script
+      // chaining (`wotann run X && next-step` ran next-step on silent failure).
+      let errorEmitted = false;
+      let producedOutput = false;
+
       try {
         const result = await runRuntimeQuery(
           runtime,
@@ -1028,13 +1194,26 @@ program
             provider: options.provider as "anthropic" | undefined,
           },
           {
-            onText: (chunk) => process.stdout.write(chunk.content),
-            onError: (chunk) => console.error(chalk.red(chunk.content)),
+            onText: (chunk) => {
+              producedOutput = true;
+              process.stdout.write(chunk.content);
+            },
+            onError: (chunk) => {
+              errorEmitted = true;
+              console.error(chalk.red(chunk.content));
+            },
           },
         );
 
         if (result.output && !result.output.endsWith("\n")) {
           process.stdout.write("\n");
+        }
+
+        // Exit non-zero when the run produced no output AND surfaced at least
+        // one error (typically every fallback hop failed). A successful run
+        // that emitted some text + a recoverable warning still exits 0.
+        if (errorEmitted && !producedOutput) {
+          process.exitCode = 1;
         }
       } finally {
         runtime.close();
@@ -6752,6 +6931,26 @@ program
       const task = (taskWords ?? []).join(" ").trim();
       if (task.length === 0) {
         process.stderr.write(chalk.red("error: a task description is required\n"));
+        process.exit(2);
+      }
+      // H-K3 fix: passing secrets on the command line leaks them into shell
+      // history, the system process table (visible to any local user via
+      // `ps aux`), and observability spans. Reject the flag with a clear
+      // pointer to the safer alternatives.
+      if (opts.apiKey) {
+        process.stderr.write(
+          chalk.red(
+            "error: --api-key is rejected — secrets visible in `ps aux` are an anti-pattern.\n",
+          ),
+        );
+        process.stderr.write(
+          chalk.dim(
+            "  Set the provider's env var instead (ANTHROPIC_API_KEY, FLY_API_TOKEN, CLOUDFLARE_API_TOKEN),\n",
+          ),
+        );
+        process.stderr.write(
+          chalk.dim("  or pipe the secret via stdin: `wotann config set ... < secret.txt`.\n"),
+        );
         process.exit(2);
       }
       // H-12 fix (Wave 6.5-WW): default-provider selection is

@@ -86,6 +86,7 @@
     }
   },
   "optionalDependencies": {
+    "@napi-rs/keyring": "^1.2.0",
     "keytar": "^7.9.0",
     "onnxruntime-node": "^1.24.3",
     "qrcode-terminal": "^0.12.0",

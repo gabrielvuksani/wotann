@@ -7,10 +7,12 @@
  * subprocess's behaviour without direct token access.
  *
  * Every payload here is shape-faithful to the Claude Agent SDK
- * (`@anthropic-ai/claude-agent-sdk@0.5.x` typings + the documented
- * stream-json envelope). We intentionally re-define the shapes here so
- * callers don't pull in the SDK package as a runtime dependency — WOTANN
- * spawns the `claude` binary directly (per V9 T0.1 + claude-cli-backend.ts).
+ * (`@anthropic-ai/claude-agent-sdk@0.2.x` typings — current at v0.2.119
+ * as of April 2026 + the documented stream-json envelope). v0.5.x mentioned
+ * in earlier docs DOES NOT exist; cite GHSA-IDs / GitHub release tags when
+ * referencing the SDK going forward. We intentionally re-define the shapes
+ * here so callers don't pull in the SDK package as a runtime dependency —
+ * WOTANN spawns the `claude` binary directly (per V9 T0.1 + claude-cli-backend.ts).
  *
  * Quality bars
  *   - QB #6 honest stubs: callers receive `decision: "allow"` only when the
