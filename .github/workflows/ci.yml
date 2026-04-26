@@ -18,6 +18,7 @@ jobs:
   typecheck-build:
     name: Typecheck + Build (Node ${{ matrix.node-version }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -25,10 +26,10 @@ jobs:
         node-version: [22]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -53,29 +54,24 @@ jobs:
         run: npm run build
 
   # Test job re-enabled 2026-04-20 per MASTER_PLAN_V8 §4 P0-7.
-  #
-  # IMPORTANT: this is a VISIBILITY gate, not a hard gate.
-  # `continue-on-error: true` means test failures surface in the GitHub
-  # UI (red X on the job) but DO NOT block PR merges. This restores
-  # regression visibility that was lost when the prior implementation
-  # was removed due to hosted-runner preemption flakes.
-  #
-  # Upgrade to a hard gate (remove `continue-on-error: true`) after the
-  # suite has been consistently green for 2 weeks. Track stability via
-  # the historical run list on the Actions tab.
+  # Promoted to a HARD gate 2026-04-25 per Wave 6.99-AP — the prior
+  # `continue-on-error: true` setting masked real test regressions because
+  # the failed `Test` step still let the job exit 0, so PRs reported all-
+  # green even when `npm test` failed. With this change a red `Test` step
+  # blocks the merge, restoring full regression enforcement.
   #
   # Prior context: the earlier shard+retry approach (commits 6faf04b,
   # d3de864) was preempted ~30-50% of runs. A self-hosted runner is
-  # the long-term fix (docs/SELF_HOSTED_RUNNER_SETUP.md). For now we
-  # accept visibility-without-enforcement rather than no signal at all.
+  # the long-term fix (docs/SELF_HOSTED_RUNNER_SETUP.md). If the hosted
+  # runners reintroduce preemption flake, restore `continue-on-error: true`
+  # explicitly here AND re-open the regression-visibility tracking issue.
   test:
-    name: Tests (visibility, non-blocking)
+    name: Tests (hard gate)
     runs-on: ubuntu-latest
-    continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -93,9 +89,10 @@ jobs:
   desktop-typecheck:
     name: Desktop typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm

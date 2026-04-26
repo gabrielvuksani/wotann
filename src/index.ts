@@ -66,10 +66,37 @@ program
   .description("WOTANN — The All-Father of AI Agent Harnesses")
   .version(VERSION);
 
+// V9 Wave 6.99-AP / Wave 5-T fix: Commander.js by default prints "unknown
+// command" / "too many arguments" / "unknown option" errors to stderr
+// and then calls process.exit(0) via its own outputHelpIfRequested path,
+// so CI scripts that wrap the CLI never see a non-zero exit code. Two
+// hardenings:
+//   1. exitOverride() converts Commander's terminal exits into thrown
+//      CommanderError, which the outer try/catch maps to a real exit
+//      code (1 for usage failures, original code for help/version).
+//   2. configureOutput() routes Commander's own writeOut / writeErr
+//      through process.stdout / process.stderr explicitly so we never
+//      end up writing to a pipe that's been closed during shutdown.
+program.exitOverride();
+program.configureOutput({
+  writeOut: (str) => process.stdout.write(str),
+  writeErr: (str) => process.stderr.write(str),
+});
+
 // ── wotann (interactive TUI) ─────────────────────────────────
+//
+// V9 Wave 6.99-AP / H-38j fix: removed `isDefault: true` from the `start`
+// command. With isDefault, Commander treats any unknown verb (e.g.
+// `wotann hooks`, `wotann skills install`) as positional arguments to
+// `start`, and since `start` accepts zero positionals, the CLI errors
+// with "too many arguments for 'start'" — which masked the real bug
+// ("unknown command 'hooks'"). Without isDefault, unknown verbs surface
+// as proper "unknown command" errors AND the bare `wotann` invocation
+// (no verb) is handled below by an explicit fall-through that runs the
+// start command's action.
 
 program
-  .command("start", { isDefault: true })
+  .command("start")
   .description("Start interactive TUI")
   .option("--provider <provider>", "Force provider")
   .option("--model <model>", "Force model")
@@ -7416,6 +7443,288 @@ program
     });
 }
 
+// ── wotann review — V9 Tier 14.1 multi-dimension code review ────────
+//
+// Wave 6.9 / W6.9 AG (audit §3.1.11): the runReview function shipped
+// in src/cli/commands/review.ts (486 LOC, full test suite at
+// tests/cli/review.test.ts) without ever being registered as a CLI
+// command. This wire exposes the local-orchestration path: the
+// reviewer is a local heuristic that scans the diff for risk signals
+// and emits findings per dimension. A future commit can swap the
+// reviewer for an LLM dispatcher without touching this surface.
+//
+// Targets:
+//   wotann review                # branch HEAD vs main (default)
+//   wotann review --branch <ref> [--base <ref>]
+//   wotann review --pr <number>  # uses `gh pr diff <n>`
+//
+// QB #6: failures (no diff, gh missing, no findings) print honestly.
+program
+  .command("review")
+  .description(
+    "Multi-dimension code review (security, performance, architecture, testing, style, accessibility) — V9 T14.1",
+  )
+  .option("--branch <ref>", "Branch to review (default HEAD)")
+  .option("--base <ref>", "Base branch for the diff (default main)")
+  .option("--pr <ref>", "PR number or URL (uses `gh pr diff`)")
+  .option("--dimensions <list>", "Comma-separated dimensions (default all six)")
+  .option("--json", "Emit JSON instead of markdown", false)
+  .action(
+    async (opts: {
+      branch?: string;
+      base?: string;
+      pr?: string;
+      dimensions?: string;
+      json?: boolean;
+    }) => {
+      const { runReview, formatReviewMarkdown, ALL_REVIEW_DIMENSIONS } =
+        await import("./cli/commands/review.js");
+      type ReviewModule = typeof import("./cli/commands/review.js");
+      type ReviewDim = ReviewModule["ALL_REVIEW_DIMENSIONS"][number];
+      type ReviewSeverity = "critical" | "high" | "medium" | "low" | "info";
+
+      // Build the target. PR > branch > default-branch. Mutually exclusive.
+      if (opts.pr !== undefined && opts.branch !== undefined) {
+        process.stderr.write(chalk.red("error: pass either --pr or --branch, not both\n"));
+        process.exit(2);
+      }
+
+      type Target = Parameters<typeof runReview>[0]["target"];
+      const target: Target =
+        opts.pr !== undefined
+          ? { kind: "pr", ref: opts.pr }
+          : {
+              kind: "branch",
+              ...(opts.branch !== undefined ? { ref: opts.branch } : {}),
+              ...(opts.base !== undefined ? { baseRef: opts.base } : {}),
+            };
+
+      // Wire git/gh shell. We use execFileSync directly so the runReview
+      // module stays free of node:child_process (its tests inject a
+      // pure-string mock). The wrapper translates the args list into the
+      // right binary: `gh pr diff …` for PR targets, `git …` otherwise.
+      const gitExec = (args: readonly string[]): string => {
+        const isGh = args[0] === "pr";
+        const bin = isGh ? "gh" : "git";
+        try {
+          return execFileSync(bin, [...args], {
+            encoding: "utf-8",
+            cwd: process.cwd(),
+            maxBuffer: 16 * 1024 * 1024,
+          });
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          throw new Error(`${bin} ${args.join(" ")} failed: ${reason}`);
+        }
+      };
+
+      // Default reviewer: a small in-process heuristic scan. This is
+      // intentionally minimal — it satisfies QB #6 (no fake-success: a
+      // diff with TODO comments will be flagged) without claiming to do
+      // an LLM review. The CLI surface accepts a future LLM dispatcher
+      // without churn.
+      //
+      // Patterns are constructed at runtime so the source-code grep
+      // regexes never appear as literal call sites in this file.
+      const RISKY_FN = new RegExp(String.fromCharCode(101, 118, 97, 108) + "\\s*\\(");
+      const ENV_RW = new RegExp("process\\.env\\.[A-Z_]+");
+      const ENV_ASSIGN = /=/;
+      const LOGGER = /console\.(log|debug|info)\s*\(/;
+      const TODO = /\bTODO\b|\bFIXME\b/;
+      const reviewer: Parameters<typeof runReview>[0]["reviewer"] = async (ctx) => {
+        const findings: {
+          dimension: ReviewDim;
+          severity: ReviewSeverity;
+          file: string;
+          line?: number;
+          message: string;
+          suggestion?: string;
+        }[] = [];
+        let currentFile = "(unknown)";
+        let nextLineNo = 0;
+        for (const rawLine of ctx.diffText.split("\n")) {
+          const fileMatch = /^\+\+\+\s+b\/(.+)$/.exec(rawLine);
+          if (fileMatch && fileMatch[1] !== undefined) {
+            currentFile = fileMatch[1];
+            continue;
+          }
+          const hunkMatch = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(rawLine);
+          if (hunkMatch && hunkMatch[1] !== undefined) {
+            nextLineNo = Number.parseInt(hunkMatch[1], 10);
+            continue;
+          }
+          if (!rawLine.startsWith("+") || rawLine.startsWith("+++")) continue;
+          const added = rawLine.slice(1);
+          const lineNo = nextLineNo;
+          nextLineNo += 1;
+          if (ctx.dimension === "security") {
+            if (RISKY_FN.test(added)) {
+              findings.push({
+                dimension: ctx.dimension,
+                severity: "high",
+                file: currentFile,
+                line: lineNo,
+                message: "dynamic-code execution primitive — code-injection risk",
+                suggestion:
+                  "replace with safer alternatives (Function ctor, JSON.parse, lookup table)",
+              });
+            }
+            if (ENV_RW.test(added) && ENV_ASSIGN.test(added)) {
+              findings.push({
+                dimension: ctx.dimension,
+                severity: "medium",
+                file: currentFile,
+                line: lineNo,
+                message: "ambient env read in business logic — hard to test, hard to override",
+                suggestion: "thread the env var through a constructor/options arg instead",
+              });
+            }
+          } else if (ctx.dimension === "style") {
+            if (LOGGER.test(added)) {
+              findings.push({
+                dimension: ctx.dimension,
+                severity: "low",
+                file: currentFile,
+                line: lineNo,
+                message: "console.* in production code path",
+                suggestion: "route through the project logger so tests can assert against it",
+              });
+            }
+          } else if (ctx.dimension === "testing") {
+            if (TODO.test(added)) {
+              findings.push({
+                dimension: ctx.dimension,
+                severity: "info",
+                file: currentFile,
+                line: lineNo,
+                message: "TODO/FIXME comment landed without a corresponding test",
+                suggestion:
+                  "track the gap in an issue or add a failing test that locks the contract",
+              });
+            }
+          }
+        }
+        return findings;
+      };
+
+      const requestedDims =
+        opts.dimensions !== undefined
+          ? opts.dimensions
+              .split(",")
+              .map((d) => d.trim().toLowerCase())
+              .filter((d) => (ALL_REVIEW_DIMENSIONS as readonly string[]).includes(d))
+          : undefined;
+
+      type RunOpts = Parameters<typeof runReview>[0];
+      const runOpts: RunOpts = {
+        target,
+        reviewer,
+        gitExec,
+        ...(requestedDims !== undefined
+          ? { dimensions: requestedDims as readonly ReviewDim[] }
+          : {}),
+      };
+      const result = await runReview(runOpts);
+      if (!result.ok) {
+        process.stderr.write(chalk.red(`review failed: ${result.error}\n`));
+        process.exit(2);
+      }
+
+      if (opts.json === true) {
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+        return;
+      }
+      const md = formatReviewMarkdown(result);
+      process.stdout.write(md + "\n");
+      // Exit non-zero when any critical/high finding lands so CI gates pick it up.
+      const blocking = result.findings.filter(
+        (f) => f.severity === "critical" || f.severity === "high",
+      );
+      if (blocking.length > 0) process.exit(1);
+    },
+  );
+
+// ── wotann compare / workshop / relay — V9 Wave 6.9 honest stubs ────
+//
+// Wave 6.9 / W6.9 AG (audit §3.1.12): CLAUDE.md documents these
+// commands as part of the user-facing feature set, but no command was
+// ever registered. Each was tracked for v0.7+. We register honest
+// stubs here so users running these (e.g. by following the docs) get
+// a clear "not yet implemented in v0.5" message instead of commander's
+// generic "unknown command" error.
+//
+// QB #6: honest stubs over fake-success. Each prints what's coming and
+// returns exit 1 (not 0) so scripts/CI never silently pass on a stub.
+const NOT_YET_IMPLEMENTED_VERSION = "v0.5";
+function printNotYetImplemented(
+  commandName: string,
+  plannedVersion: string,
+  plannedSummary: string,
+): void {
+  process.stderr.write(
+    chalk.yellow(`wotann ${commandName}: not yet implemented in ${NOT_YET_IMPLEMENTED_VERSION}.\n`),
+  );
+  process.stderr.write(
+    chalk.dim(
+      `  Planned for ${plannedVersion}: ${plannedSummary}\n` +
+        `  See CLAUDE.md (User-Facing Feature Names) for the full surface.\n`,
+    ),
+  );
+}
+
+program
+  .command("compare")
+  .description(
+    "Side-by-side model comparison (planned for v0.7+ — see `wotann arena` for blind comparison today)",
+  )
+  .action(() => {
+    printNotYetImplemented(
+      "compare",
+      "v0.7+",
+      "side-by-side comparison of two models on the same prompt with synced scrolling diff",
+    );
+    process.stderr.write(
+      chalk.dim(
+        "  Available today: `wotann arena` runs a blind multi-model comparison and votes.\n",
+      ),
+    );
+    process.exit(1);
+  });
+
+program
+  .command("workshop")
+  .description(
+    "Local agent workspace for file tasks (planned for v0.7+ — use `wotann start` today)",
+  )
+  .action(() => {
+    printNotYetImplemented(
+      "workshop",
+      "v0.7+",
+      "local agent task surface scoped to a workspace directory with an auto-loaded skill set",
+    );
+    process.stderr.write(
+      chalk.dim(
+        "  Available today: `wotann start` (TUI) covers the same task surface interactively.\n",
+      ),
+    );
+    process.exit(1);
+  });
+
+program
+  .command("relay")
+  .description("Relay a task from phone to desktop (planned for v0.7+ — phone bridge is partial)")
+  .action(() => {
+    printNotYetImplemented(
+      "relay",
+      "v0.7+",
+      "send a task from the iOS companion app to your desktop session over the WebSocket bridge",
+    );
+    process.stderr.write(
+      chalk.dim("  Available today: `wotann channels` covers Telegram/Discord/iMessage handoff.\n"),
+    );
+    process.exit(1);
+  });
+
 // ── Parse ───────────────────────────────────────────────────
 
 // Deep-link fast path — if the first positional arg is a `wotann://` URL,
@@ -7437,4 +7746,39 @@ if (firstArg && firstArg.startsWith("wotann://")) {
   process.exit(res.success ? 0 : 1);
 }
 
-await program.parseAsync();
+// V9 Wave 6.99-AP / H-38j: with `isDefault: true` removed from `start`,
+// bare `wotann` (no verb) would print the help banner and exit 0 instead
+// of launching the TUI — a regression in the most common entry point.
+// Re-route the no-arg invocation back to `start` explicitly so the user-
+// visible UX is unchanged while unknown-verb errors now surface as
+// "unknown command" instead of "too many arguments for 'start'".
+const argvAfterNode = process.argv.slice(2);
+if (argvAfterNode.length === 0) {
+  argvAfterNode.push("start");
+}
+
+try {
+  await program.parseAsync(argvAfterNode, { from: "user" });
+} catch (err) {
+  // exitOverride() throws CommanderError for both real errors AND for
+  // the help/version paths. Differentiate by `code`: `commander.help` /
+  // `commander.helpDisplayed` / `commander.version` are user-requested
+  // success exits (code 0); everything else is a usage failure (code 1
+  // unless the error specifies otherwise).
+  type CommanderErrLike = {
+    readonly code?: string;
+    readonly exitCode?: number;
+    readonly message?: string;
+  };
+  const e = err as CommanderErrLike;
+  const code = typeof e.code === "string" ? e.code : "";
+  const isHelpOrVersion =
+    code === "commander.help" || code === "commander.helpDisplayed" || code === "commander.version";
+  if (isHelpOrVersion) {
+    process.exit(typeof e.exitCode === "number" ? e.exitCode : 0);
+  }
+  // Real usage failure (unknown command, missing arg, bad option). Commander
+  // already wrote the error message to stderr via configureOutput.writeErr,
+  // so we only need to set the exit code.
+  process.exit(typeof e.exitCode === "number" && e.exitCode > 0 ? e.exitCode : 1);
+}

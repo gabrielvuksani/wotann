@@ -363,6 +363,16 @@ export async function runDoctor(targetDir: string): Promise<void> {
       ? chalk.green("  All checks passed.\n")
       : chalk.yellow("  Some checks failed. Fix issues above.\n"),
   );
+
+  // V9 Wave 6.99-AP / Wave 5-T fix: previously `wotann doctor` printed
+  // failures but always exited 0, so CI scripts that ran `wotann doctor`
+  // never saw a non-zero exit code and silently treated broken setups
+  // as healthy. Set process.exitCode (not process.exit) so any caller's
+  // post-run logic still fires; the runtime exits with this code when
+  // the event loop drains.
+  if (!allOk) {
+    process.exitCode = 1;
+  }
 }
 
 // ── wotann git (Magic Git — C20) ─────────────────────────────

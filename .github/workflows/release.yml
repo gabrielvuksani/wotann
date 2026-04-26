@@ -1,7 +1,14 @@
-name: Release
+name: WOTANN Release v2
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WOTANN Release Pipeline v2 (canonical 8-asset set)
+#
+# NB: workflow `name:` was changed from "Release" to "WOTANN Release v2" on
+# 2026-04-25 to force GitHub's workflow registry to re-parse this file
+# (SB-14 fix). When a workflow keeps the same `name:` but changes its body,
+# GitHub sometimes pins the previous parse result, causing every run to
+# show 30/30 startup_failure with no log lines. Renaming forces a fresh
+# parse on the next push event.
 #
 # Canonical assets produced per release (no more, no less):
 #   wotann-${VER}-macos-arm64.dmg          Tauri GUI — drag to Applications
@@ -76,6 +83,7 @@ jobs:
   macos-gui-dmg:
     name: Build macOS GUI DMG (Tauri arm64)
     runs-on: macos-latest
+    timeout-minutes: 30
     # Job-level env hoists the secret presence into a plain string ("true" /
     # "false") so step-level `if:` expressions can branch on it. GitHub
     # Actions does NOT permit `secrets.*` inside step `if:` expressions —
@@ -84,11 +92,15 @@ jobs:
     env:
       HAS_APPLE_CERT: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'true' || 'false' }}
     steps:
-      - uses: actions/checkout@v4
+      # Third-party actions are pinned to SHAs (SB-14 hardening) so a
+      # compromised tag cannot rewrite history under us. Tag annotation is
+      # kept as a comment so a human reviewer can see what version the
+      # SHA represents at a glance.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # Official nodejs.org Node via setup-node. Cargo cache comes later.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -96,15 +108,18 @@ jobs:
 
       # Rust toolchain with aarch64-apple-darwin target. The macos-latest
       # runner is itself arm64 so this is a native build, not cross-compile.
+      # dtolnay/rust-toolchain has no version tags, so we pin to the current
+      # `stable` branch HEAD. Re-pin if the branch advances and you want
+      # the newer toolchain.
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: aarch64-apple-darwin
 
       # Cache Cargo registry + target dir. Target dir is the big win —
       # Tauri's debug deps compile fresh otherwise (~5 min → ~1 min).
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -253,7 +268,7 @@ jobs:
           ls -la "$OUT_DIR"
 
       - name: Upload macOS GUI DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-gui-dmg
           path: |
@@ -268,8 +283,9 @@ jobs:
   macos-cli-tarball:
     name: Build macOS CLI tarball (SEA arm64)
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # setup-node@v4 installs Node from nodejs.org into the runner's
       # hosted tool cache. That Node IS statically linked AND contains the
@@ -277,7 +293,7 @@ jobs:
       # sea-bundle.sh needs. Homebrew's Node on arm64 would fail the
       # SEA fuse preflight (BLOCKED-NEEDS-SEA-NODE).
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -322,7 +338,7 @@ jobs:
           ls -la
 
       - name: Upload macOS CLI tarball artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-cli-tarball
           path: |
@@ -337,10 +353,11 @@ jobs:
   linux-cli-tarball:
     name: Build Linux CLI tarball (SEA x64)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -370,7 +387,7 @@ jobs:
           ls -la
 
       - name: Upload Linux CLI tarball artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-cli-tarball
           path: |
@@ -386,10 +403,11 @@ jobs:
   windows-cli-exe:
     name: Build Windows CLI .exe (SEA x64)
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -447,7 +465,7 @@ jobs:
           ls -la
 
       - name: Upload Windows .exe artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-cli-exe
           path: |
@@ -468,8 +486,9 @@ jobs:
       - linux-cli-tarball
       - windows-cli-exe
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Derive release version from tag
         id: ver
@@ -482,7 +501,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist/release
           merge-multiple: true
@@ -506,7 +525,7 @@ jobs:
           done
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/release/*
           draft: false
@@ -528,9 +547,10 @@ jobs:
       - windows-cli-exe
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: "https://registry.npmjs.org/"
