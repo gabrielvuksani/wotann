@@ -891,7 +891,7 @@ export async function dispatchRuntimeTool(
         return () =>
           dispatchParallelSearchTool(input, deps.workspaceDir, deps.parallelSearchMemoryFn, ctx);
 
-      default:
+      default: {
         // Wave-4C: if the tool name matches one of the 34 connector tools,
         // route it through `dispatchConnectorTool`. The registry may be
         // null (no connector configured on this machine) — we still
@@ -906,7 +906,6 @@ export async function dispatchRuntimeTool(
         // when buildAuxToolDefinitions() exposes them in the schema (wired
         // from runtime.ts:2810). dispatchAuxTool returns a normalized envelope
         // we wrap into ToolDispatchResult.
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
         const auxModule =
           require("../tools/aux-tools.js") as typeof import("../tools/aux-tools.js");
         if (auxModule.isAuxTool(toolName)) {
@@ -930,6 +929,7 @@ export async function dispatchRuntimeTool(
           };
         }
         return null;
+      }
     }
   };
 
