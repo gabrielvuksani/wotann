@@ -6,13 +6,14 @@ export default defineConfig({
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     exclude: ["node_modules", "dist"],
     testTimeout: 10_000,
-    // pool: "forks" hits vitest 4 known issue (#8861) of IPC stalls in
-    // CI that look like SIGKILL. pool: "threads" doesn't work because
-    // tests use process.chdir/exit (not supported in true workers).
-    // pool: "vmThreads" is the third option — uses Node vm contexts
-    // inside threads, gets thread-like perf without thread isolation
-    // restrictions, supports process.chdir/exit.
-    pool: "vmThreads",
+    // After exhausting forks (vitest 4 IPC stall in CI), threads
+    // (process.chdir/exit incompat), and vmThreads (env pollution
+    // from tests that mutate process.env without cleanup): forks
+    // remains the only pool that runs all 583 files cleanly LOCALLY.
+    // The CI flake on ubuntu-22.04 is mitigated at the WORKFLOW
+    // level via matrix-parallel shards in .github/workflows/ci.yml —
+    // each shard gets its own runner, capping per-process memory.
+    pool: "forks",
     maxWorkers: 1,
     fileParallelism: false,
   },
