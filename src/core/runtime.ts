@@ -14,7 +14,13 @@
  * - Session management tracks state
  */
 
-import type { ProviderName, WotannQueryOptions, AgentMessage, ToolDefinition } from "./types.js";
+import type {
+  ProviderName,
+  WotannQueryOptions,
+  AgentMessage,
+  ToolDefinition,
+  BillingType,
+} from "./types.js";
 import { extractTrackedFilePath } from "./tool-path-extractor.js";
 import type { StreamChunk } from "../providers/types.js";
 import { discoverProviders } from "../providers/discovery.js";
@@ -45,7 +51,7 @@ import { createDefaultPipeline, type MiddlewarePipeline } from "../middleware/pi
 import { assembleSystemPromptParts, wrapPromptWithThinkInCode } from "../prompt/engine.js";
 import { stripIsoTimestampsFromPrompt } from "../prompt/system-prompt.js";
 import { canBypass, executeBypass } from "../utils/wasm-bypass.js";
-import { CostTracker } from "../telemetry/cost-tracker.js";
+import { CostTracker, shouldZeroForSubscription } from "../telemetry/cost-tracker.js";
 import { ToolTimingLogger, ToolTimingBaseline } from "../tools/tool-timing.js";
 import { MemoryStore, type AutoCaptureEntry } from "../memory/store.js";
 import {
@@ -622,6 +628,20 @@ export interface RuntimeStatus {
 
 export class WotannRuntime {
   private infra: ProviderInfrastructure | null = null;
+  /**
+   * Wave 4-W: per-provider billing model captured at discovery time so
+   * the cost-tracker `record()` call site can decide whether to skip
+   * the per-token charge for subscription-billed providers (Claude
+   * Pro/Max via OAuth, GitHub Copilot, etc.). Populated alongside
+   * `this.infra` from the discovered `ProviderAuth` array; left empty
+   * when no providers have been discovered yet (record() falls through
+   * to charge per-token, the safer default per QB #6).
+   *
+   * Map shape: ProviderName → "subscription" | "api-key" | "free".
+   * Read by the single call site at runtime.ts:~4212 via
+   * `shouldZeroForSubscription(provider, this.providerBilling.get(provider))`.
+   */
+  private readonly providerBilling = new Map<ProviderName, BillingType>();
   private hookEngine: HookEngine;
   private doomLoop: DoomLoopDetector;
   private pipeline: MiddlewarePipeline;
@@ -1918,6 +1938,17 @@ export class WotannRuntime {
     if (providers.length > 0) {
       this.infra = createProviderInfrastructure(providers, this.accountPool);
       this.infra.router.hydrateRepoPerformance(this.modelPerformanceStore.load());
+      // Wave 4-W: snapshot per-provider billing so cost-tracker call site
+      // can decide whether to zero per-token cost for subscription users
+      // (Anthropic OAuth = Claude Pro/Max, Copilot, etc.). First-wins
+      // on duplicates — discovery returns ProviderAuth in priority order
+      // so the highest-priority entry wins (matches the adapter selection
+      // logic in createProviderInfrastructure).
+      for (const auth of providers) {
+        if (!this.providerBilling.has(auth.provider)) {
+          this.providerBilling.set(auth.provider, auth.billing);
+        }
+      }
       const firstProvider = providers[0];
       if (firstProvider) {
         this.session = createSession(firstProvider.provider, firstProvider.models[0] ?? "auto");
@@ -4209,22 +4240,34 @@ export class WotannRuntime {
       // numbers, including cache-read / cache-write tokens.
       const effectiveInputTokens = turnUsage?.inputTokens ?? Math.floor(totalTokens / 2);
       const effectiveOutputTokens = turnUsage?.outputTokens ?? totalTokens - effectiveInputTokens;
-      const costEntry = this.costTracker.record(
-        responseProvider,
-        responseModel,
-        effectiveInputTokens,
-        effectiveOutputTokens,
-        turnUsage
-          ? {
-              ...(turnUsage.cacheReadTokens !== undefined
-                ? { cacheReadTokens: turnUsage.cacheReadTokens }
-                : {}),
-              ...(turnUsage.cacheWriteTokens !== undefined
-                ? { cacheWriteTokens: turnUsage.cacheWriteTokens }
-                : {}),
-            }
-          : undefined,
-      );
+      // Wave 4-W: skip costTracker for subscription-billed providers
+      // (Anthropic OAuth/Claude Pro+Max, GitHub Copilot, etc.) so we
+      // don't double-count against a user who's already paying a flat
+      // monthly fee. QB #6 honest fallback: when billing is unknown
+      // (provider not in providerBilling map), default to charging the
+      // cost — under-counting silently is worse than over-counting
+      // visibly. Downstream consumers only read `costEntry.cost`, so a
+      // synthetic zero-cost entry preserves the call shape.
+      const billing = this.providerBilling.get(responseProvider);
+      const skipBilling = shouldZeroForSubscription(responseProvider, billing);
+      const costEntry = skipBilling
+        ? { cost: 0 }
+        : this.costTracker.record(
+            responseProvider,
+            responseModel,
+            effectiveInputTokens,
+            effectiveOutputTokens,
+            turnUsage
+              ? {
+                  ...(turnUsage.cacheReadTokens !== undefined
+                    ? { cacheReadTokens: turnUsage.cacheReadTokens }
+                    : {}),
+                  ...(turnUsage.cacheWriteTokens !== undefined
+                    ? { cacheWriteTokens: turnUsage.cacheWriteTokens }
+                    : {}),
+                }
+              : undefined,
+          );
       const inputTokens = effectiveInputTokens;
       const outputTokens = effectiveOutputTokens;
       // Wave 4G: emit structured per-turn telemetry. Mirrors to
