@@ -22,11 +22,17 @@ v9 also EMPIRICALLY squashed the v7-vs-v8 dead-defense contradiction (BOTH parti
 
 ## STEP 0 — RECOVERY (5 min)
 
+### A. Engram (persistent memory across sessions)
+
 Run in parallel:
 
 ```
 mem_context project=wotann limit=40
-mem_search project=wotann query="v9 brutal meta audit ship blockers iOS macOS distribution"
+mem_search project=wotann topic_key="wotann-v9-brutal-meta-audit-2026-04-26"
+mem_search project=wotann topic_key="wotann-v8-brutal-meta-audit-2026-04-26"
+mem_search project=wotann topic_key="wotann-v9-session-summary-2026-04-26"
+mem_search project=wotann topic_key="patterns/zombie-instance-detection"
+mem_search project=wotann topic_key="patterns/deployment-drift-from-code"
 mem_search project=wotann query="AASA file HTML homepage Universal Links broken production"
 mem_search project=wotann query="BGTaskScheduler missing UIBackgroundModes processing App Review fail"
 mem_search project=wotann query="Tauri updater pubkey TODO signingIdentity null notarization script"
@@ -34,17 +40,37 @@ mem_search project=wotann query="sqlite-vec WAL data loss memory vector store"
 mem_search project=wotann query="dead defense plugin-scanner privacy-router zombie instance"
 ```
 
-**READ THESE FILES IN FULL** (priority order):
+### B. Auto-memory (MEMORY.md is auto-loaded; deep-read these specific pointers)
 
-1. **`/Users/gabrielvuksani/Desktop/agent-harness/wotann/docs/AUDIT_2026_04_26_BRUTAL_v9.md`** ← **PRIMARY EXECUTION CONTEXT** (~570 lines, single source of truth, supersedes v8/v7)
+`MEMORY.md` is loaded automatically (first 200 lines) at session start. After loading, **READ THE FULL CONTENT** of these recent v9-relevant pointers:
+
+1. `~/.claude/projects/-Users-gabrielvuksani-Desktop-agent-harness/memory/project_wotann_v8v9_brutal_meta_audits.md` — v8+v9 audit project pointer
+2. `~/.claude/projects/-Users-gabrielvuksani-Desktop-agent-harness/memory/feedback_wotann_quality_bars_v9.md` — QB#19/20/21 with detailed why+how-to-apply
+3. `~/.claude/projects/-Users-gabrielvuksani-Desktop-agent-harness/memory/feedback_wotann_quality_bars_session5.md` — QB#14 commit-claim verification (still load-bearing for v9)
+4. `~/.claude/projects/-Users-gabrielvuksani-Desktop-agent-harness/memory/feedback_verify_full_chain.md` — full-chain verification rule (still load-bearing)
+5. `~/.claude/projects/-Users-gabrielvuksani-Desktop-agent-harness/memory/feedback_device_awareness.md` — Gabriel uses physical iOS devices (NEVER assume simulator)
+
+### C. Session-data transcript (full v8+v9 audit narrative)
+
+**READ IN FULL**: `~/.claude/session-data/2026-04-26-wotann-v8v9-brutal-meta-audits-session.md`
+
+This transcript covers: 8 META-AUDIT subagent IDs and findings, my own in-session empirical verifications (AASA HTML-not-JSON, NSUserActivityTypes plist absence, BGTaskScheduler missing, wireGateway orphan re-verify, Supabase Relay 0-sendMessage, kg-builder dead, methodology corrections), 4 NEW META-PATTERNS, 3 NEW Quality Bars, prior-session-context links to sessions 2-10 transcripts.
+
+Optional prior-session transcripts to skim if context-budget allows:
+- `~/.claude/session-data/2026-04-25-wotann-v9-deep-closure-session.md` (V9 tier closure)
+- `~/.claude/session-data/2026-04-25-wotann-v9-tier12-audit-wires-session.md` (Tier 12 + audit wires)
+
+### D. Working-directory primary docs (READ THESE IN FULL)
+
+1. **`/Users/gabrielvuksani/Desktop/agent-harness/wotann/docs/AUDIT_2026_04_26_BRUTAL_v9.md`** ← **PRIMARY EXECUTION CONTEXT** (~370 lines, single source of truth, supersedes v8/v7)
 2. `/Users/gabrielvuksani/Desktop/agent-harness/wotann/docs/AUDIT_2026_04_26_BRUTAL_v8.md` (referenced for v7+v8 SB detail; v9 §1 abbreviates)
-3. `/Users/gabrielvuksani/Desktop/agent-harness/wotann/CLAUDE.md` (Quality Bars #1-18 + provider-neutrality)
+3. `/Users/gabrielvuksani/Desktop/agent-harness/wotann/CLAUDE.md` (Quality Bars #1-21 + provider-neutrality)
 4. `/Users/gabrielvuksani/Desktop/agent-harness/wotann/AGENTS.md`
 5. `/Users/gabrielvuksani/Desktop/agent-harness/wotann/docs/RELEASE_INFRA.md`
 6. `/Users/gabrielvuksani/Desktop/agent-harness/wotann/scripts/v9-drift-check.mjs`
 
 **Optional reference**:
-- `docs/EXECUTION_PROMPT_2026_04_26_v8_TIGHT.md` (v8 prompt — superseded)
+- `docs/EXECUTION_PROMPT_2026_04_26_v8_TIGHT.md` (v8 prompt — superseded by this v9)
 
 ---
 
