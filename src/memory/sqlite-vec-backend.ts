@@ -58,8 +58,15 @@ export interface SqliteVecBackend {
   readonly upsert: (id: string, vector: readonly number[]) => void;
   /** Remove a vector by id. No-op if absent. */
   readonly delete: (id: string) => void;
-  /** K-nearest neighbors; empty array if store is empty. */
+  /** K-nearest neighbors via vec0 MATCH (uses table's distance_metric, default L2). */
   readonly knn: (query: readonly number[], k: number) => readonly SqliteVecHit[];
+  /**
+   * K-nearest neighbors via explicit cosine distance (sqlite-vec
+   * `vec_distance_cosine` SQL function). Because vecToBuf L2-normalizes
+   * inputs, cosine_distance(a, b) = 1 - dot(a, b). Returns hits sorted
+   * by ASCENDING distance (0 = identical, 2 = opposite). Wave 5-FF.
+   */
+  readonly searchCosine: (query: readonly number[], limit: number) => readonly SqliteVecHit[];
   /** Number of vectors currently stored. */
   readonly count: () => number;
   /** sqlite-vec extension version string (e.g. "v0.1.9"). */
@@ -159,14 +166,31 @@ export function createSqliteVecBackend(config: SqliteVecBackendConfig): SqliteVe
       WHERE embedding MATCH ? AND k = ?
       ORDER BY distance`,
   );
+  // Wave 5-FF: explicit cosine search via standalone `vec_distance_cosine`.
+  // Selects from idsTable (the regular row source) and joins to the vec0
+  // table so we can compute distance per row. vec0 row order is rowid;
+  // we rely on the JOIN to surface the embedding for each id. This is
+  // O(N) per query but is correct regardless of distance_metric on the
+  // virtual table and works across all sqlite-vec >= 0.1.9 builds.
+  const cosineSearchStmt = config.db.prepare(
+    `SELECT ${idsTable}.id AS id,
+            vec_distance_cosine(${table}.embedding, ?) AS dist
+       FROM ${idsTable}
+       JOIN ${table} ON ${table}.rowid = ${idsTable}.rowid
+      ORDER BY dist ASC
+      LIMIT ?`,
+  );
 
   const vecToBuf = (v: readonly number[]): Buffer => {
+    // Wave 5-FF: dimension validation is HONEST — silent truncation/padding
+    // would corrupt KNN in ways that only show up at recall-eval time.
+    // We throw here AND check at the upsert/knn call sites.
     if (!Array.isArray(v) || v.length !== dim) {
       throw new Error(
         `sqlite-vec: vector dimension mismatch (expected ${dim}, got ${v?.length ?? 0})`,
       );
     }
-    // sqlite-vec accepts Float32Array serialized as Buffer.
+    // First pass: copy + finite-check.
     const f32 = new Float32Array(v.length);
     for (let i = 0; i < v.length; i++) {
       const n = Number(v[i] ?? 0);
@@ -175,6 +199,27 @@ export function createSqliteVecBackend(config: SqliteVecBackendConfig): SqliteVe
       }
       f32[i] = n;
     }
+    // Wave 5-FF: L2-normalize so unit-length vectors satisfy
+    // cosine_distance(a, b) = 1 - dot(a, b). The standalone
+    // `vec_distance_cosine` SQL function then matches the searchCosine
+    // method without requiring a `distance_metric=cosine` table option
+    // (which would force a schema migration on existing dbs).
+    //
+    // Norm-zero guard: a zero vector cannot be normalized. Leave it as-is
+    // (cosine distance to anything is undefined/2 anyway). This matches
+    // the behavior of most embedding libraries (sentence-transformers
+    // returns the unmodified zero vector in this edge case).
+    let sumSq = 0;
+    for (let i = 0; i < f32.length; i++) {
+      sumSq += f32[i]! * f32[i]!;
+    }
+    const norm = Math.sqrt(sumSq);
+    if (norm > 0) {
+      for (let i = 0; i < f32.length; i++) {
+        f32[i] = f32[i]! / norm;
+      }
+    }
+    // sqlite-vec accepts Float32Array serialized as Buffer.
     return Buffer.from(f32.buffer, f32.byteOffset, f32.byteLength);
   };
 
@@ -232,6 +277,21 @@ export function createSqliteVecBackend(config: SqliteVecBackendConfig): SqliteVe
         distance: number;
       }[];
       return rows.map((r) => ({ id: r.id, distance: r.distance }));
+    },
+
+    searchCosine: (query: readonly number[], limit: number): readonly SqliteVecHit[] => {
+      const limInt = Math.max(0, Math.floor(limit));
+      if (limInt === 0) return [];
+      // vecToBuf both validates dim AND L2-normalizes the query — keeps
+      // the searchCosine vs knn paths aligned on representation.
+      const buf = vecToBuf(query);
+      const countRow = countStmt.get() as { c: number };
+      if (countRow.c === 0) return [];
+      const rows = cosineSearchStmt.all(buf, Math.min(limInt, countRow.c)) as {
+        id: string;
+        dist: number;
+      }[];
+      return rows.map((r) => ({ id: r.id, distance: r.dist }));
     },
 
     count: (): number => {
