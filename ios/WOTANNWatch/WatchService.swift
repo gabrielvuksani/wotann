@@ -4,9 +4,10 @@ import WatchConnectivity
 #if canImport(ClockKit)
 import ClockKit
 #endif
-#if canImport(WidgetKit)
-import WidgetKit
-#endif
+// V9 Wave 6-PP: WidgetKit import dropped — `updateSmartStackRelevance`
+// no longer pushes a `WidgetCenter` reload because no watch widget
+// with kind "WOTANNWatchDispatchWidget" is registered. Re-add when a
+// real watch dispatch widget lands.
 import os.log
 
 // MARK: - WatchService
@@ -115,13 +116,21 @@ final class WatchService: ObservableObject {
 
     private func updateSmartStackRelevance() {
         let hasRunning = dispatches.contains(where: \.isRunning)
-        #if canImport(WidgetKit)
-        // iOS 17 / watchOS 10+: request a timeline reload when the
-        // running state changes. The widget's TimelineEntry uses
-        // `RelevantContext` to raise its Smart Stack score.
-        WidgetCenter.shared.reloadTimelines(ofKind: "WOTANNWatchDispatchWidget")
-        #endif
-        Self.log.info("Smart Stack relevance \(hasRunning ? "raised" : "lowered", privacy: .public)")
+        // V9 Wave 6-PP: previously this method called
+        // `WidgetCenter.shared.reloadTimelines(ofKind: "WOTANNWatchDispatchWidget")`
+        // but no widget with that kind is registered in any
+        // `WidgetBundle` (the WOTANNWidgets bundle declares only
+        // `CostWidget`, `AgentStatusWidget`, `TaskProgressLiveActivity`
+        // and four `ControlWidget`s; the WOTANNWatch target ships no
+        // widget at all). The orphan kind silently no-op'd inside
+        // WidgetCenter, but the log line below claimed Smart Stack
+        // relevance was being raised/lowered, which was a false claim
+        // (quality bar #6 — honest stubs). Until a real watch dispatch
+        // widget ships, log the deferred state instead of pretending we
+        // pushed a reload.
+        Self.log.info(
+            "Smart Stack relevance would be \(hasRunning ? "raised" : "lowered", privacy: .public) (no watch widget registered yet)"
+        )
     }
 }
 

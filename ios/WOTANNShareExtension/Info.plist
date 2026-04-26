@@ -26,6 +26,25 @@
 		<string>com.apple.share-services</string>
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+		<!-- V9 Wave 6-PP: Tighten activation to only the content types
+		     ShareViewController.extractSharedContent() actually handles
+		     (public.plain-text + public.url). Without explicit predicates
+		     iOS either widens the rule (older OS) or refuses activation
+		     entirely (newer OS, App Store review), so list the supported
+		     types and cap counts. The handler currently bails on images,
+		     so we deliberately do NOT advertise NSExtensionActivationSupportsImage. -->
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>NSExtensionActivationRule</key>
+			<dict>
+				<key>NSExtensionActivationSupportsText</key>
+				<true/>
+				<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
+				<integer>1</integer>
+				<key>NSExtensionActivationSupportsWebPageWithMaxCount</key>
+				<integer>1</integer>
+			</dict>
+		</dict>
 	</dict>
 </dict>
 </plist>
