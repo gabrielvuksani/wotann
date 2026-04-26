@@ -15,7 +15,10 @@
  *   - initialize
  *   - tools/list
  *   - tools/call
- *   - prompts/list (minimal; returns [])
+ *   - prompts/list — NOT advertised. Capability dropped from `initialize`
+ *     so spec-compliant clients won't ask. A defensive `prompts/list`
+ *     handler still returns `[]` for misbehaving clients (V9 Wave 3-N
+ *     audit fix per QB#6: don't advertise capabilities you can't honor).
  *   - resources/list (V9 T4.1 — returns WOTANN's MCP Apps UI resources)
  *   - resources/read (V9 T4.1 — returns rendered HTML for ui://wotann/* URIs)
  *   - shutdown
@@ -300,9 +303,14 @@ export class WotannMcpServer {
         this.initialized = true;
         return {
           protocolVersion: MCP_PROTOCOL_VERSION,
+          // V9 Wave 3-N audit fix (QB#6 honest behavior): only advertise
+          // capabilities we actually honor. `prompts` was previously
+          // advertised but the handler always returned `[]`, dead-lettering
+          // any client that called `prompts/list`. Until WOTANN skills are
+          // mapped to MCP prompt schemas (with arguments + templates), the
+          // capability is omitted so spec-compliant clients won't ask.
           capabilities: {
             tools: {},
-            prompts: {},
             resources: {},
           },
           serverInfo: this.info,
@@ -333,6 +341,11 @@ export class WotannMcpServer {
         return result;
       }
       case "prompts/list":
+        // Defensive fallback only — the `prompts` capability is NOT
+        // advertised in the `initialize` response (see capabilities
+        // block above). A spec-compliant client should never reach
+        // this case. Returning an empty list (rather than throwing
+        // `method not implemented`) keeps misbehaving clients quiet.
         return { prompts: [] };
       case "resources/list":
         // V9 T4.1 — expose WOTANN's native UI resources (memory
