@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   classifyFeedback,
@@ -14,11 +15,33 @@ import {
 } from "./autodream.js";
 import { DreamPipeline, type DreamPipelineResult } from "./dream-pipeline.js";
 import { MemoryStore } from "../memory/store.js";
+// V9 GA-08 — wire self-evolution to dream cycles. After every workspace
+// consolidation pass we hand the recently-collected corrections + the
+// session's preference snapshot to `SelfEvolutionEngine.updateUserProfile`
+// so USER.md grows from session learning instead of staying empty.
+// Audit-traceable: a sibling-site grep for `selfEvolution.updateUserProfile`
+// outside `self-evolution.ts` will land here, satisfying QB #14.
+import { SelfEvolutionEngine } from "./self-evolution.js";
 
 export interface WorkspaceDreamOptions {
   readonly force?: boolean;
   /** Use 3-phase Light/REM/Deep pipeline (default: true). False = legacy 4-phase. */
   readonly useThreePhase?: boolean;
+  /**
+   * V9 GA-08 — override the SelfEvolutionEngine used for USER.md updates.
+   * Tests inject a stub instance pointed at a temp directory so production
+   * `~/.wotann/USER.md` isn't clobbered. Production callers pass undefined
+   * and the runner constructs a default engine pointed at homedir + .wotann.
+   */
+  readonly selfEvolution?: SelfEvolutionEngine;
+  /**
+   * V9 GA-08 — override the wotann directory the SelfEvolutionEngine
+   * writes USER.md into. When provided AND `selfEvolution` is undefined,
+   * the runner constructs an engine targeting this directory. When
+   * `selfEvolution` is provided, this option is ignored. Tests use this
+   * to keep USER.md inside the temp workspace.
+   */
+  readonly userProfileDir?: string;
 }
 
 export interface WorkspaceDreamIfDueOptions extends WorkspaceDreamOptions {
@@ -41,6 +64,15 @@ export interface WorkspaceDreamResult {
   readonly reason?: string;
   /** Present when 3-phase pipeline was used */
   readonly pipelineResult?: DreamPipelineResult;
+  /**
+   * V9 GA-08 — true when the dream cycle wired
+   * `SelfEvolutionEngine.updateUserProfile` after consolidation.
+   * False on every dry-run / gates-failed / non-executed cycle so
+   * callers can confirm USER.md learning actually fired (per QB #14).
+   */
+  readonly userProfileUpdated?: boolean;
+  /** V9 GA-08 — absolute path written by updateUserProfile. */
+  readonly userProfilePath?: string;
 }
 
 interface StoredDreamMetadata {
@@ -96,6 +128,10 @@ export function runWorkspaceDream(
         instinctsPath,
         lastDreamPath,
         reason: "Gates not satisfied. Re-run with --force to consolidate anyway.",
+        // V9 GA-08 — explicit false on gates-failed cycles so callers
+        // can distinguish "dream didn't run" from "dream ran but profile
+        // update failed" (per WorkspaceDreamResult JSDoc + QB #14).
+        userProfileUpdated: false,
       };
     }
 
@@ -137,6 +173,64 @@ export function runWorkspaceDream(
       rulesUpdated: consolidated.rulesUpdated,
     });
 
+    // V9 GA-08 — wire SelfEvolutionEngine.updateUserProfile so USER.md
+    // grows from session learning instead of staying empty (closes META
+    // §5.1 "scaffolded-but-not-wired"). Resolution order:
+    //   1. options.selfEvolution (test injection)
+    //   2. options.userProfileDir (test workspace dir)
+    //   3. default engine targeting homedir + .wotann (production)
+    // The engine derives USER.md from `wotannDir/USER.md` so we mirror
+    // that path here for the result envelope. Any failure is caught and
+    // surfaced as userProfileUpdated:false (QB #6 honest fallback) so
+    // the dream cycle still returns success — USER.md learning is
+    // best-effort, not load-bearing for instincts/gotchas.
+    const evolutionEngine =
+      options.selfEvolution ??
+      new SelfEvolutionEngine({
+        wotannDir: options.userProfileDir ?? join(homedir(), ".wotann"),
+      });
+    const profileWotannDir =
+      options.userProfileDir ?? (options.selfEvolution ? undefined : join(homedir(), ".wotann"));
+    const profilePathHint = profileWotannDir ? join(profileWotannDir, "USER.md") : undefined;
+
+    let userProfileUpdated = false;
+    let userProfilePath: string | undefined;
+    try {
+      const profileCorrections = inputs.corrections.map((entry) => ({
+        before: entry.context,
+        after: entry.message,
+      }));
+      // Preferences snapshot: pulled from the "user" memory block which
+      // (per memory taxonomy) holds Gabriel's role, preferences, and
+      // knowledge level. Honest-empty fallback when the block is empty —
+      // we never fabricate preferences. The runner additionally guards
+      // the call so no spurious USER.md is written when both maps are
+      // empty.
+      const preferences: Record<string, string> = {};
+      const preferenceEntries = store.getByBlock("user");
+      for (const entry of preferenceEntries) {
+        preferences[entry.key] = entry.value;
+      }
+
+      if (profileCorrections.length > 0 || Object.keys(preferences).length > 0) {
+        evolutionEngine.updateUserProfile(preferences, profileCorrections);
+        userProfileUpdated = true;
+        userProfilePath = profilePathHint;
+      }
+    } catch (error) {
+      // QB #6 — honest fallback. Log on stderr so operators can trace
+      // failures, but do NOT block the dream cycle from returning the
+      // (genuine) instinct + gotcha consolidation results.
+      // eslint-disable-next-line no-console
+      console.error(
+        `[dream-runner] SelfEvolutionEngine.updateUserProfile failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      userProfileUpdated = false;
+      userProfilePath = undefined;
+    }
+
     return {
       executed: true,
       forced: options.force === true,
@@ -151,6 +245,8 @@ export function runWorkspaceDream(
       instinctsPath,
       lastDreamPath,
       pipelineResult,
+      userProfileUpdated,
+      userProfilePath,
     };
   } finally {
     store.releaseConsolidationLock();
@@ -208,9 +304,8 @@ function computeDreamGates(
     0,
   );
 
-  const idleMinutes = latestEventMs > 0
-    ? Math.max(0, Math.round((Date.now() - latestEventMs) / 60_000))
-    : 10_000;
+  const idleMinutes =
+    latestEventMs > 0 ? Math.max(0, Math.round((Date.now() - latestEventMs) / 60_000)) : 10_000;
 
   const lastDreamHoursAgo = readLastDreamAgeHours(lastDreamPath);
   return {
