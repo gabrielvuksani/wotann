@@ -201,6 +201,16 @@ atomicWrite(
   }),
 );
 
+// V9 Wave 6.7 (M-N6) — SIGINT dedupe. start.ts owns the signal handlers
+// because it's the only entry point that knows about pidPath and
+// statusPath. Setting this env var BEFORE constructing the daemon tells
+// KairosDaemon.start() to SKIP its own installShutdownHandlers(), so the
+// process never has two competing SIGINT chains that could call stop()
+// twice (the second call is a no-op via the `status === "stopped"`
+// guard, but the duplicate listener registration would still leak across
+// `daemon.stop()` -> `daemon.start()` cycles in tests).
+process.env["WOTANN_DAEMON_OWNS_SIGNALS"] = "1";
+
 const daemon = new KairosDaemon();
 
 // Graceful shutdown handlers

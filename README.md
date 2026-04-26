@@ -257,6 +257,7 @@ skills/               86 markdown skills (progressive disclosure)
 |---------|---------|
 | `wotann init` | Initialize workspace |
 | `wotann engine` | Start the KAIROS daemon |
+| `wotann run <prompt>` | Non-interactive — execute a prompt with full harness intelligence |
 | `wotann doctor` | Health diagnostics |
 | `wotann arena` | Compare models blind side-by-side |
 | `wotann autonomous <task>` | Autonomous execution with proof bundle |

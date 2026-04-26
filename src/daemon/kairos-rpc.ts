@@ -629,6 +629,27 @@ interface JWKSCacheEntry {
 const JWKS_CACHE = new Map<string, JWKSCacheEntry>();
 const JWKS_TTL_MS = 60 * 60 * 1000;
 
+// V9 Wave 6.7 (M-N3) — JWKS prune. Stale JWKS entries (older than 90s)
+// are evicted on demand by `pruneJWKSCache()`; the daemon-side subscription
+// sweep timer (KairosRPCHandler#dispose / startSubscriptionSweep) calls
+// this every 60s as a side-effect to keep the cache bounded.
+//
+// QB #6: never throws — Map.delete is total and the timestamp comparison
+// is pure. QB #7: module-level cache is acceptable here because JWKS
+// caching is a process-wide network optimization (not per-handler state)
+// and tests don't observe its contents.
+const JWKS_STALE_MS = 90 * 1000;
+export function pruneJWKSCache(now: number = Date.now()): number {
+  let evicted = 0;
+  for (const [issuer, entry] of JWKS_CACHE.entries()) {
+    if (now - entry.fetchedAt >= JWKS_STALE_MS) {
+      JWKS_CACHE.delete(issuer);
+      evicted++;
+    }
+  }
+  return evicted;
+}
+
 async function fetchJWKS(issuer: string): Promise<{ keys: readonly CodexJWK[] } | null> {
   const cached = JWKS_CACHE.get(issuer);
   if (cached && Date.now() - cached.fetchedAt < JWKS_TTL_MS) return cached.jwks;
@@ -1039,8 +1060,135 @@ export class KairosRPCHandler {
     }
   >();
 
+  // V9 Wave 6.7 (M-N4) — Subscription GC sweep. The five subscription
+  // maps above (computerSession / fleet / approval / delivery /
+  // liveActivity) accumulate entries for clients that connect, subscribe,
+  // and then disconnect without calling the explicit `unsubscribe` RPC.
+  // Without a sweep, the daemon's heap grows unbounded over its lifetime.
+  //
+  // Strategy: every SWEEP_INTERVAL_MS, drop any subscription whose
+  // `lastPolledAt` is older than SUBSCRIPTION_STALE_MS. The poll-based
+  // protocol (NDJSON IPC) means a healthy client polls within seconds,
+  // so a stale window of 5 minutes is conservative — anything quieter
+  // than that is almost certainly a dead connection.
+  //
+  // Each disposed entry calls its `.dispose()` (unsubscribe from the
+  // upstream emitter) so the source store doesn't keep emitting into
+  // a forgotten buffer. QB #6: dispose calls are wrapped in try/catch
+  // so one bad subscriber can't poison the sweep. QB #7: the timer is
+  // per-handler-instance, not module-global.
+  private static readonly SWEEP_INTERVAL_MS = 60_000;
+  private static readonly SUBSCRIPTION_STALE_MS = 5 * 60_000;
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+
   constructor() {
     this.registerBuiltinMethods();
+    this.startSubscriptionSweep();
+  }
+
+  /**
+   * V9 Wave 6.7 (M-N3 + M-N4) — start the periodic GC sweep. Called from
+   * the constructor so every handler instance has its own timer (QB #7).
+   * The timer is `unref()`'d so it never blocks process exit on its own.
+   *
+   * Side-effect: also prunes the module-level JWKS_CACHE on every tick to
+   * keep that cache bounded without a second timer.
+   */
+  private startSubscriptionSweep(): void {
+    if (this.sweepTimer) return;
+    this.sweepTimer = setInterval(() => {
+      try {
+        this.sweepStaleSubscriptions();
+      } catch {
+        /* QB #6: cleanup must not throw or the timer will be unscheduled */
+      }
+      try {
+        pruneJWKSCache();
+      } catch {
+        /* QB #6: pure-Map prune cannot throw, but defensive */
+      }
+    }, KairosRPCHandler.SWEEP_INTERVAL_MS);
+    if (typeof this.sweepTimer.unref === "function") {
+      this.sweepTimer.unref();
+    }
+  }
+
+  /**
+   * V9 Wave 6.7 (M-N4) — sweep stale entries from the five polling
+   * subscription maps. Public for tests so they can drive the sweep
+   * deterministically without waiting on the 60s timer.
+   *
+   * Returns the count of entries evicted across all maps.
+   */
+  sweepStaleSubscriptions(now: number = Date.now()): number {
+    const cutoff = now - KairosRPCHandler.SUBSCRIPTION_STALE_MS;
+    let evicted = 0;
+    const maps: Array<Map<string, { readonly dispose: () => void; lastPolledAt: number }>> = [
+      this.computerSessionSubscriptions,
+      // fleetSubscriptions has the same shape (dispose + lastPolledAt) but
+      // a different value type so we cast through unknown for the loop.
+      this.fleetSubscriptions as unknown as Map<
+        string,
+        { readonly dispose: () => void; lastPolledAt: number }
+      >,
+      this.approvalSubscriptions as unknown as Map<
+        string,
+        { readonly dispose: () => void; lastPolledAt: number }
+      >,
+      this.deliverySubscriptions as unknown as Map<
+        string,
+        { readonly dispose: () => void; lastPolledAt: number }
+      >,
+      this.liveActivitySubscriptions as unknown as Map<
+        string,
+        { readonly dispose: () => void; lastPolledAt: number }
+      >,
+    ];
+    for (const map of maps) {
+      for (const [id, sub] of map.entries()) {
+        if (sub.lastPolledAt < cutoff) {
+          try {
+            sub.dispose();
+          } catch {
+            /* QB #6: a single bad subscriber must not poison the sweep */
+          }
+          map.delete(id);
+          evicted++;
+        }
+      }
+    }
+    return evicted;
+  }
+
+  /**
+   * V9 Wave 6.7 (M-N3 + M-N4) — release the sweep timer and dispose
+   * every remaining subscription. Called from KairosDaemon.stop() so
+   * daemon teardown drains the in-flight subscribers cleanly. Idempotent.
+   */
+  dispose(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+    // Drain ALL remaining subscriptions regardless of staleness — daemon
+    // is going down, so even fresh subscribers must release their handles.
+    const maps: Array<Map<string, { readonly dispose: () => void }>> = [
+      this.computerSessionSubscriptions,
+      this.fleetSubscriptions as unknown as Map<string, { readonly dispose: () => void }>,
+      this.approvalSubscriptions as unknown as Map<string, { readonly dispose: () => void }>,
+      this.deliverySubscriptions as unknown as Map<string, { readonly dispose: () => void }>,
+      this.liveActivitySubscriptions as unknown as Map<string, { readonly dispose: () => void }>,
+    ];
+    for (const map of maps) {
+      for (const sub of map.values()) {
+        try {
+          sub.dispose();
+        } catch {
+          /* QB #6: cleanup must not throw */
+        }
+      }
+      map.clear();
+    }
   }
 
   /**
@@ -2700,7 +2848,12 @@ export class KairosRPCHandler {
       let config: Record<string, unknown> = {};
       try {
         if (!existsSync(wotannDir)) {
-          mkdirSync(wotannDir, { recursive: true });
+          // V9 Wave 6.7 (M-N9) — sensitive directory: 0o700 to match the
+          // daemon's own bootstrap (see kairos.ts:Phase A3). The wotann
+          // home contains session-token.json, copilot-token.json, and
+          // every credential file the harness writes — locking the parent
+          // dir to owner-only matches the per-file 0600 perms.
+          mkdirSync(wotannDir, { recursive: true, mode: 0o700 });
         }
         if (existsSync(configPath)) {
           const raw = readFileSync(configPath, "utf-8");
@@ -7975,7 +8128,11 @@ export class KairosRPCHandler {
       };
       try {
         const { writeFileSync, mkdirSync } = await import("node:fs");
-        mkdirSync(resolveWotannHome(), { recursive: true });
+        // V9 Wave 6.7 (M-N9) — sensitive directory: 0o700 to match the
+        // daemon's other wotann-home creators. Notification prefs live
+        // alongside session tokens; matching perms keeps the security
+        // posture uniform.
+        mkdirSync(resolveWotannHome(), { recursive: true, mode: 0o700 });
         const prefs = {
           enabled: enabled ?? true,
           types: types ?? ["task", "error", "briefing"],

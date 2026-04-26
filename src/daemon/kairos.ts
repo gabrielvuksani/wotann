@@ -448,7 +448,19 @@ export class KairosDaemon {
     // daemon flushes + cleans up even on SIGINT/SIGTERM. Previously a
     // Ctrl-C mid-write left a stranded .tmp.*; now stop() runs in the
     // handler before the process exits.
-    this.installShutdownHandlers();
+    //
+    // V9 Wave 6.7 (M-N6) — SIGINT dedupe: when the daemon is launched via
+    // src/daemon/start.ts (the Tauri sidecar entry), start.ts owns the
+    // SIGINT/SIGTERM cleanup because it has additional responsibilities
+    // the daemon can't see (pidPath unlink, statusPath atomic rewrite,
+    // process.exit). In that mode start.ts sets WOTANN_DAEMON_OWNS_SIGNALS=1
+    // BEFORE constructing KairosDaemon, and we skip installing competing
+    // process-level handlers here. In every other entry point (in-process
+    // tests, embedded library use, `wotann engine`) the daemon retains
+    // ownership of its own teardown — which is the safe default.
+    if (process.env["WOTANN_DAEMON_OWNS_SIGNALS"] !== "1") {
+      this.installShutdownHandlers();
+    }
 
     // Phase A1: Initialize WotannRuntime with discovered providers
     try {
@@ -474,7 +486,13 @@ export class KairosDaemon {
       // Phase A3: Start IPC server on Unix Domain Socket
       const wotannDir = resolveWotannHome();
       if (!existsSync(wotannDir)) {
-        mkdirSync(wotannDir, { recursive: true });
+        // V9 Wave 6.7 (M-N9) — sensitive directory: mode 0o700 so the
+        // session-token.json (mode 0600), copilot-token.json (mode 0600),
+        // and other credential artifacts created below are protected by
+        // the parent dir's perms too. Without 0o700 a co-tenant on the
+        // same machine could `ls` the dir and learn the token filenames
+        // even if they couldn't read the contents.
+        mkdirSync(wotannDir, { recursive: true, mode: 0o700 });
       }
 
       // SECURITY (B1): mint a fresh session token at daemon startup and
@@ -995,9 +1013,20 @@ export class KairosDaemon {
       this.tickInterval = null;
     }
 
-    // Disconnect unified dispatch plane channels on shutdown
+    // Disconnect unified dispatch plane channels on shutdown.
+    //
+    // V9 Wave 6.7 (M-N5) — explicit catch with logging. Previously the
+    // `.catch(() => {})` swallowed disconnect failures silently, so a
+    // hung adapter (e.g. a Slack WebSocket frozen mid-close) left no
+    // trace in the daemon log. Now we record the failure so post-mortem
+    // diagnostics can correlate stranded connections with daemon shutdown.
     if (this.dispatchPlane) {
-      void this.dispatchPlane.disconnectAll().catch(() => {});
+      void this.dispatchPlane.disconnectAll().catch((err: unknown) => {
+        this.appendLog({
+          type: "error",
+          message: `Dispatch plane disconnectAll failed during stop(): ${err instanceof Error ? err.message : String(err)}`,
+        });
+      });
       this.dispatchPlane = null;
     }
 
@@ -1136,6 +1165,20 @@ export class KairosDaemon {
     }
     this.sleepTimeConsumer = null;
     this.lastSleepSessionAt = null;
+    // V9 Wave 6.7 (M-N3 + M-N4) — dispose the RPC handler so its
+    // subscription-sweep timer is cleared and every remaining polling
+    // subscriber is drained. Idempotent; safe to call even if no
+    // subscribers ever connected.
+    if (this.rpcHandler) {
+      try {
+        this.rpcHandler.dispose();
+      } catch (err) {
+        this.appendLog({
+          type: "error",
+          message: `RPC handler dispose failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
     this.rpcHandler = null;
 
     this.appendLog({ type: "stop", message: "KAIROS daemon stopped" });
@@ -1938,19 +1981,33 @@ export class KairosDaemon {
         });
       }
 
-      // Proactive health checks (cost, CI, stale approvals)
-      void proactiveCheck(this.costOracle).catch(() => {
-        // Proactive check failure is non-fatal
+      // Proactive health checks (cost, CI, stale approvals).
+      //
+      // V9 Wave 6.7 (M-N11) — wrap with explicit logging. The check is
+      // non-fatal, but a silent swallow makes it impossible to notice
+      // when (e.g.) the cost oracle's CI poll is rate-limited 100% of
+      // the time. We log at heartbeat level — not error — to keep the
+      // signal calm but visible.
+      void proactiveCheck(this.costOracle).catch((err: unknown) => {
+        this.appendLog({
+          type: "heartbeat",
+          message: `proactiveCheck failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        });
       });
     }
 
     // Proactive heartbeat — every 20th tick (~5 min at 15s intervals)
     this.heartbeatTickCounter++;
     if (this.heartbeatTickCounter % 20 === 0) {
+      // V9 Wave 6.7 (M-N11) — explicit catch with heartbeat-level log
+      // (mirrors the proactiveCheck wire above). Non-fatal but observable.
       void proactiveHeartbeatCheck({
         activeTasks: this.backgroundAgents.listTasks(),
-      }).catch(() => {
-        // Proactive heartbeat failure is non-fatal
+      }).catch((err: unknown) => {
+        this.appendLog({
+          type: "heartbeat",
+          message: `proactiveHeartbeatCheck failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+        });
       });
     }
 
