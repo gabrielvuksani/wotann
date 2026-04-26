@@ -86,8 +86,25 @@ jobs:
         run: npm rebuild better-sqlite3
       - name: Typecheck
         run: npx tsc --noEmit
-      - name: Test
-        run: npm test
+      # Split the 583-test-file suite into 3 sharded vitest runs so each
+      # fork starts with a fresh V8 heap. Single-fork serial runs hit a
+      # CI OOM cliff at ~146 s of accumulated memory even with 6 GB
+      # max-old-space; threads pool broke local tests (some test files
+      # mutate process-globals on import). Sharding keeps fork memory
+      # bounded by N/3 files per shard. Shards run serially in this job
+      # to keep memory pressure linear; ~2-3 min each = ~7-9 min total.
+      - name: Test (shard 1/3)
+        run: npx vitest run --shard=1/3
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+      - name: Test (shard 2/3)
+        run: npx vitest run --shard=2/3
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+      - name: Test (shard 3/3)
+        run: npx vitest run --shard=3/3
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
       - name: Build
         run: npm run build
 
