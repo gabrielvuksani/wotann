@@ -1026,7 +1026,16 @@ final class RemoteDesktopViewModel: ObservableObject {
     /// - #7 (per-session state): subscription state lives on the view
     ///   model, never on a module-global.
     /// - #11 (sibling-site scan): this view is the SINGLE site on iOS
-    ///   subscribing to `cursor.stream`.
+    ///   subscribing to `cursor.stream` AND `cursor.update`.
+    ///
+    /// WAVE 6-KK / H-7: prior to this wave iOS subscribed to
+    /// `cursor.stream` only. The H-7 audit observed that no iOS file
+    /// referenced `cursor.update`, so any daemon path that emitted the
+    /// per-position update topic instead of the batched stream topic
+    /// dead-lettered on the iOS side. We now subscribe to BOTH topics
+    /// and route them through the same handler — keeps the overlay
+    /// behavior identical regardless of which broadcast path the
+    /// desktop-control agent took.
     func subscribeToCursorStream() {
         guard !cursorSubscribed, let rpcClient else { return }
         cursorSubscribed = true
@@ -1045,6 +1054,19 @@ final class RemoteDesktopViewModel: ObservableObject {
         }
 
         rpcClient.subscribe("cursor.stream") { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleCursorEvent(event)
+            }
+        }
+
+        // Wave 6-KK / H-7: also wire `cursor.update`. The daemon may
+        // emit either topic depending on the producer; both ship the
+        // same {x, y} payload shape so a single handler is correct.
+        // We do NOT seed-call cursor.update because the producer side
+        // (kairos.ts) currently routes everything through cursor.stream
+        // — but the subscription is harmless when the topic is silent
+        // and immediate when a future producer surfaces.
+        rpcClient.subscribe("cursor.update") { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleCursorEvent(event)
             }

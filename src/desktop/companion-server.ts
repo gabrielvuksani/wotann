@@ -44,6 +44,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { hostname, networkInterfaces } from "node:os";
 import { join as pathJoin } from "node:path";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
+import { createSqliteKvStore, type SQLiteKvStore } from "../utils/sqlite-kv-store.js";
 import { WebSocketServer } from "ws";
 import {
   takeScreenshot,
@@ -252,10 +253,34 @@ export class PairingManager {
   private readonly sessions: Map<string, PairingSession> = new Map();
   private readonly maxDevices: number;
   private readonly secureAuth: SecureAuthManager;
+  // Wave 6-KK / H-24 — instance-level SQLite handle (QB #7) so the
+  // paired-devices roster survives daemon restart. Without this, every
+  // restart forces every iOS client to re-pair via QR — UX regression
+  // that the audit flagged. Pending requests + sessions stay in-memory
+  // (the former are short-lived QR challenges; the latter are bound
+  // to live WebSocket connections and have no meaning post-restart).
+  // QB #6: when better-sqlite3 is unavailable, helper warns + we stay
+  // in pure-memory mode (matches pre-Wave-6-KK behavior).
+  private readonly persistence: SQLiteKvStore | null;
 
-  constructor(maxDevices: number = 3) {
+  constructor(maxDevices: number = 3, persistPath?: string) {
     this.maxDevices = maxDevices;
     this.secureAuth = new SecureAuthManager();
+    // H-24: rehydrate paired devices from disk. We deliberately default
+    // the path to ~/.wotann/companion-devices.db when the caller doesn't
+    // override — every CompanionServer in production wants persistence,
+    // and tests that need pure-memory behavior pass an explicit ":memory:"
+    // path to keep their isolation.
+    const resolvedPath = persistPath ?? resolveWotannHomeSubdir("companion-devices.db");
+    const store = createSqliteKvStore(resolvedPath, "devices");
+    this.persistence = store.usable ? store : null;
+    if (this.persistence) {
+      for (const { value } of this.persistence.loadAll<CompanionDevice>()) {
+        if (value && typeof value === "object" && typeof value.id === "string") {
+          this.devices.set(value.id, value);
+        }
+      }
+    }
   }
 
   private upsertDeviceSession(
@@ -276,6 +301,10 @@ export class PairingManager {
       capabilities: ["voice-input", "push-notify", "file-share", "sync-history", "remote-control"],
     };
     this.devices.set(deviceId, device);
+    // Wave 6-KK / H-24: mirror pairing into SQLite so the device roster
+    // survives daemon restart. Best-effort — kv-store helper swallows
+    // errors per QB #6.
+    this.persistence?.put(deviceId, device);
 
     const existingSession = [...this.sessions.values()].find(
       (session) => session.device.id === deviceId,
@@ -455,6 +484,8 @@ export class PairingManager {
    */
   unpairDevice(deviceId: string): boolean {
     const removed = this.devices.delete(deviceId);
+    // Wave 6-KK / H-24: also drop persisted row.
+    this.persistence?.delete(deviceId);
     // Also remove associated sessions
     for (const [sessionId, session] of this.sessions) {
       if (session.device.id === deviceId) {
@@ -503,7 +534,11 @@ export class PairingManager {
   touchDevice(deviceId: string): void {
     const device = this.devices.get(deviceId);
     if (device) {
-      this.devices.set(deviceId, { ...device, lastSeen: new Date().toISOString() });
+      const updated: CompanionDevice = { ...device, lastSeen: new Date().toISOString() };
+      this.devices.set(deviceId, updated);
+      // Wave 6-KK / H-24: mirror lastSeen so doctor / diagnostics can
+      // reason about device staleness even after a daemon restart.
+      this.persistence?.put(deviceId, updated);
     }
   }
 

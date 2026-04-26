@@ -73,6 +73,7 @@
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { UnifiedEvent } from "../channels/fan-out.js";
+import { createSqliteKvStore, type SQLiteKvStore } from "../utils/sqlite-kv-store.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -275,6 +276,14 @@ export interface FileDeliveryOptions {
   /** Inject a deterministic token minter — tests use this to compare
    * against known values. Default uses randomBytes(24) base64url. */
   readonly mintToken?: () => string;
+  /**
+   * Wave 6-KK / H-24 — optional SQLite path so deliveries survive daemon
+   * restart. When supplied, every notify/acknowledge/sweepExpired mirrors
+   * the DeliveryRecord to disk. On construction the queue rehydrates from
+   * the same path. Honest fallback per QB #6 when better-sqlite3 is
+   * unavailable: helper warns + queue stays in pure-memory mode.
+   */
+  readonly persistPath?: string;
 }
 
 // ── Token helpers ─────────────────────────────────────────
@@ -325,6 +334,10 @@ export class FileDelivery {
   private readonly mintToken: () => string;
   private broadcast: BroadcastFn | null;
   private creationExists: CreationExistsFn | null;
+  // Wave 6-KK / H-24 — instance-level SQLite handle (QB #7). Null when
+  // the caller didn't supply a path OR the kv-store helper failed to open
+  // it (handler logged once + we coerce to null for cleaner reads).
+  private readonly persistence: SQLiteKvStore | null;
 
   constructor(options: FileDeliveryOptions = {}) {
     this.config = {
@@ -336,6 +349,19 @@ export class FileDelivery {
     this.mintToken = options.mintToken ?? defaultMintToken;
     this.broadcast = options.broadcast ?? null;
     this.creationExists = options.creationExists ?? null;
+    if (options.persistPath) {
+      const store = createSqliteKvStore(options.persistPath, "deliveries");
+      this.persistence = store.usable ? store : null;
+      if (this.persistence) {
+        for (const { value } of this.persistence.loadAll<DeliveryRecord>()) {
+          if (value && typeof value === "object" && typeof value.deliveryId === "string") {
+            this.records.set(value.deliveryId, value);
+          }
+        }
+      }
+    } else {
+      this.persistence = null;
+    }
   }
 
   /**
@@ -443,6 +469,7 @@ export class FileDelivery {
       acknowledgements: [],
     };
     this.records.set(record.deliveryId, record);
+    this.persistence?.put(record.deliveryId, record);
 
     const event: DeliveryEvent = {
       type: "notified",
@@ -524,6 +551,7 @@ export class FileDelivery {
       acknowledgements: [...existing.acknowledgements, newAck],
     };
     this.records.set(next.deliveryId, next);
+    this.persistence?.put(next.deliveryId, next);
 
     // Only emit the internal subscriber event on the FIRST transition out
     // of pending. Subsequent per-surface acks still fire the broadcast so
@@ -574,6 +602,7 @@ export class FileDelivery {
         state: "expired",
       };
       this.records.set(id, next);
+      this.persistence?.put(id, next);
       expired.push(next);
       const event: DeliveryEvent = {
         type: "expired",
@@ -665,6 +694,7 @@ export class FileDelivery {
     for (const [id, rec] of this.records) {
       if (rec.createdAt < cutoff) {
         this.records.delete(id);
+        this.persistence?.delete(id);
       }
     }
   }

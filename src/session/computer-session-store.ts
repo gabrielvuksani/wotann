@@ -19,6 +19,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { createSqliteKvStore, type SQLiteKvStore } from "../utils/sqlite-kv-store.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -156,6 +157,19 @@ export interface PendingApproval {
 
 export interface StoreConfig {
   readonly maxSessions: number;
+  /**
+   * Wave 6-KK / H-24 — optional SQLite path so sessions survive daemon
+   * restart. When set, every Session mutation mirrors a JSON snapshot to
+   * `<persistPath>` and the constructor rehydrates from it. The
+   * EventEmitter and per-session subscribers are NOT persisted (they're
+   * process-scoped by definition); when a rehydrated session is read,
+   * subscribers see history replay via the existing `events` array on
+   * the session record.
+   *
+   * QB #6: when better-sqlite3 fails to load at the path, the store
+   * stays usable in pure in-memory mode (matches pre-Wave-6-KK).
+   */
+  readonly persistPath?: string;
 }
 
 const DEFAULT_CONFIG: StoreConfig = {
@@ -289,11 +303,32 @@ export class ComputerSessionStore {
   private readonly pendingApprovals = new Map<string, PendingApproval>();
   private readonly emitter = new EventEmitter();
   private readonly config: StoreConfig;
+  // Wave 6-KK / H-24 — instance-level SQLite handle. Per QB #7 every
+  // store gets its own DB; null when caller didn't request persistence
+  // OR the SQLite handle failed to open (helper logs once + returns
+  // an unusable handle that we coerce to null here for cleaner reads).
+  private readonly persistence: SQLiteKvStore | null;
 
   constructor(config?: Partial<StoreConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     // EventEmitter default maxListeners is 10. Cross-surface means many subscribers.
     this.emitter.setMaxListeners(0);
+    // H-24 fix: open SQLite-backed kv store + rehydrate. The pendingApprovals
+    // map is REPLAYED from the rehydrated sessions (each Session carries its
+    // own `pendingApprovalId`), so we only persist Session itself.
+    if (this.config.persistPath) {
+      const store = createSqliteKvStore(this.config.persistPath, "sessions");
+      this.persistence = store.usable ? store : null;
+      if (this.persistence) {
+        for (const { value } of this.persistence.loadAll<Session>()) {
+          if (value && typeof value === "object" && typeof value.id === "string") {
+            this.sessions.set(value.id, value);
+          }
+        }
+      }
+    } else {
+      this.persistence = null;
+    }
   }
 
   // ── Create ─────────────────────────────────────────────
@@ -991,6 +1026,16 @@ export class ComputerSessionStore {
   }
 
   private emitEvent(event: SessionEvent): void {
+    // H-24 / Wave 6-KK: mirror the latest session shape to SQLite on every
+    // event tick. Reading the current Session from the in-memory map (rather
+    // than passing it through every callsite) keeps the persistence wire to
+    // a single point — easier to verify than 10+ `this.sessions.set()` sites.
+    // The mirror is best-effort (kv-store helper swallows errors per QB #6)
+    // so a transient SQLite failure never derails event emission.
+    const session = this.sessions.get(event.sessionId);
+    if (session) {
+      this.persistence?.put(session.id, session);
+    }
     this.emitter.emit(`session:${event.sessionId}`, event);
     this.emitter.emit("session:*", event);
   }
@@ -1006,16 +1051,20 @@ export class ComputerSessionStore {
     const terminal = all.find((s) => isTerminal(s.status));
     if (terminal) {
       this.sessions.delete(terminal.id);
+      this.persistence?.delete(terminal.id);
       return;
     }
     const pending = all.find((s) => s.status === "pending");
     if (pending) {
       this.sessions.delete(pending.id);
+      this.persistence?.delete(pending.id);
       return;
     }
     // All active — evict the very oldest. This is the bounded-queue safety valve.
     if (all[0]) {
-      this.sessions.delete(all[0].id);
+      const id = all[0].id;
+      this.sessions.delete(id);
+      this.persistence?.delete(id);
     }
   }
 }

@@ -50,6 +50,7 @@
 
 import type { ComputerSessionStore, Session } from "./computer-session-store.js";
 import type { UnifiedEvent } from "../channels/fan-out.js";
+import { createSqliteKvStore, type SQLiteKvStore } from "../utils/sqlite-kv-store.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -215,6 +216,18 @@ export interface LiveActivityOptions {
   readonly maxTitleLength?: number;
   readonly maxExpandedDetailLength?: number;
   readonly maxIconLength?: number;
+  /**
+   * Wave 6-KK / H-24 — optional SQLite path so the per-session current
+   * step survives a daemon restart. Without this, an in-flight Live
+   * Activity orphans on restart (the iOS Dynamic Island keeps showing
+   * a stale step that the daemon no longer remembers). Honest fallback
+   * per QB #6: if SQLite fails to open, manager stays in-memory only.
+   *
+   * NOTE: Wave 6-LL covers the iOS-side LiveActivityManager.swift
+   * restoration story; this is the desktop-side complement. The two
+   * stores live in different Swift/TS files so ownership doesn't overlap.
+   */
+  readonly persistPath?: string;
 }
 
 // ── Per-session state ──────────────────────────────────────
@@ -279,6 +292,12 @@ export class LiveActivityManager {
   private readonly config: LiveActivityConfig;
   private readonly state = new Map<string, SessionState>();
   private readonly listeners = new Set<(step: ExpandedStep) => void>();
+  // Wave 6-KK / H-24 — instance-level SQLite handle (QB #7). Null when the
+  // caller didn't supply a path OR the kv-store helper failed to open
+  // it. State persisted is the per-session SessionState (current
+  // ExpandedStep + lastEmitAt + firstSeenAt; stashed updates are
+  // intentionally NOT persisted because they're transient by design).
+  private readonly persistence: SQLiteKvStore | null;
 
   constructor(options: LiveActivityOptions = {}) {
     this.store = options.store ?? null;
@@ -291,6 +310,26 @@ export class LiveActivityManager {
         options.maxExpandedDetailLength ?? DEFAULT_CONFIG.maxExpandedDetailLength,
       maxIconLength: options.maxIconLength ?? DEFAULT_CONFIG.maxIconLength,
     };
+    if (options.persistPath) {
+      const persistStore = createSqliteKvStore(options.persistPath, "live_activity");
+      this.persistence = persistStore.usable ? persistStore : null;
+      if (this.persistence) {
+        for (const { value } of this.persistence.loadAll<SessionState>()) {
+          if (value && typeof value === "object" && typeof value.firstSeenAt === "number") {
+            // Strip the transient `stashed` slot on rehydrate — bursts in
+            // flight before the restart are gone by definition.
+            this.state.set(value.current?.sessionId ?? "", {
+              current: value.current,
+              lastEmitAt: value.lastEmitAt,
+              stashed: null,
+              firstSeenAt: value.firstSeenAt,
+            });
+          }
+        }
+      }
+    } else {
+      this.persistence = null;
+    }
   }
 
   /**
@@ -436,6 +475,7 @@ export class LiveActivityManager {
    */
   drop(sessionId: string): void {
     this.state.delete(sessionId);
+    this.persistence?.delete(sessionId);
   }
 
   /** Count of sessions holding live (dispatched) state. */
@@ -498,6 +538,7 @@ export class LiveActivityManager {
       firstSeenAt,
     };
     this.state.set(update.sessionId, nextState);
+    this.persistence?.put(update.sessionId, nextState);
 
     // Broadcast — best-effort cross-surface fan-out. Compact + expanded
     // shapes both land in the payload so each surface picks the render

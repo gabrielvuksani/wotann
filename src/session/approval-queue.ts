@@ -51,6 +51,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { UnifiedEvent } from "../channels/fan-out.js";
+import { createSqliteKvStore, type SQLiteKvStore } from "../utils/sqlite-kv-store.js";
 
 // ── Typed payloads ────────────────────────────────────────
 
@@ -268,6 +269,16 @@ export interface ApprovalQueueOptions {
   readonly broadcast?: BroadcastFn;
   readonly defaultTtlMs?: number;
   readonly previewMaxChars?: number;
+  /**
+   * Wave 6-KK / H-24 — optional SQLite persistence path. When supplied,
+   * approval records are mirrored to `<dbPath>` so a daemon restart
+   * doesn't blackhole every in-flight approval. Records are rehydrated
+   * into the in-memory map on construction. When omitted (the default
+   * for tests + lightweight callers), the queue stays purely in-memory
+   * and matches pre-Wave-6-KK behavior. QB #6: if better-sqlite3 fails
+   * to load at this path, the store warns and falls back to in-memory.
+   */
+  readonly persistPath?: string;
 }
 
 // ── Queue ─────────────────────────────────────────────────
@@ -283,6 +294,11 @@ export class ApprovalQueue {
   private readonly config: ApprovalQueueConfig;
   private readonly clock: () => number;
   private broadcast: BroadcastFn | null;
+  // Wave 6-KK / H-24 — instance-level SQLite handle (QB #7: per-instance,
+  // never module-global). Null when caller didn't supply `persistPath`,
+  // OR when the SQLite handle failed to open (helper logs once + falls
+  // through to in-memory only per QB #6).
+  private readonly persistence: SQLiteKvStore | null;
 
   constructor(options: ApprovalQueueOptions = {}) {
     this.config = {
@@ -291,6 +307,24 @@ export class ApprovalQueue {
     };
     this.clock = options.now ?? (() => Date.now());
     this.broadcast = options.broadcast ?? null;
+    // H-24 fix: open SQLite kv store + rehydrate. The kv-store helper
+    // is honest about failures — when better-sqlite3 fails to load (e.g.
+    // a missing native binary on a fresh CI image), `usable` reads false
+    // and every kv method becomes a no-op, leaving us in pure-in-memory
+    // mode with a one-time console.warn.
+    if (options.persistPath) {
+      const store = createSqliteKvStore(options.persistPath, "approvals");
+      this.persistence = store.usable ? store : null;
+      if (this.persistence) {
+        for (const { value } of this.persistence.loadAll<ApprovalRecord>()) {
+          if (value && typeof value === "object" && typeof value.approvalId === "string") {
+            this.records.set(value.approvalId, value);
+          }
+        }
+      }
+    } else {
+      this.persistence = null;
+    }
   }
 
   /**
@@ -343,6 +377,7 @@ export class ApprovalQueue {
       decidedAt: null,
     };
     this.records.set(record.approvalId, record);
+    this.persistence?.put(record.approvalId, record);
     const event: ApprovalEvent = {
       type: "enqueued",
       approvalId: record.approvalId,
@@ -404,6 +439,7 @@ export class ApprovalQueue {
       decidedAt: now,
     };
     this.records.set(params.approvalId, decided);
+    this.persistence?.put(decided.approvalId, decided);
     const event: ApprovalEvent = {
       type: "decided",
       approvalId: decided.approvalId,
@@ -446,6 +482,7 @@ export class ApprovalQueue {
         decidedAt: now,
       };
       this.records.set(id, next);
+      this.persistence?.put(id, next);
       expired.push(next);
       const event: ApprovalEvent = {
         type: "expired",
