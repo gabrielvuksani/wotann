@@ -589,6 +589,17 @@ struct SettingsView: View {
                     .foregroundColor(WTheme.Colors.textPrimary)
                     .frame(minHeight: 44)
             }
+
+            // H-E15: dead-letter queue surface so users can inspect
+            // tasks that exhausted their retry budget. Without this UI
+            // the DLQ accumulated silently on disk.
+            NavigationLink {
+                OfflineQueueDLQView()
+            } label: {
+                Label("Dead Letter Queue", systemImage: "tray.full")
+                    .foregroundColor(WTheme.Colors.textPrimary)
+                    .frame(minHeight: 44)
+            }
         } header: {
             Text("Data")
                 .font(.wotannScaled(size: 12, weight: .semibold))

@@ -39,7 +39,14 @@ struct WOTANNApp: App {
     /// Services wired at app startup.
     private let clipboardService = ClipboardService()
     private let localSendService = LocalSendService()
-    @StateObject private var crossDeviceService = CrossDeviceService()
+    // H-E18: CrossDeviceService was constructed and passed via
+    // .environmentObject() but no descendant view ever read its
+    // @Published properties (handoffActivity, iCloudSyncEnabled,
+    // lastSyncedAt). The dead instantiation also kicked off
+    // setupiCloudSync() at launch — work no consumer benefited from.
+    // Removed the @StateObject + .environmentObject; the file remains
+    // on disk for the future view that actually wires Handoff /
+    // iCloud-KVS UI.
     @StateObject private var continuityCameraService = ContinuityCameraService()
     // S4-25: one process-wide OnDeviceModelService so per-view `@StateObject`
     // instantiations do not each allocate a config struct + OfflineQueueService.
@@ -56,7 +63,6 @@ struct WOTANNApp: App {
                     ContentView()
                         .environmentObject(appState)
                         .environmentObject(connectionManager)
-                        .environmentObject(crossDeviceService)
                         .environmentObject(continuityCameraService)
                         .environmentObject(onDeviceModelService)
                         .preferredColorScheme(resolvedColorScheme)
