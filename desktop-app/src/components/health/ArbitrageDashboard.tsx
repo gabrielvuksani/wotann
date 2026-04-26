@@ -173,12 +173,12 @@ export function ArbitrageDashboard() {
                         <div className="flex items-center" style={{ gap: "var(--space-sm)" }}>
                           <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 500, color: "var(--color-text-primary)" }}>{est.model}</h3>
                           {est.recommended && (
-                            <span style={{ fontSize: "var(--font-size-2xs)", padding: "2px 6px", borderRadius: 9999, background: "var(--color-success-muted)", color: "var(--color-success)" }}>
+                            <span style={{ fontSize: "var(--font-size-2xs)", padding: "2px 6px", borderRadius: "var(--radius-pill)", background: "var(--color-success-muted)", color: "var(--color-success)" }}>
                               Recommended
                             </span>
                           )}
                           {isActive && (
-                            <span style={{ fontSize: "var(--font-size-2xs)", padding: "2px 6px", borderRadius: 9999, background: "var(--accent-muted)", color: "var(--color-primary)" }}>
+                            <span style={{ fontSize: "var(--font-size-2xs)", padding: "2px 6px", borderRadius: "var(--radius-pill)", background: "var(--accent-muted)", color: "var(--color-primary)" }}>
                               Active
                             </span>
                           )}
@@ -230,11 +230,11 @@ export function ArbitrageDashboard() {
                   </div>
 
                   {/* Cost bar visualization */}
-                  <div className="overflow-hidden" style={{ marginTop: "var(--space-sm)", height: 4, borderRadius: 9999, background: "var(--surface-3)" }}>
+                  <div className="overflow-hidden" style={{ marginTop: "var(--space-sm)", height: 4, borderRadius: "var(--radius-pill)", background: "var(--surface-3)" }}>
                     <div
                       style={{
                         height: "100%",
-                        borderRadius: 9999,
+                        borderRadius: "var(--radius-pill)",
                         width: `${Math.min((est.estimatedCost / 0.02) * 100, 100)}%`,
                         background: est.estimatedCost === 0 ? "var(--color-success)" :
                           est.estimatedCost < 0.01 ? "var(--info)" :

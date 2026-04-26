@@ -264,7 +264,7 @@ function WellCluster({
         alignItems: "center",
         gap: 1,
         padding: "0 2px",
-        borderRadius: 4,
+        borderRadius: "var(--radius-xs)",
         background: hovered ? "rgba(255,168,67,0.08)" : "transparent",
         transition: "background 120ms ease",
       }}
@@ -392,7 +392,7 @@ function RestoreConfirm({
             color: color("muted"),
             background: "transparent",
             border: "1px solid var(--border-subtle, rgba(138,176,224,0.15))",
-            borderRadius: 6,
+            borderRadius: "var(--radius-sm)",
             cursor: "pointer",
           }}
         >
@@ -410,7 +410,7 @@ function RestoreConfirm({
             color: color("background"),
             background: color("warning"),
             border: "none",
-            borderRadius: 6,
+            borderRadius: "var(--radius-sm)",
             cursor: "pointer",
           }}
         >
@@ -427,7 +427,7 @@ function RestoreConfirm({
           color: color("muted"),
           background: "transparent",
           border: "1px solid transparent",
-          borderRadius: 6,
+          borderRadius: "var(--radius-sm)",
           cursor: "pointer",
         }}
       >

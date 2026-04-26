@@ -194,7 +194,7 @@ export function ArenaView() {
                 style={{
                   width: 48,
                   height: 48,
-                  borderRadius: 12,
+                  borderRadius: "var(--radius-lg)",
                   border: "1px solid var(--border-subtle)",
                   background: color("surface"),
                   marginBottom: "var(--space-sm)",

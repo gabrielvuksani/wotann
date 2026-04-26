@@ -66,7 +66,7 @@ export function ScreenPreview() {
       style={{
         background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         padding: 16,
         display: "flex",
         flexDirection: "column",
@@ -103,7 +103,7 @@ export function ScreenPreview() {
               padding: "6px 14px",
               fontSize: 13,
               fontWeight: 500,
-              borderRadius: 8,
+              borderRadius: "var(--radius-md)",
               border: "1px solid rgba(255,255,255,0.08)",
               background: color("accent"),
               color: color("text"),
@@ -121,7 +121,7 @@ export function ScreenPreview() {
         style={{
           background: color("background"),
           border: "1px solid rgba(255,255,255,0.05)",
-          borderRadius: 8,
+          borderRadius: "var(--radius-md)",
           overflow: "hidden",
           aspectRatio: "16 / 10",
           display: "flex",

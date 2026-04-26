@@ -134,7 +134,7 @@ export function ChannelsTab({ onRefresh }: Props) {
 }
 
 const cardStyle: React.CSSProperties = {
-  background: PALETTE.surface, borderRadius: 12,
+  background: PALETTE.surface, borderRadius: "var(--radius-lg)",
   border: `1px solid ${PALETTE.divider}`, padding: 16,
   display: "flex", flexDirection: "column", gap: 12,
 };
@@ -153,7 +153,7 @@ function StatusDot({ connected }: { readonly connected: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
       <span style={{
-        width: 8, height: 8, borderRadius: 4,
+        width: 8, height: 8, borderRadius: "var(--radius-xs)",
         background: connected ? PALETTE.green : PALETTE.grey,
         boxShadow: connected ? `0 0 6px ${PALETTE.green}` : "none",
       }} />
@@ -181,7 +181,7 @@ function ConfigForm({ keys, values, onChange }: ConfigFormProps) {
             value={values[k] ?? ""}
             onChange={(e) => onChange(k, e.target.value)}
             style={{
-              minHeight: 36, padding: "8px 10px", borderRadius: 8,
+              minHeight: 36, padding: "8px 10px", borderRadius: "var(--radius-md)",
               background: PALETTE.bg, border: `1px solid ${PALETTE.divider}`,
               color: PALETTE.textPrimary, fontSize: 12, outline: "none",
               fontFamily: "ui-monospace, monospace",

@@ -429,7 +429,7 @@ export function PromptInput() {
           position: "relative",
           background: color("surface"),
           border: `1px solid ${isDragOver ? "rgba(10,132,255,0.4)" : isStreaming ? "rgba(10,132,255,0.2)" : "transparent"}`,
-          borderRadius: 12,
+          borderRadius: "var(--radius-lg)",
           transition: "border-color 150ms ease, box-shadow 150ms ease",
           boxShadow: isDragOver || isStreaming ? "0 0 0 3px rgba(10, 132, 255, 0.3)" : "none",
         }}

@@ -48,7 +48,7 @@ export function validateConfig(
 const fieldStyle = {
   background: "var(--surface-2)",
   borderColor: "var(--border-subtle)",
-  borderRadius: "12px",
+  borderRadius: "var(--radius-lg)",
   color: "var(--color-text-primary)",
 };
 

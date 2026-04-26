@@ -109,7 +109,7 @@ export function SealedScroll({
             style={{
               width: 22,
               height: 22,
-              borderRadius: 4,
+              borderRadius: "var(--radius-xs)",
               background: `linear-gradient(135deg, ${overallColor} 0%, color-mix(in srgb, ${overallColor} 66%, transparent) 100%)`,
               boxShadow: `0 0 8px color-mix(in srgb, ${overallColor} 40%, transparent)`,
               display: "inline-flex",
@@ -137,7 +137,7 @@ export function SealedScroll({
               color: tokenColor("muted"),
               padding: "2px 6px",
               background: "rgba(138,176,224,0.06)",
-              borderRadius: 4,
+              borderRadius: "var(--radius-xs)",
             }}
           >
             {bundleId}
@@ -158,7 +158,7 @@ export function SealedScroll({
               color: overallColor,
               background: "rgba(255,168,67,0.06)",
               border: `1px solid color-mix(in srgb, ${overallColor} 20%, transparent)`,
-              borderRadius: 6,
+              borderRadius: "var(--radius-sm)",
               cursor: "pointer",
               transition: "background 120ms ease",
             }}
@@ -212,7 +212,7 @@ function SealChip({ seal }: { seal: ProofSeal }): JSX.Element {
         padding: "6px 10px",
         background: bg,
         border: `1px solid color-mix(in srgb, ${color} 27%, transparent)`,
-        borderRadius: 8,
+        borderRadius: "var(--radius-md)",
         fontSize: 12,
         color: color,
       }}
@@ -221,7 +221,7 @@ function SealChip({ seal }: { seal: ProofSeal }): JSX.Element {
         style={{
           width: 24,
           height: 24,
-          borderRadius: 12,
+          borderRadius: "var(--radius-lg)",
           border: seal.state === "passed" ? "none" : `1px ${seal.state === "failed" ? "dashed" : "solid"} ${color}`,
           background: seal.state === "passed" ? color : "transparent",
           color: seal.state === "passed" ? tokenColor("background") : color,

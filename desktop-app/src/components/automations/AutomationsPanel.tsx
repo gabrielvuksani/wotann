@@ -394,7 +394,7 @@ function AutomationRow({
         style={{
           width: 8,
           height: 8,
-          borderRadius: 4,
+          borderRadius: "var(--radius-xs)",
           flexShrink: 0,
           background: automation.enabled ? "var(--color-success)" : "var(--color-text-muted)",
           boxShadow: automation.enabled ? "0 0 6px var(--color-success)" : "none",
@@ -424,7 +424,7 @@ function AutomationRow({
             style={{
               padding: "2px 8px",
               background: "var(--surface-3)",
-              borderRadius: 6,
+              borderRadius: "var(--radius-sm)",
               fontWeight: 600,
               textTransform: "uppercase",
               letterSpacing: "0.04em",
@@ -541,7 +541,7 @@ function Toggle({
             left: enabled ? 20 : 2,
             width: 22,
             height: 22,
-            borderRadius: 12,
+            borderRadius: "var(--radius-lg)",
             background: "#FFFFFF",
             boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
             transition: "left 180ms ease",

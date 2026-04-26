@@ -294,7 +294,7 @@ function LiveStream(props: LiveStreamProps): ReactElement {
           style={{
             width: 8,
             height: 8,
-            borderRadius: 4,
+            borderRadius: "var(--radius-xs)",
             background: result.connected
               ? "var(--color-success, #34c759)"
               : "var(--color-warning, #ff9f0a)",
@@ -433,7 +433,7 @@ function EventRow({ event }: EventRowProps): ReactElement {
         style={{
           width: 8,
           height: 8,
-          borderRadius: 4,
+          borderRadius: "var(--radius-xs)",
           marginTop: 6,
           background: kindColor(event.kind),
           flexShrink: 0,

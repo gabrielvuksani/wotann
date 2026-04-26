@@ -228,13 +228,13 @@ export function MemoryQualityCard() {
                 <span style={{ fontSize: "var(--font-size-2xs)", color: "var(--color-text-dim)", width: 56, textAlign: "right", fontFamily: "var(--font-mono)" }}>
                   {key}
                 </span>
-                <div style={{ flex: 1, height: 8, background: "var(--surface-1)", borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ flex: 1, height: 8, background: "var(--surface-1)", borderRadius: "var(--radius-xs)", overflow: "hidden" }}>
                   <div
                     style={{
                       height: "100%",
                       width: `${(weights[key] / maxWeight) * 100}%`,
                       background: "var(--accent)",
-                      borderRadius: 4,
+                      borderRadius: "var(--radius-xs)",
                       transition: "width 0.3s ease",
                       minWidth: 2,
                     }}

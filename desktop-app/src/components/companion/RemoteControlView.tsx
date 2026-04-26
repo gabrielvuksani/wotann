@@ -69,7 +69,7 @@ export function RemoteControlView() {
               style={{
                 width: 64,
                 height: 64,
-                borderRadius: 9999,
+                borderRadius: "var(--radius-pill)",
                 border: "1px solid var(--border-subtle)",
                 background: "var(--surface-2)",
                 marginBottom: "var(--space-md)",
@@ -100,7 +100,7 @@ export function RemoteControlView() {
                     <div className={session.status === "active" ? "animate-pulse" : ""} style={{
                       width: 12,
                       height: 12,
-                      borderRadius: 9999,
+                      borderRadius: "var(--radius-pill)",
                       background: session.status === "active" ? "var(--color-success)" :
                         session.status === "idle" ? "var(--color-warning)" : "var(--color-text-dim)",
                     }} aria-hidden="true" />
@@ -117,7 +117,7 @@ export function RemoteControlView() {
                   style={{
                     fontSize: "var(--font-size-xs)",
                     padding: "2px var(--space-sm)",
-                    borderRadius: 9999,
+                    borderRadius: "var(--radius-pill)",
                     ...(session.status === "active" ? { background: "var(--color-success-muted)", color: "var(--color-success)" } :
                     session.status === "idle" ? { background: "var(--color-warning-muted)", color: "var(--color-warning)" } :
                     { background: "var(--surface-3)", color: "var(--color-text-secondary)" }),

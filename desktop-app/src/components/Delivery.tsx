@@ -341,7 +341,7 @@ function DeliveryCard(props: DeliveryCardProps): ReactElement {
         style={{
           width: 8,
           height: 8,
-          borderRadius: 4,
+          borderRadius: "var(--radius-xs)",
           marginTop: 6,
           background: expired
             ? "var(--color-text-tertiary, #666)"

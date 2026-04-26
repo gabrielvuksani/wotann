@@ -161,7 +161,7 @@ export function FileDiffCard({ edit, onHunksChange }: FileDiffCardProps) {
                   color: COLOR_BLUE,
                   fontWeight: 600,
                   padding: "1px 6px",
-                  borderRadius: "4px",
+                  borderRadius: "var(--radius-xs)",
                   background: "rgba(10, 132, 255, 0.15)",
                 }}
               >
@@ -178,7 +178,7 @@ export function FileDiffCard({ edit, onHunksChange }: FileDiffCardProps) {
               padding: "4px 10px",
               fontSize: "11px",
               fontWeight: 600,
-              borderRadius: "6px",
+              borderRadius: "var(--radius-sm)",
               border: "none",
               cursor: "pointer",
               background: "rgba(48, 209, 88, 0.15)",
@@ -194,7 +194,7 @@ export function FileDiffCard({ edit, onHunksChange }: FileDiffCardProps) {
               padding: "4px 10px",
               fontSize: "11px",
               fontWeight: 600,
-              borderRadius: "6px",
+              borderRadius: "var(--radius-sm)",
               border: "none",
               cursor: "pointer",
               background: "rgba(255, 69, 58, 0.15)",

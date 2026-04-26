@@ -317,7 +317,7 @@ function FleetRow({ agent, onSelect }: FleetRowProps): ReactElement {
           style={{
             width: 8,
             height: 8,
-            borderRadius: 4,
+            borderRadius: "var(--radius-xs)",
             background: statusDotColor(agent.status),
             flexShrink: 0,
           }}

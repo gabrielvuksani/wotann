@@ -161,7 +161,7 @@ function WelcomeScreen() {
                   padding: "8px 12px",
                   background: "var(--surface-1)",
                   border: "1px solid var(--border-subtle)",
-                  borderRadius: 12,
+                  borderRadius: "var(--radius-lg)",
                   cursor: "pointer",
                   transition: "transform 200ms ease, box-shadow 200ms ease",
                 }}
@@ -179,7 +179,7 @@ function WelcomeScreen() {
                   style={{
                     width: 28,
                     height: 28,
-                    borderRadius: 6,
+                    borderRadius: "var(--radius-sm)",
                     background: "var(--surface-2)",
                     color: "var(--color-text-dim)",
                   }}
@@ -202,7 +202,7 @@ function WelcomeScreen() {
             className="inline-flex items-center gap-1.5"
             style={{
               padding: "3px 10px",
-              borderRadius: 12,
+              borderRadius: "var(--radius-lg)",
               fontSize: 12,
               fontWeight: 500,
               background: incognitoNext ? "var(--accent-muted)" : "rgba(255,255,255,0.03)",
@@ -235,7 +235,7 @@ function WelcomeScreen() {
                 style={{
                   padding: "2px 5px",
                   background: "rgba(255,255,255,0.04)",
-                  borderRadius: 4,
+                  borderRadius: "var(--radius-xs)",
                   fontSize: 10,
                   fontFamily: "var(--font-mono)",
                   color: "var(--color-text-dim)",
@@ -450,7 +450,7 @@ export function ChatView() {
                   color: color("muted"),
                   background: "transparent",
                   border: "1px dashed var(--border-subtle, rgba(138,176,224,0.12))",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-sm)",
                   cursor: "pointer",
                 }}
               >

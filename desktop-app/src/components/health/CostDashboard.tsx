@@ -155,7 +155,7 @@ export function CostDashboard() {
         </div>
 
         {/* Daily usage chart */}
-        <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+        <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: "var(--space-md)" }}>
           <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: "var(--space-md)" }}>Daily Usage (7 days)</h3>
           {loading ? (
             <div className="flex items-center justify-center" style={{ height: 128, fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>
@@ -191,7 +191,7 @@ export function CostDashboard() {
         </div>
 
         {/* Provider breakdown */}
-        <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+        <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: "var(--space-md)" }}>
           <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: "var(--space-md)" }}>Spending by Provider (This Week)</h3>
           {loading ? (
             <div style={{ fontSize: "var(--font-size-xs)", textAlign: "center", padding: "var(--space-md) 0", color: "var(--color-text-muted)" }}>Loading...</div>
@@ -207,11 +207,11 @@ export function CostDashboard() {
                       ${pc.cost.toFixed(2)} ({pc.percentage}%)
                     </span>
                   </div>
-                  <div className="overflow-hidden" style={{ height: 6, borderRadius: 9999, background: "var(--surface-3)" }}>
+                  <div className="overflow-hidden" style={{ height: 6, borderRadius: "var(--radius-pill)", background: "var(--surface-3)" }}>
                     <div
                       style={{
                         height: "100%",
-                        borderRadius: 9999,
+                        borderRadius: "var(--radius-pill)",
                         background: providerBarColor(pc.provider),
                         width: `${pc.percentage}%`,
                         transition: "width 400ms var(--ease-expo)",
@@ -225,7 +225,7 @@ export function CostDashboard() {
         </div>
 
         {/* Token stats */}
-        <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+        <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: "var(--space-md)" }}>
           <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: "var(--space-md)" }}>Token Summary</h3>
           {loading ? (
             <div style={{ fontSize: "var(--font-size-xs)", textAlign: "center", padding: "var(--space-md) 0", color: "var(--color-text-muted)" }}>Loading...</div>
@@ -251,7 +251,7 @@ export function CostDashboard() {
 
         {/* Lifetime Stats */}
         {lifetimeStats && (
-          <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+          <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: "var(--space-md)" }}>
             <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: "var(--space-md)" }}>Lifetime Stats</h3>
             <div className="grid grid-cols-3" style={{ gap: "var(--space-md)", marginBottom: "var(--space-md)" }}>
               <div>
@@ -312,7 +312,7 @@ export function CostDashboard() {
 
         {/* Budget progress */}
         {cost.budgetRemaining !== null && (
-          <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "var(--space-md)" }}>
+          <div style={{ background: color("surface"), border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)", padding: "var(--space-md)" }}>
             <h3 style={{ fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-secondary)", letterSpacing: "-0.1px", marginBottom: 12 }}>Monthly Budget</h3>
             <div className="flex items-center justify-between" style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginBottom: "6px" }}>
               <span>
@@ -320,11 +320,11 @@ export function CostDashboard() {
               </span>
               <span>${cost.budgetRemaining.toFixed(2)} remaining</span>
             </div>
-            <div className="overflow-hidden" style={{ height: 8, borderRadius: 9999, background: "var(--surface-3)" }}>
+            <div className="overflow-hidden" style={{ height: 8, borderRadius: "var(--radius-pill)", background: "var(--surface-3)" }}>
               <div
                 style={{
                   height: "100%",
-                  borderRadius: 9999,
+                  borderRadius: "var(--radius-pill)",
                   background: cost.budgetRemaining < 10
                     ? "var(--color-error)"
                     : cost.budgetRemaining < 25
@@ -356,7 +356,7 @@ function CostCard({
   return (
     <div
       style={{
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         border: "1px solid",
         padding: "14px 16px",
         background: alert ? "var(--color-warning-muted)" : color("surface"),

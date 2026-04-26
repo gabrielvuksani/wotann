@@ -223,7 +223,7 @@ export function MultiFileComposer() {
                     padding: "6px 14px",
                     fontSize: "12px",
                     fontWeight: 600,
-                    borderRadius: "8px",
+                    borderRadius: "var(--radius-md)",
                     border: "none",
                     cursor: canApplyAccepted ? "pointer" : "not-allowed",
                     background: canApplyAccepted
@@ -244,7 +244,7 @@ export function MultiFileComposer() {
                     padding: "6px 14px",
                     fontSize: "12px",
                     fontWeight: 600,
-                    borderRadius: "8px",
+                    borderRadius: "var(--radius-md)",
                     border: "none",
                     cursor: canApplyAll ? "pointer" : "not-allowed",
                     background: canApplyAll
@@ -265,7 +265,7 @@ export function MultiFileComposer() {
                   padding: "6px 14px",
                   fontSize: "12px",
                   fontWeight: 600,
-                  borderRadius: "8px",
+                  borderRadius: "var(--radius-md)",
                   border: "1px solid rgba(255,255,255,0.12)",
                   cursor: "pointer",
                   background: "transparent",
@@ -283,7 +283,7 @@ export function MultiFileComposer() {
                   padding: "6px 14px",
                   fontSize: "12px",
                   fontWeight: 600,
-                  borderRadius: "8px",
+                  borderRadius: "var(--radius-md)",
                   border: "none",
                   cursor:
                     prompt.trim().length === 0 ? "not-allowed" : "pointer",

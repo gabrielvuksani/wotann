@@ -167,7 +167,7 @@ function ChipPill({ prefix, label }: { readonly prefix: AtPrefix; readonly label
         gap: 4,
         padding: "1px 7px",
         margin: "0 1px",
-        borderRadius: 6,
+        borderRadius: "var(--radius-sm)",
         background: CHIP_BG,
         // ACCENT / CHIP_BG are token-backed CSS vars; visual styling uses
         // color-mix() so the alpha variants survive the token migration

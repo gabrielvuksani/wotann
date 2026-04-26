@@ -96,7 +96,7 @@ export function emitOpenPatron(): boolean {
 const DEFAULT_STYLE: CSSProperties = {
   padding: "6px 12px",
   fontSize: 12,
-  borderRadius: 6,
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--border-subtle, rgba(255,255,255,0.12))",
   background: "var(--bg-surface, rgba(255,255,255,0.04))",
   color: "var(--color-text-primary, #f6f6f8)",

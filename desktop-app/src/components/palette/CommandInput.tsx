@@ -108,7 +108,7 @@ function KbdHint({ children }: { readonly children: React.ReactNode }) {
         fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
         fontSize: 10,
         padding: "2px 6px",
-        borderRadius: 4,
+        borderRadius: "var(--radius-xs)",
         background: "rgba(255,255,255,0.06)",
         color: "rgba(255,255,255,0.55)",
         border: "1px solid rgba(255,255,255,0.08)",

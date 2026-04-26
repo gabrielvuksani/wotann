@@ -51,7 +51,7 @@ export function MouseControl() {
   const inputStyle: React.CSSProperties = {
     background: color("background"),
     border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: 8,
+    borderRadius: "var(--radius-md)",
     padding: "8px 12px",
     fontSize: 13,
     color: "var(--color-text-primary)",
@@ -65,7 +65,7 @@ export function MouseControl() {
       style={{
         background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         padding: 16,
         display: "flex",
         flexDirection: "column",

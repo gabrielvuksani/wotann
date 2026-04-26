@@ -111,7 +111,7 @@ export function ConnectorsTab({ onRefresh }: Props) {
         const isConfiguring = configuringId === meta.id;
         return (
           <article key={meta.id} style={{
-            background: PALETTE.surface, borderRadius: 12,
+            background: PALETTE.surface, borderRadius: "var(--radius-lg)",
             border: `1px solid ${PALETTE.divider}`, padding: 16,
             display: "flex", flexDirection: "column", gap: 12,
           }}>
@@ -123,7 +123,7 @@ export function ConnectorsTab({ onRefresh }: Props) {
               </div>
               <span aria-label={status.connected ? "Connected" : "Disconnected"}
                 style={{
-                  width: 8, height: 8, borderRadius: 4, marginTop: 6,
+                  width: 8, height: 8, borderRadius: "var(--radius-xs)", marginTop: 6,
                   background: status.connected ? PALETTE.green : PALETTE.grey,
                   boxShadow: status.connected ? `0 0 6px ${PALETTE.green}` : "none",
                 }}
@@ -190,7 +190,7 @@ function ConfigFormInline({ keys, values, onChange, onSave }: ConfigProps) {
             value={values[k] ?? ""}
             onChange={(e) => onChange(k, e.target.value)}
             style={{
-              minHeight: 36, padding: "8px 10px", borderRadius: 8,
+              minHeight: 36, padding: "8px 10px", borderRadius: "var(--radius-md)",
               background: PALETTE.bg, border: `1px solid ${PALETTE.divider}`,
               color: PALETTE.textPrimary, fontSize: 12, outline: "none",
               fontFamily: "ui-monospace, monospace",
@@ -199,7 +199,7 @@ function ConfigFormInline({ keys, values, onChange, onSave }: ConfigProps) {
         </label>
       ))}
       <button onClick={onSave} style={{
-        minHeight: 36, borderRadius: 8, border: "none",
+        minHeight: 36, borderRadius: "var(--radius-md)", border: "none",
         background: PALETTE.accent, color: "#FFFFFF",
         fontSize: 12, fontWeight: 600, cursor: "pointer",
       }}>Save configuration</button>

@@ -135,7 +135,7 @@ export function ConnectorConfigForm({
           role="alert"
           className="mb-4 rounded-xl px-3 py-2 text-xs border"
           style={{
-            borderRadius: "12px",
+            borderRadius: "var(--radius-lg)",
             color: banner.kind === "success" ? "var(--color-success)" : "var(--color-error)",
             background: banner.kind === "success" ? "rgba(48,209,88,0.1)" : "rgba(255,69,58,0.1)",
             borderColor: banner.kind === "success" ? "rgba(48,209,88,0.3)" : "rgba(255,69,58,0.3)",
@@ -155,7 +155,7 @@ export function ConnectorConfigForm({
           onClick={handleSave}
           disabled={saving || testing}
           className="px-4 py-1.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50"
-          style={{ background: "var(--color-primary)", color: "white", borderRadius: "12px" }}
+          style={{ background: "var(--color-primary)", color: "white", borderRadius: "var(--radius-lg)" }}
         >
           {saving ? "Saving\u2026" : "Save"}
         </button>
@@ -167,7 +167,7 @@ export function ConnectorConfigForm({
           style={{
             color: "var(--color-text-secondary)",
             borderColor: "var(--border-subtle)",
-            borderRadius: "12px",
+            borderRadius: "var(--radius-lg)",
             background: "var(--surface-2)",
           }}
         >

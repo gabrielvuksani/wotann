@@ -29,7 +29,7 @@ export function CommandItem({ command, selected, onSelect, onFocus, dataIndex }:
       style={{
         padding: "0 12px",
         height: 44,
-        borderRadius: 8,
+        borderRadius: "var(--radius-md)",
         color: selected ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.82)",
         background: selected ? "rgba(10,132,255,0.14)" : "transparent",
         borderLeft: selected ? `2px solid ${APPLE_BLUE}` : "2px solid transparent",
@@ -78,7 +78,7 @@ export function CommandItem({ command, selected, onSelect, onFocus, dataIndex }:
         style={{
           fontSize: 9,
           padding: "2px 6px",
-          borderRadius: 4,
+          borderRadius: "var(--radius-xs)",
           background: "rgba(255,255,255,0.05)",
           color: "rgba(255,255,255,0.4)",
           textTransform: "uppercase",

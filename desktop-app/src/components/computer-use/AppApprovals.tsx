@@ -122,7 +122,7 @@ export function AppApprovals() {
       style={{
         background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         padding: 16,
         display: "flex",
         flexDirection: "column",
@@ -145,7 +145,7 @@ export function AppApprovals() {
             flex: 1,
             background: color("background"),
             border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-md)",
             padding: "8px 12px",
             fontSize: 13,
             color: "var(--color-text-primary)",
@@ -160,7 +160,7 @@ export function AppApprovals() {
           style={{
             minHeight: 40,
             padding: "0 16px",
-            borderRadius: 8,
+            borderRadius: "var(--radius-md)",
             fontSize: 13,
             fontWeight: 500,
             border: "none",
@@ -194,7 +194,7 @@ export function AppApprovals() {
                 padding: "8px 12px",
                 background: color("background"),
                 border: "1px solid rgba(255,255,255,0.05)",
-                borderRadius: 8,
+                borderRadius: "var(--radius-md)",
               }}
             >
               <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
@@ -218,7 +218,7 @@ export function AppApprovals() {
                       fontSize: 10,
                       fontWeight: 600,
                       padding: "1px 5px",
-                      borderRadius: 4,
+                      borderRadius: "var(--radius-xs)",
                       background: "rgba(255,69,58,0.15)",
                       color: color("error"),
                       letterSpacing: "0.02em",
@@ -233,7 +233,7 @@ export function AppApprovals() {
                 style={{
                   fontSize: 12,
                   padding: "4px 10px",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-sm)",
                   border: "1px solid rgba(255,255,255,0.08)",
                   background: "transparent",
                   color: "var(--color-text-dim)",

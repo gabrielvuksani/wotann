@@ -84,7 +84,7 @@ function RecordControl({
       style={{
         background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         padding: 14,
       }}
     >
@@ -110,7 +110,7 @@ function RecordControl({
           {mm}:{ss}
         </div>
       </div>
-      <div style={{ background: color("background"), borderRadius: 8, padding: 8, marginBottom: 10 }}>
+      <div style={{ background: color("background"), borderRadius: "var(--radius-md)", padding: 8, marginBottom: 10 }}>
         <WaveformSVG samples={samples} active={isRecording} />
       </div>
       <button
@@ -150,7 +150,7 @@ function RecentList({
       style={{
         background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         padding: 14,
       }}
     >
@@ -170,7 +170,7 @@ function RecentList({
                 style={{
                   textAlign: "left",
                   padding: "8px 10px",
-                  borderRadius: 8,
+                  borderRadius: "var(--radius-md)",
                   border: `1px solid ${active ? color("accent") : "rgba(255,255,255,0.05)"}`,
                   background: active ? "rgba(10,132,255,0.1)" : color("background"),
                   color: "var(--color-text-primary)",
@@ -208,7 +208,7 @@ function TranscriptView({
       style={{
         background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         padding: 14,
       }}
     >
@@ -222,7 +222,7 @@ function TranscriptView({
           style={{
             fontSize: 11,
             padding: "4px 10px",
-            borderRadius: 6,
+            borderRadius: "var(--radius-sm)",
             border: "1px solid rgba(10,132,255,0.3)",
             background: "rgba(10,132,255,0.1)",
             color: color("accent"),

@@ -122,7 +122,7 @@ export function DisconnectedBanner({
       aria-live="polite"
     >
       <div className="flex items-center min-w-0" style={{ gap: 8 }}>
-        <div className="shrink-0" style={{ width: 6, height: 6, borderRadius: 9999, background: "var(--color-warning)" }} aria-hidden="true" />
+        <div className="shrink-0" style={{ width: 6, height: 6, borderRadius: "var(--radius-pill)", background: "var(--color-warning)" }} aria-hidden="true" />
         <span style={{ fontSize: "var(--font-size-xs)", fontWeight: 500, color: "var(--color-text-muted)" }}>
           Engine disconnected
           {reason && (

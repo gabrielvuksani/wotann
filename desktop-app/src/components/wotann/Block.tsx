@@ -93,7 +93,7 @@ export function Block(props: BlockProps): JSX.Element {
       tabIndex={0}
       style={{
         position: "relative",
-        borderRadius: 8,
+        borderRadius: "var(--radius-md)",
         border: `1px solid ${
           selected
             ? color("accent")
@@ -161,7 +161,7 @@ export function Block(props: BlockProps): JSX.Element {
             letterSpacing: "0.08em",
             color: STATUS_DOT[status],
             padding: "2px 6px",
-            borderRadius: 4,
+            borderRadius: "var(--radius-xs)",
             background: `color-mix(in srgb, ${STATUS_DOT[status]} 8%, transparent)`,
           }}
         >
@@ -280,7 +280,7 @@ function BlockActionButton(props: {
         color: color("muted"),
         background: "transparent",
         border: "1px solid transparent",
-        borderRadius: 4,
+        borderRadius: "var(--radius-xs)",
         cursor: "pointer",
         display: "inline-flex",
         alignItems: "center",

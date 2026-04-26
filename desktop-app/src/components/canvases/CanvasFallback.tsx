@@ -54,7 +54,7 @@ function CanvasMessage({
           style={{
             width: 6,
             height: 6,
-            borderRadius: 9999,
+            borderRadius: "var(--radius-pill)",
             background: color,
             flexShrink: 0,
           }}

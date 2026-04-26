@@ -187,7 +187,7 @@ export function ProofViewer({ onClose }: ProofViewerProps) {
             style={{
               fontSize: 12,
               padding: "6px 10px",
-              borderRadius: 6,
+              borderRadius: "var(--radius-sm)",
               background: "rgba(255,255,255,0.06)",
               border: "1px solid rgba(255,255,255,0.08)",
               color: "rgba(255,255,255,0.85)",
@@ -203,7 +203,7 @@ export function ProofViewer({ onClose }: ProofViewerProps) {
               style={{
                 fontSize: 12,
                 padding: "6px 10px",
-                borderRadius: 6,
+                borderRadius: "var(--radius-sm)",
                 background: "rgba(255,255,255,0.06)",
                 border: "1px solid rgba(255,255,255,0.08)",
                 color: "rgba(255,255,255,0.85)",
@@ -283,7 +283,7 @@ function BundleHeader({ bundle, isOpen, onToggle, onReverify, reverifying }: Bun
         gap: 12,
         padding: "10px 12px",
         background: "rgba(255,255,255,0.03)",
-        borderRadius: 8,
+        borderRadius: "var(--radius-md)",
         border: "1px solid rgba(255,255,255,0.05)",
       }}
     >
@@ -310,7 +310,7 @@ function BundleHeader({ bundle, isOpen, onToggle, onReverify, reverifying }: Bun
         style={{
           width: 8,
           height: 8,
-          borderRadius: 4,
+          borderRadius: "var(--radius-xs)",
           background: color,
           boxShadow: `0 0 6px color-mix(in srgb, ${color} 50%, transparent)`,
           flexShrink: 0,
@@ -410,7 +410,7 @@ function Chip({ label, value }: { readonly label: string; readonly value: string
       style={{
         fontSize: 10,
         padding: "2px 7px",
-        borderRadius: 4,
+        borderRadius: "var(--radius-xs)",
         background: "rgba(255,255,255,0.04)",
         border: "1px solid rgba(255,255,255,0.06)",
       }}
@@ -433,7 +433,7 @@ function CycleRow({ cycle }: { readonly cycle: ProofCycle }) {
       style={{
         padding: "8px 10px",
         background: "rgba(255,255,255,0.025)",
-        borderRadius: 6,
+        borderRadius: "var(--radius-sm)",
         fontSize: 12,
       }}
     >

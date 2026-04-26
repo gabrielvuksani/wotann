@@ -75,7 +75,7 @@ export function FocusView({ messages, onExpand, className }: FocusViewProps): JS
         flexDirection: "column",
         gap: 12,
         padding: 16,
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         background: "var(--surface-1, rgba(138, 176, 224, 0.02))",
         border: "1px solid var(--border-subtle, rgba(138,176,224,0.08))",
         fontFamily: "var(--wotann-font-sans, 'Inter Variable', system-ui)",
@@ -120,7 +120,7 @@ export function FocusView({ messages, onExpand, className }: FocusViewProps): JS
             color: color("muted"),
             background: "transparent",
             border: "1px dashed var(--border-subtle, rgba(138,176,224,0.15))",
-            borderRadius: 6,
+            borderRadius: "var(--radius-sm)",
             cursor: "pointer",
             transition: "background 120ms ease",
           }}

@@ -117,7 +117,7 @@ export function ModelPicker() {
           gap: 6,
           padding: "4px 10px",
           fontSize: "var(--font-size-xs)",
-          borderRadius: 8,
+          borderRadius: "var(--radius-md)",
           background: "var(--bg-surface)",
           color: "var(--color-text-secondary)",
           border: "1px solid rgba(255,255,255,0.06)",
@@ -147,7 +147,7 @@ export function ModelPicker() {
             width: 280,
             background: color("surface"),
             border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: 12,
+            borderRadius: "var(--radius-lg)",
             boxShadow: "var(--shadow-lg)",
           }}
           role="listbox"

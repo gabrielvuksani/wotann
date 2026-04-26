@@ -191,7 +191,7 @@ export function McpAppOverlay(props: McpAppOverlayProps): JSX.Element | null {
             border: "1px solid rgba(255,255,255,0.12)",
             color: "inherit",
             padding: "4px 10px",
-            borderRadius: 4,
+            borderRadius: "var(--radius-xs)",
             cursor: "pointer",
           }}
         >

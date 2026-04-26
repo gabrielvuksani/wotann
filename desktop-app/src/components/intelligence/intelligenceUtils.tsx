@@ -107,7 +107,7 @@ export function Card({
       style={{
         background: color("surface"),
         border: "1px solid var(--border-subtle)",
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         padding: "var(--space-md)",
         display: "flex",
         flexDirection: "column",

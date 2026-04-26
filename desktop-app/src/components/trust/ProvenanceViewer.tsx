@@ -135,7 +135,7 @@ export function ProvenanceViewer() {
               style={{
                 minHeight: 24,
                 padding: "3px 8px",
-                borderRadius: 999,
+                borderRadius: "var(--radius-pill)",
                 background: "rgba(255,255,255,0.04)",
                 border: `1px solid ${colorForSource(s)}40`,
                 color: colorForSource(s),
@@ -168,7 +168,7 @@ export function ProvenanceViewer() {
                   gridTemplateColumns: "48px 100px 1fr",
                   gap: 8,
                   padding: "4px 8px",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-sm)",
                   fontSize: 12,
                   alignItems: "baseline",
                 }}

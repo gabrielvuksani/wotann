@@ -355,7 +355,7 @@ function PanelHeader(props: PanelHeaderProps): ReactElement {
             letterSpacing: "0.04em",
             textTransform: "uppercase",
             padding: "3px 8px",
-            borderRadius: 999,
+            borderRadius: "var(--radius-pill)",
             background: "rgba(255,255,255,0.04)",
             color: props.statusColor,
             border: `1px solid ${props.statusColor}33`,

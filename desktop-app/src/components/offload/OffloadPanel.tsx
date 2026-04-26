@@ -275,7 +275,7 @@ export function OffloadPanel(): ReactElement {
               letterSpacing: "0.04em",
               textTransform: "uppercase",
               padding: "3px 8px",
-              borderRadius: 999,
+              borderRadius: "var(--radius-pill)",
               background: "rgba(255,255,255,0.04)",
               color: statusPill.color,
               border: `1px solid ${statusPill.color}33`,

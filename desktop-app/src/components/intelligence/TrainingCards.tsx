@@ -78,7 +78,7 @@ export function PendingEvolutionCard({
               key={item.id}
               style={{
                 background: color("background"),
-                borderRadius: 8,
+                borderRadius: "var(--radius-md)",
                 padding: 10,
                 border: "1px solid rgba(255,255,255,0.05)",
               }}
@@ -109,7 +109,7 @@ export function PendingEvolutionCard({
                     style={{
                       fontSize: 11,
                       padding: "4px 10px",
-                      borderRadius: 6,
+                      borderRadius: "var(--radius-sm)",
                       border: "1px solid rgba(48,209,88,0.3)",
                       background: "rgba(48,209,88,0.15)",
                       color: color("success"),
@@ -127,7 +127,7 @@ export function PendingEvolutionCard({
                     style={{
                       fontSize: 11,
                       padding: "4px 10px",
-                      borderRadius: 6,
+                      borderRadius: "var(--radius-sm)",
                       border: "1px solid rgba(255,69,58,0.3)",
                       background: "rgba(255,69,58,0.1)",
                       color: color("error"),
@@ -230,7 +230,7 @@ export function PatternHistoryCard({ patterns, loading }: { readonly patterns: r
               style={{
                 padding: "6px 8px",
                 background: color("background"),
-                borderRadius: 6,
+                borderRadius: "var(--radius-sm)",
                 border: "1px solid rgba(255,255,255,0.04)",
               }}
             >
@@ -290,7 +290,7 @@ export function SkillForgeCard({
               style={{
                 padding: "8px 10px",
                 background: color("background"),
-                borderRadius: 6,
+                borderRadius: "var(--radius-sm)",
                 border: `1px solid ${t.readyToForge ? "rgba(10,132,255,0.3)" : "rgba(255,255,255,0.05)"}`,
               }}
             >
@@ -307,7 +307,7 @@ export function SkillForgeCard({
                 style={{
                   fontSize: 11,
                   padding: "4px 10px",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-sm)",
                   border: `1px solid ${t.readyToForge ? "rgba(10,132,255,0.3)" : "rgba(255,255,255,0.08)"}`,
                   background: t.readyToForge ? "rgba(10,132,255,0.15)" : "transparent",
                   color: t.readyToForge ? color("accent") : "var(--color-text-dim)",

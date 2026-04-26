@@ -284,7 +284,7 @@ export default function PRReviewCanvas({ data, blockId }: CanvasProps) {
               style={{
                 width: 8,
                 height: 8,
-                borderRadius: 9999,
+                borderRadius: "var(--radius-pill)",
                 background: riskColor,
               }}
             />

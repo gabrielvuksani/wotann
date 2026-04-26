@@ -110,7 +110,7 @@ export function SymbolRow({ symbol, depth, filePath }: { readonly symbol: UISymb
           color: "var(--color-text-primary)",
           fontSize: 12,
           fontFamily: "var(--font-mono)",
-          borderRadius: 4,
+          borderRadius: "var(--radius-xs)",
         }}
         onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
         onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}

@@ -81,7 +81,7 @@ export function KeyboardControl() {
   const inputStyle: React.CSSProperties = {
     background: color("background"),
     border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: 8,
+    borderRadius: "var(--radius-md)",
     padding: "8px 12px",
     fontSize: 13,
     color: "var(--color-text-primary)",
@@ -94,7 +94,7 @@ export function KeyboardControl() {
       style={{
         background: color("surface"),
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 12,
+        borderRadius: "var(--radius-lg)",
         padding: 16,
         display: "flex",
         flexDirection: "column",
@@ -125,7 +125,7 @@ export function KeyboardControl() {
             style={{
               minHeight: 40,
               padding: "0 16px",
-              borderRadius: 8,
+              borderRadius: "var(--radius-md)",
               fontSize: 13,
               fontWeight: 500,
               border: "1px solid rgba(255,255,255,0.08)",
@@ -155,7 +155,7 @@ export function KeyboardControl() {
                 style={{
                   minHeight: 28,
                   padding: "4px 10px",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-sm)",
                   fontSize: 12,
                   fontWeight: 500,
                   fontFamily: "var(--font-mono)",
@@ -189,7 +189,7 @@ export function KeyboardControl() {
             style={{
               minHeight: 40,
               padding: "0 16px",
-              borderRadius: 8,
+              borderRadius: "var(--radius-md)",
               fontSize: 13,
               fontWeight: 500,
               border: "1px solid rgba(255,255,255,0.08)",

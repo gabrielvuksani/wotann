@@ -190,7 +190,7 @@ export function Sidebar() {
           <button
             onClick={handleNewChat}
             style={{
-              width: 26, height: 26, borderRadius: 6,
+              width: 26, height: 26, borderRadius: "var(--radius-sm)",
               background: "rgba(255,255,255,0.015)", border: "none",
               display: "flex", alignItems: "center", justifyContent: "center",
               color: "var(--color-text-ghost)", cursor: "pointer",
@@ -205,7 +205,7 @@ export function Sidebar() {
           <button
             onClick={() => setView("intelligence")}
             style={{
-              width: 26, height: 26, borderRadius: 6,
+              width: 26, height: 26, borderRadius: "var(--radius-sm)",
               background: "rgba(255,255,255,0.015)", border: "none",
               display: "flex", alignItems: "center", justifyContent: "center",
               color: "var(--color-text-ghost)", cursor: "pointer",
@@ -222,7 +222,7 @@ export function Sidebar() {
           <button
             onClick={() => setView("computer-use")}
             style={{
-              width: 26, height: 26, borderRadius: 6,
+              width: 26, height: 26, borderRadius: "var(--radius-sm)",
               background: "rgba(255,255,255,0.015)", border: "none",
               display: "flex", alignItems: "center", justifyContent: "center",
               color: "var(--color-text-ghost)", cursor: "pointer",
@@ -238,7 +238,7 @@ export function Sidebar() {
           <button
             onClick={() => setView("council")}
             style={{
-              width: 26, height: 26, borderRadius: 6,
+              width: 26, height: 26, borderRadius: "var(--radius-sm)",
               background: "rgba(255,255,255,0.015)", border: "none",
               display: "flex", alignItems: "center", justifyContent: "center",
               color: "var(--color-text-ghost)", cursor: "pointer",
@@ -255,7 +255,7 @@ export function Sidebar() {
           <button
             onClick={() => setView("training")}
             style={{
-              width: 26, height: 26, borderRadius: 6,
+              width: 26, height: 26, borderRadius: "var(--radius-sm)",
               background: "rgba(255,255,255,0.015)", border: "none",
               display: "flex", alignItems: "center", justifyContent: "center",
               color: "var(--color-text-ghost)", cursor: "pointer",
@@ -270,7 +270,7 @@ export function Sidebar() {
           <button
             onClick={() => setView("settings")}
             style={{
-              width: 26, height: 26, borderRadius: 6,
+              width: 26, height: 26, borderRadius: "var(--radius-sm)",
               background: "rgba(255,255,255,0.015)", border: "none",
               display: "flex", alignItems: "center", justifyContent: "center",
               color: "var(--color-text-ghost)", cursor: "pointer",
@@ -384,7 +384,7 @@ function ProjectGroupSection({ group, collapsed, onToggle, activeConversationId,
         className="flex items-center gap-1.5 w-full text-left"
         style={{
           padding: "5px 8px 3px",
-          borderRadius: 4,
+          borderRadius: "var(--radius-xs)",
           background: "transparent",
           border: "none",
           cursor: "pointer",

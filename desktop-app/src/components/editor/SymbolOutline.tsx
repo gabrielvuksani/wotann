@@ -123,7 +123,7 @@ export function SymbolOutline({ filePath }: SymbolOutlineProps) {
           style={{
             fontSize: 11,
             padding: "2px 8px",
-            borderRadius: 4,
+            borderRadius: "var(--radius-xs)",
             border: "1px solid rgba(255,255,255,0.08)",
             background: "transparent",
             color: "var(--color-text-secondary)",
@@ -147,7 +147,7 @@ export function SymbolOutline({ filePath }: SymbolOutlineProps) {
               width: "100%",
               background: color("surface"),
               border: "1px solid rgba(255,255,255,0.05)",
-              borderRadius: 6,
+              borderRadius: "var(--radius-sm)",
               padding: "4px 8px",
               fontSize: 12,
               color: "var(--color-text-primary)",

@@ -86,7 +86,7 @@ export function AgentGridView({
             style={{
               padding: "2px 8px",
               fontSize: "11px",
-              borderRadius: "4px",
+              borderRadius: "var(--radius-xs)",
               border: "none",
               cursor: "pointer",
               background:
@@ -128,7 +128,7 @@ export function AgentGridView({
               onClick={() => onSelectAgent(agent.id)}
               style={{
                 border: `1px solid ${isSelected ? "var(--color-primary)" : "var(--border-subtle)"}`,
-                borderRadius: "8px",
+                borderRadius: "var(--radius-md)",
                 padding: "10px",
                 background: isSelected
                   ? "rgba(10, 132, 255, 0.05)"

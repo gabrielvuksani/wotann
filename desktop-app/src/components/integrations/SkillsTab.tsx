@@ -106,7 +106,7 @@ export function SkillsTab({ onRefresh: _onRefresh }: Props) {
 function Card({ skill, active, onOpen }: { readonly skill: Skill; readonly active: boolean; readonly onOpen: () => void }) {
   return (
     <button onClick={onOpen} aria-pressed={active} style={{
-      textAlign: "left", cursor: "pointer", padding: 14, borderRadius: 12,
+      textAlign: "left", cursor: "pointer", padding: 14, borderRadius: "var(--radius-lg)",
       background: active ? PALETTE.surface2 : PALETTE.surface,
       border: `1px solid ${active ? PALETTE.accent : PALETTE.divider}`,
       display: "flex", flexDirection: "column", gap: 8,
@@ -115,7 +115,7 @@ function Card({ skill, active, onOpen }: { readonly skill: Skill; readonly activ
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: PALETTE.textPrimary, wordBreak: "break-word" }}>{skill.name}</span>
         <span style={{
-          fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 6, flexShrink: 0,
+          fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: "var(--radius-sm)", flexShrink: 0,
           background: skill.available === false ? PALETTE.surface2 : "rgba(48, 209, 88, 0.15)",
           color: skill.available === false ? PALETTE.textSecondary : PALETTE.green,
         }}>{skill.available === false ? "Unavailable" : "Available"}</span>
@@ -139,7 +139,7 @@ function Card({ skill, active, onOpen }: { readonly skill: Skill; readonly activ
 function Tag({ label }: { readonly label: string }) {
   return (
     <span style={{
-      fontSize: 10, padding: "2px 8px", borderRadius: 6,
+      fontSize: 10, padding: "2px 8px", borderRadius: "var(--radius-sm)",
       background: PALETTE.surface2, color: PALETTE.textSecondary, fontWeight: 500,
     }}>{label}</span>
   );
@@ -200,7 +200,7 @@ function render(src: string): readonly JSX.Element[] {
     if (seg.m) {
       out.push(
         <code key={`c${i}`} style={{
-          background: PALETTE.bg, padding: "1px 6px", borderRadius: 4,
+          background: PALETTE.bg, padding: "1px 6px", borderRadius: "var(--radius-xs)",
           fontSize: 12, fontFamily: "ui-monospace, monospace", color: PALETTE.accent,
         }}>{seg.t}</code>,
       );

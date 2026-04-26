@@ -173,7 +173,7 @@ export function PairingView() {
                 style={{ borderRadius: "var(--radius-md)", padding: "12px var(--space-md)", background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
               >
                 <div className="flex items-center" style={{ gap: "12px" }}>
-                  <div style={{ width: 8, height: 8, borderRadius: 9999, background: device.connected ? "var(--color-success)" : "var(--color-text-dim)" }} aria-hidden="true" />
+                  <div style={{ width: 8, height: 8, borderRadius: "var(--radius-pill)", background: device.connected ? "var(--color-success)" : "var(--color-text-dim)" }} aria-hidden="true" />
                   <div>
                     <p style={{ fontSize: "var(--font-size-sm)", fontWeight: 500, color: "var(--color-text-primary)" }}>{device.name}</p>
                     <p style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>

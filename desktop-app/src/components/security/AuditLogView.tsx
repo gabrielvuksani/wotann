@@ -515,7 +515,7 @@ function AuditRow({ entry }: { readonly entry: AuditEntry }): ReactElement {
         aria-label={`Type ${entry.type}`}
         style={{
           padding: "2px 8px",
-          borderRadius: 999,
+          borderRadius: "var(--radius-pill)",
           background: "rgba(255,255,255,0.04)",
           color,
           border: `1px solid ${color}33`,

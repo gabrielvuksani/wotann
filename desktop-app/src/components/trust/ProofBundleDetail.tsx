@@ -201,7 +201,7 @@ const titleStyle: React.CSSProperties = {
 
 const statusStyle: React.CSSProperties = {
   fontSize: 11, color: C.textDim, padding: "6px 10px",
-  background: "rgba(10,132,255,0.08)", border: `1px solid color-mix(in srgb, ${C.accent} 19%, transparent)`, borderRadius: 8,
+  background: "rgba(10,132,255,0.08)", border: `1px solid color-mix(in srgb, ${C.accent} 19%, transparent)`, borderRadius: "var(--radius-md)",
 };
 
 function Evidence({
@@ -241,7 +241,7 @@ function Evidence({
 
 function Card({ title, children }: { readonly title?: string; readonly children: React.ReactNode }) {
   return (
-    <section style={{ background: C.surface, border: `1px solid ${C.divider}`, borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+    <section style={{ background: C.surface, border: `1px solid ${C.divider}`, borderRadius: "var(--radius-lg)", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       {title && (
         <h3 style={{ margin: 0, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.6px", color: C.textDim }}>
           {title}
@@ -268,7 +268,7 @@ function Hr() {
 }
 
 function Dot({ ok }: { readonly ok: boolean }) {
-  return <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: ok ? C.success : C.error, flexShrink: 0 }} />;
+  return <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "var(--radius-pill)", background: ok ? C.success : C.error, flexShrink: 0 }} />;
 }
 
 function Placeholder({ label }: { readonly label: string }) {

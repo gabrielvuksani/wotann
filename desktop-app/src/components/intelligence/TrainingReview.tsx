@@ -179,7 +179,7 @@ export function TrainingReview() {
             style={{
               fontSize: 12,
               padding: "6px 12px",
-              borderRadius: 8,
+              borderRadius: "var(--radius-md)",
               border: "1px solid rgba(255,255,255,0.08)",
               background: "transparent",
               color: "var(--color-text-secondary)",

@@ -74,7 +74,7 @@ export function MCPTab({ onRefresh }: Props) {
       {servers.length === 0 ? (
         <div style={{
           padding: 40, textAlign: "center", color: PALETTE.textSecondary, fontSize: 13,
-          background: PALETTE.surface, borderRadius: 12, border: `1px solid ${PALETTE.divider}`,
+          background: PALETTE.surface, borderRadius: "var(--radius-lg)", border: `1px solid ${PALETTE.divider}`,
         }}>No MCP servers yet. Click "Add MCP Server" to register one.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -92,12 +92,12 @@ function ServerRow({ server, busy, onToggle }: { readonly server: MCPServer; rea
   const running = server.status === "running";
   return (
     <div style={{
-      background: PALETTE.surface, borderRadius: 12,
+      background: PALETTE.surface, borderRadius: "var(--radius-lg)",
       border: `1px solid ${PALETTE.divider}`, padding: 16,
       display: "flex", alignItems: "center", gap: 12,
     }}>
       <span aria-label={running ? "Running" : "Stopped"} style={{
-        width: 8, height: 8, borderRadius: 4, flexShrink: 0,
+        width: 8, height: 8, borderRadius: "var(--radius-xs)", flexShrink: 0,
         background: running ? PALETTE.green : PALETTE.grey,
         boxShadow: running ? `0 0 6px ${PALETTE.green}` : "none",
       }} />
@@ -110,7 +110,7 @@ function ServerRow({ server, busy, onToggle }: { readonly server: MCPServer; rea
         }}>{server.command} {(server.args ?? []).join(" ")}</div>
         <div style={{ display: "flex", gap: 12, marginTop: 4, fontSize: 11, color: PALETTE.textSecondary }}>
           <span style={{
-            padding: "2px 8px", background: PALETTE.surface2, borderRadius: 6,
+            padding: "2px 8px", background: PALETTE.surface2, borderRadius: "var(--radius-sm)",
             fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em",
           }}>{server.transport}</span>
           <span>{server.toolCount ?? 0} tool{(server.toolCount ?? 0) === 1 ? "" : "s"}</span>
@@ -166,7 +166,7 @@ function AddModal({ draft, onChange, onCancel, onSave }: {
     >
       <div onClick={(e) => e.stopPropagation()} style={{
         width: 420, maxWidth: "90vw", background: PALETTE.surface,
-        borderRadius: 12, border: `1px solid ${PALETTE.divider}`, padding: 20,
+        borderRadius: "var(--radius-lg)", border: `1px solid ${PALETTE.divider}`, padding: 20,
         display: "flex", flexDirection: "column", gap: 12,
       }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: PALETTE.textPrimary }}>Add MCP Server</h3>
@@ -179,7 +179,7 @@ function AddModal({ draft, onChange, onCancel, onSave }: {
             value={draft.transport}
             onChange={(e) => onChange({ ...draft, transport: e.target.value as "stdio" | "http" })}
             style={{
-              minHeight: 36, padding: "8px 10px", borderRadius: 8,
+              minHeight: 36, padding: "8px 10px", borderRadius: "var(--radius-md)",
               background: PALETTE.bg, border: `1px solid ${PALETTE.divider}`,
               color: PALETTE.textPrimary, fontSize: 12,
             }}
@@ -217,7 +217,7 @@ function Field({ label, value, onChange, placeholder }: {
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         style={{
-          minHeight: 36, padding: "8px 10px", borderRadius: 8,
+          minHeight: 36, padding: "8px 10px", borderRadius: "var(--radius-md)",
           background: PALETTE.bg, border: `1px solid ${PALETTE.divider}`,
           color: PALETTE.textPrimary, fontSize: 12, outline: "none",
           fontFamily: "ui-monospace, monospace",

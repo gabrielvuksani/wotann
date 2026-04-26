@@ -202,7 +202,7 @@ function TraceEventRow(props: TraceEventRowProps): ReactElement {
         style={{
           width: 8,
           height: 8,
-          borderRadius: 4,
+          borderRadius: "var(--radius-xs)",
           marginTop: 6,
           background: statusColor,
           flexShrink: 0,
