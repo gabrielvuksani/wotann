@@ -54,6 +54,7 @@ import {
   type AuthProvisionPlan,
 } from "../../build/auth-provisioner.js";
 import { adaptDeploy, type DeployTarget, type DeployPlan } from "../../build/deploy-adapter.js";
+import { loadScaffoldPack, type ScaffoldPackFile } from "../../build/scaffold-pack-materializer.js";
 
 // ═══ Types ═════════════════════════════════════════════════════════════
 
@@ -125,13 +126,19 @@ function composeFiles(
 ): readonly { readonly path: string; readonly source: string }[] {
   const entries: { readonly path: string; readonly source: string }[] = [];
 
-  // Scaffold files — we emit placeholders that clearly mark them as
-  // template seeds. The real template archives live out-of-band in
-  // docs/build-templates; callers that want the full archive load the
-  // appropriate skill pack.
+  // Scaffold files — V9 Wave 6.9 (audit §3.1.14): try the matching
+  // skill pack first (skills/pack-<id>.md) so `--emit` writes real,
+  // bootable files instead of placeholder stubs. When the pack is
+  // missing OR doesn't cover a particular path, we fall back to the
+  // honest placeholder so the build never silently drops files
+  // (QB #6: graceful degradation, not fake-success).
   if (scaffold.ok) {
+    const packResult = loadScaffoldPack(scaffold.scaffold.id);
+    const packIndex = packResult.ok ? indexPackFiles(packResult.files) : null;
     for (const f of emission.files) {
-      entries.push({ path: f, source: placeholderFor(f, scaffold.scaffold.id) });
+      const packed = packIndex?.get(f);
+      const source = packed !== undefined ? packed : placeholderFor(f, scaffold.scaffold.id);
+      entries.push({ path: f, source });
     }
   }
 
@@ -148,6 +155,19 @@ function composeFiles(
   }
 
   return entries;
+}
+
+/**
+ * Build a path -> contents lookup over the parsed pack files. We use a
+ * `Map` rather than a plain object so future pack entries containing
+ * `__proto__` or `constructor` paths can't poison the lookup.
+ */
+function indexPackFiles(files: readonly ScaffoldPackFile[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const f of files) {
+    m.set(f.path, f.contents);
+  }
+  return m;
 }
 
 /** Minimal placeholder. Real templates land via skill packs. */

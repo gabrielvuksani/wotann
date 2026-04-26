@@ -48,6 +48,17 @@
     "android": {
       "minSdkVersion": 24,
       "autoIncrementVersionCode": false
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://api.github.com/repos/gabrielvuksani/wotann/releases/latest"
+      ],
+      "dialog": true,
+      "pubkey": "TODO-USER-ACTION-GENERATE-VIA-tauri-signer-generate"
     }
   }
 }

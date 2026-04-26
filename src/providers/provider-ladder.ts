@@ -14,8 +14,16 @@
  * it via `selectFirstAvailable(availability)` where the availability map
  * is built by the onboarding wizard's detector passes. The detector
  * decisions live in `hardware-detect.ts` (local feasibility),
- * `claude-cli-backend.ts` (Claude CLI presence),
- * `lm-studio-adapter.ts::probeLmStudio` (LM Studio), and similar.
+ * `claude-cli-backend.ts` (Claude CLI presence), and similar.
+ *
+ * NOTE (V9 Wave 6.9 / W6.9 AH): the LM Studio rung's `probe` key
+ * `lm-studio-local` is a hook for a future detector. The dedicated
+ * `lm-studio-adapter.ts` was deleted as a dead orphan — per the user
+ * directive captured in `first-run-runner-factory.ts:37`, local rungs
+ * go through the generic OpenAI-compat path (Ollama by default). If
+ * an LM Studio detector ever lands, point it at the openai-compat
+ * adapter with `baseUrl=http://localhost:1234/v1` and a sentinel
+ * apiKey — no bespoke adapter required.
  *
  * WOTANN quality bars:
  * - QB #7 per-call state: the ladder is a `readonly` const. The
