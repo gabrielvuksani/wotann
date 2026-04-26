@@ -45,6 +45,8 @@
     "coverage": "vitest run --coverage",
     "tokens:generate": "node scripts/generate-tokens.mjs",
     "tokens:check": "node scripts/generate-tokens.mjs --check",
+    "sounds:generate": "node scripts/generate-sound-cues.mjs",
+    "sounds:check": "node scripts/generate-sound-cues.mjs --check-only",
     "prepare": "tsc && chmod +x dist/index.js",
     "postinstall": "node -e \"try { require('node:fs').chmodSync('dist/index.js', 0o755); } catch {}\"",
     "wotann": "tsx src/index.ts",

@@ -8433,6 +8433,108 @@ export class KairosRPCHandler {
         return { error: err instanceof Error ? err.message : String(err) };
       }
     });
+
+    // ── Plugin loader RPCs (resurrected from src/marketplace/plugin-loader.ts) ──
+    // Surfaces the local plugin directory's `plugin.json` manifests so the
+    // marketplace UI can list installed plugins and what they expose.
+    this.handlers.set("plugins.list", async (params) => {
+      try {
+        const { loadPlugins } = await import("../marketplace/plugin-loader.js");
+        const { resolveWotannHome } = await import("../utils/wotann-home.js");
+        const root =
+          (params as { pluginsRoot?: string }).pluginsRoot ?? `${resolveWotannHome()}/plugins`;
+        const result = loadPlugins({ pluginsRoot: root });
+        if (result.ok) {
+          return {
+            ok: true,
+            plugins: result.plugins,
+            skipped: result.skipped,
+          };
+        }
+        return { ok: false, error: result.error };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // ── Connector webhook server (resurrected). Lifecycle is opt-in via
+    // the start RPC since real production use needs per-connector HMAC
+    // secrets the user supplies. The single instance is held in this
+    // closure so start is idempotent.
+    let webhookServer:
+      | import("../connectors/connector-webhook-server.js").ConnectorWebhookServer
+      | null = null;
+
+    this.handlers.set("connectors.webhook.start", async (params) => {
+      try {
+        if (webhookServer) return { ok: true, alreadyRunning: true };
+        const webhookModule = await import("../connectors/connector-webhook-server.js");
+        const { createConnectorWebhookServer } = webhookModule;
+        type SecretInput = {
+          kind: import("../connectors/connector-webhook-server.js").ConnectorWebhookKind;
+          secret: string;
+          signatureHeader: string;
+          signaturePrefix?: string;
+        };
+        const p = params as {
+          port?: number;
+          host?: string;
+          path?: string;
+          secrets?: Record<string, SecretInput>;
+        };
+        if (typeof p.port !== "number") return { error: "port required" };
+        if (!p.secrets || Object.keys(p.secrets).length === 0) {
+          return { error: "secrets required (at least one connectorId)" };
+        }
+        const secrets: Record<
+          string,
+          import("../connectors/connector-webhook-server.js").ConnectorSecret
+        > = {};
+        for (const [id, cfg] of Object.entries(p.secrets)) {
+          secrets[id] = {
+            connectorId: id,
+            kind: cfg.kind,
+            secret: cfg.secret,
+            signatureHeader: cfg.signatureHeader,
+            ...(cfg.signaturePrefix !== undefined ? { signaturePrefix: cfg.signaturePrefix } : {}),
+          };
+        }
+        webhookServer = createConnectorWebhookServer({
+          port: p.port,
+          host: p.host ?? "127.0.0.1",
+          path: p.path ?? "/webhook",
+          secrets,
+          dispatcher: async (event) => {
+            // Honest stub dispatcher — logs and accepts. A future RPC
+            // variant can register a real per-connector handler.
+            process.stderr.write(
+              `[webhook] received ${event.connectorId} (${event.kind}) eventId=${event.eventId}\n`,
+            );
+            return { accepted: true };
+          },
+        });
+        const bound = await webhookServer.start();
+        return { ok: true, host: bound.host, port: bound.port };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("connectors.webhook.stop", async () => {
+      try {
+        if (!webhookServer) return { ok: true, wasRunning: false };
+        await webhookServer.stop();
+        webhookServer = null;
+        return { ok: true, wasRunning: true };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("connectors.webhook.stats", async () => {
+      if (!webhookServer) return { running: false };
+      return { running: true, ...webhookServer.stats() };
+    });
   }
 
   private errorResponse(id: string | number | null, code: number, message: string): RPCResponse {

@@ -2708,6 +2708,22 @@ channelsCmd
 
 // ── wotann memory ────────────────────────────────────────────
 
+// Audit-finding GAP: wire `wotann debug` CLI subcommand for support bundles.
+// Resurrected from src/cli/debug-share.ts. The bundle redacts secrets
+// (API keys, tokens) before output so users can paste it into issues
+// without leaking credentials.
+const debugCmd = program
+  .command("debug [subcommand] [args...]")
+  .description("Diagnostics: status / share / log [N] / memory")
+  .action(async (subcommand: string | undefined, args: readonly string[]) => {
+    const { handleDebugCommand } = await import("./cli/debug-share.js");
+    const sub = subcommand ?? "status";
+    const argString = (args ?? []).join(" ");
+    const out = await handleDebugCommand(`/debug ${sub} ${argString}`.trim());
+    process.stdout.write(`${out}\n`);
+  });
+void debugCmd;
+
 const memoryCmd = program.command("memory").description("Memory operations");
 
 memoryCmd
