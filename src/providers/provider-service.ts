@@ -716,27 +716,40 @@ const codexSpec: ProviderSpec = {
     return null;
   },
   async listModels(credential) {
-    if (credential?.method === "subscription" && credential.token) {
-      // Decode the plan type from the JWT payload (no signature verify here — that's
-      // done elsewhere before the credential is accepted into the store)
-      try {
-        const parts = credential.token.split(".");
-        if (parts.length >= 2) {
-          const payload = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf-8")) as {
-            "https://api.openai.com/auth"?: { chatgpt_plan_type?: string };
-          };
-          const plan = payload["https://api.openai.com/auth"]?.chatgpt_plan_type ?? "free";
-          const freeModels = codexSpec.fallbackModels.filter(
-            (m) => m.id.includes("mini") || m.id.includes("nano"),
-          );
-          if (plan === "free")
-            return freeModels.length > 0 ? freeModels : codexSpec.fallbackModels.slice(0, 2);
-        }
-      } catch {
-        /* payload decode failed */
-      }
-    }
-    return codexSpec.fallbackModels;
+    // Unified discovery — delegate to codex-models.ts (the same module
+    // the CLI/TUI uses) so the desktop + iOS surfaces see the exact
+    // same gpt-5.5 / gpt-5.4 / gpt-5.4-mini / gpt-5.3-codex / gpt-5.2
+    // catalog the picker shows. The prior implementation here only
+    // returned `codexSpec.fallbackModels` (3 entries) regardless of
+    // plan tier, which kept the same cross-surface drift bug v9 fixed
+    // for the CLI but left in place for the daemon RPC consumers.
+    const { discoverCodexModels } = await import("./codex-models.js");
+    const result = await discoverCodexModels({
+      accessToken: credential?.token,
+      // accountId + idToken absent here because ProviderCredential
+      // only carries the access_token — the cache key falls back to
+      // the empty-string "anonymous" account, which is fine because
+      // the live fetch still includes the account-id implicit in the
+      // JWT itself.
+    });
+    // Project the slug-only result into the rich ProviderModel shape
+    // by overlaying the fallback metadata when available, otherwise
+    // synthesise a best-guess entry. Keeps the desktop UI's pricing
+    // + capability hints accurate for new slugs.
+    return result.models.map((m) => {
+      const known = codexSpec.fallbackModels.find((f) => f.id === m.slug);
+      if (known) return known;
+      return {
+        id: m.slug,
+        name: m.displayName,
+        contextWindow: m.contextWindow,
+        costPerMTokInput: 0, // subscription billing handled upstream
+        costPerMTokOutput: 0,
+        supportsVision: true,
+        supportsTools: true,
+        supportsThinking: m.supportsReasoning,
+      };
+    });
   },
 };
 
@@ -845,59 +858,12 @@ const ollamaSpec: ProviderSpec = {
   },
 };
 
-const groqSpec: ProviderSpec = {
-  id: "groq",
-  name: "Groq",
-  tier: "fast",
-  envKeys: ["GROQ_API_KEY"],
-  supportedMethods: ["apiKey"],
-  docsUrl: "https://console.groq.com/keys",
-  fallbackModels: [
-    {
-      id: "llama-3.3-70b-versatile",
-      name: "Llama 3.3 70B",
-      contextWindow: 128_000,
-      costPerMTokInput: 0.59,
-      costPerMTokOutput: 0.79,
-      supportsTools: true,
-    },
-  ],
-  async detectCredential(ctx) {
-    const env = pickEnv(this.envKeys, ctx.env);
-    if (env) return { method: "apiKey", label: "API Key", token: env.value, source: "env" };
-    const saved = ctx.storedCredentials["groq"];
-    if (saved)
-      return {
-        method: "apiKey",
-        label: "API Key",
-        token: saved.token,
-        source: saved._storedAt === "keychain" ? "keychain" : "stored-file",
-      };
-    return null;
-  },
-  async listModels(credential) {
-    if (credential?.token) {
-      const res = await fetchWithTimeout("https://api.groq.com/openai/v1/models", {
-        headers: { Authorization: `Bearer ${credential.token}` },
-      });
-      if (res?.ok) {
-        const data = (await res.json()) as { data?: Array<{ id: string }> };
-        return (data.data ?? []).map((m) => ({
-          id: m.id,
-          name: m.id,
-          contextWindow: 128_000,
-          costPerMTokInput: 0.5,
-          costPerMTokOutput: 0.5,
-          supportsTools: true,
-        }));
-      }
-    }
-    return this.fallbackModels;
-  },
-};
+// groqSpec dropped alongside the 21→8 provider consolidation. Users
+// wanting Groq's fast Llama inference reach it through OpenRouter
+// (`openrouter/groq/llama-3.3-70b-versatile` slug).
 
-// Generic OpenAI-compatible provider factory used by Mistral / DeepSeek / xAI / Perplexity /
-// Together / Fireworks / SambaNova / OpenRouter / Cerebras / HuggingFace.
+// Generic OpenAI-compatible provider factory — used by OpenRouter and
+// HuggingFace (the two remaining first-class generic providers).
 function openAICompatSpec(args: {
   id: string;
   name: string;
@@ -1028,162 +994,17 @@ const copilotSpec: ProviderSpec = {
 };
 
 export const PROVIDER_SPECS: readonly ProviderSpec[] = [
+  // Provider consolidation (21 → 8 first-class). The eight entries
+  // below mirror src/core/types.ts ProviderName. Long-tail providers
+  // (mistral, deepseek, xai, perplexity, together, fireworks,
+  // sambanova, groq, cerebras, azure, bedrock, vertex) reach through
+  // OpenRouter using `<vendor>/<model>` slugs.
   anthropicSpec,
   openaiSpec,
   codexSpec,
   geminiSpec,
   ollamaSpec,
-  groqSpec,
   copilotSpec,
-  openAICompatSpec({
-    id: "mistral",
-    name: "Mistral",
-    tier: "frontier",
-    envKeys: ["MISTRAL_API_KEY"],
-    baseUrl: "https://api.mistral.ai/v1",
-    docsUrl: "https://console.mistral.ai/api-keys",
-    fallback: [
-      {
-        id: "mistral-large-latest",
-        name: "Mistral Large",
-        contextWindow: 128_000,
-        costPerMTokInput: 2,
-        costPerMTokOutput: 6,
-        supportsTools: true,
-      },
-      {
-        id: "codestral-latest",
-        name: "Codestral",
-        contextWindow: 128_000,
-        costPerMTokInput: 0.3,
-        costPerMTokOutput: 0.9,
-        supportsTools: true,
-      },
-    ],
-  }),
-  openAICompatSpec({
-    id: "deepseek",
-    name: "DeepSeek",
-    tier: "fast",
-    envKeys: ["DEEPSEEK_API_KEY"],
-    baseUrl: "https://api.deepseek.com",
-    docsUrl: "https://platform.deepseek.com/api_keys",
-    fallback: [
-      {
-        id: "deepseek-chat",
-        name: "DeepSeek V3",
-        contextWindow: 64_000,
-        costPerMTokInput: 0.27,
-        costPerMTokOutput: 1.1,
-        supportsTools: true,
-      },
-      {
-        id: "deepseek-reasoner",
-        name: "DeepSeek R1",
-        contextWindow: 64_000,
-        costPerMTokInput: 0.55,
-        costPerMTokOutput: 2.19,
-        supportsThinking: true,
-      },
-    ],
-  }),
-  openAICompatSpec({
-    id: "perplexity",
-    name: "Perplexity",
-    tier: "specialised",
-    envKeys: ["PERPLEXITY_API_KEY"],
-    baseUrl: "https://api.perplexity.ai",
-    docsUrl: "https://www.perplexity.ai/settings/api",
-    fallback: [
-      {
-        id: "sonar-pro",
-        name: "Sonar Pro",
-        contextWindow: 128_000,
-        costPerMTokInput: 3,
-        costPerMTokOutput: 15,
-      },
-    ],
-  }),
-  openAICompatSpec({
-    id: "xai",
-    name: "xAI (Grok)",
-    tier: "frontier",
-    envKeys: ["XAI_API_KEY"],
-    baseUrl: "https://api.x.ai/v1",
-    docsUrl: "https://console.x.ai/",
-    fallback: [
-      {
-        id: "grok-4-0709",
-        name: "Grok 4",
-        contextWindow: 256_000,
-        costPerMTokInput: 3,
-        costPerMTokOutput: 15,
-        supportsVision: true,
-        supportsTools: true,
-      },
-      {
-        id: "grok-code-fast-1",
-        name: "Grok Code Fast",
-        contextWindow: 128_000,
-        costPerMTokInput: 0.2,
-        costPerMTokOutput: 1.5,
-      },
-    ],
-  }),
-  openAICompatSpec({
-    id: "together",
-    name: "Together AI",
-    tier: "fast",
-    envKeys: ["TOGETHER_API_KEY"],
-    baseUrl: "https://api.together.xyz/v1",
-    docsUrl: "https://api.together.xyz/settings/api-keys",
-    fallback: [
-      {
-        id: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-        name: "Llama 3.3 70B Turbo",
-        contextWindow: 131_072,
-        costPerMTokInput: 0.88,
-        costPerMTokOutput: 0.88,
-        supportsTools: true,
-      },
-    ],
-  }),
-  openAICompatSpec({
-    id: "fireworks",
-    name: "Fireworks AI",
-    tier: "fast",
-    envKeys: ["FIREWORKS_API_KEY"],
-    baseUrl: "https://api.fireworks.ai/inference/v1",
-    docsUrl: "https://fireworks.ai/account/api-keys",
-    fallback: [
-      {
-        id: "accounts/fireworks/models/llama-v3p3-70b-instruct",
-        name: "Llama 3.3 70B",
-        contextWindow: 131_072,
-        costPerMTokInput: 0.9,
-        costPerMTokOutput: 0.9,
-        supportsTools: true,
-      },
-    ],
-  }),
-  openAICompatSpec({
-    id: "sambanova",
-    name: "SambaNova",
-    tier: "fast",
-    envKeys: ["SAMBANOVA_API_KEY"],
-    baseUrl: "https://api.sambanova.ai/v1",
-    docsUrl: "https://cloud.sambanova.ai/apis",
-    fallback: [
-      {
-        id: "Meta-Llama-3.3-70B-Instruct",
-        name: "Llama 3.3 70B",
-        contextWindow: 131_072,
-        costPerMTokInput: 0.6,
-        costPerMTokOutput: 1.2,
-        supportsTools: true,
-      },
-    ],
-  }),
   openAICompatSpec({
     id: "openrouter",
     name: "OpenRouter",
@@ -1192,24 +1013,6 @@ export const PROVIDER_SPECS: readonly ProviderSpec[] = [
     baseUrl: "https://openrouter.ai/api/v1",
     docsUrl: "https://openrouter.ai/keys",
     fallback: [],
-  }),
-  openAICompatSpec({
-    id: "cerebras",
-    name: "Cerebras",
-    tier: "fast",
-    envKeys: ["CEREBRAS_API_KEY"],
-    baseUrl: "https://api.cerebras.ai/v1",
-    docsUrl: "https://cloud.cerebras.ai/",
-    fallback: [
-      {
-        id: "llama-3.3-70b",
-        name: "Llama 3.3 70B (Cerebras)",
-        contextWindow: 128_000,
-        costPerMTokInput: 0.6,
-        costPerMTokOutput: 0.6,
-        supportsTools: true,
-      },
-    ],
   }),
   openAICompatSpec({
     id: "huggingface",

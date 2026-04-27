@@ -13,9 +13,8 @@ import React, { useState, useCallback, useEffect, useRef, memo } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { StartupScreen } from "./components/StartupScreen.js";
 import { ChatView } from "./components/ChatView.js";
-import { StatusBar } from "./components/StatusBar.js";
 import { PromptInput } from "./components/PromptInput.js";
-import { ContextHUD } from "./components/ContextHUD.js";
+import { UnifiedStatusBar } from "./components/UnifiedStatusBar.js";
 import { DiffViewer, type DiffHunk } from "./components/DiffViewer.js";
 import { AgentStatusPanel, type SubagentStatus } from "./components/AgentStatusPanel.js";
 import { HistoryPicker } from "./components/HistoryPicker.js";
@@ -1091,6 +1090,44 @@ export function WotannApp({
           }
           const allModels = [...providerModels.values()].flat();
 
+          // /model status — diagnostic mode (OpenClaw pattern). Shows
+          // resolved primary model, per-provider auth state, OAuth
+          // expiry warnings, missing-auth alerts. The "what's actually
+          // wired right now" surface — distinct from /model with no
+          // arg which lists what's PICKABLE.
+          if (arg === "status") {
+            const lines: string[] = [`Active: ${currentModel}`];
+            const activeProv = activeProvider?.provider ?? initialProvider;
+            lines.push(`Active provider: ${activeProv}`);
+            lines.push("");
+            lines.push("Configured providers:");
+            for (const p of providers) {
+              if (!p.available) continue;
+              const tier =
+                p.billing === "subscription"
+                  ? "subscription"
+                  : p.billing === "free"
+                    ? "free"
+                    : "API key";
+              const modelCount = p.models.length;
+              lines.push(
+                `  ${p.provider} [${tier}] — ${modelCount} model${modelCount === 1 ? "" : "s"}`,
+              );
+            }
+            const inactive = providers.filter((p) => !p.available);
+            if (inactive.length > 0) {
+              lines.push("");
+              lines.push("Unconfigured (run `wotann login <provider>` to enable):");
+              for (const p of inactive) {
+                lines.push(`  ${p.provider}`);
+              }
+            }
+            lines.push("");
+            lines.push("Open the picker with Ctrl+M to switch.");
+            sysMsg(lines.join("\n"));
+            return true;
+          }
+
           if (!arg) {
             const modelLines = [...providerModels.entries()].map(
               ([prov, models]) => `  ${prov}: ${models.join(", ")}`,
@@ -1103,7 +1140,9 @@ export function WotannApp({
                 ...modelLines,
                 modelLines.length === 0 ? "  (no providers configured)" : "",
                 "",
-                "Switch: /model <name>",
+                "Tip: press Ctrl+M for the interactive picker, or",
+                "     /model <name>   — switch by name",
+                "     /model status   — show full provider auth state",
               ]
                 .filter(Boolean)
                 .join("\n"),
@@ -3461,9 +3500,10 @@ export function WotannApp({
   const activeProvider = providers.find((p) => p.available);
   const runtimeStatus = runtime?.getStatus();
   const currentTheme = themeManagerRef.current.getCurrent();
-  const contextUsagePercent = runtime
-    ? Math.round((runtime.getContextBudget().usagePercent ?? 0) * 100)
-    : stats.contextPercent;
+  // contextUsagePercent removed — UnifiedStatusBar derives the percent
+  // directly from used/max tokens, so the duplicate calculation here
+  // (legacy from when the StatusBar at the bottom of the layout took
+  // a precomputed contextPercent prop) is no longer needed.
   const diffPanel = diffEntries[0];
 
   return (
@@ -3489,20 +3529,35 @@ export function WotannApp({
         </Box>
       )}
 
-      <ContextHUD
+      {/*
+        UnifiedStatusBar replaces the prior ContextHUD + StatusBar pair
+        that stacked redundant info (both showed model/provider/cost).
+        Single dense top row with three zones: context gauge | identity
+        cluster | activity cluster. Bottom of the screen is now just
+        the input prompt — saves ~3-4 lines of vertical space and
+        eliminates the visual noise from the user's screenshot session.
+      */}
+      <UnifiedStatusBar
+        model={currentModel}
+        provider={activeProvider?.provider ?? initialProvider}
+        mode={currentMode}
         usedTokens={runtimeStatus?.totalTokens ?? 0}
         maxTokens={runtime?.getMaxContextTokens() ?? 200_000}
-        cacheHitRate={0.62}
-        provider={activeProvider?.provider ?? initialProvider}
-        model={currentModel}
         costUsd={runtimeStatus?.totalCost ?? stats.cost}
+        reads={stats.reads}
+        edits={stats.edits}
+        bashCalls={stats.bashCalls}
+        turnCount={turnCount}
+        skillCount={runtimeStatus?.skillCount}
+        isStreaming={isStreaming}
+        roeSessionActive={runtime?.getActiveROESessionId() !== undefined}
       />
 
       {/*
         V9 T14.1 — Main scene wrapped in a memoized subcomponent. When
         `CLAUDE_CODE_NO_FLICKER=1` (or `--no-flicker`) is set, MainScene's
         custom equality predicate skips re-renders whose props haven't
-        moved — the StatusBar / ContextHUD outside still paint, but the
+        moved — the UnifiedStatusBar outside still paints, but the
         chat + side-panel only repaint on real state changes. When the
         flag is unset, the equality predicate returns false unconditionally
         so behaviour matches the original full-redraw path exactly.
@@ -3560,6 +3615,29 @@ export function WotannApp({
             ]);
           }}
           onCancel={() => setShowModelPicker(false)}
+          onRefresh={() => {
+            // Force-refresh every provider's model catalog. Lazy-load
+            // the discoverer so the import isn't paid on first render.
+            void import("../providers/model-discovery.js").then(({ discoverModelsForProvider }) => {
+              for (const auth of providers) {
+                if (!auth.available) continue;
+                void discoverModelsForProvider({
+                  provider: auth.provider,
+                  fallback: auth.models,
+                  forceRefresh: true,
+                });
+              }
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: "system",
+                  content:
+                    "Model catalogs refreshing in the background. The picker " +
+                    "will reflect new entries on the next open (cache TTL: 5 min).",
+                },
+              ]);
+            });
+          }}
         />
       )}
 
@@ -3611,21 +3689,14 @@ export function WotannApp({
         </Box>
       )}
 
-      <StatusBar
-        model={currentModel}
-        provider={activeProvider?.provider ?? initialProvider}
-        cost={runtimeStatus?.totalCost ?? stats.cost}
-        contextPercent={contextUsagePercent}
-        reads={stats.reads}
-        edits={stats.edits}
-        bashCalls={stats.bashCalls}
-        mode={currentMode}
-        isStreaming={isStreaming}
-        turnCount={turnCount}
-        skillCount={runtimeStatus?.skillCount}
-        roeSessionActive={runtime?.getActiveROESessionId() !== undefined}
-      />
-
+      {/*
+        Bottom-of-screen StatusBar removed — UnifiedStatusBar at the
+        top of the layout subsumes everything it used to show, and
+        eliminates the prior duplicate-info problem flagged in the
+        TUI screenshot session. Input prompt now sits directly under
+        the chat scroll, matching Codex/Hermes "fixed input pinned
+        at bottom" pattern.
+      */}
       <PromptInput
         onSubmit={handleSubmit}
         onChange={setPromptValue}

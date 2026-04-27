@@ -52,6 +52,14 @@ interface ModelPickerProps {
   readonly currentModel: string;
   readonly onSelect: (provider: ProviderName, model: string) => void;
   readonly onCancel: () => void;
+  /**
+   * Optional refresh hook — called when the user presses Ctrl+R.
+   * Caller should kick a `discoverModelsForProvider({ forceRefresh: true })`
+   * for every authenticated provider, then re-pass updated `providers`
+   * via the next render. The picker doesn't keep its own loading
+   * state — when the new list arrives it just re-renders.
+   */
+  readonly onRefresh?: () => void;
   readonly maxVisible?: number;
 }
 
@@ -76,6 +84,7 @@ const FOOTER_HINTS = [
   { keys: "↑/↓", description: "nav" },
   { keys: "1–9", description: "jump" },
   { keys: "Type", description: "filter" },
+  { keys: "Ctrl+R", description: "refresh" },
 ];
 
 /**
@@ -157,6 +166,7 @@ export function ModelPicker({
   currentModel,
   onSelect,
   onCancel,
+  onRefresh,
   maxVisible = DEFAULT_MAX_VISIBLE,
 }: ModelPickerProps): React.ReactElement {
   const tone = buildTone(PALETTES.dark);
@@ -204,6 +214,14 @@ export function ModelPicker({
     }
     if (key.return) {
       handleSelect();
+      return;
+    }
+    // Ctrl+R force-refresh — surfaces the live model catalog from the
+    // backend (Anthropic /v1/models, OpenAI /v1/models, Codex backend
+    // /models, etc.) instead of the cached list. Useful right after
+    // adding a new credential or when a provider ships a new model.
+    if (key.ctrl && input === "r") {
+      onRefresh?.();
       return;
     }
     if (key.upArrow || (key.shift && key.tab)) {

@@ -105,6 +105,11 @@ export function PromptInput({
   const tone = buildTone(PALETTES.dark);
   const [internalValue, setInternalValue] = useState("");
   const [historyIndex, setHistoryIndex] = useState(-1);
+  // Esc-Esc edit-prev (Codex pattern): track the time of the last
+  // standalone Escape press so a quick double-tap (within 500ms) on
+  // an empty input recalls the most recent prompt for editing.
+  // Single Esc still clears the input as before.
+  const [lastEscapeAt, setLastEscapeAt] = useState(0);
   const value = controlledValue ?? internalValue;
   const setValue = useCallback(
     (next: string | ((prev: string) => string)) => {
@@ -179,8 +184,24 @@ export function PromptInput({
     }
 
     if (key.escape) {
+      const now = Date.now();
+      // Esc-Esc edit-prev: empty input + double-tap within 500ms
+      // recalls the most recent prompt. Mirrors Codex CLI's pattern
+      // ("Esc Esc edit prev when empty"); footer hint surfaces it
+      // when the input is empty.
+      if (value.length === 0 && now - lastEscapeAt < 500 && history.length > 0) {
+        const last = history[0] ?? "";
+        if (last.length > 0) {
+          setValue(last);
+          setHistoryIndex(0);
+        }
+        setLastEscapeAt(0);
+        return;
+      }
+      // Single Esc clears input + resets history cursor
       setValue("");
       setHistoryIndex(-1);
+      setLastEscapeAt(now);
       return;
     }
 
