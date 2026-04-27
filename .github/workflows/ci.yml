@@ -66,41 +66,39 @@ jobs:
   # runners reintroduce preemption flake, restore `continue-on-error: true`
   # explicitly here AND re-open the regression-visibility tracking issue.
   test:
-    name: Tests (shard ${{ matrix.shard }}/6)
-    # MATRIX-PARALLEL APPROACH — each shard is a separate runner.
+    name: Tests
+    # SINGLE-RUNNER APPROACH — all 9510 tests in one ubuntu runner.
     #
-    # Prior failure pattern (5 consecutive CI runs through 40fa871):
-    # shards 1+2 of the FIRST WAVE were canceled with "runner has
-    # received a shutdown signal" while shards 3-6 (later waves)
-    # passed cleanly with 97/97 each. Root cause was contention
-    # between the test matrix and the typecheck-build matrix —
-    # both jobs started simultaneously, exhausting the free-tier
-    # runner pool, and GH Actions reclaimed the runners that were
-    # competing for capacity. Prior mitigation attempts via max-
-    # parallel reductions (6 -> 3 -> 2) never fully fixed it
-    # because the contention was BETWEEN jobs, not within the
-    # matrix.
+    # History of attempted fixes:
+    # 1. matrix shard 1..6, max-parallel: 6 — got 3 successes + 3
+    #    "runner has received a shutdown signal" errors.
+    # 2. matrix shard 1..6, max-parallel: 3 — same shutdown failures
+    #    on shards 1+2 of the first wave.
+    # 3. matrix shard 1..6, max-parallel: 2 — same.
+    # 4. matrix shard 1..6, max-parallel: 3, needs: typecheck-build
+    #    — STILL same shutdown failures on shards 1+2. By this point
+    #    the typecheck-build matrix had fully completed (so cross-
+    #    job contention was eliminated), but GH Actions free-tier
+    #    runners still reclaimed the first-wave Tests shards mid-run
+    #    despite zero competing jobs.
     #
-    # Fix: needs typecheck-build serializes Tests AFTER the
-    # typecheck-build job finishes, so the runner pool drains
-    # before tests start. Adds ~60-90 s wall time but eliminates
-    # the flake. The duplicate typecheck/build steps that used
-    # to run on shard 1 are removed because the typecheck-build
-    # job already gates the same checks.
+    # Local evidence: each shard runs in ~24 s on a developer Mac
+    # (vitest run --shard=1/6 → 1606 tests passed, 24 s). Full
+    # 9510-test suite runs in ~180 s locally. CI has the same code
+    # paths and dependencies, so the failure was purely an
+    # infrastructure flake, not a test regression.
+    #
+    # Fix: drop the matrix entirely. One runner, one job, all 9510
+    # tests serialized through vitest's internal worker pool. Total
+    # wall time is ~5 min (npm install + build + 9510 tests) vs
+    # ~3-4 min for a working matrix run, but matrix never reliably
+    # completes on free-tier runners. Reliability > speed here.
     needs: typecheck-build
-    runs-on: ubuntu-22.04
-    # Per-shard timeout: each shard runs ~22-65 s locally; bumping
-    # to 8 min covers slow CI runners with 4x safety margin and
-    # surfaces hangs faster than the prior 15 min cap.
-    timeout-minutes: 8
-    strategy:
-      fail-fast: false
-      # With needs typecheck-build removing cross-job contention,
-      # we can safely raise max-parallel back to 3 (2 waves of 3
-      # shards = ~4-6 min total) without runner reclaim risk.
-      max-parallel: 3
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+    runs-on: ubuntu-latest
+    # Single-job timeout: install (~30 s) + native rebuild (~5 s) +
+    # 9510 vitest tests (~180 s locally; CI usually 1.5-2x slower)
+    # → 6-8 min realistic. Cap at 15 min so a hang surfaces clearly.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -111,17 +109,16 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
-      - name: Test (shard ${{ matrix.shard }}/6)
-        # WOTANN_TEST_TRACE_LOAD=1 activates the load-tracer setupFile
-        # which emits `[wotann-load] <iso-ts> <file>` per test file as
-        # it loads. Verbose reporter surfaces test completions for
-        # failure diagnosis. Typecheck + build are NOT duplicated here
-        # because the typecheck-build job (this job's prerequisite via
-        # `needs:`) already gates them.
-        run: npx vitest run --shard=${{ matrix.shard }}/6 --reporter=verbose
+      - name: Test
+        # `--reporter=basic` keeps log volume manageable on a single
+        # runner (verbose reporter would emit ~9k lines and slow
+        # down the runner via stderr buffering on previous matrix
+        # attempts). vitest's internal worker pool still parallelizes
+        # tests across all available CPUs on the runner.
+        run: npx vitest run --reporter=basic
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
-          WOTANN_TEST_TRACE_LOAD: "1"
+          NODE_OPTIONS: --max-old-space-size=6144
+          WOTANN_TEST_TRACE_LOAD: "0"
 
   desktop-typecheck:
     name: Desktop typecheck
