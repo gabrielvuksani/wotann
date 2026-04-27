@@ -31,7 +31,29 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, totalmem } from "node:os";
 import { resolveWotannHomeSubdir } from "../utils/wotann-home.js";
+import { discoverCodexModelsSync } from "./codex-models.js";
+import { discoverModelsForProviderSync } from "./model-discovery.js";
 import type { ProviderAuth, ProviderName, ProviderStatus } from "../core/types.js";
+
+/**
+ * Resolve a provider's model list by reading the on-disk cache
+ * (populated by the runtime warmup at startup) and falling back to a
+ * bundled static list when no cache exists. Replaces the prior
+ * pattern of hardcoding `models: <CONST>` everywhere — every entry
+ * still has its bundled fallback for first-run / offline scenarios,
+ * but live entries take priority once the cache is warm.
+ *
+ * Synchronous because discoverProviders() is sync; the heavy lifting
+ * (live HTTP fetches) happens in `warmupProviderModels` from
+ * runtime.ts on a fire-and-forget Promise.allSettled.
+ */
+function resolveModels(
+  provider: ProviderName,
+  token: string | undefined,
+  fallback: readonly string[],
+): readonly string[] {
+  return discoverModelsForProviderSync({ provider, token, fallback });
+}
 
 // ── Codex Auth Reader ───────────────────────────────────────
 
@@ -53,6 +75,7 @@ interface CodexAuthFileTokens {
   readonly access_token?: string;
   readonly id_token?: string;
   readonly refresh_token?: string;
+  readonly account_id?: string;
 }
 
 interface CodexAuthFile {
@@ -82,6 +105,35 @@ function readCodexAuth(authPath: string): string | null {
 
     // Legacy format
     return parsed.token ?? parsed.api_key ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the full Codex auth payload (vs `readCodexAuth` which extracts
+ * only the bearer string). Used by the model-discovery layer to read
+ * the `account_id` for the `chatgpt-account-id` request header and the
+ * `id_token` for plan-claim parsing.
+ *
+ * Mirrors the resilient lookup pattern from codex-adapter.ts so legacy
+ * auth.json shapes from older Codex CLI builds still work.
+ */
+function readCodexAuthPayload(
+  authPath: string,
+): { accessToken: string; accountId?: string; idToken?: string } | null {
+  if (!existsSync(authPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(authPath, "utf-8")) as CodexAuthFile;
+    const accessToken =
+      parsed.tokens?.access_token ?? parsed.OPENAI_API_KEY ?? parsed.token ?? parsed.api_key;
+    if (!accessToken) return null;
+    const result: { accessToken: string; accountId?: string; idToken?: string } = {
+      accessToken,
+    };
+    if (parsed.tokens?.account_id) result.accountId = parsed.tokens.account_id;
+    if (parsed.tokens?.id_token) result.idToken = parsed.tokens.id_token;
+    return result;
   } catch {
     return null;
   }
@@ -320,6 +372,10 @@ export async function discoverProviders(
   const checkCli = options?.checkClaudeCli ?? isClaudeCliAvailable;
   const claudeCliAvailable = checkCli();
 
+  // Read both Anthropic auth sources up-front so both code paths can
+  // pick the better token for live-model discovery (api-key works
+  // against /v1/models, the OAuth subscription token does not).
+  const anthropicKey = process.env["ANTHROPIC_API_KEY"];
   if (oauthToken || claudeCliAvailable) {
     providers.push({
       provider: "anthropic",
@@ -329,12 +385,11 @@ export async function discoverProviders(
       label: "Claude Subscription",
       priority: 1,
       transport: "anthropic",
-      models: ANTHROPIC_MODELS,
+      models: resolveModels("anthropic", anthropicKey, ANTHROPIC_MODELS),
     });
   }
 
   // ANTHROPIC: API key
-  const anthropicKey = process.env["ANTHROPIC_API_KEY"];
   if (anthropicKey) {
     providers.push({
       provider: "anthropic",
@@ -344,7 +399,7 @@ export async function discoverProviders(
       label: "Claude API",
       priority: oauthToken ? 2 : 1,
       transport: "anthropic",
-      models: ANTHROPIC_MODELS,
+      models: resolveModels("anthropic", oauthToken ?? anthropicKey, ANTHROPIC_MODELS),
     });
   }
 
@@ -357,7 +412,7 @@ export async function discoverProviders(
       token: openaiKey,
       billing: "api-key",
       transport: "chat_completions",
-      models: ["gpt-5.4", "gpt-5.3-codex", "gpt-4.1"],
+      models: resolveModels("openai", openaiKey, ["gpt-5.4", "gpt-5.3-codex", "gpt-4.1"]),
     });
   }
 
@@ -367,6 +422,34 @@ export async function discoverProviders(
   const codexAuthPath = process.env["CODEX_AUTH_JSON_PATH"] ?? join(codexHome, "auth.json");
   const codexAuth = codexKey ?? readCodexAuth(codexAuthPath);
   if (codexAuth) {
+    // Codex multi-model gap fix: prior implementation hardcoded a
+    // 2-of-6 subset of what a paid ChatGPT subscriber actually has
+    // access to (`["codexplan", "codexspark"]` — both WOTANN-invented
+    // aliases). The real model list lives at
+    // `https://chatgpt.com/backend-api/codex/models` and is gated
+    // server-side by plan tier (Plus/Pro/Business/Edu/Enterprise).
+    //
+    // We use the SYNC variant here because discoverProviders() is
+    // sync — it reads the on-disk cache (refreshed on a 300 s TTL by
+    // the codex-adapter at request time) and falls back to a bundled
+    // 5-model list when no cache exists. The picker stays responsive
+    // because the live fetch happens in the background.
+    //
+    // Legacy aliases (`codexspark`/`codexplan`/`codexmini`) are
+    // preserved at the *adapter* layer (codex-adapter.ts:182-191)
+    // so existing user scripts that say `--model codexspark` keep
+    // working — they just resolve to the underlying real slug
+    // (`gpt-5.3-codex`/`gpt-5.4`/`gpt-5.4-mini`).
+    const payload = codexKey ? null : readCodexAuthPayload(codexAuthPath);
+    const codexModelsResult = discoverCodexModelsSync(payload?.accountId);
+    const realSlugs = codexModelsResult.models.map((m) => m.slug);
+    // Keep the legacy aliases reachable so muscle-memory CLI flags
+    // (`--model codexspark`) continue to resolve, but real slugs are
+    // listed first so the picker shows them top-of-list.
+    const fullModels: string[] = [...realSlugs];
+    for (const alias of ["codexspark", "codexplan", "codexmini"]) {
+      if (!fullModels.includes(alias)) fullModels.push(alias);
+    }
     providers.push({
       provider: "codex",
       method: "codex-jwt",
@@ -374,7 +457,7 @@ export async function discoverProviders(
       billing: "subscription",
       transport: "codex_responses",
       label: "ChatGPT Codex",
-      models: ["codexplan", "codexspark"],
+      models: fullModels,
     });
   }
 
@@ -401,10 +484,11 @@ export async function discoverProviders(
       billing: "subscription",
       subscription: "copilot-pro",
       transport: "chat_completions",
-      // Dynamic model list — the adapter fetches actual models from the API at runtime.
-      // This static list covers GA models across Copilot Free/Pro/Pro+ tiers.
-      // V14.3: dropped bare "claude-sonnet-4" (retires June 15, 2026); bumped 4.6 → 4.7.
-      models: [
+      // Dynamic model list — Copilot's adapter exposes /models via the
+      // GitHub Copilot proxy, which is OpenAI-compat-shaped and works
+      // through resolveModels. Static fallback covers GA models across
+      // Free/Pro/Pro+ tiers when the cache is cold.
+      models: resolveModels("copilot", ghToken, [
         "gpt-4.1",
         "gpt-4.1-mini",
         "gpt-5",
@@ -417,7 +501,7 @@ export async function discoverProviders(
         "gemini-2.5-pro",
         "gemini-2.5-flash",
         "grok-code-fast-1",
-      ],
+      ]),
     });
   }
 
@@ -467,7 +551,11 @@ export async function discoverProviders(
       billing: "free",
       label: "Google Gemini",
       transport: "chat_completions",
-      models: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+      models: resolveModels("gemini", geminiKey, [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
+      ]),
     });
   }
 
@@ -484,11 +572,11 @@ export async function discoverProviders(
       billing: "free",
       label: "HuggingFace Inference",
       transport: "chat_completions",
-      models: [
+      models: resolveModels("huggingface", huggingFaceKey, [
         "meta-llama/Llama-3.3-70B-Instruct",
         "Qwen/Qwen3-Coder-480B-A35B-Instruct",
         "deepseek-ai/DeepSeek-R1",
-      ],
+      ]),
     });
   }
 
@@ -517,7 +605,10 @@ export async function discoverProviders(
       billing: "api-key",
       label: "Azure OpenAI",
       transport: "chat_completions",
-      models: ["gpt-4o", "gpt-4-turbo"],
+      // Azure /models lists deployed model IDs, not arbitrary OpenAI
+      // catalog entries — the resource owner controls what's in here.
+      // Fallback covers the most common GA deployments.
+      models: resolveModels("azure", azureKey, ["gpt-4o", "gpt-4-turbo"]),
     });
   }
 
@@ -532,6 +623,9 @@ export async function discoverProviders(
       billing: "api-key",
       label: "AWS Bedrock",
       transport: "chat_completions",
+      // Bedrock /models is hidden behind AWS SigV4 + ListFoundationModels
+      // — the OpenAI-compat fetcher doesn't reach it. Static fallback
+      // wins until a SigV4-aware fetcher is wired in model-discovery.ts.
       models: [BEDROCK_SONNET, BEDROCK_HAIKU],
     });
   }
@@ -547,6 +641,9 @@ export async function discoverProviders(
       billing: "api-key",
       label: "Google Vertex AI",
       transport: "chat_completions",
+      // Vertex /models is exposed through google-cloud-aiplatform but
+      // requires SA-token signing — outside the OpenAI-compat path.
+      // Static fallback wins until a Google-OAuth fetcher is wired.
       models: [VERTEX_SONNET, "gemini-2.5-pro"],
     });
   }
@@ -561,7 +658,11 @@ export async function discoverProviders(
       billing: "api-key",
       label: "Mistral AI",
       transport: "chat_completions",
-      models: ["mistral-large-latest", "mistral-medium", "codestral-latest"],
+      models: resolveModels("mistral", mistralKey, [
+        "mistral-large-latest",
+        "mistral-medium",
+        "codestral-latest",
+      ]),
     });
   }
 
@@ -575,7 +676,7 @@ export async function discoverProviders(
       billing: "api-key",
       label: "DeepSeek",
       transport: "chat_completions",
-      models: ["deepseek-chat", "deepseek-reasoner"],
+      models: resolveModels("deepseek", deepseekKey, ["deepseek-chat", "deepseek-reasoner"]),
     });
   }
 
@@ -589,7 +690,11 @@ export async function discoverProviders(
       billing: "api-key",
       label: "Perplexity",
       transport: "chat_completions",
-      models: ["sonar", "sonar-pro", "sonar-reasoning-pro"],
+      models: resolveModels("perplexity", perplexityKey, [
+        "sonar",
+        "sonar-pro",
+        "sonar-reasoning-pro",
+      ]),
     });
   }
 
@@ -603,7 +708,7 @@ export async function discoverProviders(
       billing: "api-key",
       label: "xAI Grok",
       transport: "chat_completions",
-      models: ["grok-2", "grok-3", "grok-3-mini"],
+      models: resolveModels("xai", xaiKey, ["grok-2", "grok-3", "grok-3-mini"]),
     });
   }
 
@@ -617,7 +722,10 @@ export async function discoverProviders(
       billing: "api-key",
       label: "Together AI",
       transport: "chat_completions",
-      models: ["meta-llama/Llama-3.3-70B-Instruct-Turbo", "Qwen/Qwen2.5-Coder-32B-Instruct"],
+      models: resolveModels("together", togetherKey, [
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "Qwen/Qwen2.5-Coder-32B-Instruct",
+      ]),
     });
   }
 
@@ -631,10 +739,10 @@ export async function discoverProviders(
       billing: "api-key",
       label: "Fireworks AI",
       transport: "chat_completions",
-      models: [
+      models: resolveModels("fireworks", fireworksKey, [
         "accounts/fireworks/models/llama-v3p3-70b-instruct",
         "accounts/fireworks/models/qwen2p5-coder-32b-instruct",
-      ],
+      ]),
     });
   }
 
@@ -648,7 +756,10 @@ export async function discoverProviders(
       billing: "api-key",
       label: "SambaNova",
       transport: "chat_completions",
-      models: ["Meta-Llama-3.3-70B-Instruct", "Qwen2.5-Coder-32B-Instruct"],
+      models: resolveModels("sambanova", sambanovaKey, [
+        "Meta-Llama-3.3-70B-Instruct",
+        "Qwen2.5-Coder-32B-Instruct",
+      ]),
     });
   }
 
@@ -696,6 +807,7 @@ const ALL_PROVIDERS: readonly ProviderName[] = [
   "sambanova",
   "groq",
   "openrouter",
+  "cerebras",
 ];
 
 export function formatFullStatus(detected: readonly ProviderAuth[]): readonly ProviderStatus[] {

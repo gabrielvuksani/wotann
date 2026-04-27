@@ -677,6 +677,7 @@ export function getSecurityFallbackChain(provider: ProviderName): readonly Provi
     sambanova: ["sambanova", "free", "ollama"],
     groq: ["groq", "free", "ollama"],
     openrouter: ["openrouter", "free", "ollama"],
+    cerebras: ["cerebras", "free", "ollama"],
   };
   return chains[provider];
 }

@@ -637,6 +637,14 @@ export const PROVIDER_CAPABILITY_MATRIX: Readonly<Record<ProviderName, ProviderC
     supportsThinking: false,
     maxContextWindow: 200_000,
   },
+  cerebras: {
+    supportsComputerUse: false,
+    supportsToolCalling: true,
+    supportsVision: false,
+    supportsStreaming: true,
+    supportsThinking: false,
+    maxContextWindow: 131_072,
+  },
 };
 
 /**

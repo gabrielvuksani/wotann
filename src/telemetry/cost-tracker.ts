@@ -143,11 +143,25 @@ const COST_TABLE: Record<string, { input: number; output: number }> = {
   "llama-3.1-8b-instant": { input: 0.00005, output: 0.00008 },
   "llama-4-scout-17b-16e": { input: 0.0001, output: 0.0003 },
 
-  // Codex (subscription billing handled upstream, keep 0 so we don't
-  // double-count against a user who's already paying for ChatGPT)
+  // Codex aliases (subscription billing handled upstream, keep 0 so
+  // we don't double-count against a user who's already paying for
+  // ChatGPT). Real GPT-5.x slugs (gpt-5.4, gpt-5.3-codex, etc.)
+  // already have API pricing further up the table — when used via the
+  // Codex subscription transport, the per-provider billing flag
+  // (`subscription`) is what zeros the cost; the slug alone can't tell
+  // us which transport the user is on.
   codexplan: { input: 0, output: 0 },
   codexspark: { input: 0, output: 0 },
   codexmini: { input: 0, output: 0 },
+  // Newly-discovered Codex slugs lacking explicit API pricing — keep
+  // small placeholders so the cost-tracker doesn't return null and
+  // the per-call cost preview never displays "?". These match the
+  // gpt-5.x family pricing band; tighten when OpenAI publishes
+  // official rates.
+  "gpt-5.5": { input: 0.005, output: 0.02 },
+  "gpt-5.4-mini": { input: 0.001, output: 0.004 },
+  "gpt-5.2": { input: 0.002, output: 0.008 },
+  "gpt-5.1-codex": { input: 0.0005, output: 0.002 },
 
   // Local / free
   "llama-3.3-70b": { input: 0, output: 0 },

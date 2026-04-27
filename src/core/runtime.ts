@@ -24,6 +24,27 @@ import type {
 import { extractTrackedFilePath } from "./tool-path-extractor.js";
 import type { StreamChunk } from "../providers/types.js";
 import { discoverProviders } from "../providers/discovery.js";
+import { discoverModelsForProvider } from "../providers/model-discovery.js";
+import type { ProviderAuth } from "./types.js";
+
+/**
+ * Fire-and-forget cache warmup. Runs every available provider's live
+ * model fetch in parallel; results land on disk for the next picker
+ * open. Errors are swallowed individually so one slow provider never
+ * blocks others.
+ */
+function warmupProviderModels(providers: readonly ProviderAuth[]): void {
+  if (providers.length === 0) return;
+  void Promise.allSettled(
+    providers.map((auth) =>
+      discoverModelsForProvider({
+        provider: auth.provider,
+        token: auth.token,
+        fallback: auth.models,
+      }),
+    ),
+  );
+}
 import { resolveDefaultProvider } from "./default-provider.js";
 import {
   createProviderInfrastructure,
@@ -1946,6 +1967,19 @@ export class WotannRuntime {
 
     // Discover providers
     const providers = await discoverProviders();
+
+    // Background model-catalog warmup: discoverProviders() returns a
+    // synchronous list with hardcoded fallbacks (or 5-min cached
+    // results from prior runs). Kick off live `/v1/models` fetches in
+    // the background for every available provider so the next picker
+    // open shows the user's actual entitlements rather than a stale
+    // fallback. Fire-and-forget — startup latency is unaffected, and
+    // any failure logs to stderr without throwing because the
+    // discoverModelsForProvider contract guarantees a non-empty
+    // result via bundled fallback. Codex has its own warmup path
+    // through codex-models.ts (already wired in
+    // src/providers/codex-adapter.ts:listModels).
+    void warmupProviderModels(providers);
     if (providers.length > 0) {
       this.infra = createProviderInfrastructure(providers, this.accountPool);
       this.infra.router.hydrateRepoPerformance(this.modelPerformanceStore.load());

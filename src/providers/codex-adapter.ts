@@ -28,6 +28,7 @@ import type {
 import { getModelContextConfig } from "../context/limits.js";
 import { toCodexTools } from "./tool-serializer.js";
 import { getProviderService } from "./provider-service.js";
+import { discoverCodexModels, resolveCodexAlias } from "./codex-models.js";
 
 // ── Auth Types ──────────────────────────────────────────────
 
@@ -179,16 +180,14 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
       return;
     }
 
-    // Map model aliases to actual model IDs
+    // Map model aliases to actual model IDs. The legacy
+    // codexspark/codexplan/codexmini names came from OpenClaude and are
+    // kept here as backward-compat aliases — the alias map lives in
+    // codex-models.ts so a single source of truth governs the
+    // resolution. Real Codex slugs (`gpt-5.5`, `gpt-5.4-mini`, etc.)
+    // pass through unchanged.
     const inputModel = options.model ?? "codexspark";
-    const model =
-      inputModel === "codexplan"
-        ? "gpt-5.4"
-        : inputModel === "codexspark"
-          ? "gpt-5.3-codex"
-          : inputModel === "codexmini"
-            ? "gpt-5.1-codex"
-            : inputModel;
+    const model = resolveCodexAlias(inputModel);
 
     // Build Responses API request body.
     //
@@ -504,9 +503,26 @@ export function createCodexAdapter(rawToken?: string): ProviderAdapter {
   }
 
   async function listModels(): Promise<readonly string[]> {
-    // codexplan = GPT-5.4 (high reasoning), codexspark = GPT-5.3-Codex (fast loops)
-    // codexmini = GPT-5.1-Codex (Max, with optional Mini variant)
-    return ["codexplan", "codexspark", "codexmini"];
+    // Codex multi-model gap fix (companion change to discovery.ts):
+    // call into the live `/backend-api/codex/models` endpoint via the
+    // codex-models.ts cache. We pass through the JWT and account_id
+    // so the server gates per-account and we get the user's actual
+    // entitlement set rather than a hardcoded 3-of-6 alias subset.
+    //
+    // Falls back to the bundled 5-model catalog when the network is
+    // down or auth is missing/expired — mirrors the openai/codex CLI
+    // behaviour. Aliases (`codexspark`/`codexplan`/`codexmini`) are
+    // appended so existing user scripts keep working.
+    const result = await discoverCodexModels({
+      accessToken: auth?.tokens?.access_token,
+      accountId: auth?.tokens?.account_id,
+      idToken: auth?.tokens?.id_token,
+    });
+    const slugs = result.models.map((m) => m.slug);
+    for (const alias of ["codexspark", "codexplan", "codexmini"]) {
+      if (!slugs.includes(alias)) slugs.push(alias);
+    }
+    return slugs;
   }
 
   async function isAvailable(): Promise<boolean> {

@@ -478,13 +478,13 @@ describe("runHealthCheck: capability projection", () => {
   });
 });
 
-// ── Tests: PROVIDER_CAPABILITY_MATRIX pins all 20 providers ─
+// ── Tests: PROVIDER_CAPABILITY_MATRIX pins all 21 providers ─
 
 describe("PROVIDER_CAPABILITY_MATRIX", () => {
-  it("declares all 20 ProviderName values", () => {
-    // Gap-1 fix: openrouter added to ProviderName union (was 19, now 20).
-    // The matrix MUST stay in sync with src/core/types.ts so future
-    // additions don't slip through unnoticed.
+  it("declares all 21 ProviderName values", () => {
+    // Cerebras added to ProviderName union alongside dynamic model
+    // discovery (was 20, now 21). The matrix MUST stay in sync with
+    // src/core/types.ts so future additions don't slip through.
     const names: readonly ProviderName[] = [
       "anthropic",
       "openai",
@@ -506,12 +506,13 @@ describe("PROVIDER_CAPABILITY_MATRIX", () => {
       "sambanova",
       "groq",
       "openrouter",
+      "cerebras",
     ];
     for (const n of names) {
       expect(PROVIDER_CAPABILITY_MATRIX[n]).toBeDefined();
       expect(typeof PROVIDER_CAPABILITY_MATRIX[n].supportsStreaming).toBe("boolean");
     }
-    expect(Object.keys(PROVIDER_CAPABILITY_MATRIX)).toHaveLength(20);
+    expect(Object.keys(PROVIDER_CAPABILITY_MATRIX)).toHaveLength(21);
   });
 
   it("every provider declares supportsToolCalling=true (Phase 6 coverage)", () => {

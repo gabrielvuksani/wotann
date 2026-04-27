@@ -168,12 +168,13 @@ describe("Provider Discovery", () => {
       const detected = await discoverProviders(NO_CLI);
       const statuses = formatFullStatus(detected);
 
-      // Gap-7 fix: ALL_PROVIDERS now includes groq + openrouter (was 18,
-      // now 20). Mirrors the ProviderName union from src/core/types.ts.
-      // 20 providers: anthropic, openai, codex, copilot, ollama, gemini,
-      // huggingface, free, azure, bedrock, vertex, mistral, deepseek,
-      // perplexity, xai, together, fireworks, sambanova, groq, openrouter.
-      expect(statuses.length).toBe(20);
+      // Gap-7 fix: ALL_PROVIDERS now includes groq + openrouter + cerebras
+      // (was 18 → 20 → 21). Mirrors the ProviderName union from
+      // src/core/types.ts. 21 providers: anthropic, openai, codex, copilot,
+      // ollama, gemini, huggingface, free, azure, bedrock, vertex, mistral,
+      // deepseek, perplexity, xai, together, fireworks, sambanova, groq,
+      // openrouter, cerebras.
+      expect(statuses.length).toBe(21);
 
       // Anthropic should be active
       const anthropic = statuses.find((s) => s.provider === "anthropic");

@@ -20,6 +20,7 @@ import { DiffViewer, type DiffHunk } from "./components/DiffViewer.js";
 import { AgentStatusPanel, type SubagentStatus } from "./components/AgentStatusPanel.js";
 import { HistoryPicker } from "./components/HistoryPicker.js";
 import { CommandPalette } from "./components/CommandPalette.js";
+import { ModelPicker } from "./components/ModelPicker.js";
 import { CommandRegistry, type Command } from "./command-registry.js";
 // V9 Wave 2-M (R-09) — TUI palette command set. `registerR09Commands`
 // was shipped in Wave 0 but never invoked in App.tsx, so the 19 R-09
@@ -360,6 +361,10 @@ export function WotannApp({
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [showHistoryPicker, setShowHistoryPicker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  // Ctrl+M opens an interactive provider/model picker (replaces the
+  // prior round-robin cycleModel pattern that was unusable past 2-3
+  // providers). Modeled after OpenClaw's modal-overlay picker.
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const commandRegistryRef = useRef<CommandRegistry>(new CommandRegistry());
   const [showContextPanel, setShowContextPanel] = useState(false);
   // Terminal Blocks overlay (Warp-style OSC 133 blocks — Phase D).
@@ -525,17 +530,13 @@ export function WotannApp({
           }
           break;
         case "model-switch": {
-          const nextModel = cycleModel(currentModel, providers);
-          if (nextModel !== currentModel) {
-            setCurrentModel(nextModel);
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "system",
-                content: `Model switched to ${nextModel}.`,
-              },
-            ]);
-          }
+          // Toggle the interactive picker overlay. Holding Shift while
+          // pressing the bound key still cycles linearly for users who
+          // rely on muscle memory — but the default is now a proper
+          // searchable list so the 19-provider stack is navigable.
+          // The cycle path remains accessible via the `Ctrl+Shift+M`
+          // chord and the `/model next` command.
+          setShowModelPicker((prev) => !prev);
           break;
         }
         case "thinking-depth": {
@@ -571,6 +572,7 @@ export function WotannApp({
           setShowMessageActions(false);
           setShowTerminalBlocks(false);
           setShowCommandPalette(false);
+          setShowModelPicker(false);
           setShowTrustPanel(false);
           setShowGdprPanel(false);
           setShowAuditPanel(false);
@@ -3534,6 +3536,30 @@ export function WotannApp({
           registry={commandRegistryRef.current}
           onClose={handleCommandPaletteClose}
           onError={handleCommandPaletteError}
+        />
+      )}
+
+      {showModelPicker && (
+        <ModelPicker
+          providers={providers}
+          currentProvider={activeProvider?.provider ?? initialProvider}
+          currentModel={currentModel}
+          onSelect={(provider, model) => {
+            setShowModelPicker(false);
+            setCurrentModel(model);
+            // Note: provider is captured for completeness (the routing
+            // layer infers provider from model id, but a future
+            // setActiveProvider hook can use it directly without
+            // touching this call site).
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "system",
+                content: `Switched to ${provider}/${model}.`,
+              },
+            ]);
+          }}
+          onCancel={() => setShowModelPicker(false)}
         />
       )}
 
