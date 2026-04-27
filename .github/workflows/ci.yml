@@ -109,15 +109,47 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
-      - name: Test
-        # `--reporter=default` (vitest 4 removed the `basic` reporter
-        # that earlier vitest versions had) keeps log volume modest
-        # on a single runner — only file-level pass/fail summaries
-        # rather than the per-test verbose output that flooded the
-        # prior matrix attempts and contributed to runner stress.
-        # vitest's internal worker pool still parallelizes tests
-        # across all available CPUs on the runner.
-        run: npx vitest run --reporter=default
+      - name: Test (with retry on infrastructure flake)
+        # vitest 4 removed `--reporter=basic`; using `default` keeps
+        # log volume modest (file-level pass/fail) without the
+        # per-test stderr flood of `verbose`.
+        #
+        # Retry loop absorbs the GitHub free-tier "operation was
+        # canceled" / "runner has received a shutdown signal"
+        # infrastructure flake that aborts roughly 1 in every 2
+        # runs of this workflow at unpredictable points (verified
+        # empirically across runs 24970222405 / 24971021895 /
+        # 24971215497 — same code, different cancel times). The
+        # retry runs the SAME `vitest run` up to 3 times; if any
+        # attempt completes with exit 0, the step succeeds. Real
+        # test failures (non-zero exit when the process actually
+        # finished) propagate immediately — only mid-run aborts
+        # trigger a retry, distinguished by checking that vitest
+        # actually printed a summary line.
+        run: |
+          set -e
+          ATTEMPTS=3
+          for i in $(seq 1 $ATTEMPTS); do
+            echo "::group::Test attempt $i / $ATTEMPTS"
+            if npx vitest run --reporter=default 2>&1 | tee /tmp/vitest-out-$i.log; then
+              echo "::endgroup::"
+              echo "Tests passed on attempt $i"
+              exit 0
+            fi
+            STATUS=$?
+            echo "::endgroup::"
+            # If the log contains a vitest summary line ("Test Files"
+            # or "FAIL"), the run completed with real failures —
+            # don't retry.
+            if grep -qE "^( Test Files | FAIL |Failed Tests )" /tmp/vitest-out-$i.log; then
+              echo "Test failures are real (vitest printed a summary). Aborting without retry."
+              exit $STATUS
+            fi
+            echo "Attempt $i exited $STATUS without a vitest summary — likely an infrastructure flake. Retrying..."
+            sleep 5
+          done
+          echo "All $ATTEMPTS attempts failed without a vitest summary. Giving up."
+          exit 1
         env:
           NODE_OPTIONS: --max-old-space-size=6144
           WOTANN_TEST_TRACE_LOAD: "0"
