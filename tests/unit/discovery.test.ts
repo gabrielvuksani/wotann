@@ -109,33 +109,13 @@ describe("Provider Discovery", () => {
       expect(copilot).toBeDefined();
     });
 
-    it("detects Azure OpenAI", async () => {
-      vi.stubEnv("AZURE_OPENAI_API_KEY", "azure-key");
-      vi.stubEnv("AZURE_OPENAI_ENDPOINT", "https://my.openai.azure.com");
-      const providers = await discoverProviders(NO_CLI);
-
-      const azure = providers.find((p) => p.provider === "azure");
-      expect(azure).toBeDefined();
-    });
-
-    it("detects AWS Bedrock", async () => {
-      vi.stubEnv("AWS_REGION", "us-east-1");
-      vi.stubEnv("AWS_ACCESS_KEY_ID", "AKIA-test");
-      const providers = await discoverProviders(NO_CLI);
-
-      const bedrock = providers.find((p) => p.provider === "bedrock");
-      expect(bedrock).toBeDefined();
-      expect(bedrock?.method).toBe("aws-iam");
-    });
-
-    it("detects Google Vertex AI", async () => {
-      vi.stubEnv("GOOGLE_CLOUD_PROJECT", "my-project");
-      vi.stubEnv("GOOGLE_APPLICATION_CREDENTIALS", "/path/to/creds.json");
-      const providers = await discoverProviders(NO_CLI);
-
-      const vertex = providers.find((p) => p.provider === "vertex");
-      expect(vertex).toBeDefined();
-    });
+    // Azure / Bedrock / Vertex were dropped from the first-class set
+    // in the 21→8 provider consolidation. Users wanting those backends
+    // reach them through OpenRouter using `<vendor>/<model>` slugs
+    // (e.g. `openrouter/azure/gpt-5`). The detection blocks for those
+    // env vars were removed from src/providers/discovery.ts; re-add
+    // them in a follow-up if any of those providers move back into the
+    // first-class union.
 
     it("detects Google Gemini via GEMINI_API_KEY", async () => {
       vi.stubEnv("GEMINI_API_KEY", "gemini-test-key");
@@ -168,23 +148,19 @@ describe("Provider Discovery", () => {
       const detected = await discoverProviders(NO_CLI);
       const statuses = formatFullStatus(detected);
 
-      // Gap-7 fix: ALL_PROVIDERS now includes groq + openrouter + cerebras
-      // (was 18 → 20 → 21). Mirrors the ProviderName union from
-      // src/core/types.ts. 21 providers: anthropic, openai, codex, copilot,
-      // ollama, gemini, huggingface, free, azure, bedrock, vertex, mistral,
-      // deepseek, perplexity, xai, together, fireworks, sambanova, groq,
-      // openrouter, cerebras.
-      expect(statuses.length).toBe(21);
+      // Provider consolidation: 21 → 8 first-class providers
+      // (anthropic, openai, codex, copilot, ollama, gemini, openrouter,
+      // huggingface). Long-tail providers reach through OpenRouter.
+      expect(statuses.length).toBe(8);
 
       // Anthropic should be active
       const anthropic = statuses.find((s) => s.provider === "anthropic");
       expect(anthropic?.available).toBe(true);
 
-      // Newly added providers should be inactive when no key is set
+      // OpenRouter inactive (no key set); confirms the escape hatch
+      // surfaces in the picker even when unconfigured.
       const openrouter = statuses.find((s) => s.provider === "openrouter");
       expect(openrouter?.available).toBe(false);
-      const groq = statuses.find((s) => s.provider === "groq");
-      expect(groq?.available).toBe(false);
 
       // Others should be inactive
       const ollama = statuses.find((s) => s.provider === "ollama");

@@ -7172,15 +7172,12 @@ export class WotannRuntime {
     const preferredOrder: readonly ProviderName[] = [
       "ollama",
       "huggingface",
-      "free",
+      "openrouter",
       "openai",
       "gemini",
       "codex",
       "anthropic",
       "copilot",
-      "bedrock",
-      "vertex",
-      "azure",
     ];
 
     for (const provider of preferredOrder) {

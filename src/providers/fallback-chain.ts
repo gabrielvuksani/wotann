@@ -41,22 +41,15 @@ const PAID_PROVIDERS: readonly ProviderName[] = [
   "openai",
   "codex",
   "copilot",
-  "azure",
-  "bedrock",
-  "vertex",
-  // Third-party OpenAI-compatibles (cheapest / most-reliable first)
-  "groq",
-  "deepseek",
-  "mistral",
-  "together",
-  "fireworks",
-  "xai",
-  "perplexity",
-  "sambanova",
+  // OpenRouter is the escape hatch for the long-tail providers
+  // dropped from the first-class set (mistral/deepseek/xai/etc.) —
+  // hitting it on fallback covers them all in one entry. HF stays
+  // because its router-style auth hits a different cost basin.
+  "openrouter",
   "huggingface",
 ];
 
-const FREE_PROVIDERS: readonly ProviderName[] = ["gemini", "ollama", "free"];
+const FREE_PROVIDERS: readonly ProviderName[] = ["gemini", "ollama"];
 
 /**
  * Build a complete fallback chain starting from the preferred provider.

@@ -242,14 +242,7 @@ export class AccountPool {
       { name: "openai", envPrefix: "OPENAI_API_KEY" },
       { name: "gemini", envPrefix: "GEMINI_API_KEY" },
       { name: "huggingface", envPrefix: "HF_TOKEN" },
-      { name: "mistral", envPrefix: "MISTRAL_API_KEY" },
-      { name: "deepseek", envPrefix: "DEEPSEEK_API_KEY" },
-      { name: "perplexity", envPrefix: "PERPLEXITY_API_KEY" },
-      { name: "xai", envPrefix: "XAI_API_KEY" },
-      { name: "together", envPrefix: "TOGETHER_API_KEY" },
-      { name: "fireworks", envPrefix: "FIREWORKS_API_KEY" },
-      { name: "sambanova", envPrefix: "SAMBANOVA_API_KEY" },
-      { name: "groq", envPrefix: "GROQ_API_KEY" },
+      { name: "openrouter", envPrefix: "OPENROUTER_API_KEY" },
     ];
 
     for (const { name, envPrefix } of providers) {

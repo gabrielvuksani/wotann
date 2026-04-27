@@ -38,8 +38,8 @@ describe("Integration: Config → Provider Pipeline", () => {
     const providers = await discoverProviders({ checkClaudeCli: () => false });
     // Might find Ollama if running locally, or zero
     const statuses = formatFullStatus(providers);
-    // Gap-7 fix: ALL_PROVIDERS now includes groq + openrouter + cerebras (21 total).
-    expect(statuses.length).toBe(21);
+    // Provider consolidation: 8 first-class providers (was 21).
+    expect(statuses.length).toBe(8);
   });
 
   it("creates infrastructure from discovered providers", async () => {

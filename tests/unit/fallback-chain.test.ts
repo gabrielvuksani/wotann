@@ -8,7 +8,7 @@ import type { ProviderName } from "../../src/core/types.js";
 
 describe("Provider Fallback Chain", () => {
   const allProviders = new Set<ProviderName>([
-    "anthropic", "openai", "codex", "copilot", "ollama", "free",
+    "anthropic", "openai", "codex", "copilot", "ollama", "openrouter",
   ]);
   const noRateLimits = () => false;
 
@@ -18,11 +18,14 @@ describe("Provider Fallback Chain", () => {
       expect(chain[0]!.provider).toBe("openai");
     });
 
-    it("puts free providers (ollama, free) last", () => {
+    it("puts free providers (ollama) last", () => {
+      // Provider consolidation dropped the synthetic "free" umbrella
+      // (it aliased to Groq/Cerebras/OpenRouter under one name);
+      // OpenRouter's :free model variants now serve that role
+      // through the regular openrouter provider entry.
       const chain = buildFallbackChain("anthropic", allProviders, noRateLimits);
-      const lastTwo = chain.slice(-2).map((e) => e.provider);
-      expect(lastTwo).toContain("ollama");
-      expect(lastTwo).toContain("free");
+      const last = chain[chain.length - 1]!.provider;
+      expect(last).toBe("ollama");
     });
 
     it("paid providers come before free providers", () => {
@@ -84,8 +87,7 @@ describe("Provider Fallback Chain", () => {
     });
 
     it("falls to free provider when all paid are rate-limited", () => {
-      const allPaidLimited = (p: ProviderName) =>
-        !["ollama", "free"].includes(p);
+      const allPaidLimited = (p: ProviderName) => !["ollama"].includes(p);
 
       const chain = buildFallbackChain("anthropic", allProviders, allPaidLimited);
       const next = resolveNextProvider(chain);
@@ -154,8 +156,14 @@ describe("Provider Fallback Chain", () => {
     });
 
     it("all paid limited → falls to ollama (never degrades model)", () => {
+      // Provider consolidation: PAID_PROVIDERS now includes openrouter
+      // and huggingface (the long-tail escape hatches), so the test
+      // must mark all six as limited before falling to ollama. Gemini
+      // is in FREE_PROVIDERS so it's still available even when all
+      // paid are exhausted, but ollama is the ultimate-final since
+      // free chain enumerates `gemini → ollama` last-first.
       const allPaid = new Set<ProviderName>([
-        "anthropic", "openai", "codex", "copilot",
+        "anthropic", "openai", "codex", "copilot", "openrouter", "huggingface", "gemini",
       ]);
       const allPaidLimited = (p: ProviderName) => allPaid.has(p);
 

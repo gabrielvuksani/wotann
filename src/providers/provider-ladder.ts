@@ -113,7 +113,7 @@ export const PROVIDER_LADDER: readonly ProviderRung[] = [
   },
   {
     rank: 4,
-    id: "free",
+    id: "openrouter",
     probe: "groq-free",
     category: "free-tier",
     label: "Groq free tier (Llama 3.3 70B @ 315 tok/s)",
@@ -133,7 +133,7 @@ export const PROVIDER_LADDER: readonly ProviderRung[] = [
   },
   {
     rank: 6,
-    id: "free",
+    id: "openrouter",
     probe: "cerebras-free",
     category: "free-tier",
     label: "Cerebras free tier (fast inference)",
@@ -143,7 +143,7 @@ export const PROVIDER_LADDER: readonly ProviderRung[] = [
   },
   {
     rank: 7,
-    id: "free",
+    id: "openrouter",
     probe: "deepseek-free",
     category: "free-tier",
     label: "DeepSeek (500K free/day + paid)",

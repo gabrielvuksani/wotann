@@ -116,10 +116,26 @@ function fuzzyScore(candidate: string, query: string): number {
 
 /**
  * Flatten providers[].models into one row per (provider, model) pair.
- * Unavailable providers contribute zero rows — the picker never
- * shows a model the user can't actually use.
+ *
+ * Two filters:
+ *   1. Unavailable providers contribute zero rows (no auth = no
+ *      models — can't pick what we can't reach).
+ *   2. Non-first-class providers contribute zero rows (per the
+ *      consolidation: anthropic/openai/codex/ollama/openrouter/
+ *      gemini/copilot/huggingface only — see FIRST_CLASS_PROVIDERS
+ *      in src/core/types.ts). Power users with niche keys (Mistral,
+ *      Cerebras, etc.) still have those backends reachable through
+ *      the OpenRouter escape hatch using the
+ *      `openrouter/<vendor>/<model>` slug convention, OR can re-add
+ *      the provider to FIRST_CLASS_PROVIDERS if they want it back in
+ *      the picker.
  */
 function buildEntries(providers: readonly ProviderStatus[]): readonly ModelEntry[] {
+  // The picker shows every available provider — the type union
+  // narrows to the first-class set already, so anything reaching us
+  // here is automatically promoted-tier. Power users who want raw
+  // Mistral/Cerebras/etc. reach those backends through OpenRouter
+  // using `<vendor>/<model>` slugs.
   const entries: ModelEntry[] = [];
   for (const provider of providers) {
     if (!provider.available) continue;

@@ -278,16 +278,7 @@ async function fetchOllamaModels(baseUrl: string): Promise<readonly string[]> {
  */
 const OPENAI_COMPAT_BASE_URLS: Partial<Record<ProviderName, string>> = {
   openai: "https://api.openai.com/v1",
-  groq: "https://api.groq.com/openai/v1",
   openrouter: "https://openrouter.ai/api/v1",
-  together: "https://api.together.xyz/v1",
-  fireworks: "https://api.fireworks.ai/inference/v1",
-  deepseek: "https://api.deepseek.com/v1",
-  xai: "https://api.x.ai/v1",
-  mistral: "https://api.mistral.ai/v1",
-  cerebras: "https://api.cerebras.ai/v1",
-  sambanova: "https://api.sambanova.ai/v1",
-  perplexity: "https://api.perplexity.ai",
   huggingface: "https://router.huggingface.co/v1",
 };
 

@@ -5,28 +5,34 @@
 
 // ── Provider Types ──────────────────────────────────────────
 
+/**
+ * Supported providers — the eight first-class entries WOTANN ships.
+ * Anyone wanting Mistral, DeepSeek, xAI, Perplexity, Together,
+ * Fireworks, SambaNova, Groq, Cerebras, AWS Bedrock, Azure, Google
+ * Vertex, or the legacy "free" umbrella reaches them through
+ * OpenRouter using the `<vendor>/<model>` slug convention — that's
+ * literally what OpenRouter exists for.
+ *
+ *   - anthropic — Claude (subscription via Claude CLI/OAuth, API via
+ *     ANTHROPIC_API_KEY)
+ *   - openai — standard OpenAI API key (sk-..., the "Codex API" path)
+ *   - codex — ChatGPT subscription via ~/.codex/auth.json — covers
+ *     gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex, gpt-5.2 dynamically
+ *   - ollama — local models (no auth)
+ *   - openrouter — meta-router for 200+ third-party models
+ *   - gemini — Google AI Studio (free tier; subscription via Cloud OAuth)
+ *   - copilot — GitHub Copilot subscription (Pro/Business/Enterprise)
+ *   - huggingface — open-model router for the long tail
+ */
 export type ProviderName =
   | "anthropic"
   | "openai"
   | "codex"
   | "copilot"
   | "ollama"
-  | "gemini"
-  | "huggingface"
-  | "free"
-  | "azure"
-  | "bedrock"
-  | "vertex"
-  | "mistral"
-  | "deepseek"
-  | "perplexity"
-  | "xai"
-  | "together"
-  | "fireworks"
-  | "sambanova"
-  | "groq"
   | "openrouter"
-  | "cerebras";
+  | "gemini"
+  | "huggingface";
 
 export type TransportType = "anthropic" | "chat_completions" | "codex_responses";
 

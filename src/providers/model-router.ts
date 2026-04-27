@@ -264,7 +264,14 @@ export class ModelRouter {
         this.withOllamaCandidate(
           [
             { provider: "gemini", model: GEMINI_DEFAULTS.workerModel, tier: 1 },
-            { provider: "free", model: "auto", tier: 1 },
+            // Free-tier escape hatch: route to OpenRouter's free model
+            // family when budget is exhausted. Replaces the prior
+            // `provider: "free"` umbrella that aliased to Groq/Cerebras.
+            {
+              provider: "openrouter",
+              model: "meta-llama/llama-3.3-70b-instruct:free",
+              tier: 1,
+            },
           ],
           "coding",
         ),
@@ -303,7 +310,8 @@ export class ModelRouter {
         this.withOllamaCandidate(
           [
             { provider: "gemini", model: GEMINI_DEFAULTS.defaultModel, tier: 1 },
-            { provider: "vertex", model: VERTEX_DEFAULTS.defaultModel, tier: 1 },
+            // vertex was dropped from the first-class set; gemini above
+            // covers the same Google model family.
             { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
             { provider: "openai", model: OPENAI_DEFAULTS.oracleModel, tier: 2 },
           ],
@@ -318,7 +326,8 @@ export class ModelRouter {
     if (task.estimatedTokens > 128_000) {
       return this.findBestAvailable([
         { provider: "gemini", model: GEMINI_DEFAULTS.defaultModel, tier: 1 },
-        { provider: "vertex", model: VERTEX_DEFAULTS.defaultModel, tier: 1 },
+        // vertex dropped from first-class set; gemini above covers the
+        // same Google model family at the consumer free tier.
         { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
       ]);
     }

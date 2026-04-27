@@ -95,17 +95,12 @@ export function loadConfigFromFile(configPath: string): Partial<WotannConfig> {
 export function loadConfigFromEnv(): Partial<WotannConfig> {
   const providers: Record<string, { enabled: boolean; apiKey?: string; baseUrl?: string }> = {};
 
-  // Gap-4 fix: prior implementation only read 7 env vars (anthropic,
-  // openai, codex, copilot, ollama, huggingface, azure). The downstream
-  // WotannConfig snapshot is consumed by `wotann doctor` and the desktop
-  // UI's getConfig path; for users who only set GROQ_API_KEY (or any of
-  // 12 other supported providers) the snapshot reported "no providers
-  // configured" even when discovery picked the key up at a different
-  // layer. This now mirrors the full ProviderName union from
-  // src/core/types.ts so the config view stays honest across all 19
-  // supported providers.
+  // Provider consolidation: detect the eight first-class providers
+  // (anthropic, openai, codex, copilot, ollama, gemini, openrouter,
+  // huggingface). Long-tail providers (mistral, deepseek, xai, etc.)
+  // are reachable through OpenRouter using `<vendor>/<model>` slugs
+  // — that's literally what OpenRouter exists for.
 
-  // ── Frontier providers (subscription / API key) ──
   if (process.env["ANTHROPIC_API_KEY"] || process.env["CLAUDE_CODE_OAUTH_TOKEN"]) {
     providers["anthropic"] = { enabled: true, apiKey: process.env["ANTHROPIC_API_KEY"] };
   }
@@ -127,20 +122,6 @@ export function loadConfigFromEnv(): Partial<WotannConfig> {
       apiKey: process.env["GEMINI_API_KEY"] ?? process.env["GOOGLE_AI_API_KEY"],
     };
   }
-  if (process.env["MISTRAL_API_KEY"]) {
-    providers["mistral"] = { enabled: true, apiKey: process.env["MISTRAL_API_KEY"] };
-  }
-  if (process.env["DEEPSEEK_API_KEY"]) {
-    providers["deepseek"] = { enabled: true, apiKey: process.env["DEEPSEEK_API_KEY"] };
-  }
-  if (process.env["XAI_API_KEY"]) {
-    providers["xai"] = { enabled: true, apiKey: process.env["XAI_API_KEY"] };
-  }
-  if (process.env["PERPLEXITY_API_KEY"]) {
-    providers["perplexity"] = { enabled: true, apiKey: process.env["PERPLEXITY_API_KEY"] };
-  }
-
-  // ── Aggregator / cross-provider router ──
   if (process.env["OPENROUTER_API_KEY"]) {
     providers["openrouter"] = {
       enabled: true,
@@ -148,37 +129,12 @@ export function loadConfigFromEnv(): Partial<WotannConfig> {
       baseUrl: "https://openrouter.ai/api/v1",
     };
   }
-
-  // ── Free-tier / fast inference providers ──
-  if (process.env["GROQ_API_KEY"]) {
-    providers["groq"] = {
-      enabled: true,
-      apiKey: process.env["GROQ_API_KEY"],
-      baseUrl: "https://api.groq.com/openai/v1",
-    };
-  }
-  if (process.env["CEREBRAS_API_KEY"]) {
-    providers["cerebras"] = { enabled: true, apiKey: process.env["CEREBRAS_API_KEY"] };
-  }
-  if (process.env["TOGETHER_API_KEY"]) {
-    providers["together"] = { enabled: true, apiKey: process.env["TOGETHER_API_KEY"] };
-  }
-  if (process.env["FIREWORKS_API_KEY"]) {
-    providers["fireworks"] = { enabled: true, apiKey: process.env["FIREWORKS_API_KEY"] };
-  }
-  if (process.env["SAMBANOVA_API_KEY"]) {
-    providers["sambanova"] = { enabled: true, apiKey: process.env["SAMBANOVA_API_KEY"] };
-  }
-
-  // ── Local models ──
   if (process.env["OLLAMA_URL"] || process.env["OLLAMA_HOST"]) {
     providers["ollama"] = {
       enabled: true,
       baseUrl: process.env["OLLAMA_URL"] ?? process.env["OLLAMA_HOST"] ?? "http://localhost:11434",
     };
   }
-
-  // ── Cloud-hosted enterprise providers ──
   if (
     process.env["HF_TOKEN"] ||
     process.env["HUGGINGFACE_API_KEY"] ||
@@ -192,26 +148,6 @@ export function loadConfigFromEnv(): Partial<WotannConfig> {
         process.env["HUGGING_FACE_HUB_TOKEN"],
       baseUrl: "https://router.huggingface.co/v1",
     };
-  }
-  if (process.env["AZURE_OPENAI_API_KEY"]) {
-    providers["azure"] = {
-      enabled: true,
-      apiKey: process.env["AZURE_OPENAI_API_KEY"],
-      baseUrl: process.env["AZURE_OPENAI_ENDPOINT"],
-    };
-  }
-  // AWS Bedrock uses IAM credentials rather than a single API key. Treat
-  // the presence of either AWS_ACCESS_KEY_ID or AWS_PROFILE as the enable
-  // signal; the actual signing happens in the bedrock adapter at request
-  // time. Skip apiKey since SigV4 doesn't use one.
-  if (process.env["AWS_ACCESS_KEY_ID"] || process.env["AWS_PROFILE"]) {
-    providers["bedrock"] = { enabled: true };
-  }
-  // Google Vertex AI uses a service-account JSON file at the standard
-  // GOOGLE_APPLICATION_CREDENTIALS path. Presence enables the provider;
-  // adapter loads the credentials at request time.
-  if (process.env["GOOGLE_APPLICATION_CREDENTIALS"]) {
-    providers["vertex"] = { enabled: true };
   }
 
   return Object.keys(providers).length > 0 ? { providers } : {};

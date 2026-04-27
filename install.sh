@@ -173,70 +173,24 @@ if [ -n "${GEMINI_API_KEY:-}" ] || [ -n "${GOOGLE_AI_API_KEY:-}" ]; then
   echo -e "${GREEN}  - Google Gemini${NC}"
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
-if [ -n "${MISTRAL_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - Mistral${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - DeepSeek${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${XAI_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - xAI Grok${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${PERPLEXITY_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - Perplexity${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-
 # ── Aggregator / cross-provider router ──
+# OpenRouter is the escape hatch for the long-tail providers we
+# dropped from the first-class set: Mistral, DeepSeek, xAI Grok,
+# Perplexity, Together, Fireworks, SambaNova, Groq, Cerebras, AWS
+# Bedrock, Azure OpenAI, Google Vertex AI all reachable via
+# `<vendor>/<model>` slugs through OPENROUTER_API_KEY.
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   echo -e "${GREEN}  - OpenRouter${NC}"
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
 
-# ── Free-tier / fast inference providers ──
-if [ -n "${GROQ_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - Groq (free, fast)${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${CEREBRAS_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - Cerebras${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${TOGETHER_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - Together AI${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${FIREWORKS_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - Fireworks AI${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${SAMBANOVA_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - SambaNova${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-
-# ── Local + cloud-hosted enterprise providers ──
+# ── Local + open-model router ──
 if command -v ollama >/dev/null 2>&1; then
   echo -e "${GREEN}  - Ollama (local, free)${NC}"
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
 if [ -n "${HF_TOKEN:-}" ] || [ -n "${HUGGINGFACE_API_KEY:-}" ] || [ -n "${HUGGING_FACE_HUB_TOKEN:-}" ]; then
   echo -e "${GREEN}  - HuggingFace${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${AZURE_OPENAI_API_KEY:-}" ]; then
-  echo -e "${GREEN}  - Azure OpenAI${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${AWS_ACCESS_KEY_ID:-}" ] || [ -n "${AWS_PROFILE:-}" ]; then
-  echo -e "${GREEN}  - AWS Bedrock${NC}"
-  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
-fi
-if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
-  echo -e "${GREEN}  - Google Vertex AI${NC}"
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
 

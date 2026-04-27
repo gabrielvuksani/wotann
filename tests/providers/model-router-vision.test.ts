@@ -30,12 +30,10 @@ describe("ModelRouter — vision routing (Phase 4 Sprint B2 item 16)", () => {
       expect(decision.tier).toBe(1);
     });
 
-    it("routes to Vertex when Gemini unavailable but Vertex present", () => {
-      const router = makeRouter(["vertex", "anthropic"]);
-      const decision = router.route(makeTask({ requiresVision: true }));
-      expect(decision.provider).toBe("vertex");
-      expect(decision.model).toBe("gemini-3.1-pro");
-    });
+    // Vertex was dropped from the first-class set in the 21→8 provider
+    // consolidation. The Vertex-fallback test that lived here is no
+    // longer applicable; users wanting Google's enterprise tier reach
+    // it through OpenRouter using the `openrouter/google/...` slug.
 
     it("falls back to Claude Sonnet when Gemini+Vertex both missing", () => {
       const router = makeRouter(["anthropic", "openai"]);

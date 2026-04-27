@@ -103,7 +103,15 @@ const PRICING_TABLE: readonly ModelPricing[] = [
     thinkingPer1k: 0.0005,
   },
   { provider: "ollama", model: "llama-3.3-70b", inputPer1k: 0, outputPer1k: 0, thinkingPer1k: 0 },
-  { provider: "free", model: "free-tier", inputPer1k: 0, outputPer1k: 0, thinkingPer1k: 0 },
+  // Free-tier escape hatch via OpenRouter's :free model variants —
+  // replaces the prior "free" umbrella that aliased to Groq/Cerebras.
+  {
+    provider: "openrouter",
+    model: "meta-llama/llama-3.3-70b-instruct:free",
+    inputPer1k: 0,
+    outputPer1k: 0,
+    thinkingPer1k: 0,
+  },
 ];
 
 // ── Task complexity heuristics ────────────────────────────

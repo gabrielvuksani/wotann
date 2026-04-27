@@ -119,28 +119,27 @@ describe("E2E: CLI Commands", { timeout: 90_000 }, () => {
   });
 
   describe("wotann providers", () => {
-    it("lists all 11 providers", () => {
+    it("lists the eight first-class providers", () => {
       const output = runCLI(["providers"], tempDir);
 
       expect(output).toContain("Provider Status");
+      // Consolidation: 21 → 8 providers (anthropic, openai, codex,
+      // copilot, ollama, gemini, openrouter, huggingface). Long-tail
+      // backends (mistral/deepseek/xai/groq/etc.) reachable through
+      // OpenRouter's `<vendor>/<model>` slugs.
       expect(output).toContain("anthropic");
       expect(output).toContain("openai");
       expect(output).toContain("codex");
       expect(output).toContain("copilot");
       expect(output).toContain("ollama");
       expect(output).toContain("gemini");
+      expect(output).toContain("openrouter");
       expect(output).toContain("huggingface");
-      expect(output).toContain("free");
-      expect(output).toContain("azure");
-      expect(output).toContain("bedrock");
-      expect(output).toContain("vertex");
     });
 
     it("shows 0 active when no env vars set", () => {
       const output = runCLI(["providers"], tempDir);
-      // 18 providers: anthropic, openai, codex, copilot, ollama, gemini, huggingface, free,
-      // azure, bedrock, vertex, mistral, deepseek, perplexity, xai, together, fireworks, sambanova
-      expect(output).toContain("0 of 18");
+      expect(output).toContain("0 of 8");
     });
 
     it("reports context reality for configured providers", () => {

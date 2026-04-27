@@ -580,188 +580,12 @@ export async function discoverProviders(
     });
   }
 
-  // FREE ENDPOINTS: Community APIs
-  const freeEndpoints = await discoverFreeEndpoints();
-  if (freeEndpoints.length > 0) {
-    providers.push({
-      provider: "free",
-      method: "api-key",
-      token: "",
-      billing: "free",
-      label: "Free Endpoints",
-      transport: "chat_completions",
-      models: freeEndpoints.map((e) => e.model),
-    });
-  }
-
-  // AZURE OPENAI
-  const azureKey = process.env["AZURE_OPENAI_API_KEY"];
-  const azureEndpoint = process.env["AZURE_OPENAI_ENDPOINT"];
-  if (azureKey && azureEndpoint) {
-    providers.push({
-      provider: "azure",
-      method: "api-key",
-      token: azureKey,
-      billing: "api-key",
-      label: "Azure OpenAI",
-      transport: "chat_completions",
-      // Azure /models lists deployed model IDs, not arbitrary OpenAI
-      // catalog entries — the resource owner controls what's in here.
-      // Fallback covers the most common GA deployments.
-      models: resolveModels("azure", azureKey, ["gpt-4o", "gpt-4-turbo"]),
-    });
-  }
-
-  // AWS BEDROCK
-  const bedrockRegion = process.env["AWS_REGION"] ?? process.env["AWS_DEFAULT_REGION"];
-  const bedrockAccess = process.env["AWS_ACCESS_KEY_ID"];
-  if (bedrockRegion && bedrockAccess) {
-    providers.push({
-      provider: "bedrock",
-      method: "aws-iam",
-      token: bedrockAccess,
-      billing: "api-key",
-      label: "AWS Bedrock",
-      transport: "chat_completions",
-      // Bedrock /models is hidden behind AWS SigV4 + ListFoundationModels
-      // — the OpenAI-compat fetcher doesn't reach it. Static fallback
-      // wins until a SigV4-aware fetcher is wired in model-discovery.ts.
-      models: [BEDROCK_SONNET, BEDROCK_HAIKU],
-    });
-  }
-
-  // GOOGLE VERTEX AI
-  const vertexProject = process.env["GOOGLE_CLOUD_PROJECT"] ?? process.env["GCLOUD_PROJECT"];
-  const vertexCreds = process.env["GOOGLE_APPLICATION_CREDENTIALS"];
-  if (vertexProject && vertexCreds) {
-    providers.push({
-      provider: "vertex",
-      method: "gcp-sa",
-      token: vertexCreds,
-      billing: "api-key",
-      label: "Google Vertex AI",
-      transport: "chat_completions",
-      // Vertex /models is exposed through google-cloud-aiplatform but
-      // requires SA-token signing — outside the OpenAI-compat path.
-      // Static fallback wins until a Google-OAuth fetcher is wired.
-      models: [VERTEX_SONNET, "gemini-2.5-pro"],
-    });
-  }
-
-  // MISTRAL
-  const mistralKey = process.env["MISTRAL_API_KEY"];
-  if (mistralKey) {
-    providers.push({
-      provider: "mistral",
-      method: "api-key",
-      token: mistralKey,
-      billing: "api-key",
-      label: "Mistral AI",
-      transport: "chat_completions",
-      models: resolveModels("mistral", mistralKey, [
-        "mistral-large-latest",
-        "mistral-medium",
-        "codestral-latest",
-      ]),
-    });
-  }
-
-  // DEEPSEEK
-  const deepseekKey = process.env["DEEPSEEK_API_KEY"];
-  if (deepseekKey) {
-    providers.push({
-      provider: "deepseek",
-      method: "api-key",
-      token: deepseekKey,
-      billing: "api-key",
-      label: "DeepSeek",
-      transport: "chat_completions",
-      models: resolveModels("deepseek", deepseekKey, ["deepseek-chat", "deepseek-reasoner"]),
-    });
-  }
-
-  // PERPLEXITY
-  const perplexityKey = process.env["PERPLEXITY_API_KEY"];
-  if (perplexityKey) {
-    providers.push({
-      provider: "perplexity",
-      method: "api-key",
-      token: perplexityKey,
-      billing: "api-key",
-      label: "Perplexity",
-      transport: "chat_completions",
-      models: resolveModels("perplexity", perplexityKey, [
-        "sonar",
-        "sonar-pro",
-        "sonar-reasoning-pro",
-      ]),
-    });
-  }
-
-  // XAI / GROK
-  const xaiKey = process.env["XAI_API_KEY"];
-  if (xaiKey) {
-    providers.push({
-      provider: "xai",
-      method: "api-key",
-      token: xaiKey,
-      billing: "api-key",
-      label: "xAI Grok",
-      transport: "chat_completions",
-      models: resolveModels("xai", xaiKey, ["grok-2", "grok-3", "grok-3-mini"]),
-    });
-  }
-
-  // TOGETHER.AI
-  const togetherKey = process.env["TOGETHER_API_KEY"];
-  if (togetherKey) {
-    providers.push({
-      provider: "together",
-      method: "api-key",
-      token: togetherKey,
-      billing: "api-key",
-      label: "Together AI",
-      transport: "chat_completions",
-      models: resolveModels("together", togetherKey, [
-        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-        "Qwen/Qwen2.5-Coder-32B-Instruct",
-      ]),
-    });
-  }
-
-  // FIREWORKS.AI
-  const fireworksKey = process.env["FIREWORKS_API_KEY"];
-  if (fireworksKey) {
-    providers.push({
-      provider: "fireworks",
-      method: "api-key",
-      token: fireworksKey,
-      billing: "api-key",
-      label: "Fireworks AI",
-      transport: "chat_completions",
-      models: resolveModels("fireworks", fireworksKey, [
-        "accounts/fireworks/models/llama-v3p3-70b-instruct",
-        "accounts/fireworks/models/qwen2p5-coder-32b-instruct",
-      ]),
-    });
-  }
-
-  // SAMBANOVA
-  const sambanovaKey = process.env["SAMBANOVA_API_KEY"];
-  if (sambanovaKey) {
-    providers.push({
-      provider: "sambanova",
-      method: "api-key",
-      token: sambanovaKey,
-      billing: "api-key",
-      label: "SambaNova",
-      transport: "chat_completions",
-      models: resolveModels("sambanova", sambanovaKey, [
-        "Meta-Llama-3.3-70B-Instruct",
-        "Qwen2.5-Coder-32B-Instruct",
-      ]),
-    });
-  }
+  // Provider consolidation note: free, azure, bedrock, vertex,
+  // mistral, deepseek, perplexity, xai, together, fireworks,
+  // sambanova, groq, cerebras dropped from the first-class set.
+  // Users with raw API keys for those reach the underlying models
+  // through OpenRouter (`<vendor>/<model>` slugs) — see the
+  // OpenRouter block below.
 
   return providers;
 }
@@ -781,11 +605,9 @@ export function formatProviderStatus(
   }));
 }
 
-// Gap-7 fix: prior list was missing groq + openrouter, so `wotann doctor`
-// showed "no providers available" entries for active env vars and never
-// listed Groq/OpenRouter as inactive options when the user had no key.
-// Now mirrors src/core/types.ts ProviderName union (minus the synthetic
-// "free" pseudo-provider which is rolled into the explicit groq entry).
+// ALL_PROVIDERS = the eight first-class entries (mirrors the
+// ProviderName union in src/core/types.ts). The picker, install
+// detection, and `wotann doctor` enumerate this list.
 const ALL_PROVIDERS: readonly ProviderName[] = [
   "anthropic",
   "openai",
@@ -794,20 +616,7 @@ const ALL_PROVIDERS: readonly ProviderName[] = [
   "ollama",
   "gemini",
   "huggingface",
-  "free",
-  "azure",
-  "bedrock",
-  "vertex",
-  "mistral",
-  "deepseek",
-  "perplexity",
-  "xai",
-  "together",
-  "fireworks",
-  "sambanova",
-  "groq",
   "openrouter",
-  "cerebras",
 ];
 
 export function formatFullStatus(detected: readonly ProviderAuth[]): readonly ProviderStatus[] {

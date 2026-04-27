@@ -455,21 +455,13 @@ describe("runHealthCheck: capability projection", () => {
   });
 
   it("reports cacheControl=false for providers without prompt-cache wiring", async () => {
+    // Provider consolidation: dropped the 13 long-tail providers that
+    // had no prompt-cache wiring. The remaining cache-less first-class
+    // providers are ollama (local, no cache layer) and huggingface
+    // (router shape, cache-pass-through not implemented).
     const noCacheProviders: readonly ProviderName[] = [
       "ollama",
-      "mistral",
-      "deepseek",
-      "perplexity",
-      "xai",
-      "together",
-      "fireworks",
-      "sambanova",
-      "groq",
-      "bedrock",
-      "vertex",
       "huggingface",
-      "free",
-      "azure",
     ];
     for (const p of noCacheProviders) {
       const report = await runHealthCheck(p, mockAdapter(), { dryRun: true });
@@ -478,13 +470,12 @@ describe("runHealthCheck: capability projection", () => {
   });
 });
 
-// ── Tests: PROVIDER_CAPABILITY_MATRIX pins all 21 providers ─
+// ── Tests: PROVIDER_CAPABILITY_MATRIX pins all 8 first-class providers ─
 
 describe("PROVIDER_CAPABILITY_MATRIX", () => {
-  it("declares all 21 ProviderName values", () => {
-    // Cerebras added to ProviderName union alongside dynamic model
-    // discovery (was 20, now 21). The matrix MUST stay in sync with
-    // src/core/types.ts so future additions don't slip through.
+  it("declares all 8 ProviderName values", () => {
+    // Provider consolidation: 21 → 8 first-class entries. The matrix
+    // mirrors src/core/types.ts so future additions can't slip through.
     const names: readonly ProviderName[] = [
       "anthropic",
       "openai",
@@ -493,26 +484,13 @@ describe("PROVIDER_CAPABILITY_MATRIX", () => {
       "ollama",
       "gemini",
       "huggingface",
-      "free",
-      "azure",
-      "bedrock",
-      "vertex",
-      "mistral",
-      "deepseek",
-      "perplexity",
-      "xai",
-      "together",
-      "fireworks",
-      "sambanova",
-      "groq",
       "openrouter",
-      "cerebras",
     ];
     for (const n of names) {
       expect(PROVIDER_CAPABILITY_MATRIX[n]).toBeDefined();
       expect(typeof PROVIDER_CAPABILITY_MATRIX[n].supportsStreaming).toBe("boolean");
     }
-    expect(Object.keys(PROVIDER_CAPABILITY_MATRIX)).toHaveLength(21);
+    expect(Object.keys(PROVIDER_CAPABILITY_MATRIX)).toHaveLength(8);
   });
 
   it("every provider declares supportsToolCalling=true (Phase 6 coverage)", () => {

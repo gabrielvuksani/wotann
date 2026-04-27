@@ -38,7 +38,10 @@ describe("interactive bootstrap", () => {
         discoverProvidersFn: async () => [],
       });
 
-      expect(interactive.providers.length).toBeGreaterThan(10);
+      // Provider consolidation: 21 → 8 first-class providers. The
+      // sentinel value here was 10 (asserting we ship enough provider
+      // slots to be useful); now the floor is the eight-entry union.
+      expect(interactive.providers.length).toBeGreaterThanOrEqual(8);
       expect(interactive.providers.every((provider) => provider.available === false)).toBe(true);
       // No providers configured → empty sentinel (caller must onboard
       // the user to a provider). Previous test asserted "ollama" but

@@ -20,11 +20,13 @@ async function main(): Promise<void> {
   console.log(chalk.bold("Detected providers:"));
   for (const s of statuses) {
     const icon = s.available ? chalk.green("●") : chalk.red("○");
-    console.log(`  ${icon} ${s.label} (${s.billing}) — ${s.models.slice(0, 3).join(", ") || "none"}`);
+    console.log(
+      `  ${icon} ${s.label} (${s.billing}) — ${s.models.slice(0, 3).join(", ") || "none"}`,
+    );
   }
   console.log();
 
-  const active = providers.filter((p) => p.provider !== "free" || p.models.length > 0);
+  const active = providers.filter((p) => p.models.length > 0);
   if (active.length === 0) {
     console.log(chalk.red("No providers available. Set up auth first:"));
     console.log(chalk.dim("  Anthropic: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"));
@@ -43,12 +45,17 @@ async function main(): Promise<void> {
   console.log();
 
   // 3. Pick the target provider
-  const providerToTest = targetProvider
-    ?? (infra.adapters.has("codex") ? "codex"
-      : infra.adapters.has("anthropic") ? "anthropic"
-      : infra.adapters.has("openai") ? "openai"
-      : infra.adapters.has("ollama") ? "ollama"
-      : [...infra.adapters.keys()][0]);
+  const providerToTest =
+    targetProvider ??
+    (infra.adapters.has("codex")
+      ? "codex"
+      : infra.adapters.has("anthropic")
+        ? "anthropic"
+        : infra.adapters.has("openai")
+          ? "openai"
+          : infra.adapters.has("ollama")
+            ? "ollama"
+            : [...infra.adapters.keys()][0]);
 
   if (!providerToTest) {
     console.log(chalk.red("No testable provider found."));
@@ -83,12 +90,18 @@ async function main(): Promise<void> {
     }
 
     const elapsed = Date.now() - startTime;
-    console.log(chalk.dim(`\n\n--- Response from ${responseProvider}/${responseModel} in ${elapsed}ms (${tokensUsed} tokens) ---`));
+    console.log(
+      chalk.dim(
+        `\n\n--- Response from ${responseProvider}/${responseModel} in ${elapsed}ms (${tokensUsed} tokens) ---`,
+      ),
+    );
 
     if (fullResponse.includes("4")) {
       console.log(chalk.green("\n✓ Provider test PASSED — got correct response."));
     } else if (fullResponse.length > 0) {
-      console.log(chalk.yellow(`\n⚠ Provider responded but answer unclear: "${fullResponse.trim()}"`));
+      console.log(
+        chalk.yellow(`\n⚠ Provider responded but answer unclear: "${fullResponse.trim()}"`),
+      );
     } else {
       console.log(chalk.red("\n✗ No response received."));
     }

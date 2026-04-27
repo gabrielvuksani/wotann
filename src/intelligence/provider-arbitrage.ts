@@ -128,14 +128,6 @@ const PROVIDER_CAPABILITIES: readonly ProviderCapability[] = [
     capabilityTier: "medium",
     avgLatencyMs: 5000,
   },
-  {
-    provider: "free",
-    model: "free-tier",
-    costPer1kInput: 0,
-    costPer1kOutput: 0,
-    capabilityTier: "low",
-    avgLatencyMs: 8000,
-  },
 ];
 
 const CAPABILITY_ORDER: Record<string, number> = {

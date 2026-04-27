@@ -102,27 +102,13 @@ describe("Config System", () => {
       expect(env.providers?.["openrouter"]?.baseUrl).toBe("https://openrouter.ai/api/v1");
     });
 
-    it("detects GROQ_API_KEY with baseUrl wired", () => {
-      vi.stubEnv("GROQ_API_KEY", "gsk_test");
-      const env = loadConfigFromEnv();
-      expect(env.providers?.["groq"]).toBeDefined();
-      expect(env.providers?.["groq"]?.baseUrl).toBe("https://api.groq.com/openai/v1");
-    });
-
-    it("detects AWS Bedrock via IAM credentials (no apiKey)", () => {
-      vi.stubEnv("AWS_ACCESS_KEY_ID", "AKIA-test");
-      const env = loadConfigFromEnv();
-      expect(env.providers?.["bedrock"]).toBeDefined();
-      // Bedrock uses SigV4, not a single apiKey — assert absence so
-      // accidental token leakage in the snapshot is caught.
-      expect(env.providers?.["bedrock"]?.apiKey).toBeUndefined();
-    });
-
-    it("detects Vertex via service-account credentials path", () => {
-      vi.stubEnv("GOOGLE_APPLICATION_CREDENTIALS", "/tmp/sa-test.json");
-      const env = loadConfigFromEnv();
-      expect(env.providers?.["vertex"]).toBeDefined();
-    });
+    // Provider consolidation: GROQ_API_KEY / AWS_ACCESS_KEY_ID /
+    // GOOGLE_APPLICATION_CREDENTIALS detection blocks were removed
+    // alongside the 21→8 ProviderName narrowing. Users wanting
+    // Groq/Bedrock/Vertex reach those backends via OpenRouter
+    // (`<vendor>/<model>` slugs) instead of separate provider entries.
+    // The kept env-var coverage (anthropic/openai/codex/copilot/ollama/
+    // gemini/openrouter/huggingface) is exercised by the tests above.
 
     it("returns empty when no env vars set", () => {
       const env = loadConfigFromEnv();
