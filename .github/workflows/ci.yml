@@ -110,12 +110,14 @@ jobs:
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
       - name: Test
-        # `--reporter=basic` keeps log volume manageable on a single
-        # runner (verbose reporter would emit ~9k lines and slow
-        # down the runner via stderr buffering on previous matrix
-        # attempts). vitest's internal worker pool still parallelizes
-        # tests across all available CPUs on the runner.
-        run: npx vitest run --reporter=basic
+        # `--reporter=default` (vitest 4 removed the `basic` reporter
+        # that earlier vitest versions had) keeps log volume modest
+        # on a single runner — only file-level pass/fail summaries
+        # rather than the per-test verbose output that flooded the
+        # prior matrix attempts and contributed to runner stress.
+        # vitest's internal worker pool still parallelizes tests
+        # across all available CPUs on the runner.
+        run: npx vitest run --reporter=default
         env:
           NODE_OPTIONS: --max-old-space-size=6144
           WOTANN_TEST_TRACE_LOAD: "0"
