@@ -227,9 +227,60 @@ const MainScene = memo(
             />
           )}
           {activePanel === "diff" && !diffPanel && (
+            // Pre-edit state: rather than show a single "no diff yet"
+            // line and leave the panel mostly empty (the user's
+            // screenshot complaint), surface a quick keyboard
+            // reference so the real-estate is useful even before any
+            // edits land. Edits replace this view automatically.
             <Box flexDirection="column" gap={1}>
-              <Text dimColor>No workspace diff yet.</Text>
-              <Text dimColor>Edits will appear here as they happen.</Text>
+              <Text color={currentThemePrimary} bold>
+                Quick keys
+              </Text>
+              <Box gap={1}>
+                <Text color={currentThemeInfo} bold>
+                  Ctrl+M
+                </Text>
+                <Text dimColor>switch model</Text>
+              </Box>
+              <Box gap={1}>
+                <Text color={currentThemeInfo} bold>
+                  Ctrl+P
+                </Text>
+                <Text dimColor>command palette</Text>
+              </Box>
+              <Box gap={1}>
+                <Text color={currentThemeInfo} bold>
+                  Ctrl+R
+                </Text>
+                <Text dimColor>history search</Text>
+              </Box>
+              <Box gap={1}>
+                <Text color={currentThemeInfo} bold>
+                  Ctrl+T
+                </Text>
+                <Text dimColor>thinking depth</Text>
+              </Box>
+              <Box gap={1}>
+                <Text color={currentThemeInfo} bold>
+                  Tab
+                </Text>
+                <Text dimColor>cycle panel</Text>
+              </Box>
+              <Box gap={1}>
+                <Text color={currentThemeInfo} bold>
+                  /
+                </Text>
+                <Text dimColor>slash menu</Text>
+              </Box>
+              <Box gap={1}>
+                <Text color={currentThemeInfo} bold>
+                  Esc Esc
+                </Text>
+                <Text dimColor>edit prev</Text>
+              </Box>
+              <Box marginTop={1}>
+                <Text dimColor>Edits land here as they happen.</Text>
+              </Box>
             </Box>
           )}
           {activePanel === "agents" && <AgentStatusPanel agents={agentStatuses} />}
@@ -580,6 +631,56 @@ export function WotannApp({
         case "voice-capture":
           void handleVoiceCapture();
           break;
+        case "external-editor": {
+          // Spawn $VISUAL (or $EDITOR) with the current promptValue
+          // pre-populated. When the editor exits, read the file back
+          // and replace promptValue with whatever the user wrote.
+          // Codex CLI ships exactly this pattern — common idiom for
+          // power users composing long prompts (multi-paragraph
+          // explanations, code blocks, etc.) outside Ink's input cell.
+          const editor = process.env["VISUAL"] ?? process.env["EDITOR"];
+          if (!editor) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "system",
+                content:
+                  "Set $VISUAL or $EDITOR (e.g. `export VISUAL=nvim`) to compose long prompts externally.",
+              },
+            ]);
+            break;
+          }
+          void (async () => {
+            try {
+              const { writeFile, readFile, mkdtemp, unlink } = await import("node:fs/promises");
+              const { spawn } = await import("node:child_process");
+              const { tmpdir } = await import("node:os");
+              const { join: pathJoin } = await import("node:path");
+              const dir = await mkdtemp(pathJoin(tmpdir(), "wotann-prompt-"));
+              const tmpFile = pathJoin(dir, "prompt.md");
+              await writeFile(tmpFile, promptValue, "utf-8");
+              await new Promise<void>((resolve, reject) => {
+                const child = spawn(editor, [tmpFile], { stdio: "inherit" });
+                child.on("exit", (code) =>
+                  code === 0 ? resolve() : reject(new Error(`editor exited with ${String(code)}`)),
+                );
+                child.on("error", reject);
+              });
+              const updated = await readFile(tmpFile, "utf-8");
+              setPromptValue(updated);
+              await unlink(tmpFile).catch(() => {
+                /* best-effort cleanup */
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              setMessages((prev) => [
+                ...prev,
+                { role: "system", content: `External editor failed: ${message}` },
+              ]);
+            }
+          })();
+          break;
+        }
         // ── Wave 3G additions ─────────────────────────────
         case "command-palette":
           // Ctrl+P: toggle the overlay palette (P1-UI3).
@@ -1129,23 +1230,15 @@ export function WotannApp({
           }
 
           if (!arg) {
-            const modelLines = [...providerModels.entries()].map(
-              ([prov, models]) => `  ${prov}: ${models.join(", ")}`,
-            );
+            // Condensed system message — the picker is the primary path
+            // for switching models, so the slash command's job here is
+            // to point at Ctrl+M and surface the current model in one
+            // tight line. Long enumerations of every provider's model
+            // list belong in /model status, not the bare command output.
             sysMsg(
-              [
-                `Current model: ${currentModel}`,
-                "",
-                "Available models:",
-                ...modelLines,
-                modelLines.length === 0 ? "  (no providers configured)" : "",
-                "",
-                "Tip: press Ctrl+M for the interactive picker, or",
-                "     /model <name>   — switch by name",
-                "     /model status   — show full provider auth state",
-              ]
-                .filter(Boolean)
-                .join("\n"),
+              providerModels.size === 0
+                ? `Current: ${currentModel} (no providers configured — run \`wotann login <provider>\`)`
+                : `Current: ${currentModel}. Press Ctrl+M to switch · /model <name> · /model status`,
             );
           } else {
             // Validate model is available on some provider

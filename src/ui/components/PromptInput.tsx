@@ -21,6 +21,13 @@ import { PALETTES } from "../themes.js";
 import { buildTone, glyph, rune } from "../theme/tokens.js";
 import { Pill, Spinner } from "./primitives/index.js";
 
+/**
+ * Slash popup row cap — Codex CLI uses similar bound. Keeping the
+ * popup tight prevents it from eating half the terminal when a
+ * generic prefix like `/` shows everything.
+ */
+const MAX_SLASH_ROWS = 8;
+
 interface PromptInputProps {
   readonly onSubmit: (value: string) => void;
   readonly onChange?: (value: string) => void;
@@ -105,6 +112,10 @@ export function PromptInput({
   const tone = buildTone(PALETTES.dark);
   const [internalValue, setInternalValue] = useState("");
   const [historyIndex, setHistoryIndex] = useState(-1);
+  // Slash popup cursor — index into the filtered match list. Reset
+  // to 0 whenever the value changes so freshly-typed characters
+  // start from the top match.
+  const [slashIndex, setSlashIndex] = useState(0);
   // Esc-Esc edit-prev (Codex pattern): track the time of the last
   // standalone Escape press so a quick double-tap (within 500ms) on
   // an empty input recalls the most recent prompt for editing.
@@ -118,18 +129,40 @@ export function PromptInput({
       if (controlledValue === undefined) {
         setInternalValue(resolved);
       }
+      // Any input change resets the popup cursor to the top match so
+      // typing further never leaves the highlight stranded on a row
+      // that's been filtered out.
+      setSlashIndex(0);
       onChange?.(resolved);
     },
     [controlledValue, onChange, value],
   );
 
-  // Find matching slash commands for autocomplete hint
-  const slashHint =
-    value.startsWith("/") && value.length > 1 && value.length < 12
-      ? SLASH_COMMANDS.find(
-          (c) => c.cmd.startsWith(value.toLowerCase()) && c.cmd !== value.toLowerCase(),
-        )
-      : null;
+  // Slash popup matches — Codex-style multi-row picker. Upgrade from
+  // the prior "show one hint" pattern: now we surface up to 8 matches
+  // ordered by exact > prefix > substring, with arrow-key navigation
+  // and Tab autocompletes the highlighted entry.
+  const slashMatches = (() => {
+    if (!value.startsWith("/")) return [] as readonly { cmd: string; desc: string }[];
+    const query = value.toLowerCase();
+    if (query === "/") {
+      // Bare "/" shows the full menu (most-used commands first)
+      return SLASH_COMMANDS.slice(0, MAX_SLASH_ROWS);
+    }
+    const exact: (typeof SLASH_COMMANDS)[number][] = [];
+    const prefix: (typeof SLASH_COMMANDS)[number][] = [];
+    const substring: (typeof SLASH_COMMANDS)[number][] = [];
+    for (const cmd of SLASH_COMMANDS) {
+      if (cmd.cmd === query) exact.push(cmd);
+      else if (cmd.cmd.startsWith(query)) prefix.push(cmd);
+      else if (cmd.cmd.includes(query.slice(1))) substring.push(cmd);
+    }
+    return [...exact, ...prefix, ...substring].slice(0, MAX_SLASH_ROWS);
+  })();
+  const showSlashPopup = slashMatches.length > 0 && value.startsWith("/");
+  // Clamp the cursor whenever the match set shrinks
+  const clampedSlashIndex = Math.min(slashIndex, Math.max(0, slashMatches.length - 1));
+  const slashHint = showSlashPopup ? slashMatches[clampedSlashIndex] : null;
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
@@ -169,14 +202,29 @@ export function PromptInput({
       return;
     }
 
-    if (key.upArrow && history.length > 0) {
-      const newIndex = Math.min(historyIndex + 1, history.length - 1);
-      setHistoryIndex(newIndex);
-      setValue(history[newIndex] ?? "");
-      return;
+    // Arrow nav routes to the slash popup when it's active so users
+    // can pick from the multi-row dropdown without their muscle-memory
+    // history-recall behaviour collapsing the popup. When the popup
+    // is closed (no leading "/"), arrows resume their history-walk
+    // role.
+    if (key.upArrow) {
+      if (showSlashPopup) {
+        setSlashIndex((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      if (history.length > 0) {
+        const newIndex = Math.min(historyIndex + 1, history.length - 1);
+        setHistoryIndex(newIndex);
+        setValue(history[newIndex] ?? "");
+        return;
+      }
     }
 
     if (key.downArrow) {
+      if (showSlashPopup) {
+        setSlashIndex((prev) => Math.min(slashMatches.length - 1, prev + 1));
+        return;
+      }
       const newIndex = Math.max(historyIndex - 1, -1);
       setHistoryIndex(newIndex);
       setValue(newIndex >= 0 ? (history[newIndex] ?? "") : "");
@@ -221,17 +269,41 @@ export function PromptInput({
 
   return (
     <Box flexDirection="column">
-      {/* Slash command autocomplete hint */}
-      {slashHint && (
-        <Box paddingX={2} gap={1}>
-          <Text color={tone.muted}>Tab</Text>
-          <Text color={tone.primary}>{glyph.arrowRight}</Text>
-          <Text color={tone.warning} bold>
-            {slashHint.cmd}
-          </Text>
-          <Text color={tone.muted}>
-            {glyph.bullet} {slashHint.desc}
-          </Text>
+      {/*
+        Slash popup — Codex/Claude-Code-style multi-row picker.
+        Shows up to MAX_SLASH_ROWS matches with the highlighted row
+        rendered bold + arrow indicator. Arrow keys navigate within
+        the popup (instead of the history walk); Tab autocompletes
+        the highlighted row's command into the input.
+      */}
+      {showSlashPopup && (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor={tone.warning}
+          paddingX={1}
+          marginBottom={0}
+        >
+          {slashMatches.map((entry, idx) => {
+            const isActive = idx === clampedSlashIndex;
+            return (
+              <Box key={entry.cmd} gap={1}>
+                <Text color={isActive ? tone.warning : tone.border}>
+                  {isActive ? glyph.arrowRight : " "}
+                </Text>
+                <Text color={isActive ? tone.warning : tone.muted} bold={isActive}>
+                  {entry.cmd}
+                </Text>
+                <Text color={tone.muted}>{glyph.bullet}</Text>
+                <Text color={tone.muted}>{entry.desc}</Text>
+              </Box>
+            );
+          })}
+          <Box gap={1} marginTop={0}>
+            <Text color={tone.muted} dimColor>
+              ↑/↓ navigate · Tab fill · Enter run
+            </Text>
+          </Box>
         </Box>
       )}
 

@@ -19,6 +19,11 @@ const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { key: "t", ctrl: true, action: "thinking-depth", description: "Cycle thinking depth" },
   { key: "v", ctrl: true, action: "voice-capture", description: "Capture voice prompt" },
   { key: "/", ctrl: true, action: "global-search", description: "Global search" },
+  // Codex CLI pattern: Ctrl+G launches `$VISUAL` (or `$EDITOR`)
+  // pre-populated with the current input. Lets users compose long
+  // prompts in their real editor (vim/neovim/vscode/etc.) instead
+  // of fighting Ink's single-line input cell.
+  { key: "g", ctrl: true, action: "external-editor", description: "Edit prompt in $VISUAL" },
   { key: "i", ctrl: true, action: "context-inspect", description: "Context source inspector" },
   { key: "b", ctrl: true, action: "terminal-blocks", description: "Toggle terminal blocks view" },
   // Wave 3G additions — command palette, clear convo, last response.
