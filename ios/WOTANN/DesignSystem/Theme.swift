@@ -324,7 +324,9 @@ extension WTheme.Colors {
         switch name.lowercased() {
         case "anthropic":   return Color(hex: 0xD97706)  // amber
         case "openai":      return Color(hex: 0x10B981)  // emerald
-        case "google":      return Color(hex: 0x3B82F6)  // blue
+        // Gap-2 fix: "gemini" is the canonical daemon provider id;
+        // "google" kept as alias so legacy persisted data still maps.
+        case "gemini", "google": return Color(hex: 0x3B82F6)  // blue
         case "mistral":     return Color(hex: 0xF97316)  // orange
         case "groq":        return Color(hex: 0x5856D6)  // indigo
         case "ollama":      return Color(hex: 0x64748B)  // slate

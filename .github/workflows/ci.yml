@@ -68,27 +68,37 @@ jobs:
   test:
     name: Tests (shard ${{ matrix.shard }}/6)
     # MATRIX-PARALLEL APPROACH — each shard is a separate runner.
-    # First attempt with all 6 shards firing simultaneously got 3
-    # successes + 3 "runner has received a shutdown signal" errors,
-    # which suggests GitHub's free-tier parallel-job pressure was
-    # causing some runners to be reclaimed. Cap max-parallel at 3
-    # so the runner pool stays warm without hitting the contention
-    # cliff. Total wall time: ~6-9 min for 2 waves of 3 shards each.
-    # Each shard still gets its own clean runner (no memory
-    # accumulation across the full 583-file suite).
+    #
+    # Prior failure pattern (5 consecutive CI runs through 40fa871):
+    # shards 1+2 of the FIRST WAVE were canceled with "runner has
+    # received a shutdown signal" while shards 3-6 (later waves)
+    # passed cleanly with 97/97 each. Root cause was contention
+    # between the test matrix and the typecheck-build matrix —
+    # both jobs started simultaneously, exhausting the free-tier
+    # runner pool, and GH Actions reclaimed the runners that were
+    # competing for capacity. Prior mitigation attempts via max-
+    # parallel reductions (6 -> 3 -> 2) never fully fixed it
+    # because the contention was BETWEEN jobs, not within the
+    # matrix.
+    #
+    # Fix: needs typecheck-build serializes Tests AFTER the
+    # typecheck-build job finishes, so the runner pool drains
+    # before tests start. Adds ~60-90 s wall time but eliminates
+    # the flake. The duplicate typecheck/build steps that used
+    # to run on shard 1 are removed because the typecheck-build
+    # job already gates the same checks.
+    needs: typecheck-build
     runs-on: ubuntu-22.04
     # Per-shard timeout: each shard runs ~22-65 s locally; bumping
-    # to 8 min covers slow CI runners with 4× safety margin and
+    # to 8 min covers slow CI runners with 4x safety margin and
     # surfaces hangs faster than the prior 15 min cap.
     timeout-minutes: 8
     strategy:
       fail-fast: false
-      # Reduced from 3 → 2: at max-parallel:3 we still saw "runner
-      # has received a shutdown signal" on shards 1+2 (GH Actions
-      # free-tier matrix-pool reclaim under contention). 2 parallel
-      # runners is the sweet spot — shards still finish in 3 waves
-      # (~6-9 min total) but no infrastructure pressure.
-      max-parallel: 2
+      # With needs typecheck-build removing cross-job contention,
+      # we can safely raise max-parallel back to 3 (2 waves of 3
+      # shards = ~4-6 min total) without runner reclaim risk.
+      max-parallel: 3
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
@@ -101,22 +111,17 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Rebuild native modules (better-sqlite3)
         run: npm rebuild better-sqlite3
-      - name: Typecheck (only on shard 1)
-        if: matrix.shard == 1
-        run: npx tsc --noEmit
       - name: Test (shard ${{ matrix.shard }}/6)
         # WOTANN_TEST_TRACE_LOAD=1 activates the load-tracer setupFile
-        # which emits `[wotann-load] <iso-ts> <file>` to stderr per
-        # test file as it loads. Shard 4 has a CI-only hang — the
-        # tracer's LAST emitted file before the cancel marker is the
-        # culprit. Verbose reporter still surfaces test completions.
+        # which emits `[wotann-load] <iso-ts> <file>` per test file as
+        # it loads. Verbose reporter surfaces test completions for
+        # failure diagnosis. Typecheck + build are NOT duplicated here
+        # because the typecheck-build job (this job's prerequisite via
+        # `needs:`) already gates them.
         run: npx vitest run --shard=${{ matrix.shard }}/6 --reporter=verbose
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           WOTANN_TEST_TRACE_LOAD: "1"
-      - name: Build (only on shard 1)
-        if: matrix.shard == 1
-        run: npm run build
 
   desktop-typecheck:
     name: Desktop typecheck

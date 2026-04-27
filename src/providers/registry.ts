@@ -391,6 +391,43 @@ export function createProviderInfrastructure(
           }),
         );
         break;
+      case "openrouter":
+        // OpenRouter cross-surface gap (independent v9 audit Gap-1):
+        // OpenRouter was offered to users in iOS PairingProviderConfig,
+        // desktop-app onboarding, Tauri commands fallback list, and
+        // OPENROUTER_API_KEY env discovery — but the registry switch
+        // had no `case "openrouter":`, so a user pasting an `sk-or-…`
+        // key got silent registry drop and no adapter. Now wired as
+        // an OpenAI-compatible provider against `openrouter.ai/api/v1`.
+        // Default model is a free, capable Llama variant so first-run
+        // works without a paid plan; users override per-call.
+        adapters.set(
+          "openrouter",
+          createOpenAICompatAdapter({
+            provider: "openrouter",
+            baseUrl: "https://openrouter.ai/api/v1",
+            apiKey: auth.token,
+            defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
+            models: auth.models,
+            capabilities: {
+              supportsComputerUse: false,
+              supportsToolCalling: true,
+              // Vision support is per-model on OpenRouter (claude-*, gpt-4o-*,
+              // gemini-* support it; llama-* generally don't). Default to
+              // false so unaware callers don't attach images that get dropped;
+              // the model-router can flip this when a vision-capable model is
+              // explicitly chosen.
+              supportsVision: false,
+              supportsStreaming: true,
+              supportsThinking: false,
+              // OpenRouter supports models up to 2M ctx (Gemini Pro 1.5);
+              // declare the conservative 200K floor that most flagship
+              // models offer so capacity assumptions don't over-promise.
+              maxContextWindow: 200_000,
+            },
+          }),
+        );
+        break;
     }
 
     // Audit gap (T12.21): src/providers/opencode-sst-adapter.ts (sst/opencode

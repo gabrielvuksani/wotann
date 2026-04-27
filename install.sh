@@ -142,11 +142,18 @@ else
 fi
 
 # ---------------------------------------------------------------- Detect providers
+# Gap-5 fix: prior implementation only checked 5 of 19 supported providers
+# (Anthropic, OpenAI, Codex, Copilot, Ollama). Users with GROQ_API_KEY or
+# any other supported key already exported saw "No providers detected"
+# and were told to run `wotann init --free` even though they had a working
+# free provider. This now covers the full ProviderName union from
+# src/core/types.ts so first-run UX matches reality.
 echo ""
 echo -e "${CYAN}Detecting providers...${NC}"
 PROVIDERS_FOUND=0
 
-if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -f "$HOME/.claude/credentials.json" ]; then
+# ── Frontier providers (subscription / API key) ──
+if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || [ -f "$HOME/.claude/credentials.json" ]; then
   echo -e "${GREEN}  - Anthropic (Claude)${NC}"
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
@@ -154,7 +161,7 @@ if [ -n "${OPENAI_API_KEY:-}" ]; then
   echo -e "${GREEN}  - OpenAI${NC}"
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
-if [ -f "$HOME/.codex/auth.json" ]; then
+if [ -f "$HOME/.codex/auth.json" ] || [ -n "${CODEX_API_KEY:-}" ]; then
   echo -e "${GREEN}  - ChatGPT Codex${NC}"
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
@@ -162,8 +169,74 @@ if [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; then
   echo -e "${GREEN}  - GitHub Copilot${NC}"
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
+if [ -n "${GEMINI_API_KEY:-}" ] || [ -n "${GOOGLE_AI_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - Google Gemini${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${MISTRAL_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - Mistral${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - DeepSeek${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${XAI_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - xAI Grok${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${PERPLEXITY_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - Perplexity${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+
+# ── Aggregator / cross-provider router ──
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - OpenRouter${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+
+# ── Free-tier / fast inference providers ──
+if [ -n "${GROQ_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - Groq (free, fast)${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${CEREBRAS_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - Cerebras${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${TOGETHER_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - Together AI${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${FIREWORKS_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - Fireworks AI${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${SAMBANOVA_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - SambaNova${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+
+# ── Local + cloud-hosted enterprise providers ──
 if command -v ollama >/dev/null 2>&1; then
   echo -e "${GREEN}  - Ollama (local, free)${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${HF_TOKEN:-}" ] || [ -n "${HUGGINGFACE_API_KEY:-}" ] || [ -n "${HUGGING_FACE_HUB_TOKEN:-}" ]; then
+  echo -e "${GREEN}  - HuggingFace${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${AZURE_OPENAI_API_KEY:-}" ]; then
+  echo -e "${GREEN}  - Azure OpenAI${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${AWS_ACCESS_KEY_ID:-}" ] || [ -n "${AWS_PROFILE:-}" ]; then
+  echo -e "${GREEN}  - AWS Bedrock${NC}"
+  PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
+fi
+if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+  echo -e "${GREEN}  - Google Vertex AI${NC}"
   PROVIDERS_FOUND=$((PROVIDERS_FOUND + 1))
 fi
 

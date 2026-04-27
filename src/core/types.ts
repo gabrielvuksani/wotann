@@ -24,7 +24,8 @@ export type ProviderName =
   | "together"
   | "fireworks"
   | "sambanova"
-  | "groq";
+  | "groq"
+  | "openrouter";
 
 export type TransportType = "anthropic" | "chat_completions" | "codex_responses";
 

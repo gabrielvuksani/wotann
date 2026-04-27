@@ -163,18 +163,27 @@ describe("Provider Discovery", () => {
   });
 
   describe("formatFullStatus", () => {
-    it("shows all 18 providers with active/inactive status", async () => {
+    it("shows all 20 providers with active/inactive status", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-test");
       const detected = await discoverProviders(NO_CLI);
       const statuses = formatFullStatus(detected);
 
-      // 18 providers: anthropic, openai, codex, copilot, ollama, gemini, huggingface, free,
-      // azure, bedrock, vertex, mistral, deepseek, perplexity, xai, together, fireworks, sambanova
-      expect(statuses.length).toBe(18);
+      // Gap-7 fix: ALL_PROVIDERS now includes groq + openrouter (was 18,
+      // now 20). Mirrors the ProviderName union from src/core/types.ts.
+      // 20 providers: anthropic, openai, codex, copilot, ollama, gemini,
+      // huggingface, free, azure, bedrock, vertex, mistral, deepseek,
+      // perplexity, xai, together, fireworks, sambanova, groq, openrouter.
+      expect(statuses.length).toBe(20);
 
       // Anthropic should be active
       const anthropic = statuses.find((s) => s.provider === "anthropic");
       expect(anthropic?.available).toBe(true);
+
+      // Newly added providers should be inactive when no key is set
+      const openrouter = statuses.find((s) => s.provider === "openrouter");
+      expect(openrouter?.available).toBe(false);
+      const groq = statuses.find((s) => s.provider === "groq");
+      expect(groq?.available).toBe(false);
 
       // Others should be inactive
       const ollama = statuses.find((s) => s.provider === "ollama");

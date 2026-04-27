@@ -626,6 +626,17 @@ export const PROVIDER_CAPABILITY_MATRIX: Readonly<Record<ProviderName, ProviderC
     supportsThinking: false,
     maxContextWindow: 131_072,
   },
+  openrouter: {
+    supportsComputerUse: false,
+    supportsToolCalling: true,
+    // Vision is per-model on OpenRouter; treat the conservative default as
+    // false since users may pick text-only models. Capability augmenter
+    // upgrades this when a vision-capable model is selected.
+    supportsVision: false,
+    supportsStreaming: true,
+    supportsThinking: false,
+    maxContextWindow: 200_000,
+  },
 };
 
 /**

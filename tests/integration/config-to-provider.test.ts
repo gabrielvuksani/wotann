@@ -38,8 +38,8 @@ describe("Integration: Config → Provider Pipeline", () => {
     const providers = await discoverProviders({ checkClaudeCli: () => false });
     // Might find Ollama if running locally, or zero
     const statuses = formatFullStatus(providers);
-    // All 18 providers should be listed (active or inactive)
-    expect(statuses.length).toBe(18);
+    // Gap-7 fix: ALL_PROVIDERS now includes groq + openrouter (20 total).
+    expect(statuses.length).toBe(20);
   });
 
   it("creates infrastructure from discovered providers", async () => {

@@ -5,13 +5,40 @@ describe("Config System", () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
+    // Clear all 19 supported provider env vars so the "returns empty"
+    // assertion is environment-independent (Gap-4 expanded the env-var
+    // surface in src/core/config.ts; the prior stub list of 7 vars left
+    // GEMINI_API_KEY/GROQ_API_KEY/etc. leaking from the host shell into
+    // the test, which falsely populated `providers` and broke the
+    // empty-snapshot assertion on developer machines with those keys).
     vi.stubEnv("ANTHROPIC_API_KEY", "");
-    vi.stubEnv("OPENAI_API_KEY", "");
     vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "");
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("CODEX_API_KEY", "");
     vi.stubEnv("GH_TOKEN", "");
+    vi.stubEnv("GITHUB_TOKEN", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("GOOGLE_AI_API_KEY", "");
+    vi.stubEnv("MISTRAL_API_KEY", "");
+    vi.stubEnv("DEEPSEEK_API_KEY", "");
+    vi.stubEnv("XAI_API_KEY", "");
+    vi.stubEnv("PERPLEXITY_API_KEY", "");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GROQ_API_KEY", "");
+    vi.stubEnv("CEREBRAS_API_KEY", "");
+    vi.stubEnv("TOGETHER_API_KEY", "");
+    vi.stubEnv("FIREWORKS_API_KEY", "");
+    vi.stubEnv("SAMBANOVA_API_KEY", "");
     vi.stubEnv("OLLAMA_URL", "");
     vi.stubEnv("OLLAMA_HOST", "");
+    vi.stubEnv("HF_TOKEN", "");
+    vi.stubEnv("HUGGINGFACE_API_KEY", "");
+    vi.stubEnv("HUGGING_FACE_HUB_TOKEN", "");
     vi.stubEnv("AZURE_OPENAI_API_KEY", "");
+    vi.stubEnv("AZURE_OPENAI_ENDPOINT", "");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "");
+    vi.stubEnv("AWS_PROFILE", "");
+    vi.stubEnv("GOOGLE_APPLICATION_CREDENTIALS", "");
   });
 
   afterEach(() => {
@@ -53,6 +80,48 @@ describe("Config System", () => {
       vi.stubEnv("GH_TOKEN", "ghp_test123");
       const env = loadConfigFromEnv();
       expect(env.providers?.["copilot"]).toBeDefined();
+    });
+
+    // Gap-4 fix: lock in env-var detection for the 14 providers that
+    // the prior loadConfigFromEnv silently dropped. Each test stubs
+    // ONE env var and verifies its provider key surfaces in the
+    // snapshot. Failures here indicate a regression in the
+    // ProviderName ↔ env-var mapping.
+
+    it("detects GEMINI_API_KEY", () => {
+      vi.stubEnv("GEMINI_API_KEY", "AIza-test-key");
+      const env = loadConfigFromEnv();
+      expect(env.providers?.["gemini"]).toBeDefined();
+      expect(env.providers?.["gemini"]?.apiKey).toBe("AIza-test-key");
+    });
+
+    it("detects OPENROUTER_API_KEY with baseUrl wired", () => {
+      vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+      const env = loadConfigFromEnv();
+      expect(env.providers?.["openrouter"]).toBeDefined();
+      expect(env.providers?.["openrouter"]?.baseUrl).toBe("https://openrouter.ai/api/v1");
+    });
+
+    it("detects GROQ_API_KEY with baseUrl wired", () => {
+      vi.stubEnv("GROQ_API_KEY", "gsk_test");
+      const env = loadConfigFromEnv();
+      expect(env.providers?.["groq"]).toBeDefined();
+      expect(env.providers?.["groq"]?.baseUrl).toBe("https://api.groq.com/openai/v1");
+    });
+
+    it("detects AWS Bedrock via IAM credentials (no apiKey)", () => {
+      vi.stubEnv("AWS_ACCESS_KEY_ID", "AKIA-test");
+      const env = loadConfigFromEnv();
+      expect(env.providers?.["bedrock"]).toBeDefined();
+      // Bedrock uses SigV4, not a single apiKey — assert absence so
+      // accidental token leakage in the snapshot is caught.
+      expect(env.providers?.["bedrock"]?.apiKey).toBeUndefined();
+    });
+
+    it("detects Vertex via service-account credentials path", () => {
+      vi.stubEnv("GOOGLE_APPLICATION_CREDENTIALS", "/tmp/sa-test.json");
+      const env = loadConfigFromEnv();
+      expect(env.providers?.["vertex"]).toBeDefined();
     });
 
     it("returns empty when no env vars set", () => {

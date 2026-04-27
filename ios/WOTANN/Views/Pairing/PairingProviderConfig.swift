@@ -303,12 +303,17 @@ private struct ProviderOption: Identifiable, Equatable {
             keyLabel: "OpenAI API Key",
             keyPlaceholder: "sk-..."
         ),
+        // Gap-2 fix: id is "gemini" (matches daemon provider-service spec
+        // and src/core/types.ts ProviderName union). Previously this was
+        // "google" which the daemon rejected with "Unknown provider:
+        // google" on saveCredential, leaving paired-iOS users unable to
+        // use any Google model.
         ProviderOption(
-            id: "google",
+            id: "gemini",
             displayName: "Google",
             subtitle: "Gemini 2.5, Flash",
             icon: "globe",
-            tint: WTheme.Colors.provider("google"),
+            tint: WTheme.Colors.provider("gemini"),
             requiresKey: true,
             keyLabel: "Google AI Key",
             keyPlaceholder: "AIza..."

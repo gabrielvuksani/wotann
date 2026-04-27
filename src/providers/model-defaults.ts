@@ -204,6 +204,30 @@ export const PROVIDER_DEFAULTS: Readonly<Record<string, ProviderDefault>> = {
     envKeys: ["CEREBRAS_API_KEY"],
     label: "Cerebras",
   },
+  // Groq named entry: registry.ts has its own `case "groq":` independent
+  // of the `free` umbrella, so getProviderDefaults("groq") needs a real
+  // entry rather than falling through to ollama. Mirrors the `free`
+  // defaults since both adapter configs target the same Groq endpoint.
+  groq: {
+    defaultModel: "llama-3.3-70b-versatile",
+    workerModel: "llama-3.1-8b-instant",
+    oracleModel: "llama-3.3-70b-versatile",
+    envKeys: ["GROQ_API_KEY"],
+    label: "Groq",
+  },
+  // OpenRouter cross-surface gap (Gap-1): users picking OpenRouter on iOS
+  // pairing or desktop onboarding got silent registry drop. Now both the
+  // registry case and these defaults exist. Default model is a free,
+  // capable Llama variant so first-run works without a paid plan; users
+  // override per-call. Worker model uses the same free tier; oracle
+  // model uses Claude Sonnet which OpenRouter proxies.
+  openrouter: {
+    defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
+    workerModel: "meta-llama/llama-3.3-70b-instruct:free",
+    oracleModel: "anthropic/claude-sonnet-4.5",
+    envKeys: ["OPENROUTER_API_KEY"],
+    label: "OpenRouter",
+  },
 } as const;
 
 /**

@@ -670,6 +670,11 @@ export function formatProviderStatus(
   }));
 }
 
+// Gap-7 fix: prior list was missing groq + openrouter, so `wotann doctor`
+// showed "no providers available" entries for active env vars and never
+// listed Groq/OpenRouter as inactive options when the user had no key.
+// Now mirrors src/core/types.ts ProviderName union (minus the synthetic
+// "free" pseudo-provider which is rolled into the explicit groq entry).
 const ALL_PROVIDERS: readonly ProviderName[] = [
   "anthropic",
   "openai",
@@ -689,6 +694,8 @@ const ALL_PROVIDERS: readonly ProviderName[] = [
   "together",
   "fireworks",
   "sambanova",
+  "groq",
+  "openrouter",
 ];
 
 export function formatFullStatus(detected: readonly ProviderAuth[]): readonly ProviderStatus[] {

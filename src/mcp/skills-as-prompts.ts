@@ -4,9 +4,14 @@
  * MCP spec 2025-11-25 defines a `prompts` capability so any
  * MCP-compatible client (Claude Desktop, Cursor, Cline, Continue,
  * Zed, VSCode) can enumerate and invoke prompt templates the server
- * publishes. WOTANN already ships 142 markdown skills with a uniform
+ * publishes. WOTANN ships 100+ markdown skills with a uniform
  * frontmatter shape — they ARE prompt templates. The architectural
  * gap closed by this module: skill catalogue → MCP prompt catalogue.
+ *
+ * Doc-string note: avoid hardcoding a skill count here. The actual
+ * count grows with each release; the registry is the source of truth.
+ * Tools/CLI that need a current number should call into the registry
+ * rather than relying on this comment.
  *
  * Earlier WOTANN advertised the `prompts` capability theatrically and
  * `prompts/list` always returned `[]`. Wave 6.9-AG dropped the empty

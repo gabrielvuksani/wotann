@@ -673,11 +673,13 @@ private func previewAppState() -> AppState {
     state.conversations = [conv1, conv2, conv3]
 
     // Sample agents — rotate providers in deterministic order.
+    // Gap-2 fix: provider sample uses canonical "gemini" id (matches
+    // daemon provider-service spec) instead of legacy "google" string.
     let agent1 = AgentTask(
         title: "Running tests",
         status: .running,
         progress: 0.65,
-        provider: "google"
+        provider: "gemini"
     )
     let agent2 = AgentTask(
         title: "Code review",

@@ -55,7 +55,11 @@ struct ProviderBadge: View {
         switch provider.lowercased() {
         case "anthropic":   return "Anthropic"
         case "openai":      return "OpenAI"
-        case "google":      return "Google"
+        // Gap-2 fix: daemon's canonical provider id is "gemini". The legacy
+        // "google" string is kept as an alias here so any persisted data
+        // from older iOS builds still renders the right label, but new
+        // surfaces (PairingProviderConfig, sample previews) use "gemini".
+        case "gemini", "google": return "Google"
         case "mistral":     return "Mistral"
         case "groq":        return "Groq"
         case "ollama":      return "Ollama"
