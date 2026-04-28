@@ -20,6 +20,7 @@ import { AgentStatusPanel, type SubagentStatus } from "./components/AgentStatusP
 import { HistoryPicker } from "./components/HistoryPicker.js";
 import { CommandPalette } from "./components/CommandPalette.js";
 import { ModelPicker } from "./components/ModelPicker.js";
+import { OptionPicker } from "./components/OptionPicker.js";
 import { CommandRegistry, type Command } from "./command-registry.js";
 // V9 Wave 2-M (R-09) — TUI palette command set. `registerR09Commands`
 // was shipped in Wave 0 but never invoked in App.tsx, so the 19 R-09
@@ -415,6 +416,16 @@ export function WotannApp({
   // prior round-robin cycleModel pattern that was unusable past 2-3
   // providers). Modeled after OpenClaw's modal-overlay picker.
   const [showModelPicker, setShowModelPicker] = useState(false);
+  // Generic option picker — driven by `optionPicker` (null when closed).
+  // Used by `/mode`, `/theme`, `/thinking` to give users an interactive
+  // selector instead of a static list with "type the next arg" hint.
+  // Mirrors the ModelPicker shape so muscle memory carries.
+  const [optionPicker, setOptionPicker] = useState<{
+    title: string;
+    options: readonly { value: string; label?: string; description?: string }[];
+    currentValue?: string;
+    onSelect: (value: string) => void;
+  } | null>(null);
   const commandRegistryRef = useRef<CommandRegistry>(new CommandRegistry());
   const [showContextPanel, setShowContextPanel] = useState(false);
   // Terminal Blocks overlay (Warp-style OSC 133 blocks — Phase D).
@@ -623,6 +634,7 @@ export function WotannApp({
           setShowTerminalBlocks(false);
           setShowCommandPalette(false);
           setShowModelPicker(false);
+          setOptionPicker(null);
           setShowTrustPanel(false);
           setShowGdprPanel(false);
           setShowAuditPanel(false);
@@ -1122,21 +1134,45 @@ export function WotannApp({
 
         case "/mode": {
           if (!arg) {
-            sysMsg(
-              [
-                `Current mode: ${currentMode}`,
-                "",
-                "  default        — Standard, asks before edits",
-                "  plan           — Read-only analysis + planning",
-                "  acceptEdits    — Auto-accept file changes",
-                "  auto           — Full automation + testing",
-                "  bypass         — Skip all permission prompts",
-                "  autonomous     — Fire-and-forget until complete",
-                "  guardrails-off — No restrictions (security research)",
-                "",
-                "Switch: /mode <name>",
-              ].join("\n"),
-            );
+            // Interactive picker — same shape as the other overlays
+            // so muscle memory carries (Hermes "modal triad" pattern).
+            const modeOptions: { value: WotannMode; description: string }[] = [
+              { value: "default", description: "Standard, asks before edits" },
+              { value: "plan", description: "Read-only analysis + planning" },
+              { value: "acceptEdits", description: "Auto-accept file changes" },
+              { value: "auto", description: "Full automation + testing" },
+              { value: "bypass", description: "Skip all permission prompts" },
+              { value: "autonomous", description: "Fire-and-forget until complete" },
+              { value: "guardrails-off", description: "No restrictions (security research)" },
+              { value: "focus", description: "Single-task laser focus" },
+              { value: "interview", description: "Q&A interrogation" },
+              { value: "teach", description: "Teaching / explanation" },
+              { value: "review", description: "Code review" },
+              { value: "exploit", description: "Exploit development" },
+            ];
+            setOptionPicker({
+              title: "Mode",
+              options: modeOptions,
+              currentValue: currentMode,
+              onSelect: (value) => {
+                const newMode = value as WotannMode;
+                if (VALID_MODES.includes(newMode)) {
+                  if (runtime) runtime.setMode(newMode);
+                  setCurrentMode(newMode);
+                  sysMsg(`Mode switched to: ${newMode}`);
+                  if (newMode === "guardrails-off" && runtime) {
+                    runtime.getRulesOfEngagement();
+                    const activeId = runtime.getActiveROESessionId();
+                    sysMsg(
+                      activeId
+                        ? `Guardrails-off mode active. ROE session: ${activeId.slice(0, 8)}...`
+                        : "Guardrails-off mode active. Start an ROE session with /roe start <type>.",
+                    );
+                  }
+                }
+                setOptionPicker(null);
+              },
+            });
           } else {
             const newMode = arg as WotannMode;
             if (VALID_MODES.includes(newMode)) {
@@ -1481,20 +1517,32 @@ export function WotannApp({
 
         case "/thinking": {
           const efforts = ["low", "medium", "high", "max"] as const;
+          const efforDescriptions: Record<(typeof efforts)[number], string> = {
+            low: "Minimal reasoning, fastest responses",
+            medium: "Balanced (default)",
+            high: "Deep reasoning, better for complex tasks",
+            max: "Maximum thinking tokens (4x budget)",
+          };
           if (!arg) {
+            // Interactive picker (Hermes "modal overlay" pattern) —
+            // replaces the prior 8-line system message that asked
+            // the user to type the level out manually.
             const current = runtime?.getThinkingEffort() ?? "medium";
-            sysMsg(
-              [
-                `Thinking effort: ${current}`,
-                "",
-                "  low    — Minimal reasoning, fastest responses",
-                "  medium — Balanced (default)",
-                "  high   — Deep reasoning, better for complex tasks",
-                "  max    — Maximum thinking tokens (4x budget)",
-                "",
-                "Switch: /thinking <level>",
-              ].join("\n"),
-            );
+            setOptionPicker({
+              title: "Thinking effort",
+              options: efforts.map((value) => ({
+                value,
+                description: efforDescriptions[value],
+              })),
+              currentValue: current,
+              onSelect: (value) => {
+                const level = value as (typeof efforts)[number];
+                if (runtime) runtime.setThinkingEffort(level);
+                setThinkingEffort(level);
+                sysMsg(`Thinking effort set to: ${level}`);
+                setOptionPicker(null);
+              },
+            });
           } else {
             const level = arg.toLowerCase();
             if (efforts.includes(level as (typeof efforts)[number])) {
@@ -1511,23 +1559,23 @@ export function WotannApp({
         case "/theme": {
           const themeManager = themeManagerRef.current;
           if (!arg) {
-            sysMsg(
-              [
-                `Current theme: ${themeName}`,
-                "",
-                `Available themes (${themeManager.getThemeCount()}):`,
-                themeManager
-                  .getThemeNames()
-                  .slice(0, 16)
-                  .map((name) => `  ${name}`)
-                  .join("\n"),
-                themeManager.getThemeCount() > 16 ? "  ..." : "",
-                "",
-                "Switch: /theme <name>",
-              ]
-                .filter(Boolean)
-                .join("\n"),
-            );
+            // Interactive picker over every available theme — Norse
+            // catalog can be 30+ entries which the prior static
+            // 16-row truncation hid.
+            setOptionPicker({
+              title: `Theme (${themeManager.getThemeCount()} available)`,
+              options: themeManager.getThemeNames().map((name) => ({ value: name })),
+              currentValue: themeName,
+              onSelect: (value) => {
+                if (themeManager.setTheme(value)) {
+                  setThemeName(themeManager.getCurrent().name);
+                  sysMsg(`Theme switched to: ${value}`);
+                } else {
+                  sysMsg(`Unknown theme: ${value}`);
+                }
+                setOptionPicker(null);
+              },
+            });
           } else if (themeManager.setTheme(arg)) {
             setThemeName(themeManager.getCurrent().name);
             sysMsg(`Theme switched to: ${arg}`);
@@ -3666,7 +3714,11 @@ export function WotannApp({
         thinkingEffort={thinkingEffort}
         history={history}
         currentThemeBorder={currentTheme.colors.border}
-        currentThemePrimary={currentTheme.colors.primary}
+        // `accent` is the canonical brand-tint slot; `primary` is its
+        // deprecated alias (see src/ui/themes.ts ThemeColors). Use
+        // accent so theme-cycle keeps working when palettes drop the
+        // legacy property entirely.
+        currentThemePrimary={currentTheme.colors.accent}
         currentThemeInfo={currentTheme.colors.info}
       />
 
@@ -3684,6 +3736,22 @@ export function WotannApp({
           registry={commandRegistryRef.current}
           onClose={handleCommandPaletteClose}
           onError={handleCommandPaletteError}
+        />
+      )}
+
+      {/*
+        Generic OptionPicker — driven by `optionPicker` state. Used
+        by /mode, /theme, /thinking. Esc closes via close-overlay
+        action. The triad of pickers (history / commands / options /
+        model) shares one visual language so users learn it once.
+      */}
+      {optionPicker && (
+        <OptionPicker
+          title={optionPicker.title}
+          options={optionPicker.options}
+          currentValue={optionPicker.currentValue}
+          onSelect={optionPicker.onSelect}
+          onCancel={() => setOptionPicker(null)}
         />
       )}
 

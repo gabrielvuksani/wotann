@@ -102,114 +102,139 @@ program
   .option("--model <model>", "Force model")
   .option("--mode <mode>", "Behavioral mode (plan|careful|rapid|research|creative|debug)")
   .option("--pipe", "Pipeline mode: read from stdin, write to stdout")
-  .action(async (options: { provider?: string; model?: string; mode?: string; pipe?: boolean }) => {
-    // ── Pipeline mode: stdin → runtime → stdout ──────────────
-    if (options.pipe) {
-      const chunks: Buffer[] = [];
-      for await (const chunk of process.stdin) {
-        chunks.push(chunk as Buffer);
-      }
-      const stdinContent = Buffer.concat(chunks).toString("utf-8");
+  // Fullscreen toggle. Default ON so the user gets the Claude Code
+  // `/tui fullscreen` experience out of the box (preserves scrollback,
+  // pins input at the bottom, no flicker on streaming). Disable via
+  // `--no-fullscreen` or `WOTANN_FULLSCREEN=0`.
+  .option("--fullscreen", "Use the alternate screen buffer (default: on)", true)
+  .option("--no-fullscreen", "Render in main scrollback (legacy mode)")
+  .action(
+    async (options: {
+      provider?: string;
+      model?: string;
+      mode?: string;
+      pipe?: boolean;
+      fullscreen?: boolean;
+    }) => {
+      // ── Pipeline mode: stdin → runtime → stdout ──────────────
+      if (options.pipe) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of process.stdin) {
+          chunks.push(chunk as Buffer);
+        }
+        const stdinContent = Buffer.concat(chunks).toString("utf-8");
 
-      // Combine stdin content with any trailing positional text from argv
-      const prompt = stdinContent.trim();
-      if (!prompt) {
-        process.stderr.write("Error: --pipe requires input on stdin\n");
-        process.exit(1);
-      }
-
-      try {
-        const { createRuntime } = await import("./core/runtime.js");
-        const { runRuntimeQuery } = await import("./cli/runtime-query.js");
-        const runtime = await createRuntime(process.cwd());
+        // Combine stdin content with any trailing positional text from argv
+        const prompt = stdinContent.trim();
+        if (!prompt) {
+          process.stderr.write("Error: --pipe requires input on stdin\n");
+          process.exit(1);
+        }
 
         try {
-          const result = await runRuntimeQuery(
-            runtime,
-            {
-              prompt,
-              model: options.model,
-              provider: options.provider as "anthropic" | undefined,
-            },
-            {
-              onText: (chunk) => process.stdout.write(chunk.content),
-              onError: (chunk) => process.stderr.write(chunk.content),
-            },
-          );
-          if (result.output && !result.output.endsWith("\n")) {
-            process.stdout.write("\n");
+          const { createRuntime } = await import("./core/runtime.js");
+          const { runRuntimeQuery } = await import("./cli/runtime-query.js");
+          const runtime = await createRuntime(process.cwd());
+
+          try {
+            const result = await runRuntimeQuery(
+              runtime,
+              {
+                prompt,
+                model: options.model,
+                provider: options.provider as "anthropic" | undefined,
+              },
+              {
+                onText: (chunk) => process.stdout.write(chunk.content),
+                onError: (chunk) => process.stderr.write(chunk.content),
+              },
+            );
+            if (result.output && !result.output.endsWith("\n")) {
+              process.stdout.write("\n");
+            }
+          } finally {
+            runtime.close();
           }
-        } finally {
-          runtime.close();
+          process.exit(0);
+        } catch (error) {
+          process.stderr.write(error instanceof Error ? error.message : "Pipeline query failed");
+          process.stderr.write("\n");
+          process.exit(1);
         }
-        process.exit(0);
-      } catch (error) {
-        process.stderr.write(error instanceof Error ? error.message : "Pipeline query failed");
-        process.stderr.write("\n");
-        process.exit(1);
       }
-    }
 
-    // D12: When the daemon is running, launch the thin-client TUI instead of
-    // standing up a fresh 408-module runtime in-process. Cold start drops
-    // from ~2-5 s to ~150 ms. `--no-thin` (or WOTANN_THIN=0) opts out.
-    const optThin = process.env["WOTANN_THIN"];
-    const forceFullRuntime = optThin === "0" || process.argv.includes("--no-thin");
-    if (!forceFullRuntime && !options.pipe) {
-      const { launchOrFallback, detectDaemon } = await import("./cli/thin-client.js");
-      if (await detectDaemon()) {
-        const launched = await launchOrFallback();
-        if (launched) return; // thin TUI rendered and exited
-        // else fall through to full runtime
+      // D12: When the daemon is running, launch the thin-client TUI instead of
+      // standing up a fresh 408-module runtime in-process. Cold start drops
+      // from ~2-5 s to ~150 ms. `--no-thin` (or WOTANN_THIN=0) opts out.
+      const optThin = process.env["WOTANN_THIN"];
+      const forceFullRuntime = optThin === "0" || process.argv.includes("--no-thin");
+      if (!forceFullRuntime && !options.pipe) {
+        const { launchOrFallback, detectDaemon } = await import("./cli/thin-client.js");
+        if (await detectDaemon()) {
+          const launched = await launchOrFallback();
+          if (launched) return; // thin TUI rendered and exited
+          // else fall through to full runtime
+        }
       }
-    }
 
-    const [{ render }, ReactModule, { WotannApp }] = await Promise.all([
-      import("ink"),
-      import("react"),
-      import("./ui/App.js"),
-    ]);
-    const { bootstrapInteractiveSession } = await import("./ui/bootstrap.js");
-    const React = ReactModule.default;
-    let interactive = await bootstrapInteractiveSession(process.cwd(), options);
+      const [{ render }, ReactModule, { WotannApp }] = await Promise.all([
+        import("ink"),
+        import("react"),
+        import("./ui/App.js"),
+      ]);
+      const { bootstrapInteractiveSession } = await import("./ui/bootstrap.js");
+      const React = ReactModule.default;
+      let interactive = await bootstrapInteractiveSession(process.cwd(), options);
 
-    // Auto-launch onboarding wizard on first-run when no providers are
-    // detected. The TUI also shows an inline banner (App.tsx
-    // needsOnboarding) but the explicit wizard hand-holds the user
-    // through provider auth + a smoke-test message. Skip when an
-    // explicit --provider/--model was supplied (user knows what they
-    // want), or when WOTANN_SKIP_WIZARD=1 (CI / power users).
-    const detected = interactive.providers.filter((p) => p.available).length;
-    const skipWizard =
-      process.env["WOTANN_SKIP_WIZARD"] === "1" ||
-      Boolean(options.provider) ||
-      Boolean(options.model);
-    if (detected === 0 && !skipWizard) {
-      try {
-        const { runOnboardingWizard } = await import("./cli/run-onboarding-wizard.js");
-        await runOnboardingWizard();
-        // After the wizard completes, re-bootstrap so the TUI sees the
-        // newly-configured providers.
-        interactive = await bootstrapInteractiveSession(process.cwd(), options);
-      } catch (err) {
-        // Wizard import or run failed — log so first-launch users get
-        // a hint why the hand-holding wizard didn't appear, then fall
-        // through to the in-TUI onboarding banner.
-        const msg = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`[wotann] onboarding wizard unavailable: ${msg}\n`);
+      // Auto-launch onboarding wizard on first-run when no providers are
+      // detected. The TUI also shows an inline banner (App.tsx
+      // needsOnboarding) but the explicit wizard hand-holds the user
+      // through provider auth + a smoke-test message. Skip when an
+      // explicit --provider/--model was supplied (user knows what they
+      // want), or when WOTANN_SKIP_WIZARD=1 (CI / power users).
+      const detected = interactive.providers.filter((p) => p.available).length;
+      const skipWizard =
+        process.env["WOTANN_SKIP_WIZARD"] === "1" ||
+        Boolean(options.provider) ||
+        Boolean(options.model);
+      if (detected === 0 && !skipWizard) {
+        try {
+          const { runOnboardingWizard } = await import("./cli/run-onboarding-wizard.js");
+          await runOnboardingWizard();
+          // After the wizard completes, re-bootstrap so the TUI sees the
+          // newly-configured providers.
+          interactive = await bootstrapInteractiveSession(process.cwd(), options);
+        } catch (err) {
+          // Wizard import or run failed — log so first-launch users get
+          // a hint why the hand-holding wizard didn't appear, then fall
+          // through to the in-TUI onboarding banner.
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`[wotann] onboarding wizard unavailable: ${msg}\n`);
+        }
       }
-    }
 
-    render(
-      React.createElement(WotannApp, {
-        version: VERSION,
-        providers: interactive.providers,
-        initialModel: interactive.initialModel,
-        initialProvider: interactive.initialProvider,
-        runtime: interactive.runtime,
-      }),
-    );
-  });
+      // Switch to the alternate screen buffer before Ink takes over
+      // so the TUI gets the entire viewport and the user's scrollback
+      // is preserved untouched. Crash-safe — alt-buffer.ts wires
+      // SIGINT/SIGTERM/uncaughtException to always restore the main
+      // buffer. Default ON; disable with `--no-fullscreen` or
+      // `WOTANN_FULLSCREEN=0`.
+      const { isAltBufferRequested, enterAltBuffer } = await import("./ui/alt-buffer.js");
+      if (isAltBufferRequested(options.fullscreen !== false)) {
+        enterAltBuffer();
+      }
+
+      render(
+        React.createElement(WotannApp, {
+          version: VERSION,
+          providers: interactive.providers,
+          initialModel: interactive.initialModel,
+          initialProvider: interactive.initialProvider,
+          runtime: interactive.runtime,
+        }),
+      );
+    },
+  );
 
 // ── wotann link ─────────────────────────────────────────────
 
@@ -1540,6 +1565,14 @@ program
       import("./ui/App.js"),
     ]);
     const React = ReactModule.default;
+
+    // Same fullscreen-mode hook as `wotann start` — env var only here
+    // (no CLI flag on `wotann resume`). Default ON; disable via
+    // `WOTANN_FULLSCREEN=0`.
+    const { isAltBufferRequested, enterAltBuffer } = await import("./ui/alt-buffer.js");
+    if (isAltBufferRequested(true)) {
+      enterAltBuffer();
+    }
 
     render(
       React.createElement(WotannApp, {
