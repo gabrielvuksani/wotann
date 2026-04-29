@@ -98,13 +98,19 @@ function printHelp() {
  * Invoke the eval script with --json and collect stdout. Uses spawn with
  * argv form (no shell), so there is no path-interpolation risk even if
  * REPO_ROOT contains unusual characters.
+ *
+ * The eval script imports raw .ts guards from src/. Node's
+ * --experimental-strip-types parses .ts but doesn't rewrite "./xxx.js"
+ * import specifiers, so chained re-exports break. tsx handles both —
+ * matches the eval script's own header comment.
  */
 function runEval() {
   return new Promise((resolvePromise, rejectPromise) => {
     // Intentionally advisory mode (no WOTANN_EVAL_STRICT). We want the
     // JSON report regardless of pass/fail so we can decide whether to
     // capture the baseline here, with a clear error message.
-    const child = spawn(process.execPath, [EVAL_SCRIPT, "--json"], {
+    const tsxBin = join(REPO_ROOT, "node_modules", ".bin", "tsx");
+    const child = spawn(tsxBin, [EVAL_SCRIPT, "--json"], {
       cwd: REPO_ROOT,
       stdio: ["ignore", "pipe", "pipe"],
     });

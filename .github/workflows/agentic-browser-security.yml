@@ -94,7 +94,13 @@ jobs:
           WOTANN_EVAL_STRICT: "1"
         run: |
           set +e
-          node scripts/run-prompt-injection-eval.mjs --json > eval-report.json
+          # Use tsx so the script's raw .ts imports resolve correctly.
+          # Node 22's --experimental-strip-types parses .ts but does NOT
+          # rewrite "./xxx.js" specifiers, so chained re-exports (e.g.
+          # url-instruction-guard.ts → origin-validator.js) fail at module
+          # eval. tsx handles both — matches the script's own header
+          # comment: "for dev runs against raw TS, use `tsx`".
+          npx tsx scripts/run-prompt-injection-eval.mjs --json > eval-report.json
           EXIT=$?
           set -e
           echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
