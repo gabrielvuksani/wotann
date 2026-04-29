@@ -127,6 +127,19 @@ import {
   isSqliteVecAvailable,
   type SqliteVecBackend,
 } from "./sqlite-vec-backend.js";
+// Asymmetric embedding prefixes — model-aware text shaping inspired by
+// LightRAG's `embedding-prefixes` branch (HKUDS, merged 2026-04-26).
+// Modern instruction-tuned encoders (BGE / Qwen3-Embedding / E5) score
+// noticeably higher when queries get one prefix and docs get another.
+// Gated behind `WOTANN_ASYMMETRIC_EMBEDDINGS=1` so existing un-prefixed
+// indexes keep working unchanged. See ./embedding-profiles.ts.
+import {
+  applyDocPrefix,
+  applyQueryPrefix,
+  getEmbeddingProfile,
+  isAsymmetricEmbeddingsEnabled,
+  type EmbeddingProfile,
+} from "./embedding-profiles.js";
 // V9 T1.4 — ONNX cross-encoder (FATAL orphan). Session loading is
 // async (`loadMiniLmSession`) so the member field is populated post-
 // construction via `attachOnnxCrossEncoder()`. Baseline remains
@@ -463,6 +476,23 @@ export class MemoryStore implements MemoryProvider {
    * given memory entry. No-op when the backend isn't attached. Caller
    * generates the embedding using its chosen embedder so the store
    * doesn't pull an embedder dependency. Idempotent on duplicate id.
+   *
+   * Asymmetric-prefix port (LightRAG `embedding-prefixes`): the caller
+   * is responsible for applying the doc prefix BEFORE generating the
+   * vector. A typical wiring looks like:
+   *
+   *   import { applyDocPrefix, getEmbeddingProfile,
+   *            isAsymmetricEmbeddingsEnabled } from "./embedding-profiles.js";
+   *   const profile = isAsymmetricEmbeddingsEnabled()
+   *     ? getEmbeddingProfile(modelName)
+   *     : null;
+   *   const vec = await embed(applyDocPrefix(profile, entry.value));
+   *   store.upsertEmbedding(entry.id, vec);
+   *
+   * NOTE: turning the env-var gate ON for an existing index that was
+   * built without prefixes will skew similarity scores at query time.
+   * Rebuild the vec_embeddings table after enabling. See
+   * embedding-profiles.ts header for the full rationale.
    */
   upsertEmbedding(id: string, vector: readonly number[]): boolean {
     if (!this.vectorBackend) return false;
@@ -2495,6 +2525,20 @@ export class MemoryStore implements MemoryProvider {
           k: number,
         ) => readonly { readonly id: string; readonly distance: number }[];
       };
+      /**
+       * Asymmetric embedding prefixes (LightRAG `embedding-prefixes`
+       * inspiration). When the caller knows their embedding model name
+       * (e.g. "intfloat/e5-small-v2", "bge-large-en-v1.5"), passing it
+       * here lets the registry resolve the recommended query/doc
+       * prefix pair. Alternatively, pass `embeddingProfile` directly
+       * to override the registry. When NEITHER is supplied AND the
+       * `WOTANN_ASYMMETRIC_EMBEDDINGS` env var is unset, prefixes are
+       * not applied (legacy behavior — symmetric embed for both query
+       * and doc text). See ./embedding-profiles.ts for the rationale
+       * and the index-versioning warning.
+       */
+      readonly embeddingModel?: string;
+      readonly embeddingProfile?: EmbeddingProfile;
     } = {},
   ): Promise<{
     readonly hits: readonly (TEMPRHit & { readonly entry: MemoryEntry | null })[];
@@ -2507,6 +2551,19 @@ export class MemoryStore implements MemoryProvider {
   }> {
     const topK = opts.topK ?? 20;
     const pool = opts.candidatePool ?? Math.max(50, topK * 3);
+
+    // Resolve the asymmetric prefix profile ONCE per call. Order:
+    //   1. Explicit profile override (highest priority).
+    //   2. Registry lookup by model name.
+    //   3. null (symmetric / no prefix).
+    // The env-var gate suppresses the entire feature when off — keeps
+    // existing un-prefixed indexes from getting score-skewed by a
+    // prefixed query embedding (see embedding-profiles.ts header).
+    const prefixesEnabled = isAsymmetricEmbeddingsEnabled();
+    const resolvedProfile: EmbeddingProfile | null = !prefixesEnabled
+      ? null
+      : (opts.embeddingProfile ??
+        (opts.embeddingModel ? getEmbeddingProfile(opts.embeddingModel) : null));
 
     // Build each channel. Each channel is a closure over `this`. Errors
     // inside the closure become rejections that TEMPR captures — never
@@ -2532,7 +2589,12 @@ export class MemoryStore implements MemoryProvider {
         const resolvedBackend = opts.vectorBackend ?? this.vectorBackend;
         if (resolvedBackend) {
           try {
-            const queryVec = await opts.embed(args.query);
+            // LightRAG asymmetric-prefix port: prepend the model's
+            // recommended query prefix BEFORE embedding. No-op when
+            // the env-var gate is off OR the model isn't in the
+            // registry (resolvedProfile === null).
+            const queryText = applyQueryPrefix(resolvedProfile, args.query);
+            const queryVec = await opts.embed(queryText);
             const hits = resolvedBackend.knn(queryVec, pool);
             if (hits.length === 0) return { candidates: [] };
             // Rehydrate content from the store. Missing ids (stale
@@ -2555,10 +2617,13 @@ export class MemoryStore implements MemoryProvider {
         // used when sqlite-vec isn't wired.
         const shortlist = this.search(args.query, pool);
         if (shortlist.length === 0) return { candidates: [] };
-        const queryVec = await opts.embed!(args.query);
+        // LightRAG asymmetric-prefix port: query gets queryPrefix,
+        // each doc gets docPrefix — different prefixes are the whole
+        // point of this branch. Both calls no-op when the gate is off.
+        const queryVec = await opts.embed!(applyQueryPrefix(resolvedProfile, args.query));
         const scored: { c: TEMPRCandidate; score: number }[] = [];
         for (const row of shortlist) {
-          const docVec = await opts.embed!(row.entry.value);
+          const docVec = await opts.embed!(applyDocPrefix(resolvedProfile, row.entry.value));
           const score = cosineSimTempr(queryVec, docVec);
           if (score > 0) {
             scored.push({

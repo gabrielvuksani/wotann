@@ -37,6 +37,43 @@ export interface ContextResolutionOptions {
   readonly enableExtendedContext?: boolean;
 }
 
+/**
+ * Stage-0 pressure-relief config.
+ *
+ * Defaults match TruncateArgsSettings from langchain-ai/deepagents
+ * libs/deepagents/deepagents/middleware/summarization.py:122-149 —
+ * fire at 50% context, keep most-recent 10% of messages untouched,
+ * clip per-arg payloads to 2000 chars.
+ *
+ * Stage-0 runs before the existing Stage-1 LLM-based summarization
+ * in compactConversationHistory (~85% pressure). It targets the
+ * tool-call args bloat that dominates coding sessions: write_file
+ * content, edit_file patches, execute output. Truncation operates
+ * on the prompt copy only — session.messages are preserved for
+ * replay/retry semantics.
+ */
+export interface Stage0TruncationConfig {
+  readonly enabled: boolean;
+  readonly triggerFrac: number;
+  readonly keepFrac: number;
+  readonly maxArgLen: number;
+  readonly clipMarker: string;
+  /**
+   * Upper bound: if usage exceeds this fraction, Stage-0 alone won't
+   * help — let Stage-1 LLM summarization take over.
+   */
+  readonly stage1Frac: number;
+}
+
+export const DEFAULT_STAGE0_TRUNCATION: Stage0TruncationConfig = {
+  enabled: true,
+  triggerFrac: 0.5,
+  keepFrac: 0.1,
+  maxArgLen: 2000,
+  clipMarker: "<...argument truncated>",
+  stage1Frac: 0.85,
+};
+
 export interface OpusAvailability {
   readonly available: boolean;
   readonly provider: string | null;

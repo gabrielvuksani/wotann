@@ -1337,11 +1337,63 @@ export const danglingToolCallHook: HookHandler = {
   },
 };
 
+// ── Content-Aware Loop Detection (standard) ──────────────────
+
+/**
+ * Content-aware sliding-window detector. Distinct from the simple
+ * `createLoopDetector` (consecutive-only) and `SmartDoomLoopDetector`
+ * (sequence + similarity) — this one is content-aware: read_file with
+ * overlapping line ranges hashes to the same bucket so the
+ * "read 0-200 -> read 50-250 -> read 100-300" anti-pattern is caught.
+ *
+ * Thresholds (per session):
+ *   - 3 reps of same signature -> warn
+ *   - 5 reps of same signature -> block (force-stop)
+ *   - 30 calls of same tool in window -> warn
+ *   - 50 calls of same tool in window -> block
+ *
+ * Inspired by bytedance/deer-flow:
+ *   backend/packages/harness/deerflow/agents/middlewares/loop_detection_middleware.py
+ *
+ * State is per-instance (QB#7) — `createContentAwareLoopDetector()`
+ * returns a fresh detector each call, so each runtime/session gets
+ * its own window.
+ */
+export function createContentAwareLoopDetector(
+  config?: Parameters<typeof makeLoopDetector>[0],
+): HookHandler {
+  const detector = makeLoopDetector(config);
+
+  return {
+    name: "ContentAwareLoopDetection",
+    event: "PreToolUse",
+    profile: "standard",
+    // Run after the simpler LoopDetection (priority 100) so the
+    // content-aware verdict is the canonical signal when both fire.
+    priority: 105,
+    handler(payload: HookPayload): HookResult {
+      if (!payload.toolName) return { action: "allow" };
+      const verdict = detector.observe({
+        name: payload.toolName,
+        args: payload.toolInput ?? {},
+      });
+      if (verdict.type === "stop") {
+        return { action: "block", message: verdict.reason };
+      }
+      if (verdict.type === "warn") {
+        return { action: "warn", message: verdict.reason };
+      }
+      return { action: "allow" };
+    },
+  };
+}
+
 // ── Register All Built-in Hooks ─────────────────────────────
 
 import { HookEngine } from "./engine.js";
 import { ShadowGit as ShadowGitClass } from "../utils/shadow-git.js";
 import { validateArchive } from "../security/archive-preflight.js";
+import { makeLoopDetector } from "../orchestration/loop-detector.js";
 
 export function registerBuiltinHooks(
   engine: HookEngine,
@@ -1356,6 +1408,11 @@ export function registerBuiltinHooks(
   engine.register(createPreToolCostLimiter());
   engine.register(createLoopDetector());
   engine.register(createSmartDoomLoopDetector());
+  // Content-aware sliding-window detector — buckets read_file ranges
+  // and tracks per-tool frequency. Inspired by bytedance/deer-flow's
+  // LoopDetectionMiddleware. Per-instance state is created here so
+  // each HookEngine gets its own session-scoped detector (QB#7).
+  engine.register(createContentAwareLoopDetector());
   engine.register(danglingToolCallHook);
   engine.register(frustrationDetector);
   engine.register(configProtection);

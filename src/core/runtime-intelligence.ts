@@ -5,6 +5,8 @@ import type { CompactionStage, ContextWindowIntelligence } from "../context/wind
 import type { MemoryStore } from "../memory/store.js";
 import type { SkillRegistry } from "../skills/loader.js";
 import { compactByImportance, type Turn } from "../context/importance-compactor.js";
+import { applyStage0PressureRelief } from "../context/maximizer.js";
+import { DEFAULT_STAGE0_TRUNCATION, type Stage0TruncationConfig } from "../context/limits.js";
 
 export interface SkillActivationResult {
   readonly names: readonly string[];
@@ -212,6 +214,53 @@ export function buildContextBudgetPrompt(
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Stage-0 pressure-relief result. Returned to callers so they can log
+ * telemetry and decide whether to skip Stage-1 summarization for this
+ * tick. `messages` are PROMPT-COPY messages — never write them back to
+ * `session.messages` (originals must survive for replay/retry).
+ */
+export interface Stage0CompactionResult {
+  readonly triggered: boolean;
+  readonly messages: readonly AgentMessage[];
+  readonly bytesReclaimed: number;
+  readonly messagesAffected: number;
+}
+
+/**
+ * Stage-0 truncator entry point. Run BEFORE
+ * {@link compactConversationHistory} (Stage-1 LLM summarization) when
+ * context pressure is in the 50-85% band. Clips verbose tool-call args
+ * (write_file content, edit_file patches, execute output) in messages
+ * outside the keep-window. Preserves message ordering, IDs, role, and
+ * tool metadata so the prompt remains structurally valid.
+ *
+ * Inspired by langchain-ai/deepagents
+ *   libs/deepagents/deepagents/middleware/summarization.py:122-149
+ *   (TruncateArgsSettings).
+ *
+ * @param promptMessages prompt-copy messages (do NOT pass session.messages
+ *   directly if you intend to keep originals — pass a copy or accept the
+ *   trimmed result back into the prompt path only).
+ * @param currentTokens current observed context usage (tokens).
+ * @param maxTokens budget ceiling (tokens).
+ * @param config optional Stage-0 config; defaults to DEFAULT_STAGE0_TRUNCATION.
+ */
+export function applyStage0Truncation(
+  promptMessages: readonly AgentMessage[],
+  currentTokens: number,
+  maxTokens: number,
+  config: Stage0TruncationConfig = DEFAULT_STAGE0_TRUNCATION,
+): Stage0CompactionResult {
+  const result = applyStage0PressureRelief(promptMessages, currentTokens, maxTokens, config);
+  return {
+    triggered: result.triggered,
+    messages: result.messages as readonly AgentMessage[],
+    bytesReclaimed: result.bytesReclaimed,
+    messagesAffected: result.messagesAffected,
+  };
 }
 
 export function compactConversationHistory(

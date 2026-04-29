@@ -27,7 +27,17 @@
  * NO MODEL IS DEGRADED. Every model gets its full capability.
  */
 
-import { getModelContextConfig, isExtendedContextEnabled } from "./limits.js";
+import {
+  getModelContextConfig,
+  isExtendedContextEnabled,
+  DEFAULT_STAGE0_TRUNCATION,
+  type Stage0TruncationConfig,
+} from "./limits.js";
+import {
+  truncateToolArgs,
+  type TruncatableMessage,
+  type TruncateResult,
+} from "./tool-arg-truncator.js";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -379,5 +389,79 @@ export function getProviderReport(provider: string): ProviderCapabilityReport {
     models,
     bestContextModel: bestModel,
     bestContextTokens: bestTokens,
+  };
+}
+
+// ── Stage-0 Pressure-Relief Wire-Up ──────────────────────
+
+/**
+ * Result of running Stage-0 truncation as part of a pressure-relief flow.
+ * `triggered=true` means we attempted truncation; `bytesReclaimed>0`
+ * means it actually helped. Callers should still consult Stage-1 path
+ * if pressure remains above the Stage-1 threshold afterwards.
+ *
+ * Inspired by langchain-ai/deepagents
+ *   libs/deepagents/deepagents/middleware/summarization.py:122-149
+ *   (TruncateArgsSettings is the moral equivalent — runs BEFORE the
+ *   model, clips verbose args from messages outside the keep-window).
+ */
+export interface PressureReliefResult<M extends TruncatableMessage> {
+  readonly triggered: boolean;
+  readonly messages: readonly M[];
+  readonly bytesReclaimed: number;
+  readonly messagesAffected: number;
+}
+
+/**
+ * Stage-0 pressure-relief: if context usage is in the Stage-0 band
+ * (>= triggerFrac and < stage1Frac), run the tool-arg truncator on the
+ * supplied PROMPT-COPY messages and return the trimmed result. The
+ * caller must not write the result back to persistent storage —
+ * `session.messages` should remain the source of truth so retries and
+ * replay can use the originals.
+ *
+ * `currentTokens` and `maxTokens` come from the runtime's context
+ * budget (e.g. ContextWindowIntelligence.getBudget()). Pass the raw
+ * counts; this function decides whether to fire.
+ */
+export function applyStage0PressureRelief<M extends TruncatableMessage>(
+  promptMessages: readonly M[],
+  currentTokens: number,
+  maxTokens: number,
+  config: Stage0TruncationConfig = DEFAULT_STAGE0_TRUNCATION,
+): PressureReliefResult<M> {
+  if (!config.enabled || maxTokens <= 0 || promptMessages.length === 0) {
+    return {
+      triggered: false,
+      messages: promptMessages,
+      bytesReclaimed: 0,
+      messagesAffected: 0,
+    };
+  }
+
+  const usageFrac = currentTokens / maxTokens;
+  // Outside the Stage-0 band — either too low (no relief needed) or too
+  // high (Stage-1 LLM summarization should run instead).
+  if (usageFrac < config.triggerFrac || usageFrac >= config.stage1Frac) {
+    return {
+      triggered: false,
+      messages: promptMessages,
+      bytesReclaimed: 0,
+      messagesAffected: 0,
+    };
+  }
+
+  const result: TruncateResult<M> = truncateToolArgs(promptMessages, {
+    triggerFrac: config.triggerFrac,
+    keepFrac: config.keepFrac,
+    maxArgLen: config.maxArgLen,
+    clipMarker: config.clipMarker,
+  });
+
+  return {
+    triggered: true,
+    messages: result.messages,
+    bytesReclaimed: result.bytesReclaimed,
+    messagesAffected: result.messagesAffected,
   };
 }

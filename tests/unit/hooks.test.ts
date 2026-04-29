@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { HookEngine } from "../../src/hooks/engine.js";
-import { registerBuiltinHooks, secretScanner, destructiveGuard, createLoopDetector } from "../../src/hooks/built-in.js";
+import {
+  registerBuiltinHooks,
+  secretScanner,
+  destructiveGuard,
+  createLoopDetector,
+  createContentAwareLoopDetector,
+} from "../../src/hooks/built-in.js";
 
 describe("Hook Engine", () => {
   describe("core engine", () => {
@@ -161,7 +167,51 @@ describe("Hook Engine", () => {
       expect(names).toContain("SecretScanner");
       expect(names).toContain("DestructiveGuard");
       expect(names).toContain("LoopDetection");
+      expect(names).toContain("ContentAwareLoopDetection");
       expect(names).toContain("CorrectionCapture");
+    });
+  });
+
+  describe("ContentAwareLoopDetection hook", () => {
+    it("warns at 3 reps and blocks at 5 reps for overlapping read_file ranges", async () => {
+      const hook = createContentAwareLoopDetector();
+      // Ranges 0, 50, 100 all live in the [0, 200) bucket.
+      const r1 = await hook.handler({
+        event: "PreToolUse",
+        toolName: "read_file",
+        toolInput: { path: "src/foo.ts", lineStart: 0 },
+      });
+      expect(r1.action).toBe("allow");
+      const r2 = await hook.handler({
+        event: "PreToolUse",
+        toolName: "read_file",
+        toolInput: { path: "src/foo.ts", lineStart: 50 },
+      });
+      expect(r2.action).toBe("allow");
+      const r3 = await hook.handler({
+        event: "PreToolUse",
+        toolName: "read_file",
+        toolInput: { path: "src/foo.ts", lineStart: 100 },
+      });
+      expect(r3.action).toBe("warn");
+      // Push to 5 reps -> block.
+      await hook.handler({
+        event: "PreToolUse",
+        toolName: "read_file",
+        toolInput: { path: "src/foo.ts", lineStart: 150 },
+      });
+      const r5 = await hook.handler({
+        event: "PreToolUse",
+        toolName: "read_file",
+        toolInput: { path: "src/foo.ts", lineStart: 199 },
+      });
+      expect(r5.action).toBe("block");
+    });
+
+    it("ignores tool calls without a name", async () => {
+      const hook = createContentAwareLoopDetector();
+      const result = await hook.handler({ event: "PreToolUse" });
+      expect(result.action).toBe("allow");
     });
   });
 });

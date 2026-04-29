@@ -138,6 +138,7 @@ import {
 } from "../learning/autodream.js";
 import { runWorkspaceDreamIfDue } from "../learning/dream-runner.js";
 import {
+  applyStage0Truncation,
   buildContextBudgetPrompt,
   buildMemoryActivationPrompt,
   buildSkillActivationPrompt,
@@ -2874,6 +2875,28 @@ export class WotannRuntime {
         ],
         tools: effectiveTools,
       });
+
+      // Stage-0 pressure relief (deepagents TruncateArgsSettings port).
+      // Trim verbose tool-call args (write_file content, edit_file
+      // patches, execute output) in messages outside the keep-window
+      // BEFORE deciding whether Stage-1 LLM summarization is needed.
+      // Operates on the prompt copy only — session.messages keep their
+      // originals so retry / replay still work.
+      // See src/context/tool-arg-truncator.ts for the truncator and
+      // libs/deepagents/deepagents/middleware/summarization.py:122-149
+      // for the original inspiration.
+      if (!options.context) {
+        const stage0Budget = this.contextIntelligence.getBudget();
+        const stage0UsedTokens = stage0Budget.totalTokens - stage0Budget.availableTokens;
+        const stage0 = applyStage0Truncation(
+          conversationContext,
+          stage0UsedTokens,
+          stage0Budget.totalTokens,
+        );
+        if (stage0.triggered && stage0.messagesAffected > 0) {
+          conversationContext = [...stage0.messages];
+        }
+      }
 
       const compactionPlan = this.contextIntelligence.shouldCompact();
       if (compactionPlan.needed && !options.context) {
