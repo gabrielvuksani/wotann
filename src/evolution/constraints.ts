@@ -55,5 +55,5 @@ export function validateConstraints(
 }
 
 export function exposesSecret(content: string): boolean {
-  return /(?:sk-[A-Za-z0-9-_]{20,}|api[_-]?key\s*[:=]\s*["']?[A-Za-z0-9_\-]{20,})/i.test(content);
+  return /(?:sk-[A-Za-z0-9_-]{20,}|api[_-]?key\s*[:=]\s*["']?[A-Za-z0-9_-]{20,})/i.test(content);
 }
