@@ -120,7 +120,7 @@ private struct BlockEditorCard: View {
 
     private var pctColor: Color {
         if pct >= 0.9 { return WTheme.Colors.warning }
-        if pct >= 0.6 { return WTheme.Colors.accent }
+        if pct >= 0.6 { return WTheme.Colors.primary }
         return WTheme.Colors.success
     }
 

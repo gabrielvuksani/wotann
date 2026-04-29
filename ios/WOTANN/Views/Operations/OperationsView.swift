@@ -3,8 +3,7 @@ import SwiftUI
 // MARK: - OperationsView
 //
 // Tabbed admin/dev tools mirroring desktop OperationsPanel: Inspect /
-// Attest / Policy / Canary / Evolve. Each tab is a small focused
-// form that calls the daemon RPC.
+// Attest / Policy / Canary / Evolve.
 
 struct OperationsView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
@@ -16,41 +15,38 @@ struct OperationsView: View {
         var label: String {
             switch self {
             case .inspect: return "Inspect"
-            case .attest: return "Attest"
-            case .policy: return "Policy"
-            case .canary: return "Canary"
-            case .evolve: return "Evolve"
+            case .attest:  return "Attest"
+            case .policy:  return "Policy"
+            case .canary:  return "Canary"
+            case .evolve:  return "Evolve"
             }
         }
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
-                Picker("", selection: $tab) {
-                    ForEach(OpsTab.allCases) { t in
-                        Text(t.label).tag(t)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, WTheme.Spacing.md)
-
-                ScrollView {
-                    Group {
-                        switch tab {
-                        case .inspect: InspectTabView()
-                        case .attest:  AttestTabView()
-                        case .policy:  PolicyTabView()
-                        case .canary:  CanaryTabView()
-                        case .evolve:  EvolveTabView()
-                        }
-                    }
-                    .padding(WTheme.Spacing.md)
+        VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
+            Picker("", selection: $tab) {
+                ForEach(OpsTab.allCases) { t in
+                    Text(t.label).tag(t)
                 }
             }
-            .navigationTitle("Operations")
-            .navigationBarTitleDisplayMode(.large)
+            .pickerStyle(.segmented)
+            .padding(.horizontal, WTheme.Spacing.md)
+
+            ScrollView {
+                Group {
+                    switch tab {
+                    case .inspect: InspectTabView()
+                    case .attest:  AttestTabView()
+                    case .policy:  PolicyTabView()
+                    case .canary:  CanaryTabView()
+                    case .evolve:  EvolveTabView()
+                    }
+                }
+                .padding(WTheme.Spacing.md)
+            }
         }
+        .navigationTitle("Operations")
     }
 }
 
@@ -63,18 +59,21 @@ private struct InspectTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
-            Text("Detect a file's true content type via magic bytes (and optional ML upgrade).").font(.callout).foregroundColor(WTheme.Colors.textSecondary)
+            Text("Detect a file's true content type via magic bytes (and optional ML upgrade).")
+                .font(.callout)
+                .foregroundColor(WTheme.Colors.textSecondary)
             TextField("/path/to/file", text: $path).textFieldStyle(.roundedBorder)
             TextField("Declared type (optional)", text: $declared).textFieldStyle(.roundedBorder)
-            Button("Inspect") {
-                Task { await run() }
-            }
-            .buttonStyle(.borderedProminent)
+            Button("Inspect") { Task { await run() } }.buttonStyle(.borderedProminent)
             if let errorMessage {
                 Text(errorMessage).foregroundColor(WTheme.Colors.warning).font(.caption)
             }
             if !output.isEmpty {
-                Text(output).font(.body.monospaced()).padding(WTheme.Spacing.sm).background(WTheme.Colors.surfaceAlt).clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
+                Text(output)
+                    .font(.body.monospaced())
+                    .padding(WTheme.Spacing.sm)
+                    .background(WTheme.Colors.surfaceAlt)
+                    .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
             }
         }
     }
@@ -98,18 +97,20 @@ private struct AttestTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
-            Text("Generate or load Ed25519 audit keys. Sign a JSON record from the CLI to test verification end-to-end.")
-                .font(.callout).foregroundColor(WTheme.Colors.textSecondary)
+            Text("Generate or load Ed25519 audit keys. Use the CLI to sign + verify a JSON record end-to-end.")
+                .font(.callout)
+                .foregroundColor(WTheme.Colors.textSecondary)
             TextField("Key id", text: $keyId).textFieldStyle(.roundedBorder)
-            Button("Generate / load") {
-                Task { await run() }
-            }
-            .buttonStyle(.borderedProminent)
+            Button("Generate / load") { Task { await run() } }.buttonStyle(.borderedProminent)
             if let errorMessage {
                 Text(errorMessage).foregroundColor(WTheme.Colors.warning).font(.caption)
             }
             if !output.isEmpty {
-                Text(output).font(.body.monospaced()).padding(WTheme.Spacing.sm).background(WTheme.Colors.surfaceAlt).clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
+                Text(output)
+                    .font(.body.monospaced())
+                    .padding(WTheme.Spacing.sm)
+                    .background(WTheme.Colors.surfaceAlt)
+                    .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
             }
         }
     }
@@ -139,7 +140,9 @@ forbid(principal == "*", action == "tool:Bash", resource ~ "rm -rf");
 
     var body: some View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
-            Text("Cedar-style permit/forbid evaluator. Default-deny semantics.").font(.callout).foregroundColor(WTheme.Colors.textSecondary)
+            Text("Cedar-style permit/forbid evaluator. Default-deny semantics.")
+                .font(.callout)
+                .foregroundColor(WTheme.Colors.textSecondary)
             TextEditor(text: $policy)
                 .frame(minHeight: 100)
                 .font(.body.monospaced())
@@ -150,15 +153,16 @@ forbid(principal == "*", action == "tool:Bash", resource ~ "rm -rf");
             TextField("Principal", text: $principal).textFieldStyle(.roundedBorder)
             TextField("Action", text: $action).textFieldStyle(.roundedBorder)
             TextField("Resource", text: $resource).textFieldStyle(.roundedBorder)
-            Button("Evaluate") {
-                Task { await run() }
-            }
-            .buttonStyle(.borderedProminent)
+            Button("Evaluate") { Task { await run() } }.buttonStyle(.borderedProminent)
             if let errorMessage {
                 Text(errorMessage).foregroundColor(WTheme.Colors.warning).font(.caption)
             }
             if !output.isEmpty {
-                Text(output).font(.body.monospaced()).padding(WTheme.Spacing.sm).background(WTheme.Colors.surfaceAlt).clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
+                Text(output)
+                    .font(.body.monospaced())
+                    .padding(WTheme.Spacing.sm)
+                    .background(WTheme.Colors.surfaceAlt)
+                    .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
             }
         }
     }
@@ -183,21 +187,23 @@ private struct CanaryTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
-            Text("Capture a metric baseline from a probe URL before deploying. Compare post-deploy snapshots against this baseline.")
-                .font(.callout).foregroundColor(WTheme.Colors.textSecondary)
+            Text("Capture a metric baseline from a probe URL before deploying.")
+                .font(.callout)
+                .foregroundColor(WTheme.Colors.textSecondary)
             TextField("Probe URL (returns metric JSON)", text: $probeUrl).textFieldStyle(.roundedBorder)
             TextField("Samples", text: $samples)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.numberPad)
-            Button("Capture baseline") {
-                Task { await run() }
-            }
-            .buttonStyle(.borderedProminent)
+            Button("Capture baseline") { Task { await run() } }.buttonStyle(.borderedProminent)
             if let errorMessage {
                 Text(errorMessage).foregroundColor(WTheme.Colors.warning).font(.caption)
             }
             if !output.isEmpty {
-                Text(output).font(.body.monospaced()).padding(WTheme.Spacing.sm).background(WTheme.Colors.surfaceAlt).clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
+                Text(output)
+                    .font(.body.monospaced())
+                    .padding(WTheme.Spacing.sm)
+                    .background(WTheme.Colors.surfaceAlt)
+                    .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
             }
         }
     }
@@ -217,7 +223,7 @@ private struct EvolveTabView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
             Text("Skill Evolution").font(.title3.bold())
-            Text("The GEPA-style optimizer is a CLI workflow because each generation issues real LLM calls. Trigger from a terminal:")
+            Text("The GEPA-style optimizer is a CLI workflow. Trigger from a terminal:")
                 .font(.callout)
                 .foregroundColor(WTheme.Colors.textSecondary)
             Text("wotann evolve <skill.md> --generations 3 --write")
@@ -225,9 +231,6 @@ private struct EvolveTabView: View {
                 .padding(WTheme.Spacing.sm)
                 .background(WTheme.Colors.surfaceAlt)
                 .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
-            Text("--write archives the original under ~/.wotann/evolution-archive/ and replaces the skill file with the winning variant if its score beats baseline.")
-                .font(.caption)
-                .foregroundColor(WTheme.Colors.textSecondary)
         }
     }
 }
