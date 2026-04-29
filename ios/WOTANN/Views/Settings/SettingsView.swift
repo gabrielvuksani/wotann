@@ -220,6 +220,18 @@ struct SettingsView: View {
             }
 
             NavigationLink {
+                OperationsView()
+            } label: {
+                Label("Operations", systemImage: "gearshape.fill")
+            }
+
+            NavigationLink {
+                TeamsView()
+            } label: {
+                Label("Teams", systemImage: "person.3.fill")
+            }
+
+            NavigationLink {
                 SkillsBrowserView()
             } label: {
                 Label("Skills", systemImage: "sparkles")

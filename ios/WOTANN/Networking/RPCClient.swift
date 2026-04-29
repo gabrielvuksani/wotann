@@ -934,6 +934,126 @@ final class RPCClient: ObservableObject {
         }
     }
 
+    // MARK: Operations (Inspect / Attest / Policy / Canary)
+
+    func inspectPath(_ path: String, declared: String? = nil) async throws -> [String: RPCValue] {
+        var params: [String: RPCValue] = ["path": .string(path)]
+        if let declared { params["declared"] = .string(declared) }
+        let response = try await send("inspect.path", params: params)
+        return response.result?.objectValue ?? [:]
+    }
+
+    func attestGenkey(_ id: String = "default") async throws -> [String: RPCValue] {
+        let response = try await send("attest.genkey", params: ["id": .string(id)])
+        return response.result?.objectValue ?? [:]
+    }
+
+    func attestSign(_ record: [String: RPCValue], id: String = "default") async throws -> [String: RPCValue] {
+        let response = try await send("attest.sign", params: [
+            "record": .object(record),
+            "id": .string(id),
+        ])
+        return response.result?.objectValue ?? [:]
+    }
+
+    func attestVerify(_ envelope: [String: RPCValue]) async throws -> [String: RPCValue] {
+        let response = try await send("attest.verify", params: ["envelope": .object(envelope)])
+        return response.result?.objectValue ?? [:]
+    }
+
+    func policyEvaluate(policy: String, principal: String, action: String, resource: String) async throws -> [String: RPCValue] {
+        let response = try await send("policy.eval", params: [
+            "policy": .string(policy),
+            "principal": .string(principal),
+            "action": .string(action),
+            "resource": .string(resource),
+        ])
+        return response.result?.objectValue ?? [:]
+    }
+
+    func canaryCaptureBaseline(probeUrl: String, samples: Int = 5) async throws -> [String: RPCValue] {
+        let response = try await send("canary.captureBaseline", params: [
+            "probeUrl": .string(probeUrl),
+            "samples": .int(samples),
+        ])
+        return response.result?.objectValue ?? [:]
+    }
+
+    // MARK: Teams
+
+    func teamsListTemplates() async throws -> [TeamTemplateSummary] {
+        let response = try await send("teams.listTemplates", params: [:])
+        let values = response.result?.arrayValue ?? []
+        return values.compactMap { value in
+            guard let obj = value.objectValue else { return nil }
+            let leader = obj["leader"]?.objectValue ?? [:]
+            let agentArr = obj["agents"]?.arrayValue ?? []
+            return TeamTemplateSummary(
+                name: rpcString(obj, ["name"]) ?? "",
+                description: rpcString(obj, ["description"]) ?? "",
+                source: rpcString(obj, ["source"]) ?? "built-in",
+                leaderName: rpcString(leader, ["name"]) ?? "",
+                agentNames: agentArr.compactMap { v in
+                    guard let o = v.objectValue else { return nil }
+                    return rpcString(o, ["name"])
+                }
+            )
+        }
+    }
+
+    func teamsShowTemplate(name: String, goal: String, teamName: String? = nil) async throws -> [String: RPCValue] {
+        var params: [String: RPCValue] = ["name": .string(name), "goal": .string(goal)]
+        if let teamName { params["teamName"] = .string(teamName) }
+        let response = try await send("teams.showTemplate", params: params)
+        return response.result?.objectValue ?? [:]
+    }
+
+    func teamsSend(team: String, to: String, body: String, from: String = "ios") async throws -> [String: RPCValue] {
+        let response = try await send("teams.send", params: [
+            "team": .string(team),
+            "from": .string(from),
+            "to": .string(to),
+            "body": .string(body),
+        ])
+        return response.result?.objectValue ?? [:]
+    }
+
+    func teamsReceive(team: String, agent: String, max: Int = 10) async throws -> [InboxMessage] {
+        let response = try await send("teams.receive", params: [
+            "team": .string(team),
+            "agent": .string(agent),
+            "max": .int(max),
+        ])
+        let values = response.result?.arrayValue ?? []
+        return values.compactMap { value in
+            guard let obj = value.objectValue else { return nil }
+            return InboxMessage(
+                id: rpcString(obj, ["id"]) ?? UUID().uuidString,
+                from: rpcString(obj, ["from"]) ?? "",
+                to: rpcString(obj, ["to"]) ?? "",
+                body: rpcString(obj, ["body"]) ?? "",
+                enqueuedAt: rpcString(obj, ["enqueuedAt"]) ?? ""
+            )
+        }
+    }
+
+    func teamsBoard(team: String, agents: [String]) async throws -> [TeamBoardEntry] {
+        let response = try await send("teams.board", params: [
+            "team": .string(team),
+            "agents": .array(agents.map { .string($0) }),
+        ])
+        let values = response.result?.arrayValue ?? []
+        return values.compactMap { value in
+            guard let obj = value.objectValue else { return nil }
+            return TeamBoardEntry(
+                agent: rpcString(obj, ["agent"]) ?? "",
+                pending: Int(rpcDouble(obj, ["pending"]) ?? 0),
+                consumed: Int(rpcDouble(obj, ["consumed"]) ?? 0),
+                done: Int(rpcDouble(obj, ["done"]) ?? 0)
+            )
+        }
+    }
+
     // MARK: Incoming Handler
 
     private func handleIncoming(_ data: Data) {

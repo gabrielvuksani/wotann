@@ -52,6 +52,43 @@ export interface BlockKindInfo {
   readonly limit: number;
 }
 
+// ── Teams (ClawTeam port) ─────────────────────────────────
+export interface TeamTemplateSummary {
+  readonly name: string;
+  readonly description: string;
+  readonly source: "project" | "user" | "built-in";
+  readonly leader: { readonly name: string; readonly type: string };
+  readonly agents: readonly { readonly name: string; readonly type: string }[];
+}
+
+export interface AgentSpec {
+  readonly name: string;
+  readonly type: string;
+  readonly task: string;
+}
+
+export interface TeamTemplateRendered {
+  readonly name: string;
+  readonly description: string;
+  readonly leader: AgentSpec;
+  readonly agents: readonly AgentSpec[];
+}
+
+export interface InboxMessage {
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly body: string;
+  readonly enqueuedAt: string;
+}
+
+export interface TeamBoardEntry {
+  readonly agent: string;
+  readonly pending: number;
+  readonly consumed: number;
+  readonly done: number;
+}
+
 export interface CostDetailSnapshot extends CostSnapshot {
   readonly dailyUsage: readonly DayUsage[];
   readonly providerCosts: readonly ProviderCostBreakdown[];
@@ -450,6 +487,45 @@ export const commands = {
     invoke<boolean>("clear_block", { kind }),
   listBlockKinds: () =>
     invoke<readonly BlockKindInfo[]>("list_block_kinds"),
+
+  // ── Inspect (magika port) ─────────────────────────────────
+  inspectPath: (path: string, declared?: string) =>
+    invoke<unknown>("inspect_path", { path, declared }),
+
+  // ── Attest (protect-mcp port) ─────────────────────────────
+  attestGenkey: (id?: string) =>
+    invoke<{ id: string; publicPem: string; existed?: boolean }>("attest_genkey", { id }),
+  attestSign: (record: Record<string, unknown>, id?: string) =>
+    invoke<unknown>("attest_sign", { record, id }),
+  attestVerify: (envelope: Record<string, unknown>) =>
+    invoke<{ valid: boolean; reason: string }>("attest_verify", { envelope }),
+
+  // ── Policy (protect-mcp port) ─────────────────────────────
+  policyEvaluate: (
+    policy: string,
+    principal: string,
+    action: string,
+    resource: string,
+  ) =>
+    invoke<{ effect: "permit" | "forbid"; matchedRule: number | null; reason: string }>(
+      "policy_evaluate",
+      { policy, principal, action, resource },
+    ),
+
+  // ── Canary (gstack port) ──────────────────────────────────
+  canaryCaptureBaseline: (probeUrl: string, samples?: number) =>
+    invoke<unknown>("canary_capture_baseline", { probeUrl, samples }),
+
+  // ── Teams (ClawTeam port) ─────────────────────────────────
+  teamsListTemplates: () => invoke<readonly TeamTemplateSummary[]>("teams_list_templates"),
+  teamsShowTemplate: (name: string, goal?: string, teamName?: string) =>
+    invoke<TeamTemplateRendered>("teams_show_template", { name, goal, teamName }),
+  teamsSend: (team: string, to: string, body: string, from?: string) =>
+    invoke<unknown>("teams_send", { team, to, body, from }),
+  teamsReceive: (team: string, agent: string, max?: number) =>
+    invoke<readonly InboxMessage[]>("teams_receive", { team, agent, max }),
+  teamsBoard: (team: string, agents?: readonly string[]) =>
+    invoke<readonly TeamBoardEntry[]>("teams_board", { team, agents }),
 
   getAgents: () => invoke<readonly AgentInfo[]>("get_agents"),
 

@@ -88,6 +88,8 @@ function shortPath(path: string): string {
 const SettingsView = lazy(() => import("../settings/SettingsView").then((m) => ({ default: m.SettingsView })));
 const MemoryInspector = lazy(() => import("../memory/MemoryInspector").then((m) => ({ default: m.MemoryInspector })));
 const BlockMemoryPanel = lazy(() => import("../memory/BlockMemoryPanel").then((m) => ({ default: m.BlockMemoryPanel })));
+const OperationsPanel = lazy(() => import("../operations/OperationsPanel").then((m) => ({ default: m.OperationsPanel })));
+const TeamsPanel = lazy(() => import("../teams/TeamsPanel").then((m) => ({ default: m.TeamsPanel })));
 const CostDashboard = lazy(() => import("../health/CostDashboard").then((m) => ({ default: m.CostDashboard })));
 const CommandPalette = lazy(() => import("../palette/CommandPalette").then((m) => ({ default: m.CommandPalette })));
 const OnboardingView = lazy(() => import("../onboarding/OnboardingView").then((m) => ({ default: m.OnboardingView })));
@@ -258,6 +260,10 @@ function WorkspaceContent({
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><MemoryInspector /></Suspense></ErrorBoundary>;
     case "blocks":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><BlockMemoryPanel /></Suspense></ErrorBoundary>;
+    case "operations":
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><OperationsPanel /></Suspense></ErrorBoundary>;
+    case "teams":
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><TeamsPanel /></Suspense></ErrorBoundary>;
     case "cost":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><CostDashboard /></Suspense></ErrorBoundary>;
     case "intelligence":

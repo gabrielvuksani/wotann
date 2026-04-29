@@ -331,6 +331,22 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         action: () => setView("blocks"),
       },
       {
+        id: "ops-panel",
+        title: "Operations",
+        subtitle: "Inspect / Attest / Policy / Canary / Evolve",
+        category: "Operations",
+        icon: "⚙️",
+        action: () => setView("operations"),
+      },
+      {
+        id: "teams-panel",
+        title: "Teams",
+        subtitle: "Multi-agent team templates + inbox transport",
+        category: "Operations",
+        icon: "👥",
+        action: () => setView("teams"),
+      },
+      {
         id: "memory-mine",
         title: "Mine Conversations",
         subtitle: "memory.mine — extract patterns from history",

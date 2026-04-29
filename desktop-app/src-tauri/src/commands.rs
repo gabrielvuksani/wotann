@@ -3964,3 +3964,178 @@ pub async fn list_block_kinds() -> Result<Vec<BlockKindInfo>, String> {
         })
         .collect())
 }
+
+// Operations: Inspect / Attest / Policy / Canary / Teams.
+// Thin wrappers around the daemon RPC. We pass `serde_json::Value`
+// through verbatim because the Desktop UI only needs to render shapes
+// the daemon already produces.
+
+#[tauri::command]
+pub async fn inspect_path(
+    path: String,
+    declared: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let mut payload = serde_json::json!({ "path": path });
+    if let Some(d) = declared {
+        payload["declared"] = serde_json::Value::String(d);
+    }
+    client.call("inspect.path", payload).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn attest_genkey(id: Option<String>) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let payload = match id {
+        Some(i) => serde_json::json!({ "id": i }),
+        None => serde_json::json!({}),
+    };
+    client.call("attest.genkey", payload).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn attest_sign(
+    record: serde_json::Value,
+    id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let payload = serde_json::json!({
+        "record": record,
+        "id": id.unwrap_or_else(|| "default".to_string()),
+    });
+    client.call("attest.sign", payload).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn attest_verify(envelope: serde_json::Value) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call("attest.verify", serde_json::json!({ "envelope": envelope }))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn policy_evaluate(
+    policy: String,
+    principal: String,
+    action: String,
+    resource: String,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call(
+            "policy.eval",
+            serde_json::json!({
+                "policy": policy,
+                "principal": principal,
+                "action": action,
+                "resource": resource,
+            }),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn canary_capture_baseline(
+    probe_url: String,
+    samples: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let mut payload = serde_json::json!({ "probeUrl": probe_url });
+    if let Some(s) = samples {
+        payload["samples"] = serde_json::Value::Number(s.into());
+    }
+    client
+        .call("canary.captureBaseline", payload)
+        .map_err(|e| e.to_string())
+}
+
+// Teams.
+
+#[tauri::command]
+pub async fn teams_list_templates() -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call("teams.listTemplates", serde_json::json!({}))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn teams_show_template(
+    name: String,
+    goal: Option<String>,
+    team_name: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call(
+            "teams.showTemplate",
+            serde_json::json!({
+                "name": name,
+                "goal": goal.unwrap_or_else(|| "your goal".to_string()),
+                "teamName": team_name,
+            }),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn teams_send(
+    team: String,
+    from: Option<String>,
+    to: String,
+    body: String,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call(
+            "teams.send",
+            serde_json::json!({
+                "team": team,
+                "from": from.unwrap_or_else(|| "desktop".to_string()),
+                "to": to,
+                "body": body,
+            }),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn teams_receive(
+    team: String,
+    agent: String,
+    max: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    client
+        .call(
+            "teams.receive",
+            serde_json::json!({
+                "team": team,
+                "agent": agent,
+                "max": max.unwrap_or(10),
+            }),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn teams_board(
+    team: String,
+    agents: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let agents = agents.unwrap_or_else(|| {
+        vec![
+            "lead".to_string(),
+            "builder".to_string(),
+            "verifier".to_string(),
+        ]
+    });
+    client
+        .call(
+            "teams.board",
+            serde_json::json!({ "team": team, "agents": agents }),
+        )
+        .map_err(|e| e.to_string())
+}

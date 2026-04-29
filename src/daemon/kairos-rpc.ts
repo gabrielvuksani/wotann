@@ -8597,6 +8597,186 @@ export class KairosRPCHandler {
       const { BLOCK_KINDS, getBlockLimit } = await import("../memory/block-memory.js");
       return BLOCK_KINDS.map((k) => ({ kind: k, limit: getBlockLimit(k) }));
     });
+
+    // ── Teams (ClawTeam port) ─────────────────────────────────
+
+    this.handlers.set("teams.listTemplates", async () => {
+      const { loadAllTemplates } = await import("../orchestration/team-templates.js");
+      const tpls = loadAllTemplates();
+      return tpls.map((t) => ({
+        name: t.name,
+        description: t.description,
+        source: t.source,
+        leader: { name: t.leader.name, type: t.leader.type },
+        agents: t.agents.map((a) => ({ name: a.name, type: a.type })),
+      }));
+    });
+
+    this.handlers.set("teams.showTemplate", async (params) => {
+      const name = params["name"];
+      const goal = params["goal"];
+      const teamName = params["teamName"];
+      if (typeof name !== "string") return { error: "name required" };
+      const { loadTemplate, renderTemplate } = await import("../orchestration/team-templates.js");
+      const tpl = loadTemplate(name);
+      if (!tpl) return { error: `template not found: ${name}` };
+      const rendered = renderTemplate(tpl, {
+        goal: typeof goal === "string" ? goal : "your goal",
+        teamName: typeof teamName === "string" ? teamName : tpl.name,
+      });
+      return rendered;
+    });
+
+    this.handlers.set("teams.send", async (params) => {
+      const team = params["team"];
+      const from = params["from"];
+      const to = params["to"];
+      const body = params["body"];
+      if (typeof team !== "string" || typeof to !== "string" || typeof body !== "string") {
+        return { error: "team, to, body required" };
+      }
+      try {
+        const { FileTransport } = await import("../orchestration/file-transport.js");
+        const t = new FileTransport();
+        return t.send({ team, from: typeof from === "string" ? from : "rpc", to, body });
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("teams.receive", async (params) => {
+      const team = params["team"];
+      const agent = params["agent"];
+      const max = typeof params["max"] === "number" ? (params["max"] as number) : 10;
+      if (typeof team !== "string" || typeof agent !== "string") {
+        return { error: "team, agent required" };
+      }
+      try {
+        const { FileTransport } = await import("../orchestration/file-transport.js");
+        const t = new FileTransport();
+        return t.receive(team, agent, max);
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("teams.board", async (params) => {
+      const team = params["team"];
+      const agentsParam = params["agents"];
+      if (typeof team !== "string") return { error: "team required" };
+      const agents: string[] = Array.isArray(agentsParam)
+        ? (agentsParam as unknown[]).filter((s): s is string => typeof s === "string")
+        : ["lead", "builder", "verifier"];
+      try {
+        const { FileTransport } = await import("../orchestration/file-transport.js");
+        const t = new FileTransport();
+        return agents.map((a) => {
+          const hist = t.history(team, a, 100);
+          const counts = { pending: 0, consumed: 0, done: 0 };
+          for (const h of hist) counts[h.state]++;
+          return { agent: a, ...counts };
+        });
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // ── Inspect (magika port) ─────────────────────────────────
+
+    this.handlers.set("inspect.path", async (params) => {
+      const path = params["path"];
+      const declared = params["declared"];
+      if (typeof path !== "string") return { error: "path required" };
+      try {
+        const { detectFile, declaredVsActual } = await import("../security/file-type-validator.js");
+        const verdict = await detectFile(path);
+        const match = typeof declared === "string" ? declaredVsActual(declared, verdict) : null;
+        return { verdict, match };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // ── Attest (protect-mcp port) ─────────────────────────────
+
+    this.handlers.set("attest.genkey", async (params) => {
+      const id = typeof params["id"] === "string" ? (params["id"] as string) : "default";
+      try {
+        const { generateAuditKey, loadAuditKey } = await import("../security/signed-audit.js");
+        const existing = loadAuditKey(id);
+        if (existing) return { id: existing.id, publicPem: existing.publicPem, existed: true };
+        const key = generateAuditKey(id);
+        return { id: key.id, publicPem: key.publicPem, existed: false };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("attest.sign", async (params) => {
+      const record = params["record"];
+      const id = typeof params["id"] === "string" ? (params["id"] as string) : "default";
+      if (typeof record !== "object" || record === null) return { error: "record required" };
+      try {
+        const { getOrCreateKey, signRecord } = await import("../security/signed-audit.js");
+        return signRecord(record as Record<string, unknown>, getOrCreateKey(id));
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("attest.verify", async (params) => {
+      const envelope = params["envelope"];
+      if (typeof envelope !== "object" || envelope === null) return { error: "envelope required" };
+      try {
+        const { verifyRecord } = await import("../security/signed-audit.js");
+        return verifyRecord(envelope as Parameters<typeof verifyRecord>[0]);
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("policy.eval", async (params) => {
+      const policyText = params["policy"];
+      const principal = params["principal"];
+      const action = params["action"];
+      const resource = params["resource"];
+      if (typeof policyText !== "string") return { error: "policy required" };
+      if (
+        typeof principal !== "string" ||
+        typeof action !== "string" ||
+        typeof resource !== "string"
+      ) {
+        return { error: "principal, action, resource required" };
+      }
+      try {
+        const { evaluatePolicy, parsePolicy } = await import("../security/policy-language.js");
+        const rules = parsePolicy(policyText);
+        return evaluatePolicy(rules, { principal, action, resource });
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // ── Canary (gstack port) ──────────────────────────────────
+
+    this.handlers.set("canary.captureBaseline", async (params) => {
+      const probeUrl = params["probeUrl"];
+      const samples = typeof params["samples"] === "number" ? (params["samples"] as number) : 5;
+      if (typeof probeUrl !== "string") {
+        return { error: "probeUrl required (HTTP endpoint that returns metric JSON)" };
+      }
+      try {
+        const { captureBaseline } = await import("../orchestration/canary-monitor.js");
+        const probe = async () => {
+          const res = await fetch(probeUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return (await res.json()) as Awaited<ReturnType<Parameters<typeof captureBaseline>[0]>>;
+        };
+        return await captureBaseline(probe, samples);
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
   }
 
   private errorResponse(id: string | number | null, code: number, message: string): RPCResponse {
