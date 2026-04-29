@@ -207,6 +207,8 @@ function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+import { sanitizeForPromptInsertion } from "../security/prompt-quarantine.js";
+
 /**
  * Maximum character length for query and per-hit content embedded in the
  * LLM-reranker prompt. Caps total prompt size and prevents injection
@@ -215,21 +217,6 @@ function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
  */
 const LLM_RERANKER_MAX_QUERY_CHARS = 1000;
 const LLM_RERANKER_MAX_HIT_CHARS = 200;
-
-/**
- * Strip ASCII control characters (except tab/newline/carriage-return)
- * and zero-width / bidi-override unicode points that injection payloads
- * commonly use to hide instructions from human reviewers but pass
- * through to the model verbatim.
- */
-function sanitizeForPromptInsertion(s: string): string {
-  return (
-    s
-      // eslint-disable-next-line no-control-regex -- intentional: stripping control chars is the whole purpose
-      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
-      .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
-  );
-}
 
 /**
  * Create an LLM-backed reranker. Sends query + hits to the LLM, asks
