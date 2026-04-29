@@ -8219,6 +8219,282 @@ program
     process.exit(1);
   });
 
+// ── wotann fork-session ─────────────────────────────────────
+//
+// Port of `codex fork` (research/codex/codex-rs/cli/src/main.rs:148, 270-289).
+// Branches a NEW session from an existing one — copies the rollout under a
+// fresh id so the user can "what-if" a different prompt path. Pairs with
+// the loop detector (commit 0ca2fd3): on detected loops we can suggest
+// `wotann fork-session --last`.
+//
+// Naming: `wotann fork` is already taken by V9 T14.7's trajectory-fork
+// command (line 7026 above; takes <trajectoryPath> <outputPath>). To
+// avoid breaking existing scripts we use `fork-session` as a distinct
+// verb. The exit-code mapping mirrors the prompt's contract:
+//   0 → success
+//   1 → session-not-found
+//   2 → bad arguments
+program
+  .command("fork-session [sessionId]")
+  .description("Branch a new session from an existing one (codex-style fork)")
+  .option("--last", "Fork the most recent session for this directory", false)
+  .option(
+    "--all",
+    "When combined with --last, search across ALL recorded sessions (not cwd-filtered)",
+    false,
+  )
+  .action(async (sessionId: string | undefined, opts: { last?: boolean; all?: boolean }) => {
+    const { forkSession } = await import("./core/session-fork.js");
+    const result = forkSession({
+      sessionId,
+      last: opts.last ?? false,
+      all: opts.all ?? false,
+    });
+
+    if (!result.ok) {
+      const msg = result.error ?? "fork failed";
+      process.stderr.write(chalk.red(`fork-session: ${msg}\n`));
+      // QB#13: strict prefix match — argument errors (exit 2) vs.
+      // session-missing errors (exit 1) are distinguished by the
+      // helper's stable error-string convention.
+      if (msg.startsWith("argument:")) {
+        process.exit(2);
+      }
+      process.exit(1);
+    }
+
+    // Stdout = the new session id, so scripts can pipe it. Hint goes
+    // to stderr so it doesn't pollute the captured id.
+    process.stdout.write(`${result.newSessionId}\n`);
+    process.stderr.write(
+      chalk.green(
+        `✓ Forked session ${result.sourceSessionId?.slice(0, 8) ?? "?"} → ` +
+          `${result.newSessionId?.slice(0, 8) ?? "?"} (${result.messageCount ?? 0} messages)\n`,
+      ),
+    );
+    process.stderr.write(
+      chalk.dim(
+        `  Stored at: ${result.newSessionPath}\n` +
+          `  Resume with: wotann resume   (loads the most recent saved session for this cwd)\n`,
+      ),
+    );
+  });
+
+// ── wotann mcp export-mcpb ──────────────────────────────────
+//
+// Port of claude-task-master's `.mcpb` distribution format
+// (research/claude-task-master/manifest.json — manifest_version 0.3,
+// typed user_config, server.mcp_config). Exports a WOTANN-registered MCP
+// server as a single-file `.mcpb` manifest so a teammate can import it
+// into Claude Desktop or back into another WOTANN instance.
+//
+// v1 limitation: writes the bare manifest.json form (no zip bundling)
+// because package.json carries no zip dep — see src/marketplace/mcpb.ts.
+mcpCmd
+  .command("export-mcpb [name]")
+  .description("Export a registered MCP server as a .mcpb manifest (single-file form, no zip)")
+  .option("--out <path>", "Write to a file instead of stdout")
+  .option("--include-disabled", "Allow exporting servers that are disabled in the registry", false)
+  .option("--bundle-version <ver>", "Version to stamp into manifest.version", "0.0.0")
+  .action(
+    async (
+      name: string | undefined,
+      options: { out?: string; includeDisabled?: boolean; bundleVersion?: string },
+    ) => {
+      const { MCPRegistry } = await import("./marketplace/registry.js");
+      const { serializeMcpb } = await import("./marketplace/mcpb.js");
+      const { resolveWotannHomeSubdir } = await import("./utils/wotann-home.js");
+      const { existsSync, readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
+      const { dirname, resolve: resolvePath } = await import("node:path");
+      const yaml = await import("yaml");
+
+      // Locate target server. If --name omitted, error with usage hint
+      // (we deliberately don't bulk-export here — .mcpb is a single-server
+      // bundle format; bulk export would need to invent a wrapper that
+      // Claude Desktop wouldn't recognize).
+      if (!name) {
+        process.stderr.write(
+          chalk.red("error: <name> is required (.mcpb is a single-server bundle format)\n"),
+        );
+        process.stderr.write(
+          chalk.dim("  example: wotann mcp export-mcpb filesystem --out filesystem.mcpb\n"),
+        );
+        process.stderr.write(chalk.dim("  list registered servers: wotann mcp list\n"));
+        process.exit(2);
+      }
+
+      // Look in three places for the server, in priority order:
+      //   1. ~/.wotann/wotann.yaml (where `mcp add`/`import-mcpb` write).
+      //   2. ~/.wotann/mcp.json    (where `mcp import` persists, JSON form).
+      //   3. Builtins (cognee/omi/qmd) registered programmatically.
+      // The first hit wins. We don't merge — duplicate names across files
+      // would be ambiguous. yaml takes precedence because that's where
+      // CLI-managed servers live.
+      const registry = new MCPRegistry();
+      registry.registerBuiltins();
+      registry.loadFromDisk();
+
+      const yamlPath = resolveWotannHomeSubdir("wotann.yaml");
+      let yamlServer:
+        | { command: string; args: string[]; env?: Record<string, string>; enabled: boolean }
+        | undefined;
+      if (existsSync(yamlPath)) {
+        try {
+          const config = (yaml.parse(readFileSync(yamlPath, "utf-8")) ?? {}) as Record<
+            string,
+            unknown
+          >;
+          const key = "mcp_servers" in config ? "mcp_servers" : "mcpServers";
+          const servers = (config[key] ?? {}) as Record<string, Record<string, unknown>>;
+          const entry = servers[name];
+          if (entry) {
+            yamlServer = {
+              command: String(entry["command"] ?? ""),
+              args: Array.isArray(entry["args"]) ? (entry["args"] as unknown[]).map(String) : [],
+              ...(entry["env"] && typeof entry["env"] === "object"
+                ? { env: entry["env"] as Record<string, string> }
+                : {}),
+              enabled: entry["enabled"] !== false,
+            };
+          }
+        } catch {
+          // Bad yaml — fall through to registry lookup.
+        }
+      }
+
+      const server = yamlServer
+        ? {
+            name,
+            command: yamlServer.command,
+            args: yamlServer.args,
+            transport: "stdio" as const,
+            ...(yamlServer.env && { env: yamlServer.env }),
+            enabled: yamlServer.enabled,
+          }
+        : registry.getServer(name);
+
+      if (!server) {
+        process.stderr.write(chalk.red(`error: MCP server "${name}" not found\n`));
+        process.stderr.write(chalk.dim("  list registered servers: wotann mcp list\n"));
+        process.stderr.write(chalk.dim(`  searched: ${yamlPath} and ~/.wotann/mcp.json\n`));
+        process.exit(1);
+      }
+      if (!server.enabled && !options.includeDisabled) {
+        process.stderr.write(
+          chalk.red(
+            `error: MCP server "${name}" is disabled (use --include-disabled to export anyway)\n`,
+          ),
+        );
+        process.exit(1);
+      }
+
+      const json = serializeMcpb(server, {
+        version: options.bundleVersion ?? "0.0.0",
+      });
+
+      if (options.out) {
+        const outPath = resolvePath(process.cwd(), options.out);
+        const outDir = dirname(outPath);
+        if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+        writeFileSync(outPath, json + "\n");
+        process.stderr.write(chalk.green(`✓ Wrote .mcpb manifest for "${name}" to ${outPath}\n`));
+        process.stderr.write(
+          chalk.dim("  Note: single-file form (no zip bundle). Distribute as-is.\n"),
+        );
+      } else {
+        process.stdout.write(json + "\n");
+      }
+    },
+  );
+
+// ── wotann mcp import-mcpb ──────────────────────────────────
+//
+// Symmetrical to export-mcpb. Reads a .mcpb manifest and registers the
+// included server in ~/.wotann/wotann.yaml. Reuses the same yaml-write
+// logic as `wotann mcp add` (commit c25cb2a) — same key preservation
+// (mcp_servers vs mcpServers), same `enabled: true` default, same
+// "use --force to overwrite" guard.
+mcpCmd
+  .command("import-mcpb <file>")
+  .description("Register an MCP server from a .mcpb manifest into ~/.wotann/wotann.yaml")
+  .option("-f, --force", "Overwrite an existing server with the same name", false)
+  .option("--name <name>", "Override the manifest's name (rare; mostly for testing)")
+  .action(async (file: string, options: { force?: boolean; name?: string }) => {
+    const { parseMcpb } = await import("./marketplace/mcpb.js");
+    const { resolveWotannHomeSubdir } = await import("./utils/wotann-home.js");
+    const { existsSync, readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    const yaml = await import("yaml");
+
+    const parsed = parseMcpb(file);
+    if (!parsed.ok || !parsed.manifest) {
+      const err = parsed.error ?? "parse failed";
+      process.stderr.write(chalk.red(`import-mcpb: ${err}\n`));
+      // file-not-found / parse-failure → exit 1; structural complaints
+      // (missing fields) → exit 2 to match the prompt's contract.
+      if (err.startsWith("file not found")) {
+        process.exit(1);
+      }
+      process.exit(2);
+    }
+
+    const manifest = parsed.manifest;
+    const serverName = options.name ?? manifest.name;
+    if (!serverName) {
+      process.stderr.write(chalk.red("error: manifest has no name and --name not provided\n"));
+      process.exit(2);
+    }
+
+    // Reuse the exact yaml-write logic from `mcp add` (lines 3641-3690 of
+    // this file). Single source of write truth; same key-casing rule.
+    const configPath = resolveWotannHomeSubdir("wotann.yaml");
+    if (!existsSync(dirname(configPath))) {
+      mkdirSync(dirname(configPath), { recursive: true });
+    }
+    const config = (
+      existsSync(configPath) ? (yaml.parse(readFileSync(configPath, "utf-8")) ?? {}) : {}
+    ) as Record<string, unknown>;
+    const key = "mcp_servers" in config ? "mcp_servers" : "mcpServers";
+    const servers = (config[key] ?? {}) as Record<string, Record<string, unknown>>;
+    if (servers[serverName] && !options.force) {
+      process.stderr.write(
+        chalk.red(`error: MCP server "${serverName}" already exists in ${configPath}\n`),
+      );
+      process.stderr.write(
+        chalk.dim("  Use --force to overwrite, or `wotann mcp list` to see existing servers.\n"),
+      );
+      process.exit(1);
+    }
+
+    const env = manifest.server.mcp_config.env;
+    const updated = {
+      ...config,
+      [key]: {
+        ...servers,
+        [serverName]: {
+          command: manifest.server.mcp_config.command,
+          args: [...manifest.server.mcp_config.args],
+          transport: "stdio",
+          enabled: true,
+          ...(env && Object.keys(env).length > 0 && { env: { ...env } }),
+        },
+      },
+    };
+    writeFileSync(configPath, yaml.stringify(updated));
+
+    console.log(chalk.green(`✓ Imported MCP server "${serverName}" from ${file}`));
+    console.log(chalk.dim(`  manifest_version: ${manifest.manifest_version}`));
+    console.log(chalk.dim(`  bundle version:   ${manifest.version}`));
+    console.log(chalk.dim(`  command:          ${manifest.server.mcp_config.command}`));
+    if (manifest.server.mcp_config.args.length > 0) {
+      console.log(chalk.dim(`  args:             ${manifest.server.mcp_config.args.join(" ")}`));
+    }
+    console.log(chalk.dim(`  written to:       ${configPath}`));
+    console.log(
+      chalk.dim("  Restart the engine for changes to take effect: wotann engine restart"),
+    );
+  });
+
 // ── Parse ───────────────────────────────────────────────────
 
 // Deep-link fast path — if the first positional arg is a `wotann://` URL,

@@ -42,6 +42,7 @@ import { BlockBuffer, type Block } from "./terminal-blocks/block.js";
 import { Osc133Parser } from "./terminal-blocks/osc-133-parser.js";
 import type { AgentMessage, ProviderName, ProviderStatus } from "../core/types.js";
 import type { WotannRuntime } from "../core/runtime.js";
+import { MessageQueue, makeMessageQueue } from "../core/message-queue.js";
 import type {
   TaskPriority,
   TaskStatus,
@@ -410,6 +411,13 @@ export function WotannApp({
   const keybindingManagerRef = useRef(new KeybindingManager());
   const voiceControllerRef = useRef(new TUIVoiceController());
   const [voiceBusy, setVoiceBusy] = useState(false);
+  // Mid-stream message queue (per-session, never module-global per QB#7).
+  // Inspired by langchain-ai/open-swe agent/middleware/check_message_queue.py.
+  // The TUI submit handler enqueues here when isStreaming is true; the
+  // runtime drains in `query()` and prepends the contents onto the next
+  // model turn. `queueDepth` mirrors the queue size for the indicator.
+  const messageQueueRef = useRef<MessageQueue>(makeMessageQueue());
+  const [queueDepth, setQueueDepth] = useState(0);
   const [showHistoryPicker, setShowHistoryPicker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   // Ctrl+M opens an interactive provider/model picker (replaces the
@@ -463,6 +471,18 @@ export function WotannApp({
   useEffect(() => {
     if (messages.length > 0 && showStartup) setShowStartup(false);
   }, [messages.length, showStartup]);
+
+  // Wire the TUI-owned MessageQueue into the runtime so the runtime's
+  // pre-model drain reads from the same queue the submit handler
+  // enqueues to. Inspired by langchain-ai/open-swe
+  // agent/middleware/check_message_queue.py — same FIFO drain semantic,
+  // but the queue lives in this React tree (per-session) instead of a
+  // graph-runtime store.
+  useEffect(() => {
+    if (runtime) {
+      runtime.setMessageQueue(messageQueueRef.current);
+    }
+  }, [runtime]);
 
   // Session-13: OSC 133 stream → BlockBuffer → Block[]. Opt-in via
   // WOTANN_OSC133_FIFO (a named pipe the user creates with mkfifo).
@@ -3488,6 +3508,31 @@ export function WotannApp({
   // ── Message Submit Handler ───────────────────────────────
   const handleSubmit = useCallback(
     async (input: string) => {
+      // ── Mid-stream input routing ──────────────────────────
+      // If a model turn is still streaming, the user shouldn't have to
+      // wait — push the message onto the per-session queue and surface
+      // a system confirmation. The runtime's pre-model drain
+      // (`runtime.query()` → message-queue) prepends queued items as
+      // user-role turns on the next call.
+      //
+      // Inspired by langchain-ai/open-swe
+      // agent/middleware/check_message_queue.py — same FIFO drain
+      // ordering ("queued = older, current = newer").
+      //
+      // Slash commands and deep links remain immediate even mid-stream:
+      // they're local TUI affordances, not model input, so queuing them
+      // would be surprising.
+      if (isStreaming && !input.startsWith("/") && !input.trimStart().startsWith("wotann://")) {
+        const trimmed = input.trim();
+        if (trimmed.length === 0) return;
+        messageQueueRef.current.enqueue(trimmed);
+        setQueueDepth(messageQueueRef.current.size());
+        appendSystemMessage(`📨 Queued for next turn (${messageQueueRef.current.size()} pending)`);
+        setPromptValue("");
+        setHistory((prev) => [trimmed, ...prev.slice(0, 49)]);
+        return;
+      }
+
       if (input.startsWith("/") && handleSlashCommand(input)) return;
 
       // Auto-handle wotann:// deep links typed directly into the prompt
@@ -3545,6 +3590,11 @@ export function WotannApp({
       setStreamingContent("");
       setPromptValue("");
       setTurnCount((t) => t + 1);
+      // Queued messages are drained inside `runtime.query()` BEFORE the
+      // first await, so they're already in the model's context by the
+      // time we re-render. Reset the indicator here so the UI reflects
+      // the post-drain truth instead of going stale.
+      if (queueDepth > 0) setQueueDepth(0);
 
       if (runtime) {
         // ═══════════════════════════════════════════════════════════
@@ -3891,6 +3941,21 @@ export function WotannApp({
           <Text color={currentTheme.colors.muted}>
             · memory capture paused · all messages local
           </Text>
+        </Box>
+      )}
+
+      {/*
+        Mid-stream message-queue indicator. Surfaces when the user has
+        typed messages while a model turn was streaming so they can see
+        the queue depth before the next turn begins. Inspired by
+        langchain-ai/open-swe agent/middleware/check_message_queue.py.
+      */}
+      {queueDepth > 0 && (
+        <Box paddingX={1} gap={1}>
+          <Text color={currentTheme.colors.info} bold>
+            📨 {queueDepth} message{queueDepth === 1 ? "" : "s"} queued
+          </Text>
+          <Text color={currentTheme.colors.muted}>· will prepend on next turn</Text>
         </Box>
       )}
 

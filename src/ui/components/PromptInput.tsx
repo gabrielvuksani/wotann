@@ -183,8 +183,14 @@ export function PromptInput({
 
     if (disabled && !isStreaming) return;
 
-    // During streaming, only Ctrl+C works
-    if (isStreaming) return;
+    // Pre-2026-04-29 the input was hard-blocked during streaming
+    // (`if (isStreaming) return;`). Removed to enable the open-swe
+    // check_message_queue port (commit 0ca2fd3 + follow-up): user can
+    // type while the agent streams, and handleSubmit at App.tsx:3509
+    // routes the typed message into the per-session pending queue,
+    // which the runtime drains before the next model.complete() call.
+    // Slash commands and `wotann://` deep links still fire immediately
+    // (handled by App.tsx handleSubmit's mid-stream branch).
 
     if (key.return) {
       handleSubmit();
@@ -307,55 +313,57 @@ export function PromptInput({
         </Box>
       )}
 
-      {/* Input box */}
-      <Box borderStyle="round" borderColor={borderTone} paddingX={1}>
-        {isStreaming ? (
+      {/* Input box — during streaming, render BOTH a status row + the
+          live input so users can queue a next-turn message via the
+          open-swe check_message_queue port. */}
+      <Box borderStyle="round" borderColor={borderTone} paddingX={1} flexDirection="column">
+        {isStreaming && (
           <Box gap={1}>
             <Spinner tone={tone} accent="success" />
-            <Text color={tone.muted}>Streaming...</Text>
-            <Text color={tone.muted}>Press</Text>
+            <Text color={tone.muted}>Streaming —</Text>
             <Text color={tone.warning} bold>
               Ctrl+C
             </Text>
-            <Text color={tone.muted}>to abort</Text>
-          </Box>
-        ) : (
-          <Box>
-            {mode === "default" ? (
-              <Box gap={1}>
-                <Text color={tone.rune} bold>
-                  {rune.ask}
-                </Text>
-                <Text color={borderTone} bold>
-                  {">"}
-                </Text>
-              </Box>
-            ) : (
-              <Box gap={1}>
-                <Pill tone={tone} label={mode} variant="info" />
-                <Text color={borderTone} bold>
-                  {">"}
-                </Text>
-              </Box>
-            )}
-            <Text> </Text>
-            {value.length > 0 ? (
-              <Text>
-                {value.startsWith("/") ? (
-                  <Text color={tone.warning}>{value}</Text>
-                ) : (
-                  <Text color={tone.text}>{value}</Text>
-                )}
-                <Text color={tone.primary}>{glyph.cursorBlock}</Text>
-              </Text>
-            ) : (
-              <Text>
-                <Text color={tone.muted}>{placeholder}</Text>
-                <Text color={tone.primary}>{glyph.cursorBlock}</Text>
-              </Text>
-            )}
+            <Text color={tone.muted}>aborts; typing queues for next turn</Text>
           </Box>
         )}
+        <Box>
+          {mode === "default" ? (
+            <Box gap={1}>
+              <Text color={tone.rune} bold>
+                {rune.ask}
+              </Text>
+              <Text color={borderTone} bold>
+                {">"}
+              </Text>
+            </Box>
+          ) : (
+            <Box gap={1}>
+              <Pill tone={tone} label={mode} variant="info" />
+              <Text color={borderTone} bold>
+                {">"}
+              </Text>
+            </Box>
+          )}
+          <Text> </Text>
+          {value.length > 0 ? (
+            <Text>
+              {value.startsWith("/") ? (
+                <Text color={tone.warning}>{value}</Text>
+              ) : (
+                <Text color={tone.text}>{value}</Text>
+              )}
+              <Text color={tone.primary}>{glyph.cursorBlock}</Text>
+            </Text>
+          ) : (
+            <Text>
+              <Text color={tone.muted}>
+                {isStreaming ? "Type to queue for next turn..." : placeholder}
+              </Text>
+              <Text color={tone.primary}>{glyph.cursorBlock}</Text>
+            </Text>
+          )}
+        </Box>
       </Box>
     </Box>
   );

@@ -22,6 +22,7 @@ import type {
   BillingType,
 } from "./types.js";
 import { extractTrackedFilePath } from "./tool-path-extractor.js";
+import { MessageQueue, type PendingMessage } from "./message-queue.js";
 import type { StreamChunk } from "../providers/types.js";
 import { discoverProviders } from "../providers/discovery.js";
 import { discoverModelsForProvider } from "../providers/model-discovery.js";
@@ -729,6 +730,22 @@ export class WotannRuntime {
   private bootstrapPrompt: string = "";
   private recentErrors: string[] = [];
   private isFirstTurn = true;
+  /**
+   * Per-session message queue for user input typed while a model turn
+   * is mid-stream. The TUI input handler enqueues; we drain on every
+   * `query()` call and prepend the pending messages onto the next
+   * conversation context, so the model sees them as fresh user turns
+   * BEFORE the current prompt — matching open-swe's middleware ordering
+   * (queued = older, current = newer).
+   *
+   * Default-constructed so the runtime is always safe to drain from
+   * even if the embedder never wires a queue. When the TUI passes its
+   * own MessageQueue via {@link setMessageQueue}, we swap to that
+   * instance so the visual indicator and the runtime drain share state.
+   *
+   * Per-instance per QB#7 — never module-global.
+   */
+  private messageQueue: MessageQueue = new MessageQueue();
 
   // ── Phase 1 wired subsystems ──
   private accuracyBooster: AccuracyBooster;
@@ -2716,6 +2733,46 @@ export class WotannRuntime {
       );
 
       let conversationContext = options.context ? [...options.context] : [...this.session.messages];
+
+      // ── Mid-stream message queue drain ──────────────────────
+      // Inspired by langchain-ai/open-swe
+      // agent/middleware/check_message_queue.py:1-100. The TUI input
+      // handler enqueues user messages typed while a previous turn was
+      // still streaming; we drain them here and prepend them as
+      // user-role turns so the model sees:
+      //   [...prior, ...queuedAsUser, currentUserTurn]
+      // This matches open-swe's ordering (queued = older, current =
+      // newer) — if the user typed "actually never mind" mid-stream,
+      // the model now reads that BEFORE the new prompt, which is the
+      // correct conversational shape.
+      //
+      // Wrapped in try/catch (QB#6) so a queue bug never blocks the
+      // main query path.
+      try {
+        const queued: readonly PendingMessage[] = this.messageQueue.drain();
+        if (queued.length > 0) {
+          const queuedAsMessages: AgentMessage[] = queued.map((m) => ({
+            role: "user" as const,
+            content: m.content,
+            provider: options.provider ?? this.session.provider,
+            model: options.model ?? this.session.model,
+          }));
+          conversationContext = [...conversationContext, ...queuedAsMessages];
+          this.memoryStore?.captureEvent(
+            "queued_messages_drained",
+            `Drained ${queued.length} mid-stream message(s) into context`,
+            "query",
+            this.session.id,
+          );
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[WotannRuntime] message-queue drain failed; continuing without queued messages: ${
+            (err as Error).message
+          }`,
+        );
+      }
 
       const skillActivation = buildSkillActivationPrompt(
         this.skillRegistry,
@@ -5341,6 +5398,26 @@ export class WotannRuntime {
 
   getThinkingEffort(): ThinkingEffort {
     return this.thinkingEffort;
+  }
+
+  // ── Mid-stream message queue ──────────────────────────────
+  /**
+   * Wire a TUI-owned MessageQueue into the runtime. Call this once on
+   * mount; the same instance is then used by the TUI's `enqueue` path
+   * (when the user types mid-stream) AND the runtime's `query()`
+   * drain — so the visual indicator stays in sync with the model
+   * input. See `src/core/message-queue.ts` for the schema.
+   *
+   * Inspired by langchain-ai/open-swe
+   * agent/middleware/check_message_queue.py — same pattern, but the
+   * queue is in-memory and per-runtime instead of a thread-keyed store.
+   */
+  setMessageQueue(queue: MessageQueue): void {
+    this.messageQueue = queue;
+  }
+
+  getMessageQueue(): MessageQueue {
+    return this.messageQueue;
   }
 
   // ── Context Size Control ──────────────────────────────────
