@@ -12,6 +12,7 @@ struct SkillsBrowserView: View {
     @State private var invokePrompt = ""
     @State private var isInvoking = false
     @State private var invokeResult: String?
+    @State private var loadError: String?
 
     var filteredSkills: [SkillItem] {
         if searchQuery.isEmpty { return skills }
@@ -24,10 +25,42 @@ struct SkillsBrowserView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                if let loadError {
+                    ErrorBanner(
+                        message: loadError,
+                        type: .error,
+                        onRetry: { loadSkills() }
+                    )
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
                 if isLoading {
                     Spacer()
                     ProgressView()
                         .tint(WTheme.Colors.primary)
+                    Spacer()
+                } else if let loadError {
+                    Spacer()
+                    VStack(spacing: WTheme.Spacing.md) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.wotannScaled(size: 40))
+                            .foregroundColor(WTheme.Colors.error)
+                        Text("Couldn't load skills")
+                            .font(WTheme.Typography.headline)
+                            .foregroundColor(WTheme.Colors.textPrimary)
+                        Text(loadError)
+                            .font(WTheme.Typography.subheadline)
+                            .foregroundColor(WTheme.Colors.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, WTheme.Spacing.xl)
+                        Text("Make sure `wotann engine start` is running on your desktop.")
+                            .font(WTheme.Typography.caption)
+                            .foregroundColor(WTheme.Colors.textTertiary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, WTheme.Spacing.xl)
+                        RetryButton(action: { loadSkills() })
+                            .padding(.top, WTheme.Spacing.sm)
+                    }
                     Spacer()
                 } else if skills.isEmpty {
                     Spacer()
@@ -78,6 +111,7 @@ struct SkillsBrowserView: View {
     private func loadSkills() {
         guard connectionManager.isPaired else { return }
         isLoading = true
+        loadError = nil
         Task {
             do {
                 let result = try await connectionManager.rpcClient.getSkills()
@@ -91,7 +125,10 @@ struct SkillsBrowserView: View {
                     isLoading = false
                 }
             } catch {
-                await MainActor.run { isLoading = false }
+                await MainActor.run {
+                    loadError = error.localizedDescription
+                    isLoading = false
+                }
             }
         }
     }

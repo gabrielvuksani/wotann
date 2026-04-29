@@ -175,11 +175,55 @@ const COST_TABLE: Record<string, { input: number; output: number }> = {
   "sonar-pro": { input: 0.003, output: 0.015 },
 
   // Together / Fireworks / HuggingFace (hosted open models — approximate)
+  // Bug 1 (cost-tracker openrouter): registry.ts:111 ships HF default as
+  // "meta-llama/Llama-3.3-70B-Instruct" — keep this canonical name aligned
+  // across files so the HF cost lookup does not zero-fall to legacy 3.1 slug.
   "meta-llama/Llama-3.3-70B-Instruct": { input: 0.0006, output: 0.0006 },
   "meta-llama/Llama-3.3-70B-Instruct-Turbo": { input: 0.0006, output: 0.0006 },
   "accounts/fireworks/models/llama-v3p3-70b-instruct": { input: 0.0005, output: 0.0005 },
   "meta-llama/Meta-Llama-3.1-70B-Instruct": { input: 0.0008, output: 0.0008 },
   "meta-llama/Meta-Llama-3.1-8B-Instruct": { input: 0.0001, output: 0.0001 },
+
+  // Bug 1 (cost-tracker openrouter): OpenRouter slugs the meta-router can
+  // dispatch through. ProviderName="openrouter" (types.ts:33) is one of
+  // the 8 first-class providers; without these entries every cost
+  // prediction silently zeroed out for OpenRouter users. Pricing reflects
+  // OpenRouter's published rates as of April 2026 — they sometimes mark
+  // up the underlying provider's rate by a few percent (passthrough plus
+  // routing margin). Free-tier slugs use $0/$0 — OpenRouter explicitly
+  // hosts a "free" capacity for select community models.
+  "meta-llama/llama-3.3-70b-instruct:free": { input: 0, output: 0 }, // openrouter free tier (registry default)
+  "meta-llama/llama-3.3-70b-instruct": { input: 0.00059, output: 0.00079 },
+  "meta-llama/llama-3.1-70b-instruct": { input: 0.00052, output: 0.00075 },
+  "meta-llama/llama-3.1-8b-instruct:free": { input: 0, output: 0 },
+  "meta-llama/llama-3.1-405b-instruct": { input: 0.0008, output: 0.0008 },
+  // Anthropic models accessed via OpenRouter — same numbers as direct API
+  "anthropic/claude-opus-4-7": { input: 0.015, output: 0.075 },
+  "anthropic/claude-sonnet-4-7": { input: 0.003, output: 0.015 },
+  "anthropic/claude-haiku-4-5": { input: 0.0008, output: 0.004 },
+  // OpenAI models accessed via OpenRouter
+  "openai/gpt-5": { input: 0.00125, output: 0.01 },
+  "openai/gpt-5-mini": { input: 0.00025, output: 0.002 },
+  "openai/gpt-5.4": { input: 0.0025, output: 0.01 },
+  "openai/gpt-4.1": { input: 0.002, output: 0.008 },
+  "openai/o3": { input: 0.002, output: 0.008 },
+  "openai/o3-mini": { input: 0.0011, output: 0.0044 },
+  // Google / Gemini via OpenRouter
+  "google/gemini-3.1-pro": { input: 0.002, output: 0.012 },
+  "google/gemini-3.1-flash": { input: 0.00025, output: 0.0015 },
+  "google/gemini-2.5-pro": { input: 0.002, output: 0.012 },
+  "google/gemini-2.5-flash": { input: 0.00015, output: 0.0006 },
+  // Qwen / DeepSeek / Mistral / xAI free + paid via OpenRouter
+  "qwen/qwen3-coder": { input: 0.0002, output: 0.0008 },
+  "qwen/qwen3-coder:free": { input: 0, output: 0 },
+  "qwen/qwen-2.5-72b-instruct": { input: 0.0003, output: 0.001 },
+  "deepseek/deepseek-v3": { input: 0.0003, output: 0.0005 },
+  "deepseek/deepseek-r1": { input: 0.00055, output: 0.00219 },
+  "deepseek/deepseek-r1:free": { input: 0, output: 0 },
+  "mistralai/mistral-large": { input: 0.0005, output: 0.0015 },
+  "mistralai/mixtral-8x7b-instruct": { input: 0.00024, output: 0.00024 },
+  "x-ai/grok-4": { input: 0.003, output: 0.015 },
+  "x-ai/grok-3": { input: 0.003, output: 0.015 },
 
   // Qwen — open-source coder/general models. HuggingFace adapter
   // defaults include these but the prior cost table omitted them, so
@@ -246,7 +290,27 @@ const PROVIDER_MODELS: Record<string, readonly string[]> = {
   perplexity: ["sonar", "sonar-pro"],
   together: ["meta-llama/Llama-3.3-70B-Instruct-Turbo"],
   fireworks: ["accounts/fireworks/models/llama-v3p3-70b-instruct"],
-  huggingface: ["meta-llama/Meta-Llama-3.1-70B-Instruct"],
+  // Bug 1 (cost-tracker openrouter): align HF default with registry.ts:111
+  // ("meta-llama/Llama-3.3-70B-Instruct"). The prior literal pointed at a
+  // legacy 3.1 slug and silently mismatched the canonical default model.
+  huggingface: ["meta-llama/Llama-3.3-70B-Instruct"],
+  // Bug 1 (cost-tracker openrouter): ProviderName "openrouter" was missing
+  // from PROVIDER_MODELS so predictCost() returned a zero-cost "unknown"
+  // entry for every OpenRouter-authenticated session. Default models cover
+  // the meta-router's free tier (registry default) plus the high-traffic
+  // anthropic/openai/google slugs.
+  openrouter: [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "meta-llama/llama-3.3-70b-instruct",
+    "anthropic/claude-sonnet-4-7",
+    "anthropic/claude-opus-4-7",
+    "openai/gpt-5",
+    "openai/gpt-5-mini",
+    "google/gemini-3.1-pro",
+    "google/gemini-3.1-flash",
+    "qwen/qwen3-coder:free",
+    "deepseek/deepseek-v3",
+  ],
   // SB-NEW-8: 4 additional providers added so cost prediction works.
   azure: ["azure/gpt-5", "azure/gpt-5-mini", "azure/gpt-4.1", "azure/o3-mini"],
   bedrock: [

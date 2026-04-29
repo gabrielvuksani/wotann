@@ -214,10 +214,12 @@ export function SettingsView() {
             <SettingRow label="Accent color" description="Primary color used across the interface">
               <div className="flex items-center gap-2">
                 {(["violet", "blue", "emerald", "amber", "rose", "cyan"] as const).map((color) => {
-                  // TODO(design-token): accent picker swatches are user-selectable
-                  // distinct colors — each is the identity of a choice, not a theme token.
+                  // Accent picker swatches are user-selectable distinct colors —
+                  // each is the identity of a choice, not a theme token. Pre-2026-04-29
+                  // "violet" was wired to #0A84FF (Apple systemBlue) — fixed to a real
+                  // violet so the label matches the swatch.
                   const colorMap: Record<string, string> = {
-                    violet: "#0A84FF",
+                    violet: "#7c3aed",
                     blue: "#3b82f6",
                     emerald: "#10b981",
                     amber: "#f59e0b",

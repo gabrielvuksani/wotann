@@ -19,6 +19,7 @@ import { Box, Text } from "ink";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ProviderStatus } from "../../core/types.js";
+import type { Palette } from "../themes.js";
 import { STARTUP_GRADIENT, PALETTES } from "../themes.js";
 import { buildTone, rune as runes, glyph } from "../theme/tokens.js";
 import { Card, Notification, StatusBadge } from "./primitives/index.js";
@@ -43,10 +44,20 @@ const RUNIC_TAGLINE = `${runes.ask}  ${runes.relay}  ${runes.autopilot}`;
 interface StartupScreenProps {
   readonly version: string;
   readonly providers: readonly ProviderStatus[];
+  /**
+   * Active palette — wired from App so Ctrl+Y theme cycling flows through
+   * to the splash screen. Falls back to the dark canonical palette when
+   * unset (preserves the legacy standalone render path).
+   */
+  readonly palette?: Palette;
 }
 
-export function StartupScreen({ version, providers }: StartupScreenProps): React.ReactElement {
-  const tone = buildTone(PALETTES.dark);
+export function StartupScreen({
+  version,
+  providers,
+  palette,
+}: StartupScreenProps): React.ReactElement {
+  const tone = buildTone(palette ?? PALETTES.dark);
   const activeProviders = providers.filter((p) => p.available);
   const inactiveProviders = providers.filter((p) => !p.available);
   const hasWorkspace = existsSync(join(process.cwd(), ".wotann"));

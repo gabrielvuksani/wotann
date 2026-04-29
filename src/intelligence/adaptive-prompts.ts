@@ -38,14 +38,50 @@ interface ClassificationRule {
 const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
   {
     tier: "frontier",
-    patterns: [/opus/i, /gpt-5/i, /gemini-ultra/i, /gemini-3-pro/i],
+    // Bug 5 (adaptive-prompts regex): expanded so non-Anthropic /
+    // non-OpenAI / non-Gemini frontier models classify correctly. Without
+    // these patterns, Grok 4 / DeepSeek R1 / OpenAI o3 / Qwen3-Coder-480B
+    // were silently classified as "standard" and got the 8K-token budget
+    // + structured-reasoning scaffold — the opposite of what these large
+    // reasoning models need (they want minimal scaffolding).
+    //   - /grok(-[34])/i: xAI frontier (grok-3, grok-4, grok-4.1-fast)
+    //   - /deepseek-(r1|v[34])/i: DeepSeek V3/V4/R1 reasoning model
+    //   - /\bo[134]\b/i: OpenAI reasoning series (o1/o3/o4 — word-bounded
+    //     so it doesn't match "o" in unrelated names)
+    //   - /qwen3-coder-(480|next)/i: Qwen3 frontier coder variants
+    //   - /qwen3\.5/i: Qwen 3.5 family
+    //   - /codex(plan|spark)/i: OpenAI Codex frontier subscription tiers
+    //   - /anthropic\/claude-(opus|sonnet)/i: OpenRouter slug for Pro
+    //     Claude (the slug routes the same model so the tier should
+    //     match — slug variation should not silently downgrade)
+    //   - /openai\/(gpt-5|o[134])/i: OpenRouter slugs for OpenAI frontier
+    //   - /google\/gemini-3-pro/i: OpenRouter slug for Gemini 3 Pro
+    patterns: [
+      /opus/i,
+      /gpt-5/i,
+      /gemini-ultra/i,
+      /gemini-3-pro/i,
+      /grok-[34]/i,
+      /deepseek-(r1|v[34])/i,
+      /\bo[134]\b/i,
+      /qwen3-coder-(480|next)/i,
+      /qwen3\.5/i,
+      /codex(plan|spark)/i,
+      /anthropic\/claude-(opus|sonnet)/i,
+      /openai\/(gpt-5|o[134])/i,
+      /google\/gemini-3-pro/i,
+    ],
   },
   {
     tier: "lightweight",
-    patterns: [/\bmini\b/i, /\bphi\b/i, /gemma-2b/i, /tinyllama/i],
+    patterns: [/\bmini\b/i, /\bphi\b/i, /gemma-2b/i, /tinyllama/i, /codexmini/i],
   },
   {
     tier: "local",
+    // Bug 5 follow-up: keep generic qwen / llama / codestral here so
+    // qwen2-7b and llama-3.1-70b still classify as "local" (test pins).
+    // Frontier qwen3 variants are caught earlier by qwen3-coder-(480|next)
+    // and qwen3.5; they take precedence by ordering.
     patterns: [/ollama/i, /gguf/i, /\bllama\b/i, /\bqwen/i, /codestral/i],
   },
   {
@@ -54,7 +90,10 @@ const CLASSIFICATION_RULES: readonly ClassificationRule[] = [
   },
   {
     tier: "strong",
-    patterns: [/sonnet/i, /gpt-4/i, /gemini-pro/i, /claude-3/i],
+    // Bug 5 follow-up: include grok-2 (older), deepseek-chat, and
+    // OpenRouter slugs for haiku/4.x as "strong" so they don't silently
+    // fall through to the "standard" default.
+    patterns: [/sonnet/i, /gpt-4/i, /gemini-pro/i, /claude-3/i, /grok-2/i, /deepseek-chat/i],
   },
 ];
 
@@ -148,7 +187,7 @@ const TOOL_CALL_INSTRUCTIONS: ReadonlyMap<"native" | "xml" | "json", string> = n
       "<tool_call>",
       "  <name>tool_name</name>",
       "  <args>",
-      '    <param_name>value</param_name>',
+      "    <param_name>value</param_name>",
       "  </args>",
       "</tool_call>",
     ].join("\n"),
@@ -238,10 +277,7 @@ export class AdaptivePromptGenerator {
     }
 
     // Truncate base prompt for token-constrained models
-    const truncatedPrompt = truncateToTokenBudget(
-      basePrompt,
-      profile.maxSystemPromptTokens,
-    );
+    const truncatedPrompt = truncateToTokenBudget(basePrompt, profile.maxSystemPromptTokens);
     sections.push(truncatedPrompt);
 
     // Add explicit tool call format instructions
@@ -251,8 +287,7 @@ export class AdaptivePromptGenerator {
     }
 
     // Add verification instructions
-    const verificationInstructions =
-      VERIFICATION_TEMPLATES.get(profile.verificationLevel) ?? "";
+    const verificationInstructions = VERIFICATION_TEMPLATES.get(profile.verificationLevel) ?? "";
     if (verificationInstructions) {
       sections.push(verificationInstructions);
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - VoiceInputView
 
@@ -94,7 +95,7 @@ struct VoiceInputView: View {
     private var transcriptionArea: some View {
         VStack(spacing: WTheme.Spacing.sm) {
             if let error = permissionError ?? voiceService.error?.localizedDescription {
-                VStack(spacing: WTheme.Spacing.sm) {
+                VStack(spacing: WTheme.Spacing.md) {
                     Image(systemName: "mic.slash.fill")
                         .font(.wotannScaled(size: 40))
                         .foregroundColor(WTheme.Colors.error)
@@ -103,6 +104,22 @@ struct VoiceInputView: View {
                         .foregroundColor(WTheme.Colors.error)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, WTheme.Spacing.xl)
+
+                    // Permission-denied is the dominant cause of `permissionError`
+                    // (set explicitly at startRecording when `requestPermissions`
+                    // returns false). For any other failure the button is still
+                    // useful — Settings is always the right escape hatch when
+                    // the mic/speech-recognition won't engage.
+                    Button(action: openSettings) {
+                        Text("Open Settings")
+                            .font(WTheme.Typography.headline)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, WTheme.Spacing.lg)
+                            .frame(minWidth: 160, minHeight: 44)
+                            .background(WTheme.Colors.primary)
+                            .clipShape(Capsule())
+                    }
+                    .accessibilityLabel("Open Settings to grant microphone access")
                 }
             } else if transcription.isEmpty && !isRecording {
                 VStack(spacing: WTheme.Spacing.sm) {
@@ -407,6 +424,15 @@ struct VoiceInputView: View {
         HapticService.shared.trigger(.messageSent)
         onSend(text)
         dismiss()
+    }
+
+    private func openSettings() {
+        // Deep-link directly into this app's Settings entry so the user can
+        // flip Microphone / Speech Recognition without hunting through the
+        // top-level Settings hierarchy. UIApplication.openSettingsURLString
+        // resolves to a per-app URL (privacy → app entry).
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     private func cleanup() {

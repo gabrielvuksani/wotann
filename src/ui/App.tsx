@@ -713,7 +713,10 @@ export function WotannApp({
             try {
               execFileSync("pbcopy", [], { input: lastAssistant.content, timeout: 2000 });
               appendSystemMessage("Last response copied to clipboard.");
-            } catch {
+            } catch (err) {
+              console.warn(
+                `[WOTANN] pbcopy unavailable — falling back to inline preview: ${(err as Error).message}`,
+              );
               appendSystemMessage(
                 `Last response preview: ${lastAssistant.content.slice(0, 200)}${lastAssistant.content.length > 200 ? "..." : ""}`,
               );
@@ -750,8 +753,28 @@ export function WotannApp({
   }, []);
 
   // ── Command Palette: register built-in commands ─────────
-  // One-shot registration. Commands close over `setPromptValue` & friends
-  // so they react to the live App state at execution time.
+  // One-shot registration with live refs so handlers always read the
+  // current state. Without these mirrors, the handlers (registered once
+  // at mount with [] deps) close over the FIRST render's state — the
+  // model would never change, history would always look empty, etc.
+  // Refs are read inside the handler body so the registry stays stable
+  // across renders while still reflecting live app state.
+  const paletteStateRef = useRef({
+    currentModel,
+    providers,
+    themeName,
+    history,
+    runtime,
+    appendSystemMessage,
+  });
+  paletteStateRef.current = {
+    currentModel,
+    providers,
+    themeName,
+    history,
+    runtime,
+    appendSystemMessage,
+  };
   useEffect(() => {
     const registry = commandRegistryRef.current;
     const builtins: Command[] = [
@@ -773,10 +796,11 @@ export function WotannApp({
         description: "Cycle to the next configured provider/model",
         keywords: ["model", "provider", "cycle"],
         handler: () => {
-          const nextModel = cycleModel(currentModel, providers);
-          if (nextModel !== currentModel) {
+          const live = paletteStateRef.current;
+          const nextModel = cycleModel(live.currentModel, live.providers);
+          if (nextModel !== live.currentModel) {
             setCurrentModel(nextModel);
-            appendSystemMessage(`Model switched to ${nextModel}.`);
+            live.appendSystemMessage(`Model switched to ${nextModel}.`);
           }
         },
       },
@@ -787,10 +811,11 @@ export function WotannApp({
           "Switch to the next theme (Valhalla, Niflheim, Muspelheim, Alfheim, Svartalfheim)",
         keywords: ["theme", "color", "palette", "norse"],
         handler: () => {
-          const next = cycleNorseTheme(themeName);
+          const live = paletteStateRef.current;
+          const next = cycleNorseTheme(live.themeName);
           if (themeManagerRef.current.setTheme(next)) {
             setThemeName(themeManagerRef.current.getCurrent().name);
-            appendSystemMessage(`Theme switched to: ${next}`);
+            live.appendSystemMessage(`Theme switched to: ${next}`);
           }
         },
       },
@@ -800,7 +825,7 @@ export function WotannApp({
         description: "Open the history picker (Ctrl+R)",
         keywords: ["history", "search", "prompt"],
         handler: () => {
-          if (history.length > 0) setShowHistoryPicker(true);
+          if (paletteStateRef.current.history.length > 0) setShowHistoryPicker(true);
         },
       },
       {
@@ -818,7 +843,8 @@ export function WotannApp({
         description: "Close the TUI",
         keywords: ["quit", "exit", "close"],
         handler: () => {
-          if (runtime) runtime.close();
+          const liveRuntime = paletteStateRef.current.runtime;
+          if (liveRuntime) liveRuntime.close();
           exit();
         },
       },
@@ -828,6 +854,9 @@ export function WotannApp({
     return () => {
       for (const cmd of builtins) registry.unregister(cmd.id);
     };
+    // Intentionally empty deps — registration is one-shot. Live state
+    // is read via paletteStateRef so commands always see fresh values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── R-09 commands: register the 19 reach-gap palette entries ──
@@ -948,10 +977,13 @@ export function WotannApp({
         case "copy":
           try {
             execFileSync("pbcopy", [], { input: targetMsg.content, timeout: 2000 });
-          } catch {
-            /* clipboard unavailable */
+            appendSystemMessage("Copied to clipboard.");
+          } catch (err) {
+            console.warn(`[WOTANN] pbcopy unavailable: ${(err as Error).message}`);
+            appendSystemMessage(
+              "⚠ Clipboard unavailable (pbcopy missing or blocked). Message not copied.",
+            );
           }
-          appendSystemMessage("Copied to clipboard.");
           break;
         case "retry":
           if (targetMsg.role === "user") {
@@ -1842,7 +1874,10 @@ export function WotannApp({
                         timeout: 60000,
                       });
                       resolve(true);
-                    } catch {
+                    } catch (err) {
+                      console.warn(
+                        `[WOTANN] autonomous tsc check failed: ${(err as Error).message}`,
+                      );
                       resolve(false);
                     }
                   });
@@ -1853,7 +1888,10 @@ export function WotannApp({
                         timeout: 120000,
                       });
                       resolve(true);
-                    } catch {
+                    } catch (err) {
+                      console.warn(
+                        `[WOTANN] autonomous vitest check failed: ${(err as Error).message}`,
+                      );
                       resolve(false);
                     }
                   });
@@ -2499,7 +2537,8 @@ export function WotannApp({
                 sysMsg("Cross-session learner not available.");
               }
             }
-          } catch {
+          } catch (err) {
+            console.warn(`[WOTANN] dream cycle extraction failed: ${(err as Error).message}`);
             sysMsg("Dream cycle complete (no learnings to extract yet).");
           }
           return true;
@@ -3649,7 +3688,9 @@ export function WotannApp({
 
   return (
     <Box flexDirection="column" height="100%">
-      {showStartup && <StartupScreen version={version} providers={providers} />}
+      {showStartup && (
+        <StartupScreen version={version} providers={providers} palette={currentTheme.colors} />
+      )}
 
       {needsOnboarding && (
         <Box
@@ -3657,13 +3698,13 @@ export function WotannApp({
           paddingX={2}
           paddingY={1}
           borderStyle="round"
-          borderColor="yellow"
+          borderColor={currentTheme.colors.warning}
           marginBottom={1}
         >
-          <Text bold color="yellow">
+          <Text bold color={currentTheme.colors.warning}>
             ⚠ No providers configured
           </Text>
-          <Text color="gray">
+          <Text color={currentTheme.colors.muted}>
             Run `wotann init` to set up a provider, or run `wotann login &lt;provider&gt;` to add
             one. Free options: Ollama (local), Google Gemini (free tier), Groq (free tier).
           </Text>
@@ -3736,6 +3777,7 @@ export function WotannApp({
           registry={commandRegistryRef.current}
           onClose={handleCommandPaletteClose}
           onError={handleCommandPaletteError}
+          palette={currentTheme.colors}
         />
       )}
 

@@ -63,17 +63,26 @@ on:
     tags:
       - "v*.*.*"
       - "v*.*.*-*" # also fire on prerelease tags like v0.4.1-rc1
-  # workflow_dispatch lets us re-run the pipeline without pushing a new
-  # tag — needed to clear stale "startup_failure" entries that GitHub's
-  # workflow registry pins when a workflow file is edited (see header
-  # comment on the v2 rename). Manual runs still execute the same jobs;
-  # the precheck-secrets gate keeps it safe.
+  # workflow_dispatch lets us re-run the pipeline without pushing a new tag.
+  # Two modes:
+  #   - validate (default): runs config sanity checks ONLY — no build, no
+  #     publish. Designed to produce a green run that supersedes the GitHub
+  #     workflow-registry's pinned "startup_failure" status (see header
+  #     comment on the v2 rename). Safe to run on any branch without secrets.
+  #   - release: runs the full pipeline (precheck → 4 builds → publish →
+  #     verify-aasa). Requires the same gating as a tag push: real Tauri
+  #     pubkey + non-null signingIdentity, otherwise precheck-secrets fails
+  #     fast.
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Tag or branch to release (defaults to current ref)"
+      mode:
+        description: "validate (config sanity, no build) | release (full pipeline, requires secrets)"
         required: false
-        default: ""
+        type: choice
+        options:
+          - validate
+          - release
+        default: validate
 
 permissions:
   contents: write
@@ -88,6 +97,76 @@ env:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────
+  # Job — workflow_dispatch validate-mode
+  # Produces a deterministic green run for users who manually trigger this
+  # workflow with `mode=validate` (the default). Runs no build, no publish,
+  # no secret-gated steps. Just verifies the workflow YAML, the release
+  # scripts exist + are executable, and the deployable artifacts (AASA
+  # JSON, tauri.conf.json) parse cleanly. Designed to clear the GitHub
+  # Actions UI's pinned "startup_failure" state from 2026-04-25 without
+  # requiring user secrets.
+  # ───────────────────────────────────────────────────────────────────────
+  validate:
+    name: Validate release config (no build)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'validate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Validate workflow YAML
+        run: |
+          python3 -c "
+          import yaml
+          for f in ['.github/workflows/release.yml',
+                    '.github/workflows/ci.yml',
+                    '.github/workflows/agentic-browser-security.yml']:
+              with open(f) as fh:
+                  yaml.safe_load(fh)
+              print(f'OK: {f}')
+          "
+      - name: Verify release scripts are executable
+        run: |
+          set -e
+          for s in scripts/release/check-tauri-secrets.sh \
+                  scripts/release/check-aasa-deployment.sh \
+                  scripts/release/notarize-macos.sh \
+                  scripts/release/build-all.sh \
+                  scripts/release/verify-release-assets.sh; do
+              if [ ! -x "$s" ]; then
+                  echo "::error::$s is not executable"
+                  exit 1
+              fi
+              echo "OK: $s"
+          done
+      - name: Validate AASA file is JSON with required fields
+        run: |
+          python3 -c "
+          import json
+          d = json.load(open('site/.well-known/apple-app-site-association'))
+          assert 'applinks' in d, 'missing applinks'
+          details = d['applinks']['details']
+          assert isinstance(details, list) and len(details) > 0, 'missing details'
+          assert 'appID' in details[0] and 'paths' in details[0]
+          paths = details[0]['paths']
+          assert isinstance(paths, list) and len(paths) > 0, 'missing paths'
+          print(f'OK: AASA appID={details[0][\"appID\"]}, paths={len(paths)}')
+          "
+      - name: Validate tauri.conf.json
+        run: |
+          python3 -c "
+          import json
+          d = json.load(open('desktop-app/src-tauri/tauri.conf.json'))
+          assert d['plugins']['updater']['active'], 'updater not active'
+          # NOTE: pubkey + signingIdentity may still be placeholders here
+          # (validate-mode skips that gate). Real release runs hit
+          # precheck-secrets which enforces them.
+          print(f'OK: tauri.conf.json (productName={d[\"productName\"]})')
+          "
+      - name: Summary
+        run: |
+          echo "::notice::Validate-mode passed. Use mode=release once Tauri pubkey + signingIdentity are populated."
+
+  # ───────────────────────────────────────────────────────────────────────
   # Job 0: precheck-secrets (SB-N7 + SB-N8)
   # Fails the entire release graph if Tauri updater pubkey is still the
   # TODO placeholder OR if macOS signingIdentity is null. Both values
@@ -96,9 +175,12 @@ jobs:
   # broken DMG / un-signed updater that users cannot trust.
   #
   # Runs on Ubuntu (fast, free) before any heavy build job spins up.
+  # Skipped in workflow_dispatch validate-mode to allow secret-less green
+  # runs that supersede stale workflow-registry entries.
   # ───────────────────────────────────────────────────────────────────────
   precheck-secrets:
     name: Precheck Tauri secrets
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'release')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

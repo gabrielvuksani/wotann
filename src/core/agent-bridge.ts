@@ -51,6 +51,27 @@ function providerSupportsModel(provider: string, model: string | undefined): boo
     bedrock: ["claude-", "llama-", "mistral.", "amazon.titan", "cohere."],
     sambanova: ["llama-", "deepseek-", "qwen"],
     cerebras: ["llama-", "qwen", "deepseek-"],
+    // Bug 2 (agent-bridge families): ProviderName "openrouter" (types.ts:33)
+    // is one of the 8 first-class providers. Without an entry here, any
+    // cross-provider hop landing on OpenRouter triggers the "unknown
+    // provider" return-false path and the user's chosen model is stripped
+    // (replaced with `undefined` in agent-bridge.ts:233-234), silently
+    // downgrading to the adapter's default. OpenRouter slugs are
+    // <vendor>/<model>; the vendor segment is what we match. "free" is
+    // included because OpenRouter exposes a `:free` capacity slug suffix
+    // (e.g. "meta-llama/llama-3.3-70b-instruct:free").
+    openrouter: [
+      "meta-llama/",
+      "anthropic/",
+      "openai/",
+      "google/",
+      "deepseek/",
+      "qwen/",
+      "mistralai/",
+      "x-ai/",
+      "cohere/",
+      "free",
+    ],
   };
   const prefixes = families[provider];
   if (!prefixes) return false;

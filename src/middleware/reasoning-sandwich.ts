@@ -73,8 +73,8 @@ export interface ReasoningAdjustment {
 }
 
 const DEFAULT_CONFIG: ReasoningSandwichConfig = {
-  planningBudget: 0.9,    // HIGH — plan thoroughly
-  executionBudget: 0.3,    // LOW — execute efficiently, don't overthink
+  planningBudget: 0.9, // HIGH — plan thoroughly
+  executionBudget: 0.3, // LOW — execute efficiently, don't overthink
   verificationBudget: 0.85, // HIGH — verify carefully
   defaultBudget: 0.5,
 };
@@ -83,38 +83,203 @@ const DEFAULT_CONFIG: ReasoningSandwichConfig = {
  * Known model calibrations — adjust budgets per model family.
  * Some models respond better to higher reasoning budgets during execution,
  * while others degrade with too much reasoning overhead.
+ *
+ * Bug 7 (reasoning-sandwich calibrations): the prior table covered only
+ * 6 patterns (claude / o1 / o3 / gpt-4 / gpt-3.5 / gemini) — the 8 first-
+ * class providers (types.ts:27-35) span more model families than that.
+ * Without explicit entries the codex/copilot proxies, ollama local models,
+ * openrouter slugs, and HF community llamas all silently fell through to
+ * the DEFAULT_CONFIG (planningBudget=0.9, executionBudget=0.3,
+ * verificationBudget=0.85) — losing the per-family tuning that ForgeCode's
+ * 53.9%->63.6% TerminalBench delta proves matters. Patterns are matched
+ * via String.includes() so order of entries within each family is
+ * irrelevant; the first match wins.
  */
 const MODEL_CALIBRATIONS: readonly ModelBudgetCalibration[] = [
   // Claude models: benefit from high planning, very low execution
-  { modelPattern: "claude", planningMultiplier: 1.0, executionMultiplier: 0.8, verificationMultiplier: 1.0 },
+  {
+    modelPattern: "claude",
+    planningMultiplier: 1.0,
+    executionMultiplier: 0.8,
+    verificationMultiplier: 1.0,
+  },
   // OpenAI o-series: already have internal reasoning, reduce external overhead
-  { modelPattern: "o1", planningMultiplier: 0.7, executionMultiplier: 0.6, verificationMultiplier: 0.8 },
-  { modelPattern: "o3", planningMultiplier: 0.7, executionMultiplier: 0.6, verificationMultiplier: 0.8 },
+  {
+    modelPattern: "o1",
+    planningMultiplier: 0.7,
+    executionMultiplier: 0.6,
+    verificationMultiplier: 0.8,
+  },
+  {
+    modelPattern: "o3",
+    planningMultiplier: 0.7,
+    executionMultiplier: 0.6,
+    verificationMultiplier: 0.8,
+  },
+  // Bug 7: o4 is the next-gen reasoning model — same internal-reasoning
+  // pattern as o1/o3 so reduce external overhead identically.
+  {
+    modelPattern: "o4",
+    planningMultiplier: 0.7,
+    executionMultiplier: 0.6,
+    verificationMultiplier: 0.8,
+  },
   // GPT-4 models: benefit from moderate reasoning across all phases
-  { modelPattern: "gpt-4", planningMultiplier: 0.9, executionMultiplier: 1.0, verificationMultiplier: 0.9 },
+  {
+    modelPattern: "gpt-4",
+    planningMultiplier: 0.9,
+    executionMultiplier: 1.0,
+    verificationMultiplier: 0.9,
+  },
+  // Bug 7: gpt-5 is the current flagship; treat similarly to gpt-4 family
+  // but slightly more verification-heavy because gpt-5 reasoning is
+  // cheaper-per-token than o-series internal reasoning.
+  {
+    modelPattern: "gpt-5",
+    planningMultiplier: 1.0,
+    executionMultiplier: 1.0,
+    verificationMultiplier: 1.0,
+  },
   // Small/fast models: boost planning and verification, keep execution lean
-  { modelPattern: "gpt-3.5", planningMultiplier: 1.1, executionMultiplier: 0.7, verificationMultiplier: 1.1 },
+  {
+    modelPattern: "gpt-3.5",
+    planningMultiplier: 1.1,
+    executionMultiplier: 0.7,
+    verificationMultiplier: 1.1,
+  },
   // Gemini models: similar to GPT-4
-  { modelPattern: "gemini", planningMultiplier: 0.9, executionMultiplier: 1.0, verificationMultiplier: 0.9 },
+  {
+    modelPattern: "gemini",
+    planningMultiplier: 0.9,
+    executionMultiplier: 1.0,
+    verificationMultiplier: 0.9,
+  },
+  // Bug 7 (reasoning-sandwich calibrations): explicit entries for the
+  // remaining 4 first-class providers' canonical model families. Even
+  // when the calibration matches an existing tuning, an explicit entry
+  // beats silent default fall-through (QB#5: honest stub > silent
+  // success).
+  // Codex slugs (codexplan / codexspark / codexmini) wrap gpt-5.x — same
+  // tuning as the gpt-5 family; explicit entry so the includes() test
+  // catches "codexplan" before any future prefix collision.
+  {
+    modelPattern: "codex",
+    planningMultiplier: 1.0,
+    executionMultiplier: 1.0,
+    verificationMultiplier: 1.0,
+  },
+  // Copilot exposes models under "*-copilot" suffix aliases (e.g.
+  // "claude-sonnet-4-copilot", "gpt-5-copilot"). The "claude" / "gpt-"
+  // patterns above already match these (includes() is unanchored), so
+  // this entry exists primarily as documentation: copilot-specific
+  // tuning lives via the underlying model family.
+  {
+    modelPattern: "copilot",
+    planningMultiplier: 0.95,
+    executionMultiplier: 0.9,
+    verificationMultiplier: 0.95,
+  },
+  // Ollama qwen / llama / gemma local models — generally smaller, so
+  // boost planning + verification (better quality on important phases)
+  // and keep execution lean (avoid overthinking on local hardware).
+  {
+    modelPattern: "qwen",
+    planningMultiplier: 1.1,
+    executionMultiplier: 0.7,
+    verificationMultiplier: 1.1,
+  },
+  {
+    modelPattern: "llama",
+    planningMultiplier: 1.1,
+    executionMultiplier: 0.7,
+    verificationMultiplier: 1.1,
+  },
+  {
+    modelPattern: "gemma",
+    planningMultiplier: 1.1,
+    executionMultiplier: 0.7,
+    verificationMultiplier: 1.1,
+  },
+  // Mistral / DeepSeek / Grok via OpenRouter or direct: moderate
+  // reasoning across the board; deepseek-r1 has internal reasoning so
+  // matches "deepseek" pattern with reduced external overhead.
+  {
+    modelPattern: "mistral",
+    planningMultiplier: 0.9,
+    executionMultiplier: 0.9,
+    verificationMultiplier: 0.9,
+  },
+  {
+    modelPattern: "deepseek",
+    planningMultiplier: 0.8,
+    executionMultiplier: 0.7,
+    verificationMultiplier: 0.85,
+  },
+  {
+    modelPattern: "grok",
+    planningMultiplier: 0.9,
+    executionMultiplier: 1.0,
+    verificationMultiplier: 0.9,
+  },
+  // OpenRouter slug variants — when the slug carries a vendor prefix
+  // (anthropic/, openai/, google/), the "claude" / "gpt" / "gemini"
+  // patterns above already match because includes() is unanchored. The
+  // "free" suffix slug is documented here so callers know free-tier
+  // models route through the underlying-family tuning.
+  // HuggingFace open-model hosting — varies by model; default to the
+  // matching family pattern (llama / qwen / gemma already covered above).
 ];
 
 /** Pattern weights for phase detection scoring. */
 const PLANNING_PATTERNS: readonly string[] = [
-  "plan", "design", "architect", "strategy", "approach",
-  "how should", "what approach", "think about", "consider",
-  "break down", "decompose", "outline",
+  "plan",
+  "design",
+  "architect",
+  "strategy",
+  "approach",
+  "how should",
+  "what approach",
+  "think about",
+  "consider",
+  "break down",
+  "decompose",
+  "outline",
 ];
 
 const EXECUTION_PATTERNS: readonly string[] = [
-  "write", "edit", "implement", "fix", "create", "add",
-  "update", "change", "modify", "run", "build", "generate",
-  "refactor", "move", "rename", "delete", "remove",
+  "write",
+  "edit",
+  "implement",
+  "fix",
+  "create",
+  "add",
+  "update",
+  "change",
+  "modify",
+  "run",
+  "build",
+  "generate",
+  "refactor",
+  "move",
+  "rename",
+  "delete",
+  "remove",
 ];
 
 const VERIFICATION_PATTERNS: readonly string[] = [
-  "verify", "test", "check", "review", "validate",
-  "confirm", "ensure", "assert", "compare", "diff",
-  "correct", "accurate", "inspect",
+  "verify",
+  "test",
+  "check",
+  "review",
+  "validate",
+  "confirm",
+  "ensure",
+  "assert",
+  "compare",
+  "diff",
+  "correct",
+  "accurate",
+  "inspect",
 ];
 
 export class ReasoningSandwich {
@@ -192,9 +357,7 @@ export class ReasoningSandwich {
       { phase: "execution" as const, score: executionScore },
       { phase: "verification" as const, score: verificationScore },
     ];
-    const scored = allScored
-      .filter((s) => s.score > 0)
-      .sort((a, b) => b.score - a.score);
+    const scored = allScored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
 
     const primaryPhase = scored[0]?.phase ?? "execution";
     const topScore = scored[0]?.score ?? 0;
@@ -218,7 +381,11 @@ export class ReasoningSandwich {
    * Get the reasoning adjustment for the current phase.
    * Applies per-model calibration if a model is set.
    */
-  getAdjustment(prompt: string, isFirstTurn: boolean, maxThinkingTokens: number = 10_000): ReasoningAdjustment {
+  getAdjustment(
+    prompt: string,
+    isFirstTurn: boolean,
+    maxThinkingTokens: number = 10_000,
+  ): ReasoningAdjustment {
     const phase = this.detectPhase(prompt, isFirstTurn);
     const baseBudget = this.getBudget(phase);
     const calibrated = this.applyModelCalibration(baseBudget, phase);
@@ -308,10 +475,14 @@ export class ReasoningSandwich {
 
   private getBudget(phase: ReasoningPhase): number {
     switch (phase) {
-      case "planning": return this.config.planningBudget;
-      case "execution": return this.config.executionBudget;
-      case "verification": return this.config.verificationBudget;
-      default: return this.config.defaultBudget;
+      case "planning":
+        return this.config.planningBudget;
+      case "execution":
+        return this.config.executionBudget;
+      case "verification":
+        return this.config.verificationBudget;
+      default:
+        return this.config.defaultBudget;
     }
   }
 
@@ -329,10 +500,17 @@ export class ReasoningSandwich {
 
     let multiplier: number;
     switch (phase) {
-      case "planning": multiplier = calibration.planningMultiplier; break;
-      case "execution": multiplier = calibration.executionMultiplier; break;
-      case "verification": multiplier = calibration.verificationMultiplier; break;
-      default: multiplier = 1.0;
+      case "planning":
+        multiplier = calibration.planningMultiplier;
+        break;
+      case "execution":
+        multiplier = calibration.executionMultiplier;
+        break;
+      case "verification":
+        multiplier = calibration.verificationMultiplier;
+        break;
+      default:
+        multiplier = 1.0;
     }
 
     // Clamp between 0 and 1
@@ -371,8 +549,15 @@ function countPatternMatches(text: string, patterns: readonly string[]): number 
  */
 function isWriteTool(toolName: string): boolean {
   const writeTools: ReadonlySet<string> = new Set([
-    "write", "edit", "create_file", "write_file", "patch",
-    "insert", "replace", "Write", "Edit",
+    "write",
+    "edit",
+    "create_file",
+    "write_file",
+    "patch",
+    "insert",
+    "replace",
+    "Write",
+    "Edit",
   ]);
   return writeTools.has(toolName);
 }

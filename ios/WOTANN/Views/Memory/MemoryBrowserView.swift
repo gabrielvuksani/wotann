@@ -27,10 +27,26 @@ struct MemoryBrowserView: View {
                 .padding(.horizontal, WTheme.Spacing.lg)
                 .padding(.top, WTheme.Spacing.md)
 
+                if let errorMessage {
+                    ErrorBanner(
+                        message: errorMessage,
+                        type: .error,
+                        onRetry: { searchMemories() }
+                    )
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
                 if isLoading {
                     Spacer()
                     ProgressView()
                         .tint(WTheme.Colors.primary)
+                    Spacer()
+                } else if let errorMessage {
+                    Spacer()
+                    ErrorState(
+                        message: errorMessage,
+                        onRetry: { searchMemories() }
+                    )
                     Spacer()
                 } else if memories.isEmpty {
                     Spacer()
@@ -64,6 +80,7 @@ struct MemoryBrowserView: View {
     private func searchMemories() {
         guard connectionManager.isPaired else { return }
         isLoading = true
+        errorMessage = nil
         Task {
             do {
                 let results = try await connectionManager.rpcClient.searchMemory(searchQuery.isEmpty ? "*" : searchQuery)

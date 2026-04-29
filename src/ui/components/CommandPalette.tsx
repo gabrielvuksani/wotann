@@ -18,6 +18,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import type { CommandRegistry, Command } from "../command-registry.js";
 import { CommandExecutionError } from "../command-registry.js";
+import type { Palette } from "../themes.js";
 import { PALETTES } from "../themes.js";
 import { buildTone, glyph } from "../theme/tokens.js";
 import { Card, KeyHintBar } from "./primitives/index.js";
@@ -27,6 +28,12 @@ interface CommandPaletteProps {
   readonly onClose: () => void;
   readonly onError?: (message: string) => void;
   readonly maxVisible?: number;
+  /**
+   * Active palette — passed from App so Ctrl+Y (theme cycle) flows through
+   * to the overlay. Falls back to the dark canonical palette when unset
+   * to keep the standalone-render path (tests / harness previews) green.
+   */
+  readonly palette?: Palette;
 }
 
 const DEFAULT_MAX_VISIBLE = 8;
@@ -42,8 +49,9 @@ export function CommandPalette({
   onClose,
   onError,
   maxVisible = DEFAULT_MAX_VISIBLE,
+  palette,
 }: CommandPaletteProps): React.ReactElement {
-  const tone = buildTone(PALETTES.dark);
+  const tone = buildTone(palette ?? PALETTES.dark);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
 

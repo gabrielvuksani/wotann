@@ -73,6 +73,26 @@ function getProviderProfile(provider: string, model: string): ProviderProfile {
   } else if (p === "huggingface") {
     native.push("open-model access");
     emulated.push("tool calling (XML extraction)");
+  } else if (p === "openrouter") {
+    // Bug 4 (capabilities openrouter): ProviderName "openrouter" (types.ts:33)
+    // is one of the 8 first-class providers but had no capabilities branch.
+    // OpenRouter is a meta-router — its capability profile is dynamic by
+    // slug (anthropic/* gets Anthropic native, openai/* gets OpenAI native,
+    // free-tier llama-* often gets emulated tool calling). Default to
+    // optimistic: native function calling + vision on the high-end slugs,
+    // because OpenRouter's most-trafficked routes (anthropic/, openai/,
+    // google/) all support both natively. The model-router will gate
+    // vision-aware queries to the vision branch above so this never
+    // promises a capability the underlying model can't deliver.
+    native.push("tool calling", "vision", "extended thinking");
+    if (model.startsWith("anthropic/")) native.push("computer use", "200K-1M context window");
+    else if (model.startsWith("openai/")) native.push("parallel tool calls", "JSON mode");
+    else if (model.startsWith("google/") || model.startsWith("gemini/")) {
+      native.push("1M context window", "google_search grounding");
+    } else if (model.includes(":free") || model.startsWith("meta-llama/")) {
+      // Free-tier routes are usually small llama; tool-call quality varies.
+      emulated.push("tool calling (XML extraction fallback)");
+    }
   } else if (p === "azure" || p === "bedrock") {
     // Hosted versions of upstream models — capability depends on the model.
     native.push("tool calling", "vision");
@@ -81,7 +101,11 @@ function getProviderProfile(provider: string, model: string): ProviderProfile {
     emulated.push("tool calling (XML extraction)");
   } else {
     // Unknown provider — fall back to emulated XML tool calling so the
-    // agent doesn't lose tool capability entirely.
+    // agent doesn't lose tool capability entirely. Bug 4 follow-up: this
+    // path also catches future ProviderName additions whose capability
+    // profile hasn't been written yet (and any auth that landed at runtime
+    // before the prompt-side branch was added). Honest stub > silent
+    // success: callers see emulated rather than thinking they have native.
     emulated.push("tool calling (XML extraction)", "vision (text description fallback)");
   }
 

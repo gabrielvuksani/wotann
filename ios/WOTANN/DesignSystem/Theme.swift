@@ -24,16 +24,24 @@ enum WTheme {
     // MARK: Colors
 
     enum Colors {
-        // OLED-black canvas — Theme historically used pure #000000.
-        // WotannTokens.Dark.background is 0x08080C (near-black) which differs
-        // from the Obsidian Precision mandate of true-black on OLED displays.
+        // OLED-black canvas in dark mode; warm-white in light mode. The
+        // app-wide `colorScheme` setting (Settings → Appearance) drives this
+        // via `.preferredColorScheme(resolvedColorScheme)` at the WindowGroup
+        // root, so resolving against `traitCollection.userInterfaceStyle`
+        // here picks up the user's pick correctly.
         // TODO(ios-tokens): add pureOledBlack token to src/design/tokens.ts.
-        static let background  = Color.black
+        static let background  = Color.adaptiveToken(
+            light: WotannTokens.Light.background,
+            dark:  Color.black
+        )
 
-        // Elevated surfaces — canonical tokens.
-        static let surface     = WotannTokens.Dark.surface
+        // Elevated surfaces — adapt across schemes via the canonical palettes.
+        static let surface     = Color.adaptiveToken(
+            light: WotannTokens.Light.surface,
+            dark:  WotannTokens.Dark.surface
+        )
         // TODO(ios-tokens): add surfaceAlt (elevated-2) token to src/design/tokens.ts.
-        static let surfaceAlt  = Color(hex: 0x2C2C2E)
+        static let surfaceAlt  = Color.adaptive(light: 0xE4E4EA, dark: 0x2C2C2E)
 
         // Apple blue primary. Not in current WotannTokens (cyan-led palette).
         // TODO(ios-tokens): add applePrimary + applePrimaryPressed tokens to src/design/tokens.ts.
@@ -42,18 +50,43 @@ enum WTheme {
         // Preserved alias used throughout the codebase.
         static let primaryDim  = Color(hex: 0x0073E6)
 
-        // Status colors — delegate to canonical dark-palette semantics.
-        static let success     = WotannTokens.Dark.success
-        static let warning     = WotannTokens.Dark.warning
-        static let error       = WotannTokens.Dark.error
+        // Status colors — delegate to canonical palette per scheme so error
+        // red, warning amber, and success green stay legible against both
+        // backgrounds rather than being washed out on light mode.
+        static let success     = Color.adaptiveToken(
+            light: WotannTokens.Light.success,
+            dark:  WotannTokens.Dark.success
+        )
+        static let warning     = Color.adaptiveToken(
+            light: WotannTokens.Light.warning,
+            dark:  WotannTokens.Dark.warning
+        )
+        static let error       = Color.adaptiveToken(
+            light: WotannTokens.Light.error,
+            dark:  WotannTokens.Dark.error
+        )
 
-        // Text hierarchy. textPrimary maps cleanly; hinted opacities are
-        // iOS-specific (Apple HIG dark-mode label alphas) and not in tokens.ts.
-        static let textPrimary    = WotannTokens.Dark.text
+        // Text hierarchy. Primary delegates to the canonical palette per
+        // scheme; secondary/tertiary/quaternary use the same Apple-HIG
+        // alpha ladder against a per-scheme base hex (white-tinted on dark,
+        // black-tinted on light) so contrast holds in both modes.
+        static let textPrimary    = Color.adaptiveToken(
+            light: WotannTokens.Light.text,
+            dark:  WotannTokens.Dark.text
+        )
         // TODO(ios-tokens): add textSecondary/tertiary/quaternary alpha tokens to src/design/tokens.ts.
-        static let textSecondary  = Color(hex: 0xEBEBF5).opacity(0.60)
-        static let textTertiary   = Color(hex: 0xEBEBF5).opacity(0.30)
-        static let textQuaternary = Color(hex: 0xEBEBF5).opacity(0.18)
+        static let textSecondary  = Color.adaptiveToken(
+            light: Color(hex: 0x1E1E24).opacity(0.60),
+            dark:  Color(hex: 0xEBEBF5).opacity(0.60)
+        )
+        static let textTertiary   = Color.adaptiveToken(
+            light: Color(hex: 0x1E1E24).opacity(0.40),
+            dark:  Color(hex: 0xEBEBF5).opacity(0.30)
+        )
+        static let textQuaternary = Color.adaptiveToken(
+            light: Color(hex: 0x1E1E24).opacity(0.25),
+            dark:  Color(hex: 0xEBEBF5).opacity(0.18)
+        )
 
         // Adaptive border — uses Dark/Light palettes from canonical tokens.
         static let border = Color.adaptiveToken(
@@ -69,8 +102,11 @@ enum WTheme {
         static let onboardingGradientEnd   = Color(hex: 0x0D001A)
         static let syntaxKeyword           = Color(hex: 0x0A84FF)
         static let chartAccent             = Color(hex: 0x5AC8FA)
-        // `info` has a canonical token — delegate.
-        static let info                    = WotannTokens.Dark.info
+        // `info` has a canonical token — delegate per scheme.
+        static let info                    = Color.adaptiveToken(
+            light: WotannTokens.Light.info,
+            dark:  WotannTokens.Dark.info
+        )
         static let brainstormAccent        = Color.orange
     }
 

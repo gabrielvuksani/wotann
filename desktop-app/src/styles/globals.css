@@ -911,10 +911,26 @@ code:not(pre code) {
   }
 }
 
-/* Compact viewport — reduce padding, hide non-essential chrome */
-@media (max-width: 800px) {
-  .sidebar-container { display: none; }
-  .statusbar { font-size: 10px; padding: 0 8px; }
+/* Compact viewport — only fires on web preview (the Tauri shell enforces
+ * minWidth=800 in tauri.conf.json so the desktop app cannot reach this).
+ * Pre-2026-04-29 this rule used `display: none` on .sidebar-container
+ * which left the user with no navigation at all. Switched to a slim
+ * icon-only sidebar (still navigable) + smaller statusbar font.
+ */
+@media (max-width: 720px) {
+  .sidebar-container {
+    width: 56px !important;
+    min-width: 56px !important;
+  }
+  .sidebar-container .sidebar-label,
+  .sidebar-container .sidebar-section-title,
+  .sidebar-container .sidebar-detail {
+    display: none;
+  }
+  .statusbar {
+    font-size: 10px;
+    padding: 0 8px;
+  }
 }
 
 /* Respect reduced motion preference */

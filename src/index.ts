@@ -2618,6 +2618,51 @@ channelsCmd
     }
   });
 
+// Pre-2026-04-29 `wotann channels list` returned "unknown command 'list'".
+// `list` is the most natural CLI verb so users tried it first; we now ship
+// it as a quick adapter-availability inventory (which channels are configured
+// vs which are missing credentials). Use `wotann channels status` for the
+// runtime route + session view.
+channelsCmd
+  .command("list")
+  .alias("ls")
+  .description("List supported channel adapters and their credential-detection status")
+  .action(async () => {
+    // Each tuple: (adapter id, display name, env vars that enable it).
+    const ADAPTERS: ReadonlyArray<readonly [string, string, readonly string[]]> = [
+      ["webchat", "WebChat (built-in HTTP)", []],
+      ["telegram", "Telegram", ["TELEGRAM_BOT_TOKEN"]],
+      ["slack", "Slack", ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"]],
+      ["discord", "Discord", ["DISCORD_BOT_TOKEN"]],
+      ["signal", "Signal (signal-cli)", ["SIGNAL_PHONE"]],
+      ["whatsapp", "WhatsApp (Baileys)", ["WHATSAPP_SESSION"]],
+      ["email", "Email (IMAP/SMTP)", ["EMAIL_IMAP_HOST", "EMAIL_SMTP_HOST"]],
+      ["webhook", "Webhook (inbound HTTP)", []],
+      ["sms", "SMS (Twilio)", ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]],
+      ["matrix", "Matrix / Element", ["MATRIX_HOMESERVER", "MATRIX_ACCESS_TOKEN"]],
+      ["teams", "Microsoft Teams", ["TEAMS_BOT_ID", "TEAMS_BOT_PASSWORD"]],
+    ];
+
+    console.log(chalk.bold("\nWOTANN Channel Adapters\n"));
+    let configured = 0;
+    for (const [id, name, envs] of ADAPTERS) {
+      const present = envs.length === 0 || envs.every((v) => Boolean(process.env[v]));
+      const tag =
+        envs.length === 0
+          ? chalk.dim("(no auth — always available)")
+          : present
+            ? chalk.green("✓ configured")
+            : chalk.dim(`requires ${envs.join(" + ")}`);
+      console.log(`  ${chalk.bold(id.padEnd(10))} ${name.padEnd(28)} ${tag}`);
+      if (present) configured++;
+    }
+    console.log(
+      chalk.dim(`\n  ${configured} of ${ADAPTERS.length} adapter(s) currently configured`),
+    );
+    console.log(chalk.dim(`  Start the gateway: wotann channels start --<adapter>...`));
+    console.log(chalk.dim(`  See active routes:  wotann channels status\n`));
+  });
+
 channelsCmd
   .command("policy-list")
   .description("List persisted dispatch policies")
@@ -3551,6 +3596,130 @@ mcpCmd
     } else {
       process.stdout.write(json + "\n");
     }
+  });
+
+// ── wotann mcp add ──────────────────────────────────────────
+// Mirrors the daemon RPC `mcp.add` (kairos-rpc.ts:4699-4726). Pre-2026-04-29
+// this surface only existed as a daemon RPC + Tauri command, so the CLI
+// users who read CHANGELOG.md saw `mcp.add` advertised but couldn't add
+// servers from the terminal. Now first-class CLI: writes directly to
+// ~/.wotann/wotann.yaml under `mcp_servers` (or `mcpServers` if already
+// present, to preserve any external editor's casing convention).
+mcpCmd
+  .command("add <name>")
+  .description("Register a new MCP server in ~/.wotann/wotann.yaml")
+  .option("--command <cmd>", "Command to spawn (e.g. 'npx' or '/usr/local/bin/foo-server')")
+  .option("--args <args...>", "Arguments passed to the command (space-separated)")
+  .option("--transport <transport>", "Transport: stdio (default) or http", "stdio")
+  .option("-f, --force", "Overwrite an existing server with the same name", false)
+  .action(
+    async (
+      name: string,
+      options: {
+        command?: string;
+        args?: string[];
+        transport?: string;
+        force?: boolean;
+      },
+    ) => {
+      if (!options.command) {
+        console.error(chalk.red("error: --command <cmd> is required"));
+        console.error(
+          chalk.dim(
+            "example: wotann mcp add filesystem --command npx --args -y @modelcontextprotocol/server-filesystem .",
+          ),
+        );
+        process.exit(2);
+      }
+      const transport = options.transport ?? "stdio";
+      if (transport !== "stdio" && transport !== "http") {
+        console.error(
+          chalk.red(`error: --transport must be "stdio" or "http" (got "${transport}")`),
+        );
+        process.exit(2);
+      }
+
+      const { resolveWotannHomeSubdir } = await import("./utils/wotann-home.js");
+      const { existsSync, readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
+      const { dirname } = await import("node:path");
+      const yaml = await import("yaml");
+
+      const configPath = resolveWotannHomeSubdir("wotann.yaml");
+      if (!existsSync(dirname(configPath))) {
+        mkdirSync(dirname(configPath), { recursive: true });
+      }
+      const config = (
+        existsSync(configPath) ? (yaml.parse(readFileSync(configPath, "utf-8")) ?? {}) : {}
+      ) as Record<string, unknown>;
+
+      // Preserve whichever casing the user already chose; default to snake_case.
+      const key = "mcp_servers" in config ? "mcp_servers" : "mcpServers";
+      const servers = (config[key] ?? {}) as Record<string, Record<string, unknown>>;
+      if (servers[name] && !options.force) {
+        console.error(chalk.red(`error: MCP server "${name}" already exists in ${configPath}`));
+        console.error(
+          chalk.dim("Use --force to overwrite, or `wotann mcp list` to see existing servers."),
+        );
+        process.exit(1);
+      }
+
+      const updated = {
+        ...config,
+        [key]: {
+          ...servers,
+          [name]: {
+            command: options.command,
+            args: options.args ?? [],
+            transport,
+            enabled: true,
+          },
+        },
+      };
+      writeFileSync(configPath, yaml.stringify(updated));
+
+      console.log(chalk.green(`✓ Added MCP server "${name}" to ${configPath}`));
+      console.log(chalk.dim(`  command: ${options.command}`));
+      if (options.args && options.args.length > 0) {
+        console.log(chalk.dim(`  args:    ${options.args.join(" ")}`));
+      }
+      console.log(chalk.dim(`  transport: ${transport}`));
+      console.log(chalk.dim(`  enabled: true`));
+      console.log(
+        chalk.dim(`Restart the engine for changes to take effect: wotann engine restart`),
+      );
+    },
+  );
+
+// ── wotann mcp remove ───────────────────────────────────────
+// Symmetrical to `add` — daemon RPC has `mcp.remove` already, this exposes
+// it on the CLI so users can manage servers without leaving the terminal.
+mcpCmd
+  .command("remove <name>")
+  .alias("rm")
+  .description("Remove an MCP server from ~/.wotann/wotann.yaml")
+  .action(async (name: string) => {
+    const { resolveWotannHomeSubdir } = await import("./utils/wotann-home.js");
+    const { existsSync, readFileSync, writeFileSync } = await import("node:fs");
+    const yaml = await import("yaml");
+
+    const configPath = resolveWotannHomeSubdir("wotann.yaml");
+    if (!existsSync(configPath)) {
+      console.error(chalk.yellow(`No MCP servers configured (${configPath} doesn't exist).`));
+      process.exit(0);
+    }
+    const config = (yaml.parse(readFileSync(configPath, "utf-8")) ?? {}) as Record<string, unknown>;
+    const key = "mcp_servers" in config ? "mcp_servers" : "mcpServers";
+    const servers = (config[key] ?? {}) as Record<string, Record<string, unknown>>;
+    if (!servers[name]) {
+      console.error(chalk.red(`error: MCP server "${name}" not found`));
+      console.error(chalk.dim(`Run "wotann mcp list" to see available servers.`));
+      process.exit(1);
+    }
+    const { [name]: _removed, ...rest } = servers;
+    void _removed;
+    writeFileSync(configPath, yaml.stringify({ ...config, [key]: rest }));
+    console.log(chalk.green(`✓ Removed MCP server "${name}" from ${configPath}`));
+    console.log(chalk.dim(`Restart the engine for changes to take effect: wotann engine restart`));
   });
 
 // ── wotann lsp ───────────────────────────────────────────────

@@ -6,6 +6,9 @@
 
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
+import type { Palette } from "../themes.js";
+import { PALETTES } from "../themes.js";
+import { buildTone, type Tone } from "../theme/tokens.js";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -34,6 +37,11 @@ export interface DiffLine {
 interface DiffTimelineProps {
   readonly entries: readonly DiffEntry[];
   readonly maxHunksVisible?: number;
+  /**
+   * Active palette — wired from App so theme cycling carries through to
+   * the timeline. Falls back to the dark canonical palette when unset.
+   */
+  readonly palette?: Palette;
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -43,10 +51,10 @@ function formatTime(ts: number): string {
   return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
 }
 
-function lineColor(type: DiffLine["type"]): string {
-  if (type === "add") return "green";
-  if (type === "remove") return "red";
-  return "gray";
+function lineColor(type: DiffLine["type"], tone: Tone): string {
+  if (type === "add") return tone.success;
+  if (type === "remove") return tone.error;
+  return tone.muted;
 }
 
 function linePrefix(type: DiffLine["type"]): string {
@@ -60,7 +68,9 @@ function linePrefix(type: DiffLine["type"]): string {
 export function DiffTimeline({
   entries,
   maxHunksVisible = 4,
+  palette,
 }: DiffTimelineProps): React.ReactElement {
+  const tone = buildTone(palette ?? PALETTES.dark);
   const [selectedEntry, setSelectedEntry] = useState(0);
   const [selectedHunk, setSelectedHunk] = useState(0);
   const entry = entries[selectedEntry];
@@ -85,8 +95,12 @@ export function DiffTimeline({
   if (entries.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text bold color="cyan">📊 Diff Timeline</Text>
-        <Text color="gray" dimColor>No changes recorded</Text>
+        <Text bold color={tone.primary}>
+          📊 Diff Timeline
+        </Text>
+        <Text color={tone.muted} dimColor>
+          No changes recorded
+        </Text>
       </Box>
     );
   }
@@ -94,21 +108,22 @@ export function DiffTimeline({
   if (!entry) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text bold color="cyan">📊 Diff Timeline</Text>
-        <Text color="gray">No entry selected</Text>
+        <Text bold color={tone.primary}>
+          📊 Diff Timeline
+        </Text>
+        <Text color={tone.muted}>No entry selected</Text>
       </Box>
     );
   }
 
-  const visibleHunks = entry.hunks.slice(
-    selectedHunk,
-    selectedHunk + maxHunksVisible,
-  );
+  const visibleHunks = entry.hunks.slice(selectedHunk, selectedHunk + maxHunksVisible);
 
   return (
     <Box flexDirection="column" paddingX={1}>
       {/* Header */}
-      <Text bold color="cyan">📊 Diff Timeline</Text>
+      <Text bold color={tone.primary}>
+        📊 Diff Timeline
+      </Text>
 
       {/* Timeline scrubber */}
       <Box marginTop={1}>
@@ -117,7 +132,7 @@ export function DiffTimeline({
           return (
             <Box key={e.id} marginRight={1}>
               <Text
-                color={isSelected ? "white" : "gray"}
+                color={isSelected ? tone.text : tone.muted}
                 bold={isSelected}
                 inverse={isSelected}
               >
@@ -132,26 +147,27 @@ export function DiffTimeline({
       <Box marginTop={1} flexDirection="column">
         <Box>
           <Text bold>{entry.file}</Text>
-          <Text color="green"> +{entry.additions}</Text>
-          <Text color="red"> -{entry.deletions}</Text>
+          <Text color={tone.success}> +{entry.additions}</Text>
+          <Text color={tone.error}> -{entry.deletions}</Text>
         </Box>
-        <Text color="gray">{entry.message}</Text>
+        <Text color={tone.muted}>{entry.message}</Text>
       </Box>
 
       {/* Diff hunks */}
       <Box marginTop={1} flexDirection="column" borderStyle="single" paddingX={1}>
         {visibleHunks.map((hunk, hi) => (
           <Box key={`hunk-${hi}`} flexDirection="column">
-            <Text color="cyan" dimColor>
+            <Text color={tone.primary} dimColor>
               @@ Line {hunk.startLine} @@
             </Text>
             {hunk.lines.map((line, li) => (
               <Box key={`line-${hi}-${li}`}>
-                <Text color="gray" dimColor>
+                <Text color={tone.muted} dimColor>
                   {String(line.lineNumber).padStart(4)}
                 </Text>
-                <Text color={lineColor(line.type)}>
-                  {" "}{linePrefix(line.type)} {line.content}
+                <Text color={lineColor(line.type, tone)}>
+                  {" "}
+                  {linePrefix(line.type)} {line.content}
                 </Text>
               </Box>
             ))}
@@ -160,15 +176,16 @@ export function DiffTimeline({
       </Box>
 
       {entry.hunks.length > maxHunksVisible && (
-        <Text color="gray" dimColor>
-          Showing hunks {selectedHunk + 1}-{Math.min(selectedHunk + maxHunksVisible, entry.hunks.length)} of {entry.hunks.length}
+        <Text color={tone.muted} dimColor>
+          Showing hunks {selectedHunk + 1}-
+          {Math.min(selectedHunk + maxHunksVisible, entry.hunks.length)} of {entry.hunks.length}
         </Text>
       )}
 
       {/* Controls */}
       <Box marginTop={1}>
-        <Text color="gray" dimColor>
-          ←→ scrub timeline  ↑↓ scroll hunks  ({selectedEntry + 1}/{entries.length})
+        <Text color={tone.muted} dimColor>
+          ←→ scrub timeline ↑↓ scroll hunks ({selectedEntry + 1}/{entries.length})
         </Text>
       </Box>
     </Box>

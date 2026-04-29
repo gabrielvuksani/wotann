@@ -311,19 +311,35 @@ export const useStore = create<DesktopState>((set) => ({
     set({ provider, model });
     localStorage.setItem("wotann-selected-provider", provider);
     localStorage.setItem("wotann-selected-model", model);
-    // Sync to Rust AppState — this is the channel send_message_streaming uses
+    // Sync to Rust AppState — this is the channel send_message_streaming uses.
+    // Pre-2026-04-29 these errors were silently swallowed; now surfaced via
+    // the store's notification system so the user knows when their provider
+    // toggle didn't reach the daemon. The dynamic-import-fail catch stays
+    // silent because that's the "not in Tauri context" path (browser / SSR).
     import("@tauri-apps/api/core")
       .then(({ invoke }) => {
-        invoke("switch_provider", { provider, model }).catch(() => {});
+        invoke("switch_provider", { provider, model }).catch((err) => {
+          useStore.getState().addNotification({
+            type: "error",
+            title: "Provider switch failed",
+            message: `Could not sync provider/model to engine: ${(err as Error)?.message ?? String(err)}`,
+          });
+        });
       })
-      .catch(() => {});
-    // Also tell the daemon config so it survives restarts
+      .catch(() => {}); // not in Tauri context — silent OK
+    // Also tell the daemon config so it survives restarts.
     import("../store/engine")
       .then(({ setConfig }) => {
-        setConfig("active_provider", provider).catch(() => {});
-        setConfig("active_model", model).catch(() => {});
+        setConfig("active_provider", provider).catch((err) => {
+          useStore.getState().addNotification({
+            type: "error",
+            title: "Provider preference not persisted",
+            message: `Selection won't survive restart: ${(err as Error)?.message ?? String(err)}`,
+          });
+        });
+        setConfig("active_model", model).catch(() => {}); // partner of above; one notification is enough
       })
-      .catch(() => {});
+      .catch(() => {}); // not in Tauri context — silent OK
   },
   setMode: (mode) => set({ mode }),
   updateCost: (cost) => set({ cost }),

@@ -8,6 +8,7 @@ struct CostDashboardView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
     @State private var selectedPeriod: CostPeriod = .week
     @State private var isRefreshing = false
+    @State private var refreshError: String?
 
     enum CostPeriod: String, CaseIterable {
         case day   = "Today"
@@ -27,6 +28,17 @@ struct CostDashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: WTheme.Spacing.lg) {
+                    if let refreshError {
+                        ErrorBanner(
+                            message: refreshError,
+                            type: .error,
+                            onRetry: {
+                                Task { await refreshCost() }
+                            }
+                        )
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+
                     // Period selector
                     periodSelector
 
@@ -49,15 +61,21 @@ struct CostDashboardView: View {
             }
             .background(WTheme.Colors.background)
             .navigationTitle("Cost")
-            .refreshable {
-                isRefreshing = true
-                do {
-                    appState.costSnapshot = try await connectionManager.rpcClient.getCost()
-                } catch {
-                    // Keep existing
-                }
-                isRefreshing = false
-            }
+            .refreshable { await refreshCost() }
+        }
+    }
+
+    @MainActor
+    private func refreshCost() async {
+        isRefreshing = true
+        refreshError = nil
+        defer { isRefreshing = false }
+        do {
+            // Keep last good snapshot visible if the fetch fails — we surface
+            // the failure via `refreshError` instead of clearing the UI.
+            appState.costSnapshot = try await connectionManager.rpcClient.getCost()
+        } catch {
+            refreshError = "Couldn't refresh cost: \(error.localizedDescription)"
         }
     }
 

@@ -11,13 +11,20 @@ import type {
   MemoryLayer,
   MemorySearchResult,
 } from "../../memory/store.js";
-import { SEVERITY } from "../themes.js";
+import type { Palette } from "../themes.js";
+import { PALETTES, SEVERITY } from "../themes.js";
+import { buildTone } from "../theme/tokens.js";
 
 // ── Types ──────────────────────────────────────────────────────
 
 interface MemoryInspectorProps {
   readonly memoryStore: MemoryStore | null;
   readonly query?: string;
+  /**
+   * Active palette — wired from App so theme cycling carries through.
+   * Falls back to the dark canonical palette when unset.
+   */
+  readonly palette?: Palette;
 }
 
 interface LayerSummary {
@@ -89,7 +96,12 @@ function layerBar(count: number, maxCount: number, width: number = 20): string {
 
 // ── Component ──────────────────────────────────────────────────
 
-export function MemoryInspector({ memoryStore, query }: MemoryInspectorProps): React.ReactElement {
+export function MemoryInspector({
+  memoryStore,
+  query,
+  palette,
+}: MemoryInspectorProps): React.ReactElement {
+  const tone = buildTone(palette ?? PALETTES.dark);
   const [scrollOffset, setScrollOffset] = useState(0);
 
   // Retrieve entries from the store
@@ -154,8 +166,8 @@ export function MemoryInspector({ memoryStore, query }: MemoryInspectorProps): R
   // No memory store connected
   if (memoryStore === null) {
     return (
-      <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
-        <Text bold color="yellow">
+      <Box flexDirection="column" borderStyle="single" borderColor={tone.muted} paddingX={1}>
+        <Text bold color={tone.warning}>
           Memory Inspector
         </Text>
         <Text dimColor>No memory store connected.</Text>
@@ -165,17 +177,17 @@ export function MemoryInspector({ memoryStore, query }: MemoryInspectorProps): R
   }
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor={tone.primary} paddingX={1}>
       {/* Header */}
       <Box gap={1} marginBottom={1}>
-        <Text bold color="cyan">
+        <Text bold color={tone.primary}>
           Memory Inspector
         </Text>
         <Text dimColor>({totalCount} entries)</Text>
         {query !== undefined && query.length > 0 && (
           <Box gap={1}>
             <Text dimColor>searching:</Text>
-            <Text color="yellow">{query}</Text>
+            <Text color={tone.warning}>{query}</Text>
           </Box>
         )}
       </Box>

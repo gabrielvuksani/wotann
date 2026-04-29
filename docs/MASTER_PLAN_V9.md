@@ -32,7 +32,7 @@
 | Supabase key | `git cat-file -e dbaf1225 && echo still-reachable` | **STILL REACHABLE from 7 refs** (Tier: FINAL) |
 | runtime.ts LOC | `wc -l src/core/runtime.ts` | **6939** (Tier: FINAL) |
 | kairos-rpc.ts LOC | `wc -l src/daemon/kairos-rpc.ts` | **8223** (Tier: FINAL — V9 GA wave deltas: cursor.record bridge + creations.watch + 13 stream discriminator emit sites + JWKS prune + subscription sweep) |
-| index.ts LOC | `wc -l src/index.ts` | **7784** (Tier: FINAL — V9 GA wave deltas: review/compare/workshop/relay verbs + Commander exitOverride + bare-wotann fallback + AgentModel resolver + WOTANN_MAX_DAILY_SPEND guard) |
+| index.ts LOC | `wc -l src/index.ts` | **8278** (Tier: FINAL — V9 GA wave deltas: review/compare/workshop/relay verbs + Commander exitOverride + bare-wotann fallback + AgentModel resolver + WOTANN_MAX_DAILY_SPEND guard + 2026-04-29 mcp add/remove + channels list) |
 | App.tsx LOC | `wc -l src/ui/App.tsx` | **3873** (Tier: FINAL, drifted 3185 → 3352 → 3615 → 3873 as Norse-signature primitives + cross-surface RPC handlers + design-token migration + TUI Round 2 alt-buffer/slash popup/OptionPicker landed) |
 
 **Critical correction from wire-audit (2026-04-21)**: ~45% of audited modules are genuinely WIRED. ~20% are FATAL orphans (getter-only, zero external callers). Pattern to grep for: `getX()` method with zero callers outside same-file + lib.ts + tests. See Tier 1 for the 14 FATAL orphans uncovered.

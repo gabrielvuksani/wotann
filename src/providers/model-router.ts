@@ -33,6 +33,14 @@ const ANTHROPIC_DEFAULTS = PROVIDER_DEFAULTS["anthropic"]!;
 const OPENAI_DEFAULTS = PROVIDER_DEFAULTS["openai"]!;
 const GEMINI_DEFAULTS = PROVIDER_DEFAULTS["gemini"]!;
 const VERTEX_DEFAULTS = PROVIDER_DEFAULTS["vertex"]!;
+// Bug 3 (model-router tiers): openrouter + huggingface are 2 of the 8
+// first-class providers (types.ts:27-35). Without entries in the routing
+// tables, a user authenticated only with these falls through to
+// firstAvailable with model="auto" — which produces an unusable adapter
+// call. Pull the canonical defaults from PROVIDER_DEFAULTS so future
+// model-id bumps stay in one place. ProviderName "openrouter" / "huggingface".
+const OPENROUTER_DEFAULTS = PROVIDER_DEFAULTS["openrouter"]!;
+const HUGGINGFACE_DEFAULTS = PROVIDER_DEFAULTS["huggingface"]!;
 
 // Copilot-internal alias used as the canonical routing target when the
 // router picks Copilot for an Anthropic-shaped task. Copilot exposes Claude
@@ -293,8 +301,15 @@ export class ModelRouter {
       }
     }
 
-    // Computer use → Anthropic default (only Claude supports native CU);
-    // Copilot proxy as fallback (also routes Claude under the hood).
+    // Computer use → Anthropic default (Claude has the most-mature native CU
+    // surface — `computer-use-preview` tools + `screenshot/click/type/scroll`
+    // tool-use blocks). Gemini 3 supports vision-driven CU emulation through
+    // the harness's perception engine (see src/computer-use/), which is
+    // currently NOT first-class on this routing path; it would route through
+    // the vision branch above. Copilot proxy as fallback (also routes Claude
+    // under the hood). Bug 3: prior comment claimed "only Claude has native
+    // CU" — that's true for first-party CU APIs today but Gemini-3 vision
+    // emulation closes the gap when explicitly opted in.
     if (task.requiresComputerUse) {
       return this.findBestAvailable([
         { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
@@ -340,6 +355,11 @@ export class ModelRouter {
             { provider: "anthropic", model: ANTHROPIC_DEFAULTS.defaultModel, tier: 2 },
             { provider: "copilot", model: COPILOT_CLAUDE_SONNET_ALIAS, tier: 2 },
             { provider: "openai", model: OPENAI_DEFAULTS.workerModel, tier: 2 },
+            // Bug 3 (model-router tiers): openrouter free tier as last-tier
+            // safety net for users with only OpenRouter authenticated.
+            { provider: "openrouter", model: OPENROUTER_DEFAULTS.defaultModel, tier: 2 },
+            // Bug 3: huggingface default for users with only HF authenticated.
+            { provider: "huggingface", model: HUGGINGFACE_DEFAULTS.defaultModel, tier: 2 },
           ],
           "coding",
         ),
@@ -352,6 +372,13 @@ export class ModelRouter {
         { provider: "anthropic", model: ANTHROPIC_DEFAULTS.oracleModel, tier: 3 },
         { provider: "openai", model: OPENAI_DEFAULTS.oracleModel, tier: 3 },
         { provider: "copilot", model: COPILOT_GPT_ALIAS, tier: 3 },
+        // Bug 3 (model-router tiers): OpenRouter sells the same Pro models
+        // (Anthropic + OpenAI flagships) under the <vendor>/<model> slug
+        // convention. The `anthropic/claude-sonnet-4-7` slug routes Sonnet
+        // via OpenRouter so plan/review tasks aren't excluded for
+        // OpenRouter-only users. Falls AFTER direct providers so Anthropic-
+        // direct wins when both auths exist.
+        { provider: "openrouter", model: "anthropic/claude-sonnet-4-7", tier: 3 },
       ]);
     }
 
@@ -363,6 +390,11 @@ export class ModelRouter {
           { provider: "openai", model: OPENAI_DEFAULTS.workerModel, tier: 2 },
           { provider: "copilot", model: COPILOT_CLAUDE_SONNET_ALIAS, tier: 2 },
           { provider: "gemini", model: GEMINI_DEFAULTS.workerModel, tier: 2 },
+          // Bug 3 (model-router tiers): OpenRouter + HF defaults so users
+          // authenticated only with these providers don't fall through to
+          // findBestAvailable's firstAvailable path with model="auto".
+          { provider: "openrouter", model: OPENROUTER_DEFAULTS.defaultModel, tier: 2 },
+          { provider: "huggingface", model: HUGGINGFACE_DEFAULTS.defaultModel, tier: 2 },
         ],
         "general",
       ),
