@@ -1394,6 +1394,7 @@ import { HookEngine } from "./engine.js";
 import { ShadowGit as ShadowGitClass } from "../utils/shadow-git.js";
 import { validateArchive } from "../security/archive-preflight.js";
 import { makeLoopDetector } from "../orchestration/loop-detector.js";
+import { createWhisperHook } from "../memory/whisper-hook.js";
 
 export function registerBuiltinHooks(
   engine: HookEngine,
@@ -1402,6 +1403,10 @@ export function registerBuiltinHooks(
   // Minimal profile (always active)
   engine.register(secretScanner);
   engine.register(destructiveGuard);
+  // Letta-style "always-on" core memory: injects block memory + queued
+  // whispers into every UserPromptSubmit's contextPrefix. Disable with
+  // WOTANN_DISABLE_WHISPER=1.
+  engine.register(createWhisperHook());
 
   // Standard profile
   engine.register(createCostLimiter(50));

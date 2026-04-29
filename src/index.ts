@@ -2939,6 +2939,110 @@ memoryCmd
     }
   });
 
+// ── wotann blocks (letta-style core memory) ────────────────────
+
+const blocksCmd = program
+  .command("blocks")
+  .description("Letta-style core-memory blocks injected into every turn");
+
+blocksCmd
+  .command("list")
+  .description("List all stored memory blocks with byte counts")
+  .action(async () => {
+    const { listBlocks } = await import("./memory/block-memory.js");
+    const summaries = listBlocks();
+    if (summaries.length === 0) {
+      console.log(chalk.dim("No memory blocks set. Try: wotann blocks set persona <text>"));
+      return;
+    }
+    console.log(chalk.bold("\nMemory blocks\n"));
+    for (const s of summaries) {
+      const pct = Math.round((s.bytes / s.limit) * 100);
+      const bar = pct >= 90 ? chalk.red : pct >= 60 ? chalk.yellow : chalk.green;
+      const trunc = s.truncated ? chalk.red(" [truncated]") : "";
+      console.log(
+        `  ${chalk.cyan(s.kind.padEnd(10))} ${bar(`${s.bytes}/${s.limit} (${pct}%)`)}${trunc}  ${chalk.dim(s.updatedAt)}`,
+      );
+    }
+  });
+
+blocksCmd
+  .command("get <kind>")
+  .description("Print the contents of a single block")
+  .action(async (kind: string) => {
+    const { isValidBlockKind, readBlock } = await import("./memory/block-memory.js");
+    if (!isValidBlockKind(kind)) {
+      console.error(chalk.red(`Unknown block kind: ${kind}`));
+      process.exitCode = 2;
+      return;
+    }
+    const block = readBlock(kind);
+    if (!block) {
+      console.log(chalk.dim(`Block "${kind}" is empty.`));
+      return;
+    }
+    console.log(block.content);
+  });
+
+blocksCmd
+  .command("set <kind> <text...>")
+  .description("Replace the contents of a block (truncates to limit)")
+  .action(async (kind: string, text: string[]) => {
+    const { isValidBlockKind, writeBlock } = await import("./memory/block-memory.js");
+    if (!isValidBlockKind(kind)) {
+      console.error(chalk.red(`Unknown block kind: ${kind}`));
+      process.exitCode = 2;
+      return;
+    }
+    const joined = text.join(" ");
+    const block = writeBlock(kind, joined);
+    const note = block.truncatedAt ? chalk.yellow(" (truncated)") : "";
+    console.log(chalk.green(`✓ ${kind} set (${block.content.length} chars)${note}`));
+  });
+
+blocksCmd
+  .command("append <kind> <text...>")
+  .description("Append to a block with newline separator")
+  .action(async (kind: string, text: string[]) => {
+    const { appendBlock, isValidBlockKind } = await import("./memory/block-memory.js");
+    if (!isValidBlockKind(kind)) {
+      console.error(chalk.red(`Unknown block kind: ${kind}`));
+      process.exitCode = 2;
+      return;
+    }
+    const block = appendBlock(kind, text.join(" "));
+    const note = block.truncatedAt ? chalk.yellow(" (truncated)") : "";
+    console.log(chalk.green(`✓ ${kind} appended (${block.content.length} chars)${note}`));
+  });
+
+blocksCmd
+  .command("clear <kind>")
+  .description("Delete a block")
+  .action(async (kind: string) => {
+    const { clearBlock, isValidBlockKind } = await import("./memory/block-memory.js");
+    if (!isValidBlockKind(kind)) {
+      console.error(chalk.red(`Unknown block kind: ${kind}`));
+      process.exitCode = 2;
+      return;
+    }
+    const removed = clearBlock(kind);
+    if (removed) console.log(chalk.green(`✓ ${kind} cleared`));
+    else console.log(chalk.dim(`Block "${kind}" was already empty.`));
+  });
+
+blocksCmd
+  .command("render")
+  .description("Print the rendered <core_memory> + whisper block (debug)")
+  .action(async () => {
+    const { renderActiveBlocks } = await import("./memory/block-memory.js");
+    const out = renderActiveBlocks();
+    if (!out) {
+      console.log(chalk.dim("Nothing to render — all blocks are empty."));
+      return;
+    }
+    console.log(out);
+  });
+
 // ── wotann skills ────────────────────────────────────────────
 
 const skillsCmd = program.command("skills").description("Skill management");
@@ -7507,6 +7611,334 @@ program
 //
 // Loads + runs YAML recipes from .wotann/recipes/. Audit gap: 1063 LOC
 // of recipe runtime existed but no CLI surface.
+
+// ── wotann canary (gstack canary port) ────────────────────────
+
+program
+  .command("canary <baselineFile>")
+  .description("Post-deploy canary monitor: watch metrics, alert on regression (gstack port)")
+  .option("--probe-cmd <cmd>", "Shell command that prints a JSON metric snapshot to stdout")
+  .option("--interval-ms <n>", "Probe interval in ms", "60000")
+  .option("--max-duration-ms <n>", "Total monitoring window in ms", "600000")
+  .action(
+    async (
+      baselineFile: string,
+      options: { probeCmd?: string; intervalMs: string; maxDurationMs: string },
+    ) => {
+      const { runCanary } = await import("./orchestration/canary-monitor.js");
+      const { readFileSync } = await import("node:fs");
+      const baseline = JSON.parse(readFileSync(baselineFile, "utf8"));
+      if (!options.probeCmd) {
+        console.error(chalk.red("Pass --probe-cmd <cmd> to run a real canary."));
+        console.error(chalk.dim("Example: --probe-cmd 'curl -s http://localhost:3000/metrics'"));
+        process.exitCode = 2;
+        return;
+      }
+      const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+      const probe = async () => {
+        const result = await execFileNoThrow("/bin/sh", ["-c", options.probeCmd!]);
+        if (result.exitCode !== 0) {
+          throw new Error(`probe-cmd exited ${result.exitCode}: ${result.stderr}`);
+        }
+        return JSON.parse(result.stdout);
+      };
+      console.log(chalk.bold(`\nStarting canary against baseline ${baselineFile}\n`));
+      const report = await runCanary({
+        probe,
+        baseline,
+        intervalMs: Number(options.intervalMs) || 60000,
+        maxDurationMs: Number(options.maxDurationMs) || 600000,
+        onCheck: (snap, n) =>
+          console.log(
+            chalk.dim(
+              `  check #${n}: errorRate=${snap.errorRate.toFixed(3)} p95=${snap.p95LatencyMs.toFixed(0)}ms`,
+            ),
+          ),
+        onAlert: (a) => console.log(chalk.red(`  ALERT: ${a.severity} ${a.metric} — ${a.message}`)),
+      });
+      console.log(chalk.bold(`\nVerdict: ${report.status.toUpperCase()}`));
+      console.log(
+        `  checks=${report.checksRun} alerts=${report.alerts.length} duration=${report.durationMs}ms`,
+      );
+      if (report.status !== "healthy") process.exitCode = 2;
+    },
+  );
+
+// ── wotann attest / policy (protect-mcp port) ─────────────────
+//
+// The existing `wotann audit` command (line ~980) inspects the
+// append-only workspace audit DB. Ed25519 signing is a separate concern
+// — it attests to provenance, not durability — so it lives under a
+// distinct `wotann attest` namespace to avoid conflicting with the
+// existing top-level `audit` command.
+
+const attestCmd = program
+  .command("attest")
+  .description("Ed25519-signed audit envelope primitives (protect-mcp port)");
+
+attestCmd
+  .command("genkey [id]")
+  .description("Generate or load an Ed25519 audit key pair (default id: 'default')")
+  .action(async (id?: string) => {
+    const { generateAuditKey, loadAuditKey } = await import("./security/signed-audit.js");
+    const keyId = id ?? "default";
+    const existing = loadAuditKey(keyId);
+    if (existing) {
+      console.log(chalk.yellow(`Key "${keyId}" already exists. Public key:\n`));
+      console.log(existing.publicPem);
+      return;
+    }
+    const key = generateAuditKey(keyId);
+    console.log(chalk.green(`✓ Generated key "${keyId}". Public key:\n`));
+    console.log(key.publicPem);
+  });
+
+attestCmd
+  .command("sign <jsonPath>")
+  .description("Read a JSON file and produce a signed envelope")
+  .option("--key <id>", "Key id to sign with", "default")
+  .action(async (jsonPath: string, options: { key: string }) => {
+    const { getOrCreateKey, signRecord } = await import("./security/signed-audit.js");
+    const { readFileSync } = await import("node:fs");
+    const record = JSON.parse(readFileSync(jsonPath, "utf8")) as Record<string, unknown>;
+    const envelope = signRecord(record, getOrCreateKey(options.key));
+    console.log(JSON.stringify(envelope, null, 2));
+  });
+
+attestCmd
+  .command("verify <envelopePath>")
+  .description("Verify a signed envelope JSON file")
+  .action(async (envelopePath: string) => {
+    const { verifyRecord } = await import("./security/signed-audit.js");
+    const { readFileSync } = await import("node:fs");
+    const envelope = JSON.parse(readFileSync(envelopePath, "utf8"));
+    const result = verifyRecord(envelope);
+    if (result.valid) {
+      console.log(chalk.green(`✓ valid: ${result.reason}`));
+    } else {
+      console.log(chalk.red(`✗ invalid: ${result.reason}`));
+      process.exitCode = 2;
+    }
+  });
+
+const policyCmd = program
+  .command("policy")
+  .description("Cedar-style policy DSL evaluator (protect-mcp port)");
+
+policyCmd
+  .command("eval <policyPath>")
+  .description("Evaluate a request against a policy file")
+  .requiredOption("--principal <p>", "principal identifier")
+  .requiredOption("--action <a>", "action identifier")
+  .requiredOption("--resource <r>", "resource identifier")
+  .action(
+    async (
+      policyPath: string,
+      options: { principal: string; action: string; resource: string },
+    ) => {
+      const { parsePolicy, evaluatePolicy } = await import("./security/policy-language.js");
+      const { readFileSync } = await import("node:fs");
+      const text = readFileSync(policyPath, "utf8");
+      const rules = parsePolicy(text);
+      const decision = evaluatePolicy(rules, options);
+      const tag = decision.effect === "permit" ? chalk.green("PERMIT") : chalk.red("FORBID");
+      console.log(`${tag}: ${decision.reason}`);
+      if (decision.effect === "forbid") process.exitCode = 2;
+    },
+  );
+
+// ── wotann inspect (file-type validator / magika port) ────────
+
+program
+  .command("inspect <file>")
+  .description("Detect file type via magic bytes + optional magika ONNX classifier")
+  .option("--declared <type>", "Compare against a declared content type (e.g. image/png)")
+  .action(async (file: string, options: { declared?: string }) => {
+    const { detectFile, declaredVsActual } = await import("./security/file-type-validator.js");
+    const verdict = await detectFile(file);
+    console.log(chalk.bold(`\n${file}\n`));
+    console.log(`  detected   : ${chalk.cyan(verdict.detectedKind)}`);
+    console.log(`  confidence : ${verdict.confidence}`);
+    console.log(`  source     : ${verdict.source}`);
+    console.log(`  notes      : ${chalk.dim(verdict.notes)}`);
+    if (options.declared) {
+      const r = declaredVsActual(options.declared, verdict);
+      const tag = r.match ? chalk.green("✓ MATCH") : chalk.red("✗ MISMATCH");
+      console.log(`\n  ${tag} (${r.reason})`);
+      if (!r.match) process.exitCode = 2;
+    }
+  });
+
+// ── wotann teams (ClawTeam port) ──────────────────────────────
+
+const teamsCmd = program
+  .command("teams")
+  .description("Multi-agent team templates and inbox transport (ClawTeam port)");
+
+teamsCmd
+  .command("list")
+  .description("List all available team templates (project + user + built-in)")
+  .action(async () => {
+    const { loadAllTemplates } = await import("./orchestration/team-templates.js");
+    const tpls = loadAllTemplates();
+    if (tpls.length === 0) {
+      console.log(chalk.dim("No templates found."));
+      return;
+    }
+    console.log(chalk.bold("\nAvailable team templates\n"));
+    for (const tpl of tpls) {
+      const tag =
+        tpl.source === "built-in"
+          ? chalk.dim("(built-in)")
+          : tpl.source === "user"
+            ? chalk.cyan("(user)")
+            : chalk.green("(project)");
+      console.log(`  ${chalk.bold(tpl.name.padEnd(18))} ${tag}  ${chalk.dim(tpl.description)}`);
+      console.log(
+        `    leader: ${tpl.leader.name} | agents: ${tpl.agents.map((a) => a.name).join(", ")}`,
+      );
+    }
+  });
+
+teamsCmd
+  .command("show <name>")
+  .description("Print a fully-rendered template (with goal substitutions)")
+  .option("--goal <text>", "Substitute {goal} in task strings", "your goal here")
+  .option("--team <name>", "Substitute {team_name} (defaults to template name)")
+  .action(async (name: string, options: { goal: string; team?: string }) => {
+    const { loadTemplate, renderTemplate } = await import("./orchestration/team-templates.js");
+    const tpl = loadTemplate(name);
+    if (!tpl) {
+      console.error(chalk.red(`No template named "${name}"`));
+      process.exitCode = 1;
+      return;
+    }
+    const rendered = renderTemplate(tpl, {
+      goal: options.goal,
+      teamName: options.team ?? tpl.name,
+    });
+    console.log(chalk.bold(`\nTemplate: ${rendered.name}\n`));
+    console.log(chalk.dim(rendered.description));
+    console.log("\n" + chalk.cyan(`Leader: ${rendered.leader.name} (${rendered.leader.type})`));
+    console.log(rendered.leader.task);
+    for (const agent of rendered.agents) {
+      console.log("\n" + chalk.cyan(`Agent: ${agent.name} (${agent.type})`));
+      console.log(agent.task);
+    }
+  });
+
+teamsCmd
+  .command("send <team> <to> <body...>")
+  .description("Send a message into another agent's inbox in this team")
+  .option("--from <name>", "Sender (defaults to 'cli')", "cli")
+  .action(async (team: string, to: string, body: string[], options: { from: string }) => {
+    const { FileTransport } = await import("./orchestration/file-transport.js");
+    const t = new FileTransport();
+    const sent = t.send({ team, from: options.from, to, body: body.join(" ") });
+    console.log(chalk.green(`✓ message ${sent.id} delivered to ${team}/${to}`));
+  });
+
+teamsCmd
+  .command("receive <team> <agent>")
+  .description("Drain pending messages from an agent's inbox")
+  .option("--max <n>", "Maximum messages to drain", "10")
+  .action(async (team: string, agent: string, options: { max: string }) => {
+    const { FileTransport } = await import("./orchestration/file-transport.js");
+    const t = new FileTransport();
+    const messages = t.receive(team, agent, Number(options.max) || 10);
+    if (messages.length === 0) {
+      console.log(chalk.dim("(empty)"));
+      return;
+    }
+    for (const m of messages) {
+      console.log(
+        `${chalk.cyan(m.from)} -> ${chalk.cyan(m.to)} ${chalk.dim(m.enqueuedAt)}\n  ${m.body}`,
+      );
+    }
+  });
+
+teamsCmd
+  .command("board <team>")
+  .description("Show inbox state for every agent in a team")
+  .option("--agents <list>", "Comma-separated agent names to inspect")
+  .action(async (team: string, options: { agents?: string }) => {
+    const { FileTransport } = await import("./orchestration/file-transport.js");
+    const t = new FileTransport();
+    const agents = (options.agents ?? "lead,builder,verifier")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    console.log(chalk.bold(`\nTeam ${team} inbox board\n`));
+    for (const a of agents) {
+      const hist = t.history(team, a, 100);
+      const counts = { pending: 0, consumed: 0, done: 0 };
+      for (const h of hist) counts[h.state]++;
+      console.log(
+        `  ${chalk.cyan(a.padEnd(20))} pending=${counts.pending} consumed=${counts.consumed} done=${counts.done}`,
+      );
+    }
+  });
+
+// ── wotann evolve (hermes-self-evolution port) ────────────────
+
+program
+  .command("evolve <skillPath>")
+  .description("Evolve a skill file via the GEPA-style optimizer (hermes-self-evolution port)")
+  .option("--generations <n>", "Number of optimization generations (default 3)", "3")
+  .option(
+    "--write",
+    "Write the winning variant back over the skill file (creates archive of original)",
+  )
+  .option("--budget <usd>", "Maximum spend in USD before stopping (default $10)", "10")
+  .action(
+    async (
+      skillPath: string,
+      options: { generations: string; write?: boolean; budget: string },
+    ) => {
+      const { evolveSkill, buildSyntheticExamples } = await import("./evolution/runner.js");
+      const { existsSync, readFileSync } = await import("node:fs");
+      if (!existsSync(skillPath)) {
+        console.error(chalk.red(`Skill not found: ${skillPath}`));
+        process.exitCode = 1;
+        return;
+      }
+      const baseline = readFileSync(skillPath, "utf8");
+      const examples = buildSyntheticExamples(baseline);
+
+      // Stub callers that don't actually invoke a provider — preserves
+      // the design contract that the optimizer is provider-agnostic.
+      // Users who want a real provider call can wrap this CLI by passing
+      // their own callable into runOptimization() programmatically.
+      const { makeStubMutator, makeStubEvaluator } = await import("./evolution/optimizer.js");
+      const summary = await evolveSkill({
+        skillPath,
+        examples,
+        mutate: makeStubMutator(),
+        evaluate: makeStubEvaluator(),
+        generations: Number(options.generations) || 3,
+        write: Boolean(options.write),
+      });
+
+      console.log(chalk.bold(`\nEvolution summary for ${skillPath}\n`));
+      console.log(`  baseline score : ${summary.baselineScore.toFixed(3)}`);
+      console.log(`  best score     : ${summary.bestScore.toFixed(3)}`);
+      console.log(`  improvement    : ${summary.improvementPct.toFixed(1)}%`);
+      console.log(`  generations    : ${summary.generations}`);
+      console.log(`  cost (USD)     : $${summary.totalCostUsd.toFixed(4)}`);
+      if (summary.notes.length > 0) {
+        console.log(chalk.dim("\n  Notes:"));
+        for (const n of summary.notes) console.log(chalk.dim(`    - ${n}`));
+      }
+      if (options.write && summary.bestScore > summary.baselineScore) {
+        console.log(chalk.green(`\n✓ Wrote winning variant to ${skillPath} (original archived)`));
+      } else if (options.write) {
+        console.log(chalk.yellow("\n  No improvement found — skill file left unchanged."));
+      } else {
+        console.log(chalk.dim("\n  (Pass --write to apply the winning variant.)"));
+      }
+    },
+  );
+
 const recipeCmd = program.command("recipe").description("Goose-style recipe management (V9 T12.4)");
 
 // Helper: enumerate recipe filenames in .wotann/recipes/. CLI-local helper
