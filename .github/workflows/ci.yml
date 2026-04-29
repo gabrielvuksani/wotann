@@ -158,6 +158,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Seed Local.xcconfig from template
+        # Local.xcconfig is gitignored (developer-specific Team ID).
+        # The .template version ships in-tree; copy it so the project's
+        # base-configuration reference resolves on CI.
+        working-directory: ios
+        run: cp Local.xcconfig.template Local.xcconfig
       - name: Resolve SPM packages
         working-directory: ios
         run: xcrun xcodebuild -resolvePackageDependencies -project WOTANN.xcodeproj
@@ -165,4 +171,4 @@ jobs:
         working-directory: ios
         run: |
           set -o pipefail
-          xcrun xcodebuild -project WOTANN.xcodeproj -scheme WOTANN -destination 'generic/platform=iOS Simulator' -configuration Debug -skipPackagePluginValidation CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -200
+          xcrun xcodebuild -project WOTANN.xcodeproj -scheme WOTANN -destination 'generic/platform=iOS Simulator' -configuration Debug -skipPackagePluginValidation CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO DEVELOPMENT_TEAM= build 2>&1 | tail -200
