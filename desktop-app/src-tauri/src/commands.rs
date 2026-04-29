@@ -3814,3 +3814,153 @@ pub mod test_exports {
         super::validate_path_existing(path)
     }
 }
+
+// ── Blocks (letta-style core memory) — mirrors `wotann blocks ...` CLI ─────
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockSummary {
+    pub kind: String,
+    pub bytes: u64,
+    pub limit: u64,
+    pub truncated: bool,
+    pub updated_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryBlock {
+    pub kind: String,
+    pub content: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated_at: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockKindInfo {
+    pub kind: String,
+    pub limit: u64,
+}
+
+fn map_block_summary(v: &serde_json::Value) -> Option<BlockSummary> {
+    let obj = v.as_object()?;
+    Some(BlockSummary {
+        kind: obj.get("kind")?.as_str()?.to_string(),
+        bytes: obj.get("bytes")?.as_u64().unwrap_or(0),
+        limit: obj.get("limit")?.as_u64().unwrap_or(0),
+        truncated: obj.get("truncated").and_then(|v| v.as_bool()).unwrap_or(false),
+        updated_at: obj
+            .get("updatedAt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    })
+}
+
+fn map_memory_block(v: &serde_json::Value) -> Option<MemoryBlock> {
+    let obj = v.as_object()?;
+    Some(MemoryBlock {
+        kind: obj.get("kind")?.as_str()?.to_string(),
+        content: obj.get("content")?.as_str()?.to_string(),
+        updated_at: obj
+            .get("updatedAt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        truncated_at: obj
+            .get("truncatedAt")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+    })
+}
+
+#[tauri::command]
+pub async fn list_blocks() -> Result<Vec<BlockSummary>, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call("blocks.list", serde_json::json!({}))
+        .map_err(|e| e.to_string())?;
+    let arr = result.as_array().cloned().unwrap_or_default();
+    Ok(arr.iter().filter_map(map_block_summary).collect())
+}
+
+#[tauri::command]
+pub async fn get_block(kind: String) -> Result<Option<MemoryBlock>, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call("blocks.get", serde_json::json!({ "kind": kind }))
+        .map_err(|e| e.to_string())?;
+    if result.is_null() {
+        return Ok(None);
+    }
+    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+        return Err(err.to_string());
+    }
+    Ok(map_memory_block(&result))
+}
+
+#[tauri::command]
+pub async fn set_block(kind: String, content: String) -> Result<MemoryBlock, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call(
+            "blocks.set",
+            serde_json::json!({ "kind": kind, "content": content }),
+        )
+        .map_err(|e| e.to_string())?;
+    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+        return Err(err.to_string());
+    }
+    map_memory_block(&result).ok_or_else(|| "malformed daemon response".to_string())
+}
+
+#[tauri::command]
+pub async fn append_block(kind: String, content: String) -> Result<MemoryBlock, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call(
+            "blocks.append",
+            serde_json::json!({ "kind": kind, "content": content }),
+        )
+        .map_err(|e| e.to_string())?;
+    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+        return Err(err.to_string());
+    }
+    map_memory_block(&result).ok_or_else(|| "malformed daemon response".to_string())
+}
+
+#[tauri::command]
+pub async fn clear_block(kind: String) -> Result<bool, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call("blocks.clear", serde_json::json!({ "kind": kind }))
+        .map_err(|e| e.to_string())?;
+    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+        return Err(err.to_string());
+    }
+    Ok(result
+        .get("removed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false))
+}
+
+#[tauri::command]
+pub async fn list_block_kinds() -> Result<Vec<BlockKindInfo>, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call("blocks.kinds", serde_json::json!({}))
+        .map_err(|e| e.to_string())?;
+    let arr = result.as_array().cloned().unwrap_or_default();
+    Ok(arr
+        .iter()
+        .filter_map(|v| {
+            let obj = v.as_object()?;
+            Some(BlockKindInfo {
+                kind: obj.get("kind")?.as_str()?.to_string(),
+                limit: obj.get("limit")?.as_u64().unwrap_or(0),
+            })
+        })
+        .collect())
+}

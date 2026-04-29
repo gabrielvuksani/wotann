@@ -8535,6 +8535,68 @@ export class KairosRPCHandler {
       if (!webhookServer) return { running: false };
       return { running: true, ...webhookServer.stats() };
     });
+
+    // ── Blocks (letta-style core memory) ──────────────────────
+    //
+    // Surface block-memory CRUD over RPC so Desktop + iOS can manage
+    // the same blocks the CLI manages. All handlers are pure file I/O
+    // — no runtime dependency.
+
+    this.handlers.set("blocks.list", async () => {
+      const { listBlocks } = await import("../memory/block-memory.js");
+      return listBlocks();
+    });
+
+    this.handlers.set("blocks.get", async (params) => {
+      const kind = params["kind"];
+      const { isValidBlockKind, readBlock } = await import("../memory/block-memory.js");
+      if (typeof kind !== "string" || !isValidBlockKind(kind)) {
+        return { error: "invalid kind" };
+      }
+      return readBlock(kind);
+    });
+
+    this.handlers.set("blocks.set", async (params) => {
+      const kind = params["kind"];
+      const content = params["content"];
+      const { isValidBlockKind, writeBlock } = await import("../memory/block-memory.js");
+      if (typeof kind !== "string" || !isValidBlockKind(kind)) {
+        return { error: "invalid kind" };
+      }
+      if (typeof content !== "string") return { error: "content must be a string" };
+      return writeBlock(kind, content);
+    });
+
+    this.handlers.set("blocks.append", async (params) => {
+      const kind = params["kind"];
+      const content = params["content"];
+      const { appendBlock, isValidBlockKind } = await import("../memory/block-memory.js");
+      if (typeof kind !== "string" || !isValidBlockKind(kind)) {
+        return { error: "invalid kind" };
+      }
+      if (typeof content !== "string") return { error: "content must be a string" };
+      return appendBlock(kind, content);
+    });
+
+    this.handlers.set("blocks.clear", async (params) => {
+      const kind = params["kind"];
+      const { clearBlock, isValidBlockKind } = await import("../memory/block-memory.js");
+      if (typeof kind !== "string" || !isValidBlockKind(kind)) {
+        return { error: "invalid kind" };
+      }
+      const removed = clearBlock(kind);
+      return { removed };
+    });
+
+    this.handlers.set("blocks.render", async () => {
+      const { renderActiveBlocks } = await import("../memory/block-memory.js");
+      return { content: renderActiveBlocks() };
+    });
+
+    this.handlers.set("blocks.kinds", async () => {
+      const { BLOCK_KINDS, getBlockLimit } = await import("../memory/block-memory.js");
+      return BLOCK_KINDS.map((k) => ({ kind: k, limit: getBlockLimit(k) }));
+    });
   }
 
   private errorResponse(id: string | number | null, code: number, message: string): RPCResponse {

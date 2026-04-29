@@ -214,6 +214,12 @@ struct SettingsView: View {
             }
 
             NavigationLink {
+                BlocksView()
+            } label: {
+                Label("Memory Blocks", systemImage: "rectangle.stack.fill")
+            }
+
+            NavigationLink {
                 SkillsBrowserView()
             } label: {
                 Label("Skills", systemImage: "sparkles")

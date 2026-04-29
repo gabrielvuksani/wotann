@@ -17,6 +17,41 @@ import type {
 
 // ── New domain types for commands ───────────────────────
 
+// ── Blocks (letta-style core memory) ──────────────────────
+export type BlockKind =
+  | "persona"
+  | "human"
+  | "task"
+  | "project"
+  | "scratch"
+  | "issues"
+  | "decisions"
+  | "bindings"
+  | "custom1"
+  | "custom2"
+  | "custom3"
+  | "custom4";
+
+export interface BlockSummary {
+  readonly kind: BlockKind;
+  readonly bytes: number;
+  readonly limit: number;
+  readonly truncated: boolean;
+  readonly updatedAt: string;
+}
+
+export interface MemoryBlock {
+  readonly kind: BlockKind;
+  readonly content: string;
+  readonly updatedAt: string;
+  readonly truncatedAt?: string;
+}
+
+export interface BlockKindInfo {
+  readonly kind: BlockKind;
+  readonly limit: number;
+}
+
 export interface CostDetailSnapshot extends CostSnapshot {
   readonly dailyUsage: readonly DayUsage[];
   readonly providerCosts: readonly ProviderCostBreakdown[];
@@ -402,6 +437,19 @@ export const commands = {
 
   searchMemory: (query: string) =>
     invoke<readonly MemoryEntry[]>("search_memory", { query }),
+
+  // ── Blocks (letta-style core memory) ─────────────────────
+  listBlocks: () => invoke<readonly BlockSummary[]>("list_blocks"),
+  getBlock: (kind: BlockKind) =>
+    invoke<MemoryBlock | null>("get_block", { kind }),
+  setBlock: (kind: BlockKind, content: string) =>
+    invoke<MemoryBlock>("set_block", { kind, content }),
+  appendBlock: (kind: BlockKind, content: string) =>
+    invoke<MemoryBlock>("append_block", { kind, content }),
+  clearBlock: (kind: BlockKind) =>
+    invoke<boolean>("clear_block", { kind }),
+  listBlockKinds: () =>
+    invoke<readonly BlockKindInfo[]>("list_block_kinds"),
 
   getAgents: () => invoke<readonly AgentInfo[]>("get_agents"),
 

@@ -149,6 +149,66 @@ export function buildR09Commands(deps: R09CommandDeps): readonly Command[] {
       },
     },
     {
+      id: "r09.blocks",
+      label: "Memory Blocks",
+      description: "Letta-style core memory blocks injected into every turn",
+      keywords: ["blocks", "memory", "letta", "persona", "core", "always-on"],
+      handler: verbHint(
+        "blocks list",
+        "Manage core-memory blocks: `wotann blocks list/get/set/append/clear`. The full editor lives in the desktop + iOS apps.",
+      ),
+    },
+    {
+      id: "r09.teams",
+      label: "Teams",
+      description: "Multi-agent team templates + inbox transport (ClawTeam)",
+      keywords: ["teams", "multi-agent", "team", "clawteam", "inbox"],
+      handler: verbHint(
+        "teams list",
+        "List built-in templates: `wotann teams list`. Show one rendered: `wotann teams show <name> --goal <text>`.",
+      ),
+    },
+    {
+      id: "r09.evolve",
+      label: "Evolve",
+      description: "GEPA-style skill optimizer (hermes-self-evolution port)",
+      keywords: ["evolve", "gepa", "optimize", "skill"],
+      handler: verbHint(
+        "evolve",
+        "Evolve a skill file: `wotann evolve <skillPath> --generations 3 --write`.",
+      ),
+    },
+    {
+      id: "r09.attest",
+      label: "Attest",
+      description: "Ed25519-signed audit envelopes (protect-mcp port)",
+      keywords: ["attest", "audit", "sign", "verify", "ed25519"],
+      handler: verbHint(
+        "attest genkey",
+        "Generate an audit key: `wotann attest genkey [id]`. Sign + verify: `wotann attest sign|verify <path>`.",
+      ),
+    },
+    {
+      id: "r09.canary",
+      label: "Canary",
+      description: "Post-deploy probe-based monitor (gstack canary port)",
+      keywords: ["canary", "monitor", "deploy", "gstack"],
+      handler: verbHint(
+        "canary",
+        "Run the post-deploy canary: `wotann canary <baseline.json> --probe-cmd '<cmd>'`.",
+      ),
+    },
+    {
+      id: "r09.inspect",
+      label: "Inspect File",
+      description: "Magic-byte + optional ML file-type detection (magika port)",
+      keywords: ["inspect", "file-type", "magika", "magic-byte"],
+      handler: verbHint(
+        "inspect",
+        "Detect a file's true type: `wotann inspect <path> [--declared <type>]`.",
+      ),
+    },
+    {
       id: "r09.recipe",
       label: "Recipe",
       description: "Goose-style recipe management (V9 T12.4)",

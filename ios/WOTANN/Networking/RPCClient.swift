@@ -869,6 +869,71 @@ final class RPCClient: ObservableObject {
         return response.result?.objectValue ?? [:]
     }
 
+    // MARK: Blocks (letta-style core memory)
+
+    func listBlocks() async throws -> [BlockSummary] {
+        let response = try await send("blocks.list", params: [:])
+        let values = response.result?.arrayValue ?? []
+        return values.compactMap { value in
+            guard let obj = value.objectValue else { return nil }
+            return BlockSummary(
+                kind: rpcString(obj, ["kind"]) ?? "",
+                bytes: Int(rpcDouble(obj, ["bytes"]) ?? 0),
+                limit: Int(rpcDouble(obj, ["limit"]) ?? 0),
+                truncated: obj["truncated"]?.boolValue ?? false,
+                updatedAt: rpcString(obj, ["updatedAt"]) ?? ""
+            )
+        }
+    }
+
+    func getBlock(kind: String) async throws -> MemoryBlock? {
+        let response = try await send("blocks.get", params: ["kind": .string(kind)])
+        guard let obj = response.result?.objectValue else { return nil }
+        if obj["error"] != nil { return nil }
+        return MemoryBlock(
+            kind: rpcString(obj, ["kind"]) ?? kind,
+            content: rpcString(obj, ["content"]) ?? "",
+            updatedAt: rpcString(obj, ["updatedAt"]) ?? "",
+            truncatedAt: rpcString(obj, ["truncatedAt"])
+        )
+    }
+
+    func setBlock(kind: String, content: String) async throws -> MemoryBlock {
+        let response = try await send("blocks.set", params: [
+            "kind": .string(kind),
+            "content": .string(content),
+        ])
+        guard let obj = response.result?.objectValue else {
+            throw RPCError(code: -32603, message: "blocks.set returned non-object")
+        }
+        if let err = rpcString(obj, ["error"]) { throw RPCError(code: -32000, message: err) }
+        return MemoryBlock(
+            kind: rpcString(obj, ["kind"]) ?? kind,
+            content: rpcString(obj, ["content"]) ?? "",
+            updatedAt: rpcString(obj, ["updatedAt"]) ?? "",
+            truncatedAt: rpcString(obj, ["truncatedAt"])
+        )
+    }
+
+    func clearBlock(kind: String) async throws -> Bool {
+        let response = try await send("blocks.clear", params: ["kind": .string(kind)])
+        guard let obj = response.result?.objectValue else { return false }
+        if let err = rpcString(obj, ["error"]) { throw RPCError(code: -32000, message: err) }
+        return obj["removed"]?.boolValue ?? false
+    }
+
+    func listBlockKinds() async throws -> [BlockKindInfo] {
+        let response = try await send("blocks.kinds", params: [:])
+        let values = response.result?.arrayValue ?? []
+        return values.compactMap { value in
+            guard let obj = value.objectValue else { return nil }
+            return BlockKindInfo(
+                kind: rpcString(obj, ["kind"]) ?? "",
+                limit: Int(rpcDouble(obj, ["limit"]) ?? 0)
+            )
+        }
+    }
+
     // MARK: Incoming Handler
 
     private func handleIncoming(_ data: Data) {

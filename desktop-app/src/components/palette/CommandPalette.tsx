@@ -323,6 +323,14 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
         action: () => setView("memory"),
       },
       {
+        id: "memory-blocks",
+        title: "Memory Blocks",
+        subtitle: "letta-style core memory injected into every turn",
+        category: "Memory",
+        icon: "📋",
+        action: () => setView("blocks"),
+      },
+      {
         id: "memory-mine",
         title: "Mine Conversations",
         subtitle: "memory.mine — extract patterns from history",
