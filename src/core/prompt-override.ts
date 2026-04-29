@@ -75,25 +75,26 @@ export function extractOverride(raw: string): ExtractedPrompt {
   return { cleaned, override, raw, problems };
 }
 
+// The 8 first-class providers per src/core/types.ts ProviderName +
+// safe aliases that the codebase normalizes elsewhere (e.g.
+// capabilities.ts:20 maps "google" → "gemini"; HF_TOKEN env var maps
+// "hf" → "huggingface"). Long-tail providers (xai, groq, cerebras,
+// azure, bedrock, vertex, etc.) reach via openrouter using the
+// `<vendor>/<model>` slug — that's literally what openrouter exists
+// for, and accepting them here would only cause downstream registry
+// rejections. The "free" umbrella was removed in v9.
 const KNOWN_PROVIDERS = new Set([
   "anthropic",
   "openai",
-  "gemini",
-  "google",
-  "cerebras",
-  "groq",
-  "ollama",
-  "openrouter",
   "codex",
   "copilot",
+  "ollama",
+  "openrouter",
+  "gemini",
   "huggingface",
-  "hf",
-  "free",
-  "azure",
-  "bedrock",
-  "vertex",
-  "xai",
-  "grok",
+  // safe aliases — normalized at the call site
+  "google", // → gemini (capabilities.ts:20 normalization)
+  "hf", // → huggingface (HF_TOKEN convention)
 ]);
 
 function splitPrimary(

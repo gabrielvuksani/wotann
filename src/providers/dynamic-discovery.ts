@@ -212,7 +212,13 @@ async function discoverGeminiModels(apiKey: string): Promise<readonly Discovered
       .map((m) => ({
         id: m.name.replace("models/", ""),
         name: m.displayName ?? m.name.replace("models/", ""),
-        provider: "google",
+        // v10 Gap-2 follow-up: use canonical "gemini" not "google".
+        // The 8-provider union (src/core/types.ts) treats Gemini as
+        // a first-class provider with id "gemini"; this discovery
+        // path was returning the legacy "google" slug, breaking
+        // downstream provider-equality checks (e.g. cost-tracker
+        // category lookup, fallback chain, model-router routing).
+        provider: "gemini",
         maxInputTokens: m.inputTokenLimit,
         maxOutputTokens: m.outputTokenLimit,
         capabilities: ["chat"],

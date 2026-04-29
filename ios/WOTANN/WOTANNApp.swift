@@ -326,12 +326,35 @@ struct WOTANNApp: App {
     /// - `wotann://agent?id=<UUID>` -- navigate to agent detail
     /// - `wotann://settings` -- switch to Settings tab
     private func handleDeepLink(_ url: URL) {
-        guard url.scheme == "wotann" else { return }
+        // Accept both URL forms:
+        //   - `wotann://chat?id=...`       (custom scheme, in-app button taps)
+        //   - `https://wotann.com/chat?id=...` (Universal Link from Mail/
+        //                                     Messages/Safari via AASA)
+        //
+        // Prior to 2026-04-29 this guard was `url.scheme == "wotann"`,
+        // which silently rejected every Universal Link — the AASA file,
+        // entitlement, NSUserActivityTypes plist key, and onContinueUser-
+        // Activity handler at WOTANNApp.swift:92-100 all routed correctly
+        // up to this point and then failed here. Fixing the guard makes
+        // Universal Links live end-to-end.
+        let isWotannScheme = url.scheme == "wotann"
+        let isHttpsWotann = url.scheme == "https" && url.host == "wotann.com"
+        guard isWotannScheme || isHttpsWotann else { return }
 
-        switch url.host {
+        // Extract the action name. Custom-scheme uses `url.host` ("chat" in
+        // `wotann://chat`); Universal Links use the first non-empty path
+        // component ("chat" in `https://wotann.com/chat`).
+        let action: String
+        if isWotannScheme {
+            action = url.host ?? ""
+        } else {
+            action = url.pathComponents.first(where: { $0 != "/" && !$0.isEmpty }) ?? ""
+        }
+
+        switch action {
         case "pair":
             handlePairLink(url)
-        case "chat":
+        case "chat", "conversation":
             handleChatLink(url)
         case "dispatch":
             // "Dispatch" now lives under the Work tab (index 2) in MainShell.

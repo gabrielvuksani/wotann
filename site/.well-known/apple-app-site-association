@@ -9,7 +9,6 @@
           "/chat/*",
           "/conversation/*",
           "/agent/*",
-          "/share/*",
           "/dispatch",
           "/meet",
           "/settings"

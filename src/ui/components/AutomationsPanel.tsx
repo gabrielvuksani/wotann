@@ -97,9 +97,15 @@ async function loadAutomations(): Promise<AutomationsState> {
  * Default agent config used when the user creates an automation through
  * the panel. Honest stub: model/maxTurns are sensible but real users
  * will edit the JSON to tune. Matches the shape AutomationConfig demands.
+ *
+ * Model defaults to canonical `claude-sonnet-4-7` (Opus 4.7 generation).
+ * Pre-2026-04-29 this was stale at `claude-sonnet-4-5` — every other
+ * surface uses 4-7 and the cost-tracker / context-window registries
+ * are scoped to current models, so the stale value would route to
+ * the canonical-fallback path and surprise the user.
  */
 const DEFAULT_AGENT_CONFIG = Object.freeze({
-  model: "claude-sonnet-4-5",
+  model: "claude-sonnet-4-7",
   systemPrompt: "You are a WOTANN automation agent.",
   maxTurns: 5,
   maxCost: 1.0,
