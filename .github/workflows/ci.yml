@@ -147,3 +147,22 @@ jobs:
       - name: Typecheck desktop
         working-directory: desktop-app
         run: npx tsc --noEmit --project tsconfig.app.json
+
+  # Catches the failure mode that bit us in commits 21854a7..525819f:
+  # new Swift files added to disk but not registered in the xcodeproj
+  # target memberships. CI was previously TS-only so iOS-only breakage
+  # silently shipped to origin/main.
+  ios-build:
+    name: iOS Simulator build
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Resolve SPM packages
+        working-directory: ios
+        run: xcrun xcodebuild -resolvePackageDependencies -project WOTANN.xcodeproj
+      - name: xcodebuild iOS Simulator
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcrun xcodebuild -project WOTANN.xcodeproj -scheme WOTANN -destination 'generic/platform=iOS Simulator' -configuration Debug -skipPackagePluginValidation CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -200
