@@ -915,6 +915,27 @@ final class RPCClient: ObservableObject {
         )
     }
 
+    /// Append text to a block (preserves existing content with a newline
+    /// separator). Mirrors `blocks.append` on the daemon and `appendBlock`
+    /// on Desktop/CLI. Audit caught the missing iOS wrapper —
+    /// see Engram `wotann-rpc-shape-audit-2026-04-29`.
+    func appendBlock(kind: String, content: String) async throws -> MemoryBlock {
+        let response = try await send("blocks.append", params: [
+            "kind": .string(kind),
+            "content": .string(content),
+        ])
+        guard let obj = response.result?.objectValue else {
+            throw RPCError(code: -32603, message: "blocks.append returned non-object")
+        }
+        if let err = rpcString(obj, ["error"]) { throw RPCError(code: -32000, message: err) }
+        return MemoryBlock(
+            kind: rpcString(obj, ["kind"]) ?? kind,
+            content: rpcString(obj, ["content"]) ?? "",
+            updatedAt: rpcString(obj, ["updatedAt"]) ?? "",
+            truncatedAt: rpcString(obj, ["truncatedAt"])
+        )
+    }
+
     func clearBlock(kind: String) async throws -> Bool {
         let response = try await send("blocks.clear", params: ["kind": .string(kind)])
         guard let obj = response.result?.objectValue else { return false }

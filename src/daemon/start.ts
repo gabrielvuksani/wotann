@@ -223,8 +223,25 @@ function cleanupOnExit() {
   atomicWrite(statusPath, JSON.stringify({ pid: process.pid, status: "stopped" }));
 }
 
+// Forced-exit watchdog: if `daemon.stop()` hangs (stuck cron task,
+// deadlocked socket close, worker waiting on a syscall), the process
+// can otherwise only be killed by an external SIGKILL. After
+// SHUTDOWN_DEADLINE_MS we force `process.exit(2)` regardless. Mirrors
+// home-assistant/core's `THREADING_SHUTDOWN_TIMEOUT` pattern (audit
+// finding).
+const SHUTDOWN_DEADLINE_MS = 15_000;
+function armShutdownWatchdog(reason: string): void {
+  setTimeout(() => {
+    console.error(
+      `[KAIROS] Shutdown deadline (${SHUTDOWN_DEADLINE_MS}ms) reached after ${reason} — forcing exit(2).`,
+    );
+    process.exit(2);
+  }, SHUTDOWN_DEADLINE_MS).unref();
+}
+
 process.on("SIGTERM", async () => {
   console.log("[KAIROS] SIGTERM received, shutting down...");
+  armShutdownWatchdog("SIGTERM");
   daemon.stop();
   cleanupOnExit();
   process.exit(0);
@@ -232,6 +249,7 @@ process.on("SIGTERM", async () => {
 
 process.on("SIGINT", async () => {
   console.log("[KAIROS] SIGINT received, shutting down...");
+  armShutdownWatchdog("SIGINT");
   daemon.stop();
   cleanupOnExit();
   process.exit(0);

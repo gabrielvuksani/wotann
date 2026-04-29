@@ -173,6 +173,16 @@ export interface WithRetriesOptions {
   readonly sleep?: (ms: number) => Promise<void>;
   /** Called before each retry for telemetry. */
   readonly onRetry?: (decision: RetryDecision, ctx: RetryContext) => void;
+  /**
+   * Bound the total wall-clock time the retry loop is allowed to consume,
+   * including the in-flight call duration AND the cumulative sleep budget.
+   * If the next sleep would push past this deadline, the loop bails with
+   * the last error rather than slow-walking past the user's budget. This
+   * is the curl `--retry-max-time` pattern — without it, a single
+   * `Retry-After: 60` will block 60 seconds even if the original request
+   * was time-budgeted at 5. Default: undefined (no deadline cap).
+   */
+  readonly maxTotalDurationMs?: number;
 }
 
 export interface RetryOutcome<T> {
@@ -217,6 +227,12 @@ export async function withRetries<T>(
       const decision = policy(ctx);
       options.onRetry?.(decision, ctx);
       if (!decision.shouldRetry) break;
+      // Total-duration cap (curl --retry-max-time). If sleeping past this
+      // would exceed the user's deadline, give up rather than block.
+      if (typeof options.maxTotalDurationMs === "number") {
+        const projectedElapsed = Date.now() - startedAt + decision.delayMs;
+        if (projectedElapsed > options.maxTotalDurationMs) break;
+      }
       totalDelayMs += decision.delayMs;
       await sleep(decision.delayMs);
       attempt++;

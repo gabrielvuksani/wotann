@@ -17,7 +17,7 @@
  */
 
 import type React from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { commands } from "../../hooks/useTauriCommand";
 
@@ -326,6 +326,28 @@ function EvolveTab(): React.JSX.Element {
 
 export function OperationsPanel(): React.JSX.Element {
   const [active, setActive] = useState<TabKey>("inspect");
+  const [daemonError, setDaemonError] = useState<string | null>(null);
+
+  // Probe the daemon once at mount so the user sees a single top-level
+  // banner rather than 5 different per-tab errors. Audit caught:
+  // OperationsPanel previously surfaced raw `[WOTANN IPC] RPC error...`
+  // strings inside individual ResultBlock instances, leaving the user
+  // confused about whether the daemon was the issue.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        // The cheapest authenticated round-trip we have right now.
+        await commands.listBlockKinds();
+        if (!cancelled) setDaemonError(null);
+      } catch (err) {
+        if (!cancelled) setDaemonError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: 16, gap: 16 }}>
@@ -334,6 +356,19 @@ export function OperationsPanel(): React.JSX.Element {
         <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)", maxWidth: 720 }}>
           Admin and audit tools for safe deploys, signed audit logs, file-type validation, and policy gates. These complement the daemon — they operate on local files / RPC, not the chat session.
         </p>
+        {daemonError && (
+          <div
+            style={{
+              fontSize: 12,
+              padding: 8,
+              borderRadius: 4,
+              background: "var(--color-warning-muted)",
+              color: "var(--color-warning)",
+            }}
+          >
+            Could not reach daemon: {daemonError}. Make sure <code>wotann daemon start</code> is running.
+          </div>
+        )}
       </header>
       <nav style={{ display: "flex", gap: 8, borderBottom: "1px solid var(--border-default)" }}>
         {TABS.map((t) => (

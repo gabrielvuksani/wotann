@@ -55,6 +55,29 @@ impl KairosClient {
         PathBuf::from(home).join(".wotann").join("kairos.sock")
     }
 
+    /// Path to the daemon's session-token file. Mirrors
+    /// `resolveWotannHomeSubdir("session-token.json")` from the TS side.
+    fn session_token_path() -> PathBuf {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/var/tmp".into());
+        PathBuf::from(home).join(".wotann").join("session-token.json")
+    }
+
+    /// Read the session token the daemon wrote at startup. Mirrors
+    /// `readSessionToken()` in `src/daemon/kairos-ipc.ts:125-127`.
+    /// Returns None on ENOENT / parse failure / wrong shape so the caller
+    /// can decide whether the request must be rejected (auth-required) or
+    /// allowed through (`ping`/`keepalive`).
+    fn read_session_token() -> Option<String> {
+        let path = Self::session_token_path();
+        let raw = std::fs::read_to_string(&path).ok()?;
+        let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let token = parsed.get("token")?.as_str()?;
+        if token.len() < 32 {
+            return None;
+        }
+        Some(token.to_string())
+    }
+
     /// Check if the daemon is running (socket file exists)
     pub fn is_daemon_running() -> bool {
         Self::socket_path().exists()
@@ -187,6 +210,23 @@ impl KairosClient {
             .ok_or_else(|| "Not connected to KAIROS daemon".to_string())?;
 
         let id = self.next_id()?;
+
+        // Mirror the auth injection from `call`. Streaming methods are
+        // never on the unauth allowlist, so this is unconditional.
+        let mut params = params;
+        if let Some(token) = Self::read_session_token() {
+            if !params.is_object() {
+                params = serde_json::json!({});
+            }
+            if let Some(obj) = params.as_object_mut() {
+                if !obj.contains_key("authToken") {
+                    obj.insert(
+                        "authToken".to_string(),
+                        serde_json::Value::String(token),
+                    );
+                }
+            }
+        }
 
         let request = RPCRequest {
             jsonrpc: "2.0",

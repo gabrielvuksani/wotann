@@ -24,26 +24,35 @@ struct OperationsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
-            Picker("", selection: $tab) {
-                ForEach(OpsTab.allCases) { t in
-                    Text(t.label).tag(t)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, WTheme.Spacing.md)
+        Group {
+            // Audit caught: every per-tab form invokes daemon RPC; without
+            // a top-level pairing guard the user gets cryptic per-tab error
+            // messages until they pair. Mirrors BlocksView/TeamsView.
+            if !connectionManager.isPaired {
+                DaemonOfflineView()
+            } else {
+                VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
+                    Picker("", selection: $tab) {
+                        ForEach(OpsTab.allCases) { t in
+                            Text(t.label).tag(t)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, WTheme.Spacing.md)
 
-            ScrollView {
-                Group {
-                    switch tab {
-                    case .inspect: InspectTabView()
-                    case .attest:  AttestTabView()
-                    case .policy:  PolicyTabView()
-                    case .canary:  CanaryTabView()
-                    case .evolve:  EvolveTabView()
+                    ScrollView {
+                        Group {
+                            switch tab {
+                            case .inspect: InspectTabView()
+                            case .attest:  AttestTabView()
+                            case .policy:  PolicyTabView()
+                            case .canary:  CanaryTabView()
+                            case .evolve:  EvolveTabView()
+                            }
+                        }
+                        .padding(WTheme.Spacing.md)
                     }
                 }
-                .padding(WTheme.Spacing.md)
             }
         }
         .navigationTitle("Operations")

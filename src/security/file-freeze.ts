@@ -184,6 +184,23 @@ export class FileFreezer {
 
     return configs;
   }
+
+  /**
+   * Auto-freeze WOTANN's own configuration surface so the agent can't
+   * rewrite the policy/skills/memory directories that govern its own
+   * behaviour. Inspired by Roo-Code's `RooProtectedController` —
+   * `.wotann/**`, `wotann.yaml`, AGENTS.md, CLAUDE.md are all "self-rule"
+   * files where an auto-approved Edit would let the agent disable its
+   * own safety mechanisms. Always freeze these unless `--no-self-protect`
+   * is explicitly passed.
+   */
+  freezeSelfConfigFiles(): readonly string[] {
+    const selfConfigs = [".wotann/**", "wotann.yaml", "wotann.yml", "AGENTS.md", "CLAUDE.md"];
+    for (const pattern of selfConfigs) {
+      this.freeze(pattern, "Self-config protection (Roo-Code pattern)", false);
+    }
+    return selfConfigs;
+  }
 }
 
 /**

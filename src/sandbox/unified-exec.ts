@@ -313,9 +313,22 @@ export class UnifiedExecSession {
       let stdout = "";
       let stderr = "";
       let killedByTimeout = false;
+      // SIGKILL fallback for SIGTERM-trapping subprocesses. kernel-sandbox.ts
+      // already escalates; unified-exec previously didn't, so a `bash`
+      // process with `trap '' TERM` would hang the agent forever once the
+      // soft timeout fired. killTimer is hoisted so close/error handlers
+      // below can clear it.
+      let killTimer: ReturnType<typeof setTimeout> | null = null;
       const timer = setTimeout(() => {
         killedByTimeout = true;
         child.kill("SIGTERM");
+        killTimer = setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // process already gone — fine
+          }
+        }, 5_000);
       }, this.timeoutMs);
       child.stdout.on("data", (chunk: Buffer) => {
         if (stdout.length < this.maxBuffer) stdout += chunk.toString();
@@ -325,6 +338,7 @@ export class UnifiedExecSession {
       });
       child.on("close", (code, signal) => {
         clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
         const exitCode = killedByTimeout ? -2 : typeof code === "number" ? code : signal ? -1 : 0;
         resolvePromise(
           this.record({
@@ -339,6 +353,7 @@ export class UnifiedExecSession {
       });
       child.on("error", (err) => {
         clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
         resolvePromise(
           this.record({
             stdout,
