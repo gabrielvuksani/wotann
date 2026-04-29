@@ -856,7 +856,9 @@ export function WotannApp({
     };
     // Intentionally empty deps — registration is one-shot. Live state
     // is read via paletteStateRef so commands always see fresh values.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // (No `eslint-disable react-hooks/exhaustive-deps` here because the
+    //  plugin is in package.json deps but not registered in eslint.config.js;
+    //  referencing the rule would error out the lint job.)
   }, []);
 
   // ── R-09 commands: register the 19 reach-gap palette entries ──
