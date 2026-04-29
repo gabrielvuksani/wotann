@@ -14,3 +14,13 @@
 
 /
   Cache-Control: public, max-age=300, must-revalidate
+
+# SB-N5: Apple App Site Association — iOS universal links require
+# https://wotann.com/.well-known/apple-app-site-association to return
+# JSON (NOT text/html). Apple's CDN fetcher specifically checks the
+# Content-Type and refuses to associate the domain if it's anything
+# else. The file has no extension so Pages would otherwise hand back
+# application/octet-stream.
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+  Cache-Control: public, max-age=3600

@@ -3,22 +3,17 @@
  * Uses Ollama's native endpoint, NOT the OpenAI-compatible shim.
  *
  * Ollama CLI reference:
- *   ollama pull qwen3.5:27b    — download model
+ *   ollama pull <model>:<tag>  — download model (e.g., `ollama pull qwen3-coder:30b`)
  *   ollama list                 — show downloaded models
  *   ollama ps                   — show running models (VRAM usage)
  *   ollama serve                — start daemon (localhost:11434)
  *
- * Best models for coding agents (ranked by agent task scores):
- *   qwen3-coder-next  — 80B MoE (3B active), #1 SWE-rebench, ~18GB VRAM
- *   qwen3-coder:30b   — 96/100 agent score, ~20GB VRAM
- *   devstral:24b      — 94/100 agent score, ~16GB VRAM
- *   qwen3.5:27b       — multimodal, 256K context, ~20GB VRAM
- *   qwen3.5:35b-a3b   — MoE variant, ~16GB VRAM
- *   qwen3-coder:7b    — entry level, ~5GB VRAM
- *   qwen3.5:9b        — entry level, ~8GB VRAM
+ * Model selection: WOTANN's router auto-discovers installed models via
+ * /api/tags and routes to whichever model the user has pulled. No model
+ * is hardcoded — install whatever fits your VRAM budget.
  *
  * Tool calling: natively supported via /api/chat with `tools` parameter.
- * Best tool-calling models: Llama 3.1, Qwen3 series, hermes-2-pro, mistral:7b.
+ * Any tool-calling-capable model the user installs will work.
  */
 
 import type {

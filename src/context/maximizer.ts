@@ -12,17 +12,17 @@
  * 4. Dynamically shard large contexts across sub-windows
  * 5. Report theoretical vs practical limits with confidence scores
  *
- * PROVIDER MAXIMUMS (as of April 2026):
- * - Anthropic (Opus 4.6 / Sonnet 4.6): 1M tokens  (requires beta header)
- * - OpenAI (GPT-5.4):                    1M tokens  (default)
- * - OpenAI (GPT-4.1):                    1M tokens  (default)
- * - Google (Gemini 2.5 Pro):              1M tokens  (default)
- * - Google (Gemini 3.1 Pro Preview):      1M tokens  (default)
- * - Codex (codexplan):                    400K tokens (subscription)
- * - Ollama (QWen3.5:27b):                262K tokens (local VRAM-dependent)
- * - DeepSeek (R1):                        128K tokens (API)
- * - Mistral (Codestral):                  256K tokens (API)
- * - xAI (Grok-3):                         1M tokens  (API, unverified)
+ * PROVIDER MAXIMUMS (as of April 2026, first-class providers only):
+ * - Anthropic (Opus 4.7 / Sonnet 4.7): 1M tokens  (requires beta header)
+ * - OpenAI   (GPT-5.4 / GPT-4.1):      1M tokens  (default)
+ * - Codex    (codexplan):              400K tokens (subscription)
+ * - Copilot  (gpt-4.1 / sonnet-4.7):   varies by upstream model
+ * - Gemini   (2.5 Pro / 3.1 Pro):      1M tokens  (default)
+ * - Ollama   (any installed model):    VRAM-dependent, model-dependent
+ * - OpenRouter (200+ third-party models): discovered dynamically — see
+ *     dynamic-discovery.ts for the live model list. Long-tail providers
+ *     (deepseek, mistral, xai, etc.) reach WOTANN through this provider.
+ * - HuggingFace (open-model router):   discovered dynamically.
  *
  * NO MODEL IS DEGRADED. Every model gets its full capability.
  */
@@ -56,6 +56,10 @@ export interface ProviderProbeConfig {
 
 // ── Provider Probe Configurations ────────────────────────
 
+// Probe configs for the 8 first-class providers in src/core/types.ts
+// (anthropic, openai, codex, copilot, ollama, openrouter, gemini, huggingface).
+// Long-tail providers reach WOTANN through openrouter and don't need direct
+// probe entries here.
 const PROVIDER_PROBES: readonly ProviderProbeConfig[] = [
   {
     provider: "anthropic",
@@ -84,25 +88,24 @@ const PROVIDER_PROBES: readonly ProviderProbeConfig[] = [
     maxTokensField: "max_tokens",
   },
   {
+    provider: "copilot",
+    headerOverrides: {},
+    maxTokensField: "max_tokens",
+  },
+  {
     provider: "ollama",
     headerOverrides: {},
     maxTokensField: "num_ctx",
   },
   {
-    provider: "deepseek",
-    probeEndpoint: "https://api.deepseek.com/v1/chat/completions",
+    provider: "openrouter",
+    probeEndpoint: "https://openrouter.ai/api/v1/chat/completions",
     headerOverrides: {},
     maxTokensField: "max_tokens",
   },
   {
-    provider: "mistral",
-    probeEndpoint: "https://api.mistral.ai/v1/chat/completions",
-    headerOverrides: {},
-    maxTokensField: "max_tokens",
-  },
-  {
-    provider: "xai",
-    probeEndpoint: "https://api.x.ai/v1/chat/completions",
+    provider: "huggingface",
+    probeEndpoint: "https://api-inference.huggingface.co/v1/chat/completions",
     headerOverrides: {},
     maxTokensField: "max_tokens",
   },
@@ -188,17 +191,22 @@ export function maximizeAllProviders(
 ): ReadonlyMap<string, MaximizedContext> {
   const results = new Map<string, MaximizedContext>();
 
-  // Known models per provider
+  // Known static models per first-class provider (8-provider union — see
+  // src/core/types.ts ProviderName). Long-tail providers (deepseek, mistral,
+  // xai, etc.) are NOT first-class — they reach WOTANN through openrouter.
+  //
+  // openrouter and huggingface are intentionally absent from this static
+  // map: their model lists are discovered dynamically at runtime via
+  // src/providers/dynamic-discovery.ts. ollama models are also installed
+  // locally per user, but a small probe set is kept here for headers/test
+  // hygiene; the live router calls /api/tags for the real list.
   const providerModels: Record<string, readonly string[]> = {
     anthropic: ["claude-opus-4-7", "claude-sonnet-4-7", "claude-haiku-4-5"],
     openai: ["gpt-5.4", "gpt-5.3-codex", "gpt-4.1"],
     codex: ["codexplan", "codexspark", "codexmini"],
     gemini: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.1-pro-preview"],
-    ollama: ["qwen3-coder-next", "qwen3.5:27b", "devstral:24b"],
-    copilot: ["gpt-4.1", "claude-sonnet-4.7", "gpt-5"],
-    deepseek: ["deepseek-r1", "deepseek-coder-v3"],
-    mistral: ["codestral-2501", "mistral-large-2"],
-    xai: ["grok-3", "grok-3-mini"],
+    ollama: ["qwen3-coder-next", "qwen3-coder:30b", "devstral:24b"],
+    copilot: ["gpt-4.1", "claude-sonnet-4-7", "gpt-5"],
   };
 
   for (const provider of providers) {

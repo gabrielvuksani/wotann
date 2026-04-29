@@ -63,6 +63,17 @@ on:
     tags:
       - "v*.*.*"
       - "v*.*.*-*" # also fire on prerelease tags like v0.4.1-rc1
+  # workflow_dispatch lets us re-run the pipeline without pushing a new
+  # tag — needed to clear stale "startup_failure" entries that GitHub's
+  # workflow registry pins when a workflow file is edited (see header
+  # comment on the v2 rename). Manual runs still execute the same jobs;
+  # the precheck-secrets gate keeps it safe.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or branch to release (defaults to current ref)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -77,11 +88,31 @@ env:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────
+  # Job 0: precheck-secrets (SB-N7 + SB-N8)
+  # Fails the entire release graph if Tauri updater pubkey is still the
+  # TODO placeholder OR if macOS signingIdentity is null. Both values
+  # require a real USER-ACTION outside this repo (generate keypair,
+  # obtain Developer ID cert) — releasing with placeholders ships a
+  # broken DMG / un-signed updater that users cannot trust.
+  #
+  # Runs on Ubuntu (fast, free) before any heavy build job spins up.
+  # ───────────────────────────────────────────────────────────────────────
+  precheck-secrets:
+    name: Precheck Tauri secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Verify Tauri updater pubkey + signingIdentity
+        run: bash scripts/release/check-tauri-secrets.sh
+
+  # ───────────────────────────────────────────────────────────────────────
   # Job 1: macos-gui-dmg
   # Builds the Tauri 2 desktop app and produces a drag-to-Applications DMG.
   # ───────────────────────────────────────────────────────────────────────
   macos-gui-dmg:
     name: Build macOS GUI DMG (Tauri arm64)
+    needs: precheck-secrets
     runs-on: macos-latest
     timeout-minutes: 30
     # Job-level env hoists the secret presence into a plain string ("true" /
@@ -282,6 +313,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────
   macos-cli-tarball:
     name: Build macOS CLI tarball (SEA arm64)
+    needs: precheck-secrets
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -352,6 +384,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────
   linux-cli-tarball:
     name: Build Linux CLI tarball (SEA x64)
+    needs: precheck-secrets
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -402,6 +435,7 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────
   windows-cli-exe:
     name: Build Windows CLI .exe (SEA x64)
+    needs: precheck-secrets
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -565,3 +599,48 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 7 (optional, post-publish): verify-aasa-deployment (SB-N5)
+  # Smoke-tests https://wotann.com/.well-known/apple-app-site-association
+  # to confirm Cloudflare Pages is serving the AASA file as
+  # `application/json`. Apple's swcd silently refuses to associate the
+  # domain if the response is `text/html`, which breaks every iOS
+  # universal-link handoff.
+  #
+  # Soft gate by design: AASA is server-side and can legitimately lag the
+  # binary build by minutes (Pages deploy) or hours (DNS propagation).
+  # Failing here flips the just-published release back to draft via
+  # `gh release edit`, surfacing the issue without blocking the build.
+  # The job itself fails-loud (set -e in the script) so the workflow
+  # status shows the problem in the dashboard.
+  # ───────────────────────────────────────────────────────────────────────
+  verify-aasa-deployment:
+    name: Verify AASA deployment
+    needs: publish-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Smoke-test AASA URL
+        id: aasa
+        # Run the check; capture pass/fail for the next step. Use
+        # `continue-on-error` so we always reach the draft-flip step
+        # below, but the job overall still fails when AASA is wrong.
+        continue-on-error: true
+        run: bash scripts/release/check-aasa-deployment.sh https://wotann.com/.well-known/apple-app-site-association
+
+      - name: Mark release as draft if AASA failed
+        if: steps.aasa.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo "AASA verification failed; flipping release $REF_NAME back to draft."
+          gh release edit "$REF_NAME" --draft
+          # Surface as job failure so the workflow status reflects the issue.
+          exit 1

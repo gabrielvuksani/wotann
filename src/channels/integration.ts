@@ -1,7 +1,14 @@
 /**
  * Channel integration helpers.
- * Bridges the adapter.ts contract to the gateway.ts contract used by KAIROS,
- * and provides a one-call wiring function to set up all available channels.
+ * Bridges the adapter.ts contract to the gateway.ts contract used by KAIROS.
+ *
+ * NB-5 (2026-04-28): the historical `wireGateway()` one-call wiring helper
+ * was removed because it had zero callers — KAIROS calls
+ * `gateway.registerAdapter()` directly per channel (see kairos.ts for
+ * Telegram/Slack/Discord/Signal/WhatsApp/Email/Webhook/SMS/Matrix/Teams
+ * registration sites). Keeping the helper around as orphan code accumulated
+ * imports (`createAvailableAdapters`, `getChannelStatus`,
+ * `ChannelStatusSummary`) that were not used elsewhere in this file.
  */
 
 import type {
@@ -9,18 +16,14 @@ import type {
   ChannelMessage,
   ChannelType,
 } from "./gateway.js";
-import { ChannelGateway, type GatewayConfig } from "./gateway.js";
 import type {
   ChannelAdapter as LegacyChannelAdapter,
   IncomingMessage,
   OutgoingMessage,
   MessageAttachment,
 } from "./adapter.js";
-import { createAvailableAdapters, getChannelStatus, type ChannelStatusSummary } from "./auto-detect.js";
 
-export function wrapLegacyAdapter(
-  adapter: LegacyChannelAdapter,
-): GatewayChannelAdapter {
+export function wrapLegacyAdapter(adapter: LegacyChannelAdapter): GatewayChannelAdapter {
   return new LegacyGatewayAdapter(adapter);
 }
 
@@ -93,50 +96,4 @@ function toGatewayAttachment(attachment: MessageAttachment) {
 function buildMessageId(message: IncomingMessage): string {
   const replyToken = message.replyTo ?? "root";
   return `${message.channelType}:${message.channelId}:${message.senderId}:${replyToken}:${message.timestamp.getTime()}`;
-}
-
-// ── Gateway Wiring ────────────────────────────────────────
-
-export interface WiredGatewayResult {
-  readonly gateway: ChannelGateway;
-  readonly registered: readonly ChannelType[];
-  readonly skipped: readonly { type: ChannelType; reason: string }[];
-  readonly status: ChannelStatusSummary;
-}
-
-/**
- * Create a ChannelGateway and register all adapters that have valid credentials.
- *
- * This is the main entry point for wiring channels. It:
- * 1. Loads credentials from ~/.wotann/channels.json (or env vars)
- * 2. Creates adapter instances for each configured channel
- * 3. Wraps them into the gateway contract via LegacyGatewayAdapter
- * 4. Registers them with a new ChannelGateway
- *
- * The caller still needs to:
- * - Call gateway.setMessageHandler() to wire up the KAIROS runtime
- * - Call gateway.connectAll() to start all adapters
- */
-export function wireGateway(
-  gatewayConfig?: Partial<GatewayConfig>,
-  channelsConfigPath?: string,
-): WiredGatewayResult {
-  const gateway = new ChannelGateway(gatewayConfig);
-  const adapterResults = createAvailableAdapters(channelsConfigPath);
-  const status = getChannelStatus(channelsConfigPath);
-
-  const registered: ChannelType[] = [];
-  const skipped: { type: ChannelType; reason: string }[] = [];
-
-  for (const result of adapterResults) {
-    if (result.adapter) {
-      const wrapped = wrapLegacyAdapter(result.adapter);
-      gateway.registerAdapter(wrapped);
-      registered.push(result.type);
-    } else {
-      skipped.push({ type: result.type, reason: result.reason });
-    }
-  }
-
-  return { gateway, registered, skipped, status };
 }

@@ -200,10 +200,10 @@ const MODEL_PROFILES: ReadonlyMap<string, ModelHarnessProfile> = new Map([
     },
   ],
   [
-    "google/gemini-2.5-pro",
+    "gemini/gemini-2.5-pro",
     {
       model: "gemini-2.5-pro",
-      provider: "google",
+      provider: "gemini",
       promptStyle: "json" as const,
       toolCallFormat: "native" as const,
       thinkingStyle: "native-extended" as const,

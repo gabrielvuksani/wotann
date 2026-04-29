@@ -56,13 +56,10 @@ export {
   createCostLedger,
   getQuotaProbe,
   isQuotaThresholdCrossed,
-  classify,
-  renderUserHint,
-  isRetriable,
   decideSubscriptionFlag,
   describeSubscriptionFlag,
 } from "./hardening/index.js";
-export type { CostLedger, RawProcessFailure, SubscriptionFlagDecision } from "./hardening/index.js";
+export type { CostLedger, SubscriptionFlagDecision } from "./hardening/index.js";
 
 // V9 T3.1 — composition root that runtime.ts calls to wire Waves 1-5
 // (hooks/agents/channels/hardening) into a single launchable bridge.

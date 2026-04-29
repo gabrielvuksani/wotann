@@ -398,7 +398,9 @@ import { BenchmarkHarness } from "../intelligence/benchmark-harness.js";
 
 // Security (mega-merge)
 import { SkillsGuard } from "../security/skills-guard.js";
-import { HashAuditChain } from "../security/hash-audit-chain.js";
+// HashAuditChain runs as a singleton via src/security/write-audit.ts —
+// no per-runtime instance is needed. The class is still exported via
+// src/lib.ts for callers that want their own chain (tests, audits).
 
 // Core (mega-merge)
 import { VirtualPathResolver } from "./virtual-paths.js";
@@ -803,7 +805,6 @@ export class WotannRuntime {
   // NeverStop strategies merged into AutonomousExecutor
   // Security (mega-merge)
   private skillsGuard: SkillsGuard;
-  private hashAuditChain: HashAuditChain;
   // Core (mega-merge)
   private virtualPathResolver: VirtualPathResolver;
   private configDiscovery: ConfigDiscovery;
@@ -1568,9 +1569,6 @@ export class WotannRuntime {
 
     // Skills guard: static-analysis security scanner for skill content
     this.skillsGuard = new SkillsGuard();
-
-    // Hash audit chain: immutable hash-chain audit trail
-    this.hashAuditChain = new HashAuditChain();
 
     // Virtual path resolver: isolate agents from real filesystem layout
     this.virtualPathResolver = new VirtualPathResolver([
@@ -5663,9 +5661,6 @@ export class WotannRuntime {
   // Security (mega-merge)
   getSkillsGuard(): SkillsGuard {
     return this.skillsGuard;
-  }
-  getHashAuditChain(): HashAuditChain {
-    return this.hashAuditChain;
   }
 
   // Core (mega-merge)

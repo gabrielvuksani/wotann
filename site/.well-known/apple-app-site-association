@@ -1,0 +1,20 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "TODO_TEAMID.com.wotann.ios",
+        "paths": [
+          "/pair/*",
+          "/chat/*",
+          "/conversation/*",
+          "/agent/*",
+          "/share/*",
+          "/dispatch",
+          "/meet",
+          "/settings"
+        ]
+      }
+    ]
+  }
+}

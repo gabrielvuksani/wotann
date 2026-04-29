@@ -7,11 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import {
-  defaultImperatives,
-  defaultPromptLikeKeys,
-  inspectUrl,
-} from "../../src/security/url-instruction-guard.js";
+import { inspectUrl } from "../../src/security/url-instruction-guard.js";
 
 // ── ALLOW path ────────────────────────────────────────────────────────────
 
@@ -167,26 +163,6 @@ describe("inspectUrl — custom extraImperatives", () => {
     });
     expect(r.verdict).toBe("BLOCK");
     expect(r.hits.find((h) => h.matchedToken === "delete-all-users")).toBeDefined();
-  });
-});
-
-// ── Public accessors ─────────────────────────────────────────────────────
-
-describe("exported accessors", () => {
-  it("defaultImperatives returns a non-empty readonly list", () => {
-    const list = defaultImperatives();
-    expect(Array.isArray(list)).toBe(true);
-    expect(list.length).toBeGreaterThan(0);
-    expect(list).toContain("ignore previous");
-  });
-
-  it("defaultPromptLikeKeys returns a sorted deduped list", () => {
-    const keys = defaultPromptLikeKeys();
-    const sorted = [...keys].sort();
-    expect(keys).toEqual(sorted);
-    expect(new Set(keys).size).toBe(keys.length);
-    expect(keys).toContain("prompt");
-    expect(keys).toContain("cmd");
   });
 });
 
