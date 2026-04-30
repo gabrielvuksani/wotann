@@ -177,6 +177,10 @@ struct PromptLibraryView: View {
         appState.updateConversation(conversation.id) { conv in
             conv.messages.append(Message(role: .user, content: template.prompt))
         }
+        // Round 8: donate to Siri / Spotlight so this snippet surfaces
+        // as a Top Hit and Lock-Screen suggestion. Donation is
+        // fire-and-forget — it never blocks the dismiss/tab-switch.
+        IntentDonationService.shared.donateSnippet(title: template.title)
         appState.activeTab = 1
         dismiss()
     }

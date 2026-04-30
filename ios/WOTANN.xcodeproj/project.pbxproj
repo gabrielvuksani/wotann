@@ -39,6 +39,7 @@
 		1DBF7CB49929C59A63CCC4B1 /* PairingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C15FCB52E102C803EB082B5 /* PairingViewModel.swift */; };
 		1DFA4133059A447B8F8FB65B /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85CD124246CE92A9A09C3C73 /* HomeView.swift */; };
 		1E7D23BB279777C85830341B /* ActiveWorkStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D2841CE2B1B3A5500D3B19C /* ActiveWorkStrip.swift */; };
+		1EC18C190FAB42B876CFC445 /* SnippetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 016757F115DA85328948D5D4 /* SnippetIntents.swift */; };
 		2011416DD966342A47EF1027 /* DiagnosticLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17BE0EC43A77717E763C2310 /* DiagnosticLogger.swift */; };
 		21C6F764ABDF58935CE189D7 /* TaskApprovalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A13F72B52D66CA749AE5EB74 /* TaskApprovalView.swift */; };
 		235ADEE270DCB81BCE3F2058 /* Snippets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64037688FCC3E6EA2B6253F2 /* Snippets.swift */; };
@@ -110,6 +111,7 @@
 		6D83206B8D48FF7E6C8483C3 /* EditorService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A970BCCA60E9BE6DC6C23B5 /* EditorService.swift */; };
 		6EF1048510C16DD867AA8F92 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1232C29A76FFFEECDBD9E3E5 /* Assets.xcassets */; };
 		6F88812F35204E11602F0369 /* EditorThemes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B6F914C0596A3F5D2D25FCB /* EditorThemes.swift */; };
+		7318EDF1ECA83ED388E256FA /* SnippetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 016757F115DA85328948D5D4 /* SnippetIntents.swift */; };
 		73266E624343026C5AFC3C3A /* PairingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6AFCFB793FD11DF147F9C3 /* PairingState.swift */; };
 		73CCE1EF3B766BB743E56723 /* SmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0625D6594E4FEF9E54366AA6 /* SmokeTests.swift */; };
 		7406720F1DD784F12A86D3E2 /* RecentConversationsStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A5B0DA01EDFD98EBDCCBD6 /* RecentConversationsStrip.swift */; };
@@ -293,6 +295,7 @@
 /* Begin PBXFileReference section */
 		004B1EA5CCD16314B7069723 /* CostModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostModels.swift; sourceTree = "<group>"; };
 		013C9CBA475179EC47B20361 /* EditorLanguages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorLanguages.swift; sourceTree = "<group>"; };
+		016757F115DA85328948D5D4 /* SnippetIntents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SnippetIntents.swift; sourceTree = "<group>"; };
 		0179DCE406DE010D855EF594 /* CodePlaygroundView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodePlaygroundView.swift; sourceTree = "<group>"; };
 		035D3BE91A3F4D1BA4B80C8F /* WorkspaceTrustView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTrustView.swift; sourceTree = "<group>"; };
 		050C9F8CBB29129367DC8BF4 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
@@ -978,6 +981,7 @@
 				6C84845C879D8B24838AA8C7 /* Blocks.swift */,
 				B5A6E2B15C788B7A3B7A3376 /* Teams.swift */,
 				64037688FCC3E6EA2B6253F2 /* Snippets.swift */,
+				016757F115DA85328948D5D4 /* SnippetIntents.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -1435,6 +1439,7 @@
 				2D0B9FABB98058BB3E1BE710 /* Blocks.swift in Sources */,
 				8876D8D5F30298B89E74F134 /* Teams.swift in Sources */,
 				235ADEE270DCB81BCE3F2058 /* Snippets.swift in Sources */,
+				7318EDF1ECA83ED388E256FA /* SnippetIntents.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1642,6 +1647,7 @@
 				5FD4F2C0493905DDB93C3627 /* TeamsView.swift in Sources */,
 				897871422623949FA041D929 /* Snippets.swift in Sources */,
 				A0B449C0F8F730DC77F3E67D /* SnippetSyncManager.swift in Sources */,
+				1EC18C190FAB42B876CFC445 /* SnippetIntents.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

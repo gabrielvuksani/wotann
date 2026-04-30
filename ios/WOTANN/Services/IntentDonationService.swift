@@ -97,6 +97,39 @@ final class IntentDonationService {
         #endif
     }
 
+    /// Donate a "run snippet" intent — Round 8 cross-surface prompt
+    /// library hook. Called after every successful snippet use in
+    /// `PromptLibraryView` so Siri / Spotlight / the Action Button
+    /// learn the user's most-used prompts and surface them as one-tap
+    /// shortcuts.
+    ///
+    /// Donations are fire-and-forget. The user's snippet flow is
+    /// never blocked or affected by donation success/failure.
+    func donateSnippet(title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            log.debug("Skipping snippet donation: empty title")
+            return
+        }
+        #if canImport(AppIntents)
+        if #available(iOS 18.0, *) {
+            let intent = RunSnippetIntent(snippetTitle: trimmed)
+            Task { [log] in
+                do {
+                    try await intent.donate()
+                    log.debug("Donated RunSnippetIntent for \"\(trimmed, privacy: .public)\"")
+                } catch {
+                    log.debug("Snippet donation failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        } else {
+            log.debug("Skipping snippet donation: requires iOS 18+")
+        }
+        #else
+        log.debug("Skipping snippet donation: AppIntents framework unavailable")
+        #endif
+    }
+
     // MARK: - Helpers
 
     private static func truncate(_ prompt: String) -> String {
