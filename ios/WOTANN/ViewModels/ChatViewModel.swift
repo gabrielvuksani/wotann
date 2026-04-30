@@ -113,6 +113,13 @@ final class ChatViewModel: ObservableObject {
             if enableOnDevice {
                 // Try on-device inference via the shared singleton (S4-25).
                 let onDeviceService = onDeviceModelService
+                // Read the active on-device model id from the service's
+                // config rather than hardcoding "gemma-4". The user can
+                // swap to gemma-4-e2b-q4 / functiongemma-270m-q4 /
+                // phi-4-mini-q4 (or any future MLX checkpoint) and the
+                // message-meta line should match — Round 7 audit caught
+                // this lying to the user.
+                let activeOnDeviceModel = onDeviceService.activeModelId
                 isStreaming = true
                 let offlineAssistantId = UUID()
                 let offlinePlaceholder = Message(
@@ -120,7 +127,7 @@ final class ChatViewModel: ObservableObject {
                     role: .assistant,
                     content: "",
                     provider: "on-device",
-                    model: "gemma-4",
+                    model: activeOnDeviceModel,
                     isStreaming: true
                 )
                 appState.updateConversation(conversationId) { conv in
@@ -138,7 +145,7 @@ final class ChatViewModel: ObservableObject {
                                 role: .assistant,
                                 content: result,
                                 provider: "on-device",
-                                model: "gemma-4",
+                                model: activeOnDeviceModel,
                                 isStreaming: false
                             )
                         }

@@ -75,6 +75,17 @@ final class OnDeviceModelService: ObservableObject {
     private let config: OnDeviceModelConfig
     private let offlineQueue: OfflineQueueService
 
+    /// Public read of the active on-device model id (e.g.
+    /// "gemma-4-e2b-q4"). ChatViewModel surfaces this in the message
+    /// metadata so the user sees the actual model that produced the
+    /// reply rather than a hardcoded label.
+    var activeModelId: String { config.modelId }
+
+    /// Public read of the active on-device model's HuggingFace repo,
+    /// useful for any UI that surfaces "Model: gemma/gemma-4-e2b-it
+    /// (offline, 2.6 GB)" line.
+    var activeModelRepo: String { config.hfRepo }
+
     @MainActor
     init(config: OnDeviceModelConfig = .gemma4E2B) {
         self.config = config

@@ -2296,7 +2296,24 @@ pub async fn list_ollama_models() -> Result<Vec<String>, String> {
     }
 }
 
-/// Save API keys to the WOTANN config file (~/.wotann/providers.env)
+/// Save API keys to the WOTANN config file (~/.wotann/providers.env).
+///
+/// Round 7 audit hardening:
+/// 1. **Atomic write** — previously `std::fs::write()` truncated then
+///    wrote, leaving a 0-byte window where the daemon (reading the
+///    file on startup) would see no keys at all. Now we write to
+///    `<path>.tmp.<rand>` then `rename(2)` over the target — the
+///    rename is atomic per POSIX, so concurrent readers always see
+///    either the old version or the new version, never a half-written
+///    one.
+/// 2. **Empty-value semantics** — previously, setting a key to "" in
+///    the UI silently kept the old value (the merge skipped empty
+///    keys). Now an empty value DELETES the key from the file, so
+///    "Clear" buttons in the UI actually clear the credential.
+/// 3. **Quote-safe values** — values containing `#` or whitespace are
+///    now wrapped in double-quotes so the daemon's parser at
+///    `src/daemon/start.ts:78-87` can round-trip them without losing
+///    characters after the `#`.
 #[tauri::command]
 pub async fn save_api_keys(keys: std::collections::HashMap<String, String>) -> Result<(), String> {
     let home = dirs_home();
@@ -2310,35 +2327,100 @@ pub async fn save_api_keys(keys: std::collections::HashMap<String, String>) -> R
     let mut existing: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     if let Ok(content) = std::fs::read_to_string(&env_path) {
         for line in content.lines() {
-            if let Some((key, value)) = line.split_once('=') {
-                existing.insert(key.trim().to_string(), value.trim().to_string());
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if let Some((key, value)) = trimmed.split_once('=') {
+                let mut v = value.trim().to_string();
+                // Strip surrounding quotes that we may have written
+                // ourselves (round-trip-safe).
+                if (v.starts_with('"') && v.ends_with('"') && v.len() >= 2)
+                    || (v.starts_with('\'') && v.ends_with('\'') && v.len() >= 2)
+                {
+                    v = v[1..v.len() - 1].to_string();
+                }
+                existing.insert(key.trim().to_string(), v);
             }
         }
     }
 
-    // Merge new keys (only non-empty values)
+    // Merge new keys: empty value removes the key, non-empty replaces it.
     for (key, value) in &keys {
-        if !value.is_empty() {
+        if value.is_empty() {
+            existing.remove(key);
+        } else {
             existing.insert(key.clone(), value.clone());
         }
     }
 
-    // Write the env file
-    let content: String = existing
-        .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
+    // Write the env file with quote-safe values + sorted keys for
+    // deterministic output (helps git diff if user vendors the file).
+    let mut entries: Vec<(&String, &String)> = existing.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    let content: String = entries
+        .into_iter()
+        .map(|(k, v)| {
+            // Wrap in quotes if the value contains characters that
+            // would confuse the daemon's parser (`#`, whitespace, `=`).
+            let needs_quoting = v.contains('#')
+                || v.contains(' ')
+                || v.contains('\t')
+                || v.contains('\n')
+                || v.contains('=');
+            if needs_quoting {
+                let escaped = v.replace('\\', "\\\\").replace('"', "\\\"");
+                format!("{}=\"{}\"", k, escaped)
+            } else {
+                format!("{}={}", k, v)
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
-    std::fs::write(&env_path, &content).map_err(|e| e.to_string())?;
+    // Atomic write: create unique temp file in same dir, write fully,
+    // fsync, rename(2) over target. Same dir is required because
+    // `rename` is only atomic across paths within the same filesystem.
+    use std::io::Write;
+    let tmp_name = format!(
+        "{}/.providers.env.tmp.{}.{}",
+        wotann_dir,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    {
+        let mut tmp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_name)
+            .map_err(|e| format!("create temp file: {}", e))?;
+        tmp_file
+            .write_all(content.as_bytes())
+            .map_err(|e| format!("write temp file: {}", e))?;
+        tmp_file
+            .write_all(b"\n")
+            .map_err(|e| format!("write temp file trailing newline: {}", e))?;
+        tmp_file
+            .sync_all()
+            .map_err(|e| format!("fsync temp file: {}", e))?;
+    } // Drop closes the handle.
 
-    // Set restrictive permissions (owner read/write only) — API keys are sensitive
+    // Apply restrictive permissions on the temp file BEFORE rename so
+    // there's never a window where the new file exists at the target
+    // path with default permissions.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(&env_path, perms).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(&tmp_name, perms)
+            .map_err(|e| format!("chmod temp file: {}", e))?;
     }
+
+    std::fs::rename(&tmp_name, &env_path)
+        .map_err(|e| format!("atomic rename {} -> {}: {}", tmp_name, env_path, e))?;
 
     // NOTE: Removed std::env::set_var — it is unsafe in multi-threaded Rust.
     // The daemon reads from providers.env on startup; no need to set env vars here.

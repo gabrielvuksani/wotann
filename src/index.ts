@@ -7565,7 +7565,7 @@ program
   .option("--max-retries <n>", "Per-stage retry budget", (v) => Number(v))
   .option("--stages <csv>", "Override stages (default prd,design,code,qa)")
   .option("--force", "Overwrite existing artifact files at --out", false)
-  .option("--model <id>", "Model id used by every stage (default haiku)", "haiku")
+  .option("--model <id>", "Model id used by every stage (default: provider-defaulted worker model)")
   .action(
     async (
       ideaWords: string[],
@@ -7588,7 +7588,16 @@ program
       const { runSopCommand, parseStagesFlag } = await import("./cli/commands/sop.js");
       type SopOpts = Parameters<typeof runSopCommand>[0];
       const stages = parseStagesFlag(opts.stages);
-      const sopOpts: Record<string, unknown> = { idea, model: opts.model ?? "haiku" };
+      // Round 7 audit fix (QB#1 violation): prior default was hardcoded
+      // to "haiku" — Anthropic-vendor-biased fallback. Now resolves to
+      // the active provider's worker model so Gemini/OpenAI/Ollama
+      // users get a sensible default for their stack.
+      const { detectProviderFromEnv, getProviderDefaults } =
+        await import("./providers/model-defaults.js");
+      const detected = detectProviderFromEnv(process.env);
+      const fallbackModel = getProviderDefaults(detected?.provider ?? null).workerModel;
+      const resolvedModel = opts.model ?? fallbackModel;
+      const sopOpts: Record<string, unknown> = { idea, model: resolvedModel };
       if (opts.out !== undefined) sopOpts["outDir"] = opts.out;
       if (opts.emit === true) sopOpts["emit"] = true;
       if (opts.force === true) sopOpts["force"] = true;

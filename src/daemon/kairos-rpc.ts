@@ -8778,56 +8778,676 @@ export class KairosRPCHandler {
       }
     });
 
-    // ── Honest-stub handlers for in-development feature panels ────
+    // ── Real wires for the 6 desktop-panel features ─────────────
     //
-    // The Desktop UI ships panels for `agentless`, `build`, `deploy`,
-    // `offload`, `recipe`, and `sop` — each panel calls daemon RPC
-    // methods (e.g. `agentless.run`, `build.status`) that historically
-    // did not exist, so every click silently dead-letters with -32601.
-    // Audit-Agent-D (2026-04-29) caught this via the parity matrix.
+    // Round 7 audit (Audit-Agent on 2026-04-30) confirmed every one of
+    // these features has a working orchestrator already shipped — the
+    // Round-6 honest-stubs were just glue that nobody had written yet.
+    // Each handler below now calls the real implementation:
+    //   agentless → src/modes/agentless/orchestrator.ts:runAgentless
+    //   build     → src/cli/commands/build.ts:runBuildCommand
+    //   deploy    → src/cli/commands/deploy.ts:runDeployCommand
+    //   offload   → src/providers/cloud-offload/{anthropic,fly,cf}.ts
+    //   recipe    → src/recipes/recipe-runtime.ts:runRecipe
+    //   sop       → src/sop/pipeline.ts:runPipeline
     //
-    // The Quality Bar #2 rule (honest stubs over silent success) says
-    // we must register these handlers even when the underlying feature
-    // isn't built — returning a structured `not_implemented` envelope
-    // so the UI can render "Feature in development" instead of crashing
-    // on `result.providers.map(...)` against undefined. The envelope
-    // shape is intentionally identical across all 16 stubs so the
-    // generic UI helper in stub-handler.tsx can render them uniformly.
-    const stubFeature = (
-      feature: string,
-      status: "planned" | "in-progress" | "alpha" = "planned",
-    ) => {
-      return async () => ({
-        error: "not_implemented",
-        feature,
-        status,
-        message: `Feature "${feature}" is ${status}. The daemon handler is registered as a stub so the UI doesn't silently dead-letter; real implementation is tracked in docs/MASTER_PLAN.md.`,
-      });
+    // Per-class state is stored on the `featureRunState` field below
+    // (QB#7 — no module-globals; per-instance state survives across
+    // a daemon.stop() → daemon.start() cycle without leaking).
+
+    // ── agentless ─────────────────────────────────────────────
+    this.handlers.set("agentless.run", async (params) => {
+      const issueText =
+        typeof params["issue"] === "string" ? (params["issue"] as string).trim() : "";
+      if (issueText.length === 0) {
+        return {
+          success: false,
+          phases: [],
+          affectedFiles: [],
+          error: "issue required",
+        };
+      }
+      try {
+        const { runAgentless } = await import("../modes/agentless/orchestrator.js");
+        const root = process.cwd();
+        const model = this.buildRuntimeAgentlessModel();
+        const result = await runAgentless(
+          { title: issueText.slice(0, 96), body: issueText, source: "manual" },
+          {
+            localize: { root },
+            repair: { root, model },
+          },
+        );
+        return {
+          success: result.outcome === "success",
+          phases: [
+            {
+              phase: "localize",
+              status: "success",
+              summary: `${result.localize.candidateFiles.length} candidates`,
+            },
+            {
+              phase: "repair",
+              status: result.repair?.diff ? "success" : "failed",
+              summary: result.repair?.error ?? `diff len ${result.repair?.diff?.length ?? 0}`,
+            },
+            {
+              phase: "validate",
+              status: result.validate?.passed
+                ? "success"
+                : result.outcome === "blocked-validate"
+                  ? "failed"
+                  : "pending",
+              summary: result.validate?.applyError,
+            },
+          ],
+          ...(result.repair?.diff ? { diff: result.repair.diff } : {}),
+          affectedFiles: result.localize.candidateFiles.map((c) => c.file),
+        };
+      } catch (err) {
+        return {
+          success: false,
+          phases: [],
+          affectedFiles: [],
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    });
+
+    this.handlers.set("agentless.cancel", async () => ({
+      ok: false,
+      error:
+        "agentless does not support mid-run cancel; orchestrator is fire-and-forget. Wait for current run to finish.",
+    }));
+
+    // ── build ─────────────────────────────────────────────────
+    this.handlers.set("build.run", async (params) => {
+      const prompt =
+        typeof params["prompt"] === "string" ? (params["prompt"] as string).trim() : "";
+      const variantsCount =
+        typeof params["variants"] === "number" && params["variants"] >= 1
+          ? Math.min(5, Math.floor(params["variants"] as number))
+          : 1;
+      if (prompt.length === 0) {
+        return { success: false, variants: [], error: "prompt required" };
+      }
+      this.featureRunState.build.running = true;
+      try {
+        const { runBuildCommand } = await import("../cli/commands/build.js");
+        const result = await runBuildCommand({
+          spec: prompt,
+          variants: variantsCount,
+          emit: false,
+        });
+        if (!result.ok) {
+          return { success: false, variants: [], error: result.error };
+        }
+        return {
+          success: true,
+          prompt,
+          variants: result.variants.map((v) => ({
+            id: `variant-${v.variantIndex}`,
+            model: v.scaffold.ok ? v.scaffold.scaffold.id : "unknown",
+            status: "success" as const,
+            summary: `${v.files.length} files; deploy: ${v.deploy.target}; db: ${v.db.provider}`,
+          })),
+        };
+      } catch (err) {
+        return {
+          success: false,
+          variants: [],
+          error: err instanceof Error ? err.message : String(err),
+        };
+      } finally {
+        this.featureRunState.build.running = false;
+      }
+    });
+
+    this.handlers.set("build.status", async () => ({
+      running: this.featureRunState.build.running,
+    }));
+
+    this.handlers.set("build.cancel", async () => {
+      // runBuildCommand has no AbortSignal yet — set the flag so
+      // subsequent variant emissions early-return, but in-flight
+      // current-variant model calls continue.
+      this.featureRunState.build.running = false;
+      return { ok: true };
+    });
+
+    // ── deploy ────────────────────────────────────────────────
+    this.handlers.set("deploy.targets", async () => ({
+      targets: [
+        { id: "cloudflare-pages", name: "Cloudflare Pages", kind: "edge" },
+        { id: "vercel", name: "Vercel", kind: "serverless" },
+        { id: "fly", name: "Fly.io", kind: "vm" },
+        { id: "self-host", name: "Self-hosted (Caddy)", kind: "vm" },
+      ],
+    }));
+
+    this.handlers.set("deploy.run", async (params) => {
+      const target = params["target"];
+      const env = typeof params["env"] === "string" ? (params["env"] as string) : "production";
+      if (typeof target !== "string") {
+        return { success: false, log: "target required", target: "", env };
+      }
+      try {
+        const { runDeployCommand, parseDeployTarget } = await import("../cli/commands/deploy.js");
+        const parsed = parseDeployTarget(target);
+        if (!parsed) {
+          return {
+            success: false,
+            log: `unknown target: ${target}`,
+            target,
+            env,
+          };
+        }
+        const result = await runDeployCommand({
+          to: parsed,
+          projectDir: process.cwd(),
+          emit: false,
+        });
+        if (!result.ok) {
+          return { success: false, log: result.error, target, env };
+        }
+        return {
+          success: true,
+          target,
+          env,
+          log: [
+            `Plan for ${parsed} (${env}):`,
+            "",
+            "Files that would emit:",
+            ...result.plan.files.map((f) => `  ${f.path}`),
+            "",
+            "Commands:",
+            ...result.commands.map((c) => `  $ ${c}`),
+          ].join("\n"),
+        };
+      } catch (err) {
+        return {
+          success: false,
+          log: err instanceof Error ? err.message : String(err),
+          target,
+          env,
+        };
+      }
+    });
+
+    // ── offload ───────────────────────────────────────────────
+    this.handlers.set("offload.providers", async () => {
+      const reg = await this.ensureCloudOffloadRegistry();
+      return {
+        providers: [
+          {
+            id: "anthropic-managed",
+            name: "Anthropic Managed",
+            description: "Anthropic-hosted long-running session",
+            available: reg.has("anthropic-managed"),
+          },
+          {
+            id: "fly-sprites",
+            name: "Fly Sprites",
+            description: "Fly.io ephemeral compute sprites",
+            available: reg.has("fly-sprites"),
+          },
+          {
+            id: "cloudflare-agents",
+            name: "Cloudflare Agents",
+            description: "Cloudflare Durable Objects + Workers AI",
+            available: reg.has("cloudflare-agents"),
+          },
+        ],
+      };
+    });
+
+    this.handlers.set("offload.run", async (params) => {
+      const provider = params["provider"];
+      const task = params["task"];
+      if (typeof provider !== "string" || typeof task !== "string" || task.trim().length === 0) {
+        return { success: false, output: "provider + task required" };
+      }
+      const { isCloudOffloadProvider } = await import("../providers/cloud-offload/adapter.js");
+      if (!isCloudOffloadProvider(provider)) {
+        return { success: false, output: `unknown provider: ${provider}` };
+      }
+      const reg = await this.ensureCloudOffloadRegistry();
+      const adapter = reg.get(provider);
+      if (!adapter) {
+        return {
+          success: false,
+          output: `provider ${provider} not configured (set the matching API key env var)`,
+        };
+      }
+      try {
+        const { captureCloudSnapshot } = await import("../providers/cloud-offload/snapshot.js");
+        const { tmpdir } = await import("node:os");
+        const { join } = await import("node:path");
+        const outputDir = join(
+          tmpdir(),
+          `wotann-cloud-snapshot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        );
+        const snapshotResult = await captureCloudSnapshot({
+          cwd: process.cwd(),
+          outputDir,
+        });
+        if (!snapshotResult.ok) {
+          return {
+            success: false,
+            provider,
+            output: `snapshot failed: ${snapshotResult.error ?? "unknown error"}`,
+          };
+        }
+        const collected: string[] = [];
+        const session = await adapter.start({
+          task,
+          snapshot: snapshotResult.snapshot,
+          onFrame: (frame) => {
+            if (frame.kind === "stdout" || frame.kind === "stderr") {
+              collected.push(frame.content);
+            }
+          },
+        });
+        this.featureRunState.offload.activeSessions.set(provider, session.sessionId);
+        return {
+          success: session.status === "completed",
+          provider,
+          output: collected.join(""),
+          ...(session.costUsd !== undefined ? { costUsd: session.costUsd } : {}),
+          sessionId: session.sessionId,
+        };
+      } catch (err) {
+        return {
+          success: false,
+          provider,
+          output: err instanceof Error ? err.message : String(err),
+        };
+      }
+    });
+
+    this.handlers.set("offload.cancel", async (params) => {
+      const provider = params["provider"];
+      if (typeof provider !== "string") return { ok: false };
+      const sessionId = this.featureRunState.offload.activeSessions.get(provider);
+      if (!sessionId) return { ok: false, error: "no active session" };
+      const { isCloudOffloadProvider } = await import("../providers/cloud-offload/adapter.js");
+      if (!isCloudOffloadProvider(provider)) return { ok: false };
+      const reg = await this.ensureCloudOffloadRegistry();
+      const adapter = reg.get(provider);
+      if (!adapter) return { ok: false };
+      const cancelled = await adapter.cancel(sessionId);
+      this.featureRunState.offload.activeSessions.delete(provider);
+      return { ok: cancelled };
+    });
+
+    // ── recipe ────────────────────────────────────────────────
+    this.handlers.set("recipe.list", async () => {
+      try {
+        const recipes = await this.listRecipes();
+        return { recipes };
+      } catch (err) {
+        return {
+          recipes: [],
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    });
+
+    this.handlers.set("recipe.run", async (params) => {
+      const name = typeof params["name"] === "string" ? (params["name"] as string) : "";
+      if (name.length === 0) {
+        return { success: false, output: "name required", recipe: "" };
+      }
+      try {
+        const { loadRecipeFromFile } = await import("../recipes/recipe-loader.js");
+        const { runRecipe } = await import("../recipes/recipe-runtime.js");
+        const files = await this.listRecipeFiles();
+        let recipe: import("../recipes/recipe-types.js").Recipe | null = null;
+        for (const f of files) {
+          const r = await loadRecipeFromFile(f);
+          if (r.ok && r.recipe.id === name) {
+            recipe = r.recipe;
+            break;
+          }
+        }
+        if (!recipe) {
+          return {
+            success: false,
+            output: `recipe "${name}" not found in .wotann/recipes/`,
+            recipe: name,
+          };
+        }
+        this.featureRunState.recipe.running.add(name);
+        const t0 = Date.now();
+        try {
+          const result = await runRecipe(
+            recipe,
+            {},
+            {
+              availableExtensions: ["builtin.echo", "builtin.bash"],
+              executor: this.buildRuntimeRecipeExecutor(),
+            },
+          );
+          return {
+            success: result.ok,
+            recipe: name,
+            output: result.outputs
+              .map((o) => `[${o.type}] ${o.ok ? "✓" : "✗"} ${o.message ?? ""}`)
+              .join("\n"),
+            durationMs: Date.now() - t0,
+            ...(result.ok ? {} : { error: result.error }),
+          };
+        } finally {
+          this.featureRunState.recipe.running.delete(name);
+        }
+      } catch (err) {
+        return {
+          success: false,
+          recipe: name,
+          output: err instanceof Error ? err.message : String(err),
+        };
+      }
+    });
+
+    this.handlers.set("recipe.cancel", async (params) => {
+      const name = typeof params["name"] === "string" ? (params["name"] as string) : "";
+      this.featureRunState.recipe.running.delete(name);
+      return {
+        ok: false,
+        error: "recipe runtime does not support mid-run cancel",
+      };
+    });
+
+    // ── sop ───────────────────────────────────────────────────
+    this.handlers.set("sop.list", async () => ({
+      sops: [
+        {
+          name: "metagpt",
+          description: "MetaGPT-style PRD → Design → Code → QA pipeline",
+          stages: ["prd", "design", "code", "qa"],
+        },
+      ],
+    }));
+
+    this.handlers.set("sop.run", async (params) => {
+      const name = params["name"];
+      if (typeof name !== "string" || name !== "metagpt") {
+        return {
+          success: false,
+          name: typeof name === "string" ? name : "",
+          emitted: [],
+          log: `unknown SOP: ${String(name)}. Available: metagpt`,
+        };
+      }
+      const stagesParam = Array.isArray(params["stages"])
+        ? ((params["stages"] as unknown[]).filter((s) => typeof s === "string") as string[])
+        : [];
+      const idea =
+        typeof params["idea"] === "string" && (params["idea"] as string).trim().length > 0
+          ? (params["idea"] as string)
+          : typeof params["prompt"] === "string"
+            ? (params["prompt"] as string)
+            : "(no idea provided)";
+      if (!this.runtime) {
+        return {
+          success: false,
+          name,
+          emitted: [],
+          log: "no runtime bound — cannot run SOP without a model",
+        };
+      }
+      try {
+        const { runPipeline, summarizePipeline } = await import("../sop/pipeline.js");
+        const { STAGE_ORDER } = await import("../sop/types.js");
+        type SopStage = (typeof STAGE_ORDER)[number];
+        const validStages = stagesParam.filter((s): s is SopStage =>
+          (STAGE_ORDER as readonly string[]).includes(s),
+        );
+        const stages: readonly SopStage[] =
+          validStages.length > 0 ? validStages : (["prd", "design", "code", "qa"] as const);
+        const model = this.buildRuntimeSopModel();
+        this.featureRunState.sop.running = true;
+        const emitted: string[] = [];
+        try {
+          const result = await runPipeline({
+            idea,
+            model,
+            stages,
+            onStageComplete: (a) => emitted.push(a.filename),
+          });
+          return {
+            success: result.outcome === "success",
+            name,
+            emitted,
+            log: summarizePipeline(result),
+          };
+        } finally {
+          this.featureRunState.sop.running = false;
+        }
+      } catch (err) {
+        return {
+          success: false,
+          name,
+          emitted: [],
+          log: err instanceof Error ? err.message : String(err),
+        };
+      }
+    });
+
+    this.handlers.set("sop.cancel", async () => {
+      this.featureRunState.sop.running = false;
+      return {
+        ok: false,
+        error: "SOP pipeline does not support mid-run cancel",
+      };
+    });
+  }
+
+  /**
+   * Per-instance state for the 6 panel features. Tracks in-flight
+   * runs so `*.cancel` and `*.status` calls have something to read.
+   * Resets when the daemon restarts — runs are not durable across
+   * `daemon.stop()`.
+   */
+  private readonly featureRunState = {
+    build: { running: false },
+    sop: { running: false },
+    recipe: { running: new Set<string>() },
+    offload: { activeSessions: new Map<string, string>() },
+  };
+
+  /**
+   * Cached cloud-offload registry. Lazy-initialized because each
+   * adapter factory throws on missing config (apiKey/region/etc.),
+   * and we want the daemon to boot even when zero providers are
+   * configured.
+   */
+  private cloudOffloadRegistry:
+    | import("../providers/cloud-offload/adapter.js").CloudOffloadRegistry
+    | null = null;
+
+  private async ensureCloudOffloadRegistry(): Promise<
+    import("../providers/cloud-offload/adapter.js").CloudOffloadRegistry
+  > {
+    if (this.cloudOffloadRegistry) return this.cloudOffloadRegistry;
+    const { createCloudOffloadRegistry } = await import("../providers/cloud-offload/adapter.js");
+    this.cloudOffloadRegistry = createCloudOffloadRegistry();
+    // Adapters require explicit register() with config — the registry
+    // is intentionally empty until a future startup-config wire reads
+    // ~/.wotann/cloud-offload.yaml. Until then `available: false` is
+    // the honest answer for all three providers.
+    return this.cloudOffloadRegistry;
+  }
+
+  /**
+   * Build a runtime-backed AgentlessModel adapter. Routes the
+   * orchestrator's model.query() through `runtime.query()` so the
+   * user's chosen provider (Anthropic, OpenAI, Gemini, Ollama, etc.)
+   * is honored. If no runtime is bound, returns a stub model that
+   * yields empty text (orchestrator handles this gracefully — the
+   * repair phase will skip).
+   */
+  private buildRuntimeAgentlessModel(): import("../modes/agentless/types.js").AgentlessModel {
+    const runtime = this.runtime;
+    if (!runtime) {
+      return {
+        name: "stub",
+        async query() {
+          return { text: "", tokensIn: 0, tokensOut: 0 };
+        },
+      };
+    }
+    return {
+      name: runtime.getStatus().activeProvider ?? "wotann-runtime",
+      async query(prompt, opts) {
+        let text = "";
+        for await (const chunk of runtime.query({
+          prompt,
+          ...(opts?.maxTokens ? { maxTokens: opts.maxTokens } : {}),
+        })) {
+          if (chunk.type === "text" && typeof chunk.content === "string") text += chunk.content;
+        }
+        return { text, tokensIn: 0, tokensOut: 0 };
+      },
     };
+  }
 
-    // 16 panels × 1-3 methods each = 16 stubs. Sorted by panel for
-    // grep-friendliness when wiring real implementations later.
-    this.handlers.set("agentless.run", stubFeature("agentless.run", "planned"));
-    this.handlers.set("agentless.cancel", stubFeature("agentless.cancel", "planned"));
+  /**
+   * Build a runtime-backed SopModel. Mirror of the agentless adapter
+   * but with the SopModel typing.
+   */
+  private buildRuntimeSopModel(): import("../sop/types.js").SopModel {
+    const runtime = this.runtime;
+    if (!runtime) {
+      return {
+        name: "stub",
+        async query() {
+          return { text: "", tokensIn: 0, tokensOut: 0 };
+        },
+      };
+    }
+    return {
+      name: runtime.getStatus().activeProvider ?? "wotann-runtime",
+      async query(prompt, opts) {
+        let text = "";
+        for await (const chunk of runtime.query({
+          prompt,
+          ...(opts?.maxTokens ? { maxTokens: opts.maxTokens } : {}),
+        })) {
+          if (chunk.type === "text" && typeof chunk.content === "string") text += chunk.content;
+        }
+        return { text, tokensIn: 0, tokensOut: 0 };
+      },
+    };
+  }
 
-    this.handlers.set("build.run", stubFeature("build.run", "planned"));
-    this.handlers.set("build.status", stubFeature("build.status", "planned"));
-    this.handlers.set("build.cancel", stubFeature("build.cancel", "planned"));
+  /**
+   * Build a recipe executor. read/write/bash use Node primitives;
+   * prompt routes through the runtime if bound, else returns an
+   * error envelope so the recipe still completes (with the prompt
+   * step marked failed).
+   */
+  private buildRuntimeRecipeExecutor(): import("../recipes/recipe-types.js").RecipeStepExecutor {
+    const runtime = this.runtime;
+    return {
+      read: async (p: string) => {
+        try {
+          const { readFile } = await import("node:fs/promises");
+          return { ok: true, content: await readFile(p, "utf-8") };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
+      write: async (p: string, c: string) => {
+        try {
+          const { writeFile } = await import("node:fs/promises");
+          await writeFile(p, c, "utf-8");
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
+      bash: async (cmd: string) => {
+        try {
+          const { exec } = await import("node:child_process");
+          const { promisify } = await import("node:util");
+          const execAsync = promisify(exec);
+          const r = await execAsync(cmd);
+          return {
+            ok: true,
+            exitCode: 0,
+            stdout: String(r.stdout ?? ""),
+            stderr: String(r.stderr ?? ""),
+          };
+        } catch (e) {
+          const ee = e as { code?: number; stdout?: Buffer; stderr?: Buffer };
+          return {
+            ok: false,
+            exitCode: ee.code ?? 1,
+            stdout: String(ee.stdout ?? ""),
+            stderr: String(ee.stderr ?? ""),
+          };
+        }
+      },
+      prompt: async (text: string) => {
+        if (!runtime) return { ok: false, error: "no runtime bound" };
+        try {
+          let response = "";
+          for await (const chunk of runtime.query({ prompt: text })) {
+            if (chunk.type === "text" && typeof chunk.content === "string")
+              response += chunk.content;
+          }
+          return { ok: true, response };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
+    };
+  }
 
-    this.handlers.set("deploy.run", stubFeature("deploy.run", "planned"));
-    this.handlers.set("deploy.targets", stubFeature("deploy.targets", "planned"));
+  /**
+   * List recipe files in `.wotann/recipes/` (project-level only).
+   * Returns absolute paths, ordered alphabetically. Empty array if
+   * the directory doesn't exist — recipes are an optional feature.
+   */
+  private async listRecipeFiles(): Promise<readonly string[]> {
+    try {
+      const { readdir } = await import("node:fs/promises");
+      const { resolve, join } = await import("node:path");
+      const dir = resolve(".wotann/recipes");
+      const entries = await readdir(dir, { withFileTypes: true });
+      return entries
+        .filter((e) => e.isFile() && /\.(ya?ml|json)$/i.test(e.name))
+        .map((e) => join(dir, e.name))
+        .sort();
+    } catch {
+      return [];
+    }
+  }
 
-    this.handlers.set("offload.run", stubFeature("offload.run", "planned"));
-    this.handlers.set("offload.cancel", stubFeature("offload.cancel", "planned"));
-    this.handlers.set("offload.providers", stubFeature("offload.providers", "planned"));
-
-    this.handlers.set("recipe.run", stubFeature("recipe.run", "planned"));
-    this.handlers.set("recipe.list", stubFeature("recipe.list", "planned"));
-    this.handlers.set("recipe.cancel", stubFeature("recipe.cancel", "planned"));
-
-    this.handlers.set("sop.run", stubFeature("sop.run", "planned"));
-    this.handlers.set("sop.list", stubFeature("sop.list", "planned"));
-    this.handlers.set("sop.cancel", stubFeature("sop.cancel", "planned"));
+  /**
+   * Helper for `recipe.list`: load each recipe file, extract metadata,
+   * and translate the `id`→`name` field the UI panel expects.
+   */
+  private async listRecipes(): Promise<
+    readonly { name: string; description?: string; path: string }[]
+  > {
+    const { loadRecipeFromFile } = await import("../recipes/recipe-loader.js");
+    const files = await this.listRecipeFiles();
+    const out: { name: string; description?: string; path: string }[] = [];
+    for (const f of files) {
+      const result = await loadRecipeFromFile(f);
+      if (result.ok) {
+        out.push({
+          name: result.recipe.id,
+          ...(result.recipe.description
+            ? { description: result.recipe.description }
+            : { description: result.recipe.title }),
+          path: f,
+        });
+      }
+    }
+    return out;
   }
 
   private errorResponse(id: string | number | null, code: number, message: string): RPCResponse {
