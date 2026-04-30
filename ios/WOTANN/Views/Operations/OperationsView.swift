@@ -101,16 +101,37 @@ private struct InspectTabView: View {
 private struct AttestTabView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
     @State private var keyId = "default"
+    @State private var recordJSON = "{\"action\":\"tool:Read\",\"resource\":\"src/foo.ts\"}"
+    @State private var lastEnvelopeJSON: String = ""
     @State private var output: String = ""
     @State private var errorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: WTheme.Spacing.sm) {
-            Text("Generate or load Ed25519 audit keys. Use the CLI to sign + verify a JSON record end-to-end.")
+            Text("Generate or load Ed25519 audit keys, then sign and verify JSON records end-to-end. The signed envelope round-trips without leaving the daemon — keys never reach the phone.")
                 .font(.callout)
                 .foregroundColor(WTheme.Colors.textSecondary)
             TextField("Key id", text: $keyId).textFieldStyle(.roundedBorder)
-            Button("Generate / load") { Task { await run() } }.buttonStyle(.borderedProminent)
+            HStack(spacing: WTheme.Spacing.sm) {
+                Button("Generate / load") { Task { await runGenkey() } }
+                    .buttonStyle(.borderedProminent)
+                Button("Sign record") { Task { await runSign() } }
+                    .buttonStyle(.bordered)
+                    .disabled(recordJSON.isEmpty)
+                Button("Verify") { Task { await runVerify() } }
+                    .buttonStyle(.bordered)
+                    .disabled(lastEnvelopeJSON.isEmpty)
+            }
+            Text("Record JSON")
+                .font(.caption)
+                .foregroundColor(WTheme.Colors.textSecondary)
+            TextEditor(text: $recordJSON)
+                .frame(minHeight: 80)
+                .font(.body.monospaced())
+                .scrollContentBackground(.hidden)
+                .padding(WTheme.Spacing.sm)
+                .background(WTheme.Colors.surfaceAlt)
+                .clipShape(RoundedRectangle(cornerRadius: WTheme.Radius.sm))
             if let errorMessage {
                 Text(errorMessage).foregroundColor(WTheme.Colors.warning).font(.caption)
             }
@@ -124,13 +145,121 @@ private struct AttestTabView: View {
         }
     }
 
-    private func run() async {
+    private func runGenkey() async {
         do {
             let result = try await connectionManager.rpcClient.attestGenkey(keyId)
-            output = String(describing: result)
+            // Typed result (Round 6): show whether the key existed already or
+            // was just minted, so users can spot accidental rotations.
+            output = "id=\(result.id) existed=\(result.existed)\n\npublicPem (truncated):\n\(String(result.publicPem.prefix(120)))…"
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func runSign() async {
+        do {
+            // Parse the user's JSON record into [String: RPCValue].
+            // attestSign() is the typed wrapper at RPCClient:1029.
+            let recordValue = rpcFromJSON(recordJSON)
+            guard case .object(let record) = recordValue else {
+                errorMessage = "Record JSON must be a JSON object"
+                return
+            }
+            let envelope = try await connectionManager.rpcClient.attestSign(
+                record,
+                id: keyId
+            )
+            if let err = envelope["error"]?.stringValue {
+                errorMessage = err
+                return
+            }
+            // Persist the envelope so "Verify" can re-use it.
+            if let envelopeData = try? JSONSerialization.data(
+                withJSONObject: rpcValueToAny(envelope),
+                options: [.prettyPrinted, .sortedKeys]
+            ),
+               let pretty = String(data: envelopeData, encoding: .utf8) {
+                lastEnvelopeJSON = pretty
+                output = "Signed.\nEnvelope:\n\(pretty)"
+            } else {
+                output = "Signed (envelope serialization failed)."
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func runVerify() async {
+        do {
+            let envelopeValue = rpcFromJSON(lastEnvelopeJSON)
+            guard case .object(let envelope) = envelopeValue else {
+                errorMessage = "Last envelope is not a JSON object"
+                return
+            }
+            let result = try await connectionManager.rpcClient.attestVerify(envelope)
+            if let err = result["error"]?.stringValue {
+                errorMessage = err
+                return
+            }
+            let valid = result["valid"]?.boolValue ?? false
+            let reason = result["reason"]?.stringValue ?? "(no reason)"
+            output = valid ? "✓ Verified — \(reason)" : "✗ Verification FAILED — \(reason)"
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Lightweight RPCValue parser — the JSONSerialization output uses
+    /// `Any` (NSDictionary/NSArray/NSNumber/NSString/NSNull) which we
+    /// translate into the RPCValue tree the daemon expects.
+    private func rpcFromJSON(_ jsonString: String) -> RPCValue {
+        guard let data = jsonString.data(using: .utf8),
+              let any = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
+            return .null
+        }
+        return rpcFromAny(any)
+    }
+
+    private func rpcFromAny(_ any: Any) -> RPCValue {
+        if any is NSNull { return .null }
+        if let s = any as? String { return .string(s) }
+        if let b = any as? Bool { return .bool(b) }
+        if let n = any as? NSNumber {
+            // NSNumber is sneaky — Bool slips through as NSNumber too.
+            // We've already handled Bool above, so anything reaching here
+            // is a real number. Distinguish int/double via the encoding.
+            let s = String(cString: n.objCType)
+            return s == "d" || s == "f" ? .double(n.doubleValue) : .int(n.intValue)
+        }
+        if let arr = any as? [Any] {
+            return .array(arr.map(rpcFromAny))
+        }
+        if let dict = any as? [String: Any] {
+            var out: [String: RPCValue] = [:]
+            for (k, v) in dict { out[k] = rpcFromAny(v) }
+            return .object(out)
+        }
+        return .null
+    }
+
+    private func rpcValueToAny(_ obj: [String: RPCValue]) -> Any {
+        var out: [String: Any] = [:]
+        for (k, v) in obj { out[k] = rpcValueToAnyOne(v) }
+        return out
+    }
+
+    private func rpcValueToAnyOne(_ v: RPCValue) -> Any {
+        switch v {
+        case .null: return NSNull()
+        case .bool(let b): return b
+        case .int(let i): return i
+        case .double(let d): return d
+        case .string(let s): return s
+        case .array(let arr): return arr.map(rpcValueToAnyOne)
+        case .object(let obj): return rpcValueToAny(obj)
         }
     }
 }

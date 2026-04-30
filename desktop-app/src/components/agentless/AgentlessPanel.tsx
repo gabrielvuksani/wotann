@@ -25,6 +25,11 @@ import {
   type ReactElement,
 } from "react";
 import { commands } from "../../hooks/useTauriCommand";
+import {
+  isNotImplemented,
+  NotImplementedBanner,
+  type NotImplementedEnvelope,
+} from "../_shared/honestStub";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -137,14 +142,21 @@ export function AgentlessPanel(): ReactElement {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [lastResult, setLastResult] = useState<AgentlessResult | null>(null);
+  const [stubEnvelope, setStubEnvelope] =
+    useState<NotImplementedEnvelope | null>(null);
 
   const run = useCallback(async (): Promise<void> => {
     if (issue.trim().length === 0) return;
     setIsRunning(true);
     setErrorMessage(null);
     setLastResult(null);
+    setStubEnvelope(null);
     try {
       const result = await rpcCall("agentless.run", { issue: issue.trim() });
+      if (isNotImplemented(result)) {
+        setStubEnvelope(result);
+        return;
+      }
       setLastResult(parseRunResult(result, issue.trim()));
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
@@ -170,6 +182,14 @@ export function AgentlessPanel(): ReactElement {
       return { label: "Unresolved", color: "var(--color-error, #ef4444)" };
     return { label: "Idle", color: "var(--color-text-secondary)" };
   }, [isRunning, lastResult]);
+
+  if (stubEnvelope) {
+    return (
+      <div className="flex-1 flex flex-col h-full overflow-auto" data-testid="agentless-panel">
+        <NotImplementedBanner envelope={stubEnvelope} panelTitle="Agentless Repair" />
+      </div>
+    );
+  }
 
   return (
     <div

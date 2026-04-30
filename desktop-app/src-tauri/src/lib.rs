@@ -85,6 +85,7 @@ pub fn run() {
             commands::append_block,
             commands::clear_block,
             commands::list_block_kinds,
+            commands::render_block,
             commands::inspect_path,
             commands::attest_genkey,
             commands::attest_sign,

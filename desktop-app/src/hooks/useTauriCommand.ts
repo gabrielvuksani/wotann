@@ -52,6 +52,10 @@ export interface BlockKindInfo {
   readonly limit: number;
 }
 
+export interface BlockRenderResult {
+  readonly content: string;
+}
+
 // ── Teams (ClawTeam port) ─────────────────────────────────
 export interface TeamTemplateSummary {
   readonly name: string;
@@ -65,11 +69,23 @@ export interface AgentSpec {
   readonly name: string;
   readonly type: string;
   readonly task: string;
+  readonly model?: string;
 }
 
+/// Full rendered-template shape returned by `teams.showTemplate` on the
+/// daemon. Carries the orchestration metadata (`invokeArgs`, `backend`,
+/// `source`, `path`) that the prior shape silently dropped — Desktop
+/// callers need these to build an accurate "this team will run as
+/// `tmux new-session …`" preview before spawning, and to surface
+/// where the template originated (project/.wotann vs ~/.wotann vs
+/// built-in) so the user can edit the right copy.
 export interface TeamTemplateRendered {
   readonly name: string;
   readonly description: string;
+  readonly invokeArgs: readonly string[];
+  readonly backend: "tmux" | "wotann" | "none";
+  readonly source: "project" | "user" | "built-in";
+  readonly path?: string;
   readonly leader: AgentSpec;
   readonly agents: readonly AgentSpec[];
 }
@@ -487,6 +503,12 @@ export const commands = {
     invoke<boolean>("clear_block", { kind }),
   listBlockKinds: () =>
     invoke<readonly BlockKindInfo[]>("list_block_kinds"),
+
+  /// Render the active block-memory composition into the assembled
+  /// system-prompt string. Used by Memory panel "Preview prompt"
+  /// affordance — closes the gap where `blocks.render` was daemon-
+  /// only and Memory panel had no preview surface.
+  renderBlock: () => invoke<string>("render_block"),
 
   // ── Inspect (magika port) ─────────────────────────────────
   inspectPath: (path: string, declared?: string) =>

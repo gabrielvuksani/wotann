@@ -31,14 +31,19 @@ coverage/
 .parcel-cache/
 .vite/
 
-# Allow our source `src/build/` (V9 Tier 9 wotann-build subsystem) and
-# the `tests/build/` test suite to be tracked. The `build/` ignore above
-# is for compiled artifacts at the repo root, not source directories
-# named "build" inside src/ or tests/.
+# Allow our source `src/build/` (V9 Tier 9 wotann-build subsystem),
+# the `tests/build/` test suite, AND the desktop-app `build/` UI panel
+# directory (Tier-12 admin reach for `wotann build`) to be tracked.
+# The `build/` ignore above is for compiled artifacts at the repo root,
+# not source directories named "build" inside src/ / tests/ / desktop-app/.
+# Round 6 audit caught this — BuildPanel.tsx was a phantom-untracked
+# file (panel rendered locally, but git ignored the directory entirely).
 !src/build/
 !src/build/**
 !tests/build/
 !tests/build/**
+!desktop-app/src/components/build/
+!desktop-app/src/components/build/**
 
 # SEA (Single Executable Application) build artifacts
 dist/release/

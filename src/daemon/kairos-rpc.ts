@@ -8777,6 +8777,57 @@ export class KairosRPCHandler {
         return { error: err instanceof Error ? err.message : String(err) };
       }
     });
+
+    // ── Honest-stub handlers for in-development feature panels ────
+    //
+    // The Desktop UI ships panels for `agentless`, `build`, `deploy`,
+    // `offload`, `recipe`, and `sop` — each panel calls daemon RPC
+    // methods (e.g. `agentless.run`, `build.status`) that historically
+    // did not exist, so every click silently dead-letters with -32601.
+    // Audit-Agent-D (2026-04-29) caught this via the parity matrix.
+    //
+    // The Quality Bar #2 rule (honest stubs over silent success) says
+    // we must register these handlers even when the underlying feature
+    // isn't built — returning a structured `not_implemented` envelope
+    // so the UI can render "Feature in development" instead of crashing
+    // on `result.providers.map(...)` against undefined. The envelope
+    // shape is intentionally identical across all 16 stubs so the
+    // generic UI helper in stub-handler.tsx can render them uniformly.
+    const stubFeature = (
+      feature: string,
+      status: "planned" | "in-progress" | "alpha" = "planned",
+    ) => {
+      return async () => ({
+        error: "not_implemented",
+        feature,
+        status,
+        message: `Feature "${feature}" is ${status}. The daemon handler is registered as a stub so the UI doesn't silently dead-letter; real implementation is tracked in docs/MASTER_PLAN.md.`,
+      });
+    };
+
+    // 16 panels × 1-3 methods each = 16 stubs. Sorted by panel for
+    // grep-friendliness when wiring real implementations later.
+    this.handlers.set("agentless.run", stubFeature("agentless.run", "planned"));
+    this.handlers.set("agentless.cancel", stubFeature("agentless.cancel", "planned"));
+
+    this.handlers.set("build.run", stubFeature("build.run", "planned"));
+    this.handlers.set("build.status", stubFeature("build.status", "planned"));
+    this.handlers.set("build.cancel", stubFeature("build.cancel", "planned"));
+
+    this.handlers.set("deploy.run", stubFeature("deploy.run", "planned"));
+    this.handlers.set("deploy.targets", stubFeature("deploy.targets", "planned"));
+
+    this.handlers.set("offload.run", stubFeature("offload.run", "planned"));
+    this.handlers.set("offload.cancel", stubFeature("offload.cancel", "planned"));
+    this.handlers.set("offload.providers", stubFeature("offload.providers", "planned"));
+
+    this.handlers.set("recipe.run", stubFeature("recipe.run", "planned"));
+    this.handlers.set("recipe.list", stubFeature("recipe.list", "planned"));
+    this.handlers.set("recipe.cancel", stubFeature("recipe.cancel", "planned"));
+
+    this.handlers.set("sop.run", stubFeature("sop.run", "planned"));
+    this.handlers.set("sop.list", stubFeature("sop.list", "planned"));
+    this.handlers.set("sop.cancel", stubFeature("sop.cancel", "planned"));
   }
 
   private errorResponse(id: string | number | null, code: number, message: string): RPCResponse {

@@ -78,6 +78,50 @@ impl KairosClient {
         Some(token.to_string())
     }
 
+    /// Methods the daemon allows without an `authToken` param. Mirrors
+    /// `UNAUTH_METHODS` in `src/daemon/kairos-ipc.ts:49`. We MUST keep this
+    /// in sync with the daemon side — if the daemon adds a new public
+    /// method (e.g. `health`) and we forget here, every Desktop call will
+    /// inject an unwanted auth token, which is harmless but noisy.
+    /// Conversely, if we allowlist a method the daemon DOES require auth
+    /// for, every call will fail with -32001.
+    const UNAUTH_METHODS: &'static [&'static str] = &["ping", "keepalive"];
+
+    /// Inject the daemon session token into outbound RPC params unless
+    /// the method is on the unauth allowlist or the caller already
+    /// supplied an `authToken`. Returns the (possibly mutated) params.
+    ///
+    /// SHIP-BLOCKER fix (2026-04-29): previous commit 799b870 only patched
+    /// `call_streaming()`. The non-streaming `call()` was still emitting
+    /// unauthenticated requests, causing every Desktop RPC call (except
+    /// ping/keepalive and the streaming `send_message`) to fail with
+    /// -32001. Audit-Agent-A caught this. The shared helper keeps the
+    /// two code paths from drifting again.
+    fn inject_auth(method: &str, mut params: serde_json::Value) -> serde_json::Value {
+        if Self::UNAUTH_METHODS.contains(&method) {
+            return params;
+        }
+        if let Some(obj) = params.as_object() {
+            if obj.contains_key("authToken") {
+                return params;
+            }
+        }
+        let token = match Self::read_session_token() {
+            Some(t) => t,
+            None => return params, // No token yet — let the daemon reject if it must
+        };
+        if !params.is_object() {
+            params = serde_json::json!({});
+        }
+        if let Some(obj) = params.as_object_mut() {
+            obj.insert(
+                "authToken".to_string(),
+                serde_json::Value::String(token),
+            );
+        }
+        params
+    }
+
     /// Check if the daemon is running (socket file exists)
     pub fn is_daemon_running() -> bool {
         Self::socket_path().exists()
@@ -150,6 +194,10 @@ impl KairosClient {
 
         let id = self.next_id()?;
 
+        // Auth injection — must be applied before serialization. Without
+        // this, every non-ping/keepalive call gets -32001 from the daemon.
+        let params = Self::inject_auth(method, params);
+
         let request = RPCRequest {
             jsonrpc: "2.0",
             method: method.to_string(),
@@ -211,22 +259,11 @@ impl KairosClient {
 
         let id = self.next_id()?;
 
-        // Mirror the auth injection from `call`. Streaming methods are
-        // never on the unauth allowlist, so this is unconditional.
-        let mut params = params;
-        if let Some(token) = Self::read_session_token() {
-            if !params.is_object() {
-                params = serde_json::json!({});
-            }
-            if let Some(obj) = params.as_object_mut() {
-                if !obj.contains_key("authToken") {
-                    obj.insert(
-                        "authToken".to_string(),
-                        serde_json::Value::String(token),
-                    );
-                }
-            }
-        }
+        // Streaming methods are never on the unauth allowlist, but route
+        // through the same helper for consistency. inject_auth() returns
+        // params unchanged when the method is on the allowlist or when
+        // an authToken is already present.
+        let params = Self::inject_auth(method, params);
 
         let request = RPCRequest {
             jsonrpc: "2.0",

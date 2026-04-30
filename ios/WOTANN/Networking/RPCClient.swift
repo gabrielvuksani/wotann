@@ -269,6 +269,29 @@ final class RPCClient: ObservableObject {
         return nil
     }
 
+    /// Coerce a value to Bool. Accepts true/false, 1/0, "true"/"false"
+    /// (case-insensitive). Daemon JSON-RPC handlers occasionally serialize
+    /// booleans as integers when round-tripping through the type-erased
+    /// `params` map (especially after `JSON.parse` in the bridge layer),
+    /// so the helper looks at multiple shapes before giving up.
+    private func rpcBool(_ object: [String: RPCValue], _ keys: [String]) -> Bool? {
+        for key in keys {
+            switch object[key] {
+            case .bool(let b): return b
+            case .int(let i): return i != 0
+            case .double(let d): return d != 0
+            case .string(let s):
+                let lower = s.lowercased()
+                if lower == "true" { return true }
+                if lower == "false" { return false }
+                continue
+            default:
+                continue
+            }
+        }
+        return nil
+    }
+
     // MARK: Authentication
 
     /// Fetch the current session token from the desktop daemon via the
@@ -943,6 +966,18 @@ final class RPCClient: ObservableObject {
         return obj["removed"]?.boolValue ?? false
     }
 
+    /// Render the active block-memory composition into the assembled
+    /// system-prompt string. Calls `blocks.render` on the daemon. Used
+    /// by the Memory panel to show users the actual prompt their next
+    /// turn will see — closes the gap where `blocks.render` was
+    /// daemon-only and Memory panel had no preview surface.
+    func renderBlocks() async throws -> String {
+        let response = try await send("blocks.render", params: [:])
+        guard let obj = response.result?.objectValue else { return "" }
+        if let err = rpcString(obj, ["error"]) { throw RPCError(code: -32000, message: err) }
+        return rpcString(obj, ["content"]) ?? ""
+    }
+
     func listBlockKinds() async throws -> [BlockKindInfo] {
         let response = try await send("blocks.kinds", params: [:])
         let values = response.result?.arrayValue ?? []
@@ -964,7 +999,29 @@ final class RPCClient: ObservableObject {
         return response.result?.objectValue ?? [:]
     }
 
-    func attestGenkey(_ id: String = "default") async throws -> [String: RPCValue] {
+    /// Generate (or load existing) audit-attestation key. Returns a typed
+    /// `AttestKeyResult` so the iOS UI can distinguish a freshly-minted
+    /// key from one that already existed — previously the
+    /// `[String: RPCValue]` return silently dropped the `existed` flag,
+    /// leaving the user unable to tell whether they had just rotated
+    /// their identity or merely re-loaded the stored key.
+    func attestGenkey(_ id: String = "default") async throws -> AttestKeyResult {
+        let response = try await send("attest.genkey", params: ["id": .string(id)])
+        let obj = response.result?.objectValue ?? [:]
+        if let err = rpcString(obj, ["error"]) {
+            throw RPCError(code: -32000, message: err)
+        }
+        return AttestKeyResult(
+            id: rpcString(obj, ["id"]) ?? id,
+            publicPem: rpcString(obj, ["publicPem"]) ?? "",
+            existed: rpcBool(obj, ["existed"]) ?? false
+        )
+    }
+
+    /// Legacy untyped variant for callers that still need the raw
+    /// dictionary (e.g. SwiftUI previews that use placeholder keys).
+    /// Prefer `attestGenkey` above.
+    func attestGenkeyRaw(_ id: String = "default") async throws -> [String: RPCValue] {
         let response = try await send("attest.genkey", params: ["id": .string(id)])
         return response.result?.objectValue ?? [:]
     }
@@ -1002,31 +1059,79 @@ final class RPCClient: ObservableObject {
 
     // MARK: Teams
 
+    /// List team templates with full per-agent typing. Previously the
+    /// agents were collapsed to `[String]` (`agentNames`), losing the
+    /// `type` field — so the iOS team-picker couldn't show "1 lead +
+    /// 2 reviewers + 1 verifier" without a follow-up `showTemplate`
+    /// round-trip per template. Carrying typed `TeamAgent` objects
+    /// fixes that and matches the daemon's actual return shape at
+    /// `src/daemon/kairos-rpc.ts:8606-8612`.
     func teamsListTemplates() async throws -> [TeamTemplateSummary] {
         let response = try await send("teams.listTemplates", params: [:])
         let values = response.result?.arrayValue ?? []
         return values.compactMap { value in
             guard let obj = value.objectValue else { return nil }
-            let leader = obj["leader"]?.objectValue ?? [:]
+            let leader = parseAgent(obj["leader"]?.objectValue ?? [:])
             let agentArr = obj["agents"]?.arrayValue ?? []
             return TeamTemplateSummary(
                 name: rpcString(obj, ["name"]) ?? "",
                 description: rpcString(obj, ["description"]) ?? "",
                 source: rpcString(obj, ["source"]) ?? "built-in",
-                leaderName: rpcString(leader, ["name"]) ?? "",
-                agentNames: agentArr.compactMap { v in
+                leader: leader,
+                agents: agentArr.compactMap { v in
                     guard let o = v.objectValue else { return nil }
-                    return rpcString(o, ["name"])
+                    return parseAgent(o)
                 }
             )
         }
     }
 
-    func teamsShowTemplate(name: String, goal: String, teamName: String? = nil) async throws -> [String: RPCValue] {
+    /// Show a rendered template — returns the typed `RenderedTeamTemplate`
+    /// instead of `[String: RPCValue]`. Carrying `invokeArgs`, `backend`,
+    /// `source`, `path`, and per-agent `model` lets the iOS UI render
+    /// the team-spawn confirmation sheet with full fidelity (e.g.
+    /// "Will run with backend=tmux via wotann --json") without having
+    /// to grovel through an untyped dictionary.
+    func teamsShowTemplate(
+        name: String,
+        goal: String,
+        teamName: String? = nil
+    ) async throws -> RenderedTeamTemplate {
         var params: [String: RPCValue] = ["name": .string(name), "goal": .string(goal)]
         if let teamName { params["teamName"] = .string(teamName) }
         let response = try await send("teams.showTemplate", params: params)
-        return response.result?.objectValue ?? [:]
+        let obj = response.result?.objectValue ?? [:]
+        if let err = rpcString(obj, ["error"]) {
+            throw RPCError(code: -32000, message: err)
+        }
+        let leader = parseAgent(obj["leader"]?.objectValue ?? [:])
+        let agentArr = obj["agents"]?.arrayValue ?? []
+        let invokeArgsRaw = obj["invokeArgs"]?.arrayValue ?? []
+        return RenderedTeamTemplate(
+            name: rpcString(obj, ["name"]) ?? name,
+            description: rpcString(obj, ["description"]) ?? "",
+            invokeArgs: invokeArgsRaw.compactMap { $0.stringValue },
+            backend: rpcString(obj, ["backend"]) ?? "wotann",
+            source: rpcString(obj, ["source"]) ?? "built-in",
+            path: rpcString(obj, ["path"]),
+            leader: leader,
+            agents: agentArr.compactMap { v in
+                guard let o = v.objectValue else { return nil }
+                return parseAgent(o)
+            }
+        )
+    }
+
+    /// Helper: parse a JSON-RPC object into a typed `TeamAgent`.
+    /// Centralized so `teamsListTemplates`/`teamsShowTemplate` stay in
+    /// sync — adding a field here lights it up everywhere.
+    private func parseAgent(_ obj: [String: RPCValue]) -> TeamAgent {
+        TeamAgent(
+            name: rpcString(obj, ["name"]) ?? "",
+            type: rpcString(obj, ["type"]) ?? "agent",
+            task: rpcString(obj, ["task"]),
+            model: rpcString(obj, ["model"])
+        )
     }
 
     func teamsSend(team: String, to: String, body: String, from: String = "ios") async throws -> [String: RPCValue] {

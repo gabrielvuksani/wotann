@@ -1229,8 +1229,18 @@ export class WotannRuntime {
 
     // ── Initialize wired subsystems (Phase 2 plan.md) ──
 
-    // File freezer: session-scoped immutable file protection
+    // File freezer: session-scoped immutable file protection.
+    // Roo-Code pattern: auto-protect WOTANN's own configuration surface
+    // (.wotann/**, wotann.yaml, AGENTS.md, CLAUDE.md) so the agent
+    // can't rewrite the policy/skills/memory files that govern its own
+    // behaviour. Set WOTANN_NO_SELF_PROTECT=1 to opt out — useful when
+    // the user IS the agent author and wants to edit these files.
+    // Audit-Agent-A (2026-04-29) caught the prior commit where this
+    // helper was added but never called.
     this.fileFreezer = new FileFreezer(config.workingDir);
+    if (process.env["WOTANN_NO_SELF_PROTECT"] !== "1") {
+      this.fileFreezer.freezeSelfConfigFiles();
+    }
 
     // Secret scanner: detect API keys, PII, base64 exfiltration in outputs
     this.secretScanner = new SecretScanner();

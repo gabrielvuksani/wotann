@@ -31,6 +31,11 @@ import {
   type ReactElement,
 } from "react";
 import { commands } from "../../hooks/useTauriCommand";
+import {
+  isNotImplemented,
+  NotImplementedBanner,
+  type NotImplementedEnvelope,
+} from "../_shared/honestStub";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -128,12 +133,18 @@ export function RecipePanel(): ReactElement {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [lastResult, setLastResult] = useState<RecipeRunResult | null>(null);
+  const [stubEnvelope, setStubEnvelope] =
+    useState<NotImplementedEnvelope | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
       const result = await rpcCall("recipe.list", {});
+      if (isNotImplemented(result)) {
+        setStubEnvelope(result);
+        return;
+      }
       const list = parseEntries(result);
       setEntries(list);
       if (selected !== null && !list.some((e) => e.name === selected)) {
@@ -159,6 +170,10 @@ export function RecipePanel(): ReactElement {
     setLastResult(null);
     try {
       const result = await rpcCall("recipe.run", { name: selected });
+      if (isNotImplemented(result)) {
+        setStubEnvelope(result);
+        return;
+      }
       setLastResult(parseRunResult(result, selected));
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
@@ -188,6 +203,14 @@ export function RecipePanel(): ReactElement {
       return { label: "Failed", color: "var(--color-error, #ef4444)" };
     return { label: "Idle", color: "var(--color-text-secondary)" };
   }, [isRunning, lastResult]);
+
+  if (stubEnvelope) {
+    return (
+      <div className="flex-1 flex flex-col h-full overflow-auto" data-testid="recipe-panel">
+        <NotImplementedBanner envelope={stubEnvelope} panelTitle="Recipes" />
+      </div>
+    );
+  }
 
   return (
     <div

@@ -26,6 +26,11 @@ import {
   type ReactElement,
 } from "react";
 import { commands } from "../../hooks/useTauriCommand";
+import {
+  isNotImplemented,
+  NotImplementedBanner,
+  type NotImplementedEnvelope,
+} from "../_shared/honestStub";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -120,12 +125,18 @@ export function DeployPanel(): ReactElement {
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<DeployRunResult | null>(null);
+  const [stubEnvelope, setStubEnvelope] =
+    useState<NotImplementedEnvelope | null>(null);
 
   const refreshTargets = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
       const result = await rpcCall("deploy.targets", {});
+      if (isNotImplemented(result)) {
+        setStubEnvelope(result);
+        return;
+      }
       const list = parseTargets(result);
       setTargets(list);
       if (
@@ -157,6 +168,10 @@ export function DeployPanel(): ReactElement {
         target: selectedTarget,
         env,
       });
+      if (isNotImplemented(result)) {
+        setStubEnvelope(result);
+        return;
+      }
       setLastResult(parseRunResult(result, selectedTarget, env));
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
@@ -176,6 +191,14 @@ export function DeployPanel(): ReactElement {
       return { label: "Failed", color: "var(--color-error, #ef4444)" };
     return { label: "Idle", color: "var(--color-text-secondary)" };
   }, [isRunning, lastResult]);
+
+  if (stubEnvelope) {
+    return (
+      <div className="flex-1 flex flex-col h-full overflow-auto" data-testid="deploy-panel">
+        <NotImplementedBanner envelope={stubEnvelope} panelTitle="Deploy" />
+      </div>
+    );
+  }
 
   return (
     <div

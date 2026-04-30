@@ -3965,6 +3965,27 @@ pub async fn list_block_kinds() -> Result<Vec<BlockKindInfo>, String> {
         .collect())
 }
 
+/// Render the active block-memory composition. Returns the assembled
+/// system-prompt string the daemon would inject on the next turn —
+/// lets the Memory panel preview exactly what the model will see
+/// without spawning a real conversation. Closes the parity gap where
+/// `blocks.render` was daemon-only.
+#[tauri::command]
+pub async fn render_block() -> Result<String, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call("blocks.render", serde_json::json!({}))
+        .map_err(|e| e.to_string())?;
+    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+        return Err(err.to_string());
+    }
+    Ok(result
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string())
+}
+
 // Operations: Inspect / Attest / Policy / Canary / Teams.
 // Thin wrappers around the daemon RPC. We pass `serde_json::Value`
 // through verbatim because the Desktop UI only needs to render shapes

@@ -26,6 +26,11 @@ import {
   type ReactElement,
 } from "react";
 import { commands } from "../../hooks/useTauriCommand";
+import {
+  isNotImplemented,
+  NotImplementedBanner,
+  type NotImplementedEnvelope,
+} from "../_shared/honestStub";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -163,12 +168,18 @@ export function OffloadPanel(): ReactElement {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [lastResult, setLastResult] = useState<OffloadResult | null>(null);
+  const [stubEnvelope, setStubEnvelope] =
+    useState<NotImplementedEnvelope | null>(null);
 
   const refreshProviders = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
       const result = await rpcCall("offload.providers", {});
+      if (isNotImplemented(result)) {
+        setStubEnvelope(result);
+        return;
+      }
       const list = parseProviders(result);
       setProviders(list);
       if (!list.some((p) => p.id === selected) && list.length > 0) {
@@ -194,6 +205,10 @@ export function OffloadPanel(): ReactElement {
         provider: selected,
         task: task.trim(),
       });
+      if (isNotImplemented(result)) {
+        setStubEnvelope(result);
+        return;
+      }
       setLastResult(parseRunResult(result, selected));
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
@@ -223,6 +238,14 @@ export function OffloadPanel(): ReactElement {
       return { label: "Failed", color: "var(--color-error, #ef4444)" };
     return { label: "Idle", color: "var(--color-text-secondary)" };
   }, [isRunning, lastResult]);
+
+  if (stubEnvelope) {
+    return (
+      <div className="flex-1 flex flex-col h-full overflow-auto" data-testid="offload-panel">
+        <NotImplementedBanner envelope={stubEnvelope} panelTitle="Offload" />
+      </div>
+    );
+  }
 
   return (
     <div

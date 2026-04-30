@@ -26,6 +26,11 @@ import {
   type ReactElement,
 } from "react";
 import { commands } from "../../hooks/useTauriCommand";
+import {
+  isNotImplemented,
+  NotImplementedBanner,
+  type NotImplementedEnvelope,
+} from "../_shared/honestStub";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -134,12 +139,18 @@ export function SOPPanel(): ReactElement {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [lastResult, setLastResult] = useState<SopRunResult | null>(null);
+  const [stubEnvelope, setStubEnvelope] =
+    useState<NotImplementedEnvelope | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
       const result = await rpcCall("sop.list", {});
+      if (isNotImplemented(result)) {
+        setStubEnvelope(result);
+        return;
+      }
       const list = parseEntries(result);
       setEntries(list);
       if (selected !== null && !list.some((e) => e.name === selected)) {
@@ -177,6 +188,10 @@ export function SOPPanel(): ReactElement {
         name: selected,
         stages: Array.from(stagesEnabled),
       });
+      if (isNotImplemented(result)) {
+        setStubEnvelope(result);
+        return;
+      }
       setLastResult(parseRunResult(result, selected));
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
@@ -211,6 +226,14 @@ export function SOPPanel(): ReactElement {
       return { label: "Failed", color: "var(--color-error, #ef4444)" };
     return { label: "Idle", color: "var(--color-text-secondary)" };
   }, [isRunning, lastResult]);
+
+  if (stubEnvelope) {
+    return (
+      <div className="flex-1 flex flex-col h-full overflow-auto" data-testid="sop-panel">
+        <NotImplementedBanner envelope={stubEnvelope} panelTitle="SOP" />
+      </div>
+    );
+  }
 
   return (
     <div
