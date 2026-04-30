@@ -99,7 +99,23 @@ export interface ContextSource {
 export type PrimarySpace = "chat" | "editor" | "workshop" | "exploit";
 
 /** All navigable views. */
-export type AppView = "chat" | "editor" | "workshop" | "exploit" | "compare" | "memory" | "cost" | "settings" | "intelligence" | "computer-use" | "council" | "training";
+export type AppView =
+  | "chat"
+  | "editor"
+  | "workshop"
+  | "exploit"
+  | "compare"
+  | "memory"
+  | "blocks"
+  | "operations"
+  | "teams"
+  | "snippets"
+  | "cost"
+  | "settings"
+  | "intelligence"
+  | "computer-use"
+  | "council"
+  | "training";
 
 /** Legacy view aliases for backward compatibility during migration. */
 export type LegacyView = "arena" | "agents" | "pairing" | "playground" | "dispatch" | "tasks" | "connectors" | "remote" | "approvals" | "scheduled" | "plugins" | "projects" | "arbitrage" | "canvas";

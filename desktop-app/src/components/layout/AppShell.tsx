@@ -89,6 +89,7 @@ const SettingsView = lazy(() => import("../settings/SettingsView").then((m) => (
 const MemoryInspector = lazy(() => import("../memory/MemoryInspector").then((m) => ({ default: m.MemoryInspector })));
 const BlockMemoryPanel = lazy(() => import("../memory/BlockMemoryPanel").then((m) => ({ default: m.BlockMemoryPanel })));
 const OperationsPanel = lazy(() => import("../operations/OperationsPanel").then((m) => ({ default: m.OperationsPanel })));
+const SnippetPanel = lazy(() => import("../snippets/SnippetPanel").then((m) => ({ default: m.SnippetPanel })));
 const TeamsPanel = lazy(() => import("../teams/TeamsPanel").then((m) => ({ default: m.TeamsPanel })));
 const CostDashboard = lazy(() => import("../health/CostDashboard").then((m) => ({ default: m.CostDashboard })));
 const CommandPalette = lazy(() => import("../palette/CommandPalette").then((m) => ({ default: m.CommandPalette })));
@@ -262,6 +263,8 @@ function WorkspaceContent({
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><BlockMemoryPanel /></Suspense></ErrorBoundary>;
     case "operations":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><OperationsPanel /></Suspense></ErrorBoundary>;
+    case "snippets":
+      return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><SnippetPanel /></Suspense></ErrorBoundary>;
     case "teams":
       return <ErrorBoundary><Suspense fallback={<ViewSkeleton />}><TeamsPanel /></Suspense></ErrorBoundary>;
     case "cost":

@@ -378,11 +378,19 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
 
       // ── Snippets (Round 8 cross-surface prompt library) ──
       {
-        id: "snippet-list",
-        title: "Browse Snippets",
-        subtitle: "snippet.list — your prompt library across CLI/Desktop/iOS",
+        id: "snippet-panel",
+        title: "Open Snippet Library",
+        subtitle: "Manage prompt templates with {{var}} substitution — synced across surfaces",
         category: "Snippets",
         icon: "📋",
+        action: () => setView("snippets"),
+      },
+      {
+        id: "snippet-list",
+        title: "Browse Snippets (count)",
+        subtitle: "snippet.list — quick count probe",
+        category: "Snippets",
+        icon: "📚",
         action: () =>
           void rpcCall("Snippet list", async () => {
             try {
