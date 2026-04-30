@@ -67,6 +67,7 @@
 		3419E6A20D4E3CDACFD02F1C /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 212A1B208E121BEB41DED345 /* ShareViewController.swift */; };
 		34970A1A2199D90E20013CFF /* ArtifactEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A16DF73866A2EBC73B0F6F88 /* ArtifactEditorView.swift */; };
 		369783EB878E8A5C8637BB23 /* CarPlayService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62F56A2BBEBBD733E0895A87 /* CarPlayService.swift */; };
+		3C8FA423759B122F9C234ECD /* SnippetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 016757F115DA85328948D5D4 /* SnippetIntents.swift */; };
 		3DEC1C5EB1265F934EC04273 /* ProviderBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17F025A4946358EB8D1FEA23 /* ProviderBadge.swift */; };
 		406704D6B31A083DC6E4526F /* EditorMinimap.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED26AC1220458FBD3F572ECF /* EditorMinimap.swift */; };
 		418A37A17B04D896EF876A21 /* ChannelStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D31A3722B056BCD7AD34687F /* ChannelStatusView.swift */; };
@@ -1461,6 +1462,7 @@
 				1DA107A3700831948633643F /* WLogo.swift in Sources */,
 				481C9D67B053D8902B076595 /* WOTANNWidgetBundle.swift in Sources */,
 				4D9E24644BD3DF42711869C6 /* WotannTokens.swift in Sources */,
+				3C8FA423759B122F9C234ECD /* SnippetIntents.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
