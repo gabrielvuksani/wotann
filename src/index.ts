@@ -9128,6 +9128,43 @@ snipCmd
     }
   });
 
+snipCmd
+  .command("favorite <id>")
+  .alias("fav")
+  .description("Toggle favorite status of a snippet (or set explicitly)")
+  .option("--on", "Mark as favorite", false)
+  .option("--off", "Unmark as favorite", false)
+  .action(async (id: string, opts: { on?: boolean; off?: boolean }) => {
+    const { SnippetStore } = await import("./snippets/snippet-store.js");
+    const { resolveWotannHomeSubdir } = await import("./utils/wotann-home.js");
+    const { join } = await import("node:path");
+    const dbPath = join(resolveWotannHomeSubdir(""), "snippets.db");
+    const store = new SnippetStore(dbPath);
+    try {
+      const current = store.getById(id);
+      if (!current) {
+        process.stderr.write(chalk.red(`not found: ${id}\n`));
+        process.exit(2);
+      }
+      // --on / --off let users explicitly set state (idempotent for
+      // scripting). Without flags, behave as a toggle.
+      const next = opts.on ? true : opts.off ? false : !current.isFavorite;
+      store.upsert({
+        id: current.id,
+        title: current.title,
+        body: current.body,
+        category: current.category,
+        tags: current.tags,
+        isFavorite: next,
+      });
+      process.stdout.write(
+        chalk.green(`✓ ${next ? "favorited" : "unfavorited"} ${current.title}\n`),
+      );
+    } finally {
+      store.close();
+    }
+  });
+
 // "unknown command" instead of "too many arguments for 'start'".
 const argvAfterNode = process.argv.slice(2);
 if (argvAfterNode.length === 0) {
