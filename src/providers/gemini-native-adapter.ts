@@ -568,6 +568,11 @@ export function createGeminiNativeAdapter(
       "gemini-3.1-flash-lite",
       "gemini-2.5-pro",
       "gemini-2.5-flash",
+      // Round 8 audit: 2.5-flash-lite is the cheap-tier production
+      // Gemini model that was missing from the inventory (Audit-Agent-B).
+      // Same price tier as 2.0-flash but newer training cutoff +
+      // tool-use improvements.
+      "gemini-2.5-flash-lite",
       "gemini-2.0-flash",
     ];
   }

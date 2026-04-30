@@ -553,6 +553,7 @@ export async function discoverProviders(
       transport: "chat_completions",
       models: resolveModels("gemini", geminiKey, [
         "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
         "gemini-2.5-pro",
         "gemini-2.0-flash",
       ]),

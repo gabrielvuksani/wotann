@@ -317,7 +317,8 @@ async function loginOllama(): Promise<LoginResult> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch("http://localhost:11434/api/tags", { signal: controller.signal });
+    const { ollamaUrl } = await import("../providers/ollama-host.js");
+    const response = await fetch(ollamaUrl("/api/tags"), { signal: controller.signal });
     clearTimeout(timeout);
 
     if (response.ok) {

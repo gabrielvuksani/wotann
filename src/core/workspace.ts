@@ -6,6 +6,7 @@
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { stringify as yamlStringify } from "yaml";
+import { resolveOllamaHost } from "../providers/ollama-host.js";
 
 // ── Template Content ────────────────────────────────────────
 
@@ -340,11 +341,14 @@ function generateConfigTemplate(options: ConfigTemplateOptions = {}): string {
   };
 
   if (options.ollamaPrimary) {
+    // Round 8: bake OLLAMA_HOST (if set) into the generated wotann.yaml
+    // so a user with a non-default Ollama deployment doesn't have to
+    // edit the file post-init.
     (config as Record<string, unknown>)["providers"] = {
       ollama: {
         enabled: true,
         priority: 1,
-        baseUrl: "http://localhost:11434",
+        baseUrl: resolveOllamaHost(),
       },
     };
     (config as Record<string, unknown>)["kv_cache"] = {

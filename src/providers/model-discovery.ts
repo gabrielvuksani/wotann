@@ -324,7 +324,8 @@ export async function discoverModelsForProvider(
       if (!token) return fallbackResult("no Gemini API key");
       models = await fetchGeminiModels(token);
     } else if (provider === "ollama") {
-      models = await fetchOllamaModels(baseUrl ?? "http://localhost:11434");
+      const { resolveOllamaHost } = await import("./ollama-host.js");
+      models = await fetchOllamaModels(baseUrl ?? resolveOllamaHost());
     } else {
       const url = baseUrl ?? OPENAI_COMPAT_BASE_URLS[provider];
       if (!url) return fallbackResult("no base URL for provider");

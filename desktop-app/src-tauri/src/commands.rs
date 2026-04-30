@@ -1038,9 +1038,9 @@ fn hardcoded_providers() -> Vec<ProviderInfo> {
         .build()
         .ok();
 
-    // 1. Ollama (local) — probe /api/tags
+    // 1. Ollama (local) — probe /api/tags via env-resolved host (Round 8).
     if let Some(ref c) = client {
-        if let Ok(resp) = c.get("http://localhost:11434/api/tags").send() {
+        if let Ok(resp) = c.get(ollama_url("/api/tags")).send() {
             if let Ok(body) = resp.json::<serde_json::Value>() {
                 if let Some(models) = body.get("models").and_then(|m| m.as_array()) {
                     let model_infos: Vec<ModelInfo> = models
@@ -2105,7 +2105,7 @@ async fn check_ollama_api() -> Option<String> {
         .timeout(std::time::Duration::from_secs(2))
         .build()
         .ok()?;
-    let resp = client.get("http://localhost:11434/api/version").send().await.ok()?;
+    let resp = client.get(ollama_url("/api/version")).send().await.ok()?;
     if !resp.status().is_success() {
         return None;
     }
@@ -2258,7 +2258,7 @@ pub async fn list_ollama_models() -> Result<Vec<String>, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    match client.get("http://localhost:11434/api/tags").send().await {
+    match client.get(ollama_url("/api/tags")).send().await {
         Ok(resp) if resp.status().is_success() => {
             let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
             let models = body
@@ -3485,6 +3485,47 @@ fn chrono_ts() -> u64 {
 /// Utility: home directory
 fn dirs_home() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/Users/default".into())
+}
+
+/// Resolve the Ollama base URL from env. Mirrors `resolveOllamaHost()`
+/// in `src/providers/ollama-host.ts` so a user with `OLLAMA_HOST` set
+/// (e.g., remote LAN box, Tailscale exit, Docker port-remap) sees it
+/// honored on every Tauri-side network probe.
+///
+/// Precedence: `OLLAMA_HOST` > `OLLAMA_URL` > literal `http://127.0.0.1:11434`.
+/// Trailing slashes stripped so callers can append paths cleanly.
+fn ollama_host() -> String {
+    let raw = std::env::var("OLLAMA_HOST")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            std::env::var("OLLAMA_URL")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+        })
+        .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
+    let trimmed = raw.trim().trim_end_matches('/').to_string();
+    // Normalize bare host:port to http://host:port for consistency.
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed
+    } else if trimmed.contains(':') {
+        format!("http://{}", trimmed)
+    } else {
+        format!("http://{}:11434", trimmed)
+    }
+}
+
+/// Append a path to the resolved Ollama base URL.
+fn ollama_url(path: &str) -> String {
+    let base = ollama_host();
+    if path.is_empty() {
+        return base;
+    }
+    if path.starts_with('/') {
+        format!("{}{}", base, path)
+    } else {
+        format!("{}/{}", base, path)
+    }
 }
 
 /// Get the local network IP address for device pairing

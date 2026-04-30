@@ -39,7 +39,10 @@ export async function discoverModels(
   const promises: Promise<readonly DiscoveredModel[]>[] = [];
 
   if (creds.ollamaHost || isOllamaRunning()) {
-    promises.push(discoverOllamaModels(creds.ollamaHost ?? "http://localhost:11434"));
+    const { resolveOllamaHost } = await import("./ollama-host.js");
+    // Round 8: route through resolveOllamaHost so OLLAMA_HOST env var
+    // is honored even when no per-credential override is supplied.
+    promises.push(discoverOllamaModels(creds.ollamaHost ?? resolveOllamaHost()));
   }
   if (creds.anthropicKey) {
     promises.push(discoverAnthropicModels(creds.anthropicKey));

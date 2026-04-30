@@ -117,6 +117,9 @@ const COST_TABLE: Record<string, { input: number; output: number }> = {
   "gemini-3.1-flash-lite": { input: 0.00015, output: 0.0006 },
   "gemini-2.5-pro": { input: 0.002, output: 0.012 },
   "gemini-2.5-flash": { input: 0.00015, output: 0.0006 },
+  // Round 8 audit fix — newer cheap-tier (was missing). Same price
+  // points as 2.5-flash; lower latency for short prompts.
+  "gemini-2.5-flash-lite": { input: 0.0001, output: 0.0004 },
   "gemini-2.0-flash": { input: 0.00015, output: 0.0006 },
 
   // DeepSeek

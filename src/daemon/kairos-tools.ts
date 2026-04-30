@@ -71,9 +71,13 @@ export interface PRSubscription {
 }
 
 export type PREvent =
-  | "opened" | "closed" | "merged"
-  | "review_requested" | "review_submitted"
-  | "checks_passed" | "checks_failed"
+  | "opened"
+  | "closed"
+  | "merged"
+  | "review_requested"
+  | "review_submitted"
+  | "checks_passed"
+  | "checks_failed"
   | "comment";
 
 export interface PRState {
@@ -89,11 +93,19 @@ export interface PRState {
  */
 export function checkPRState(repo: string, prNumber: number): PRState | null {
   try {
-    const output = execFileSync("gh", [
-      "pr", "view", String(prNumber),
-      "--repo", repo,
-      "--json", "number,title,state,statusCheckRollup,updatedAt",
-    ], { stdio: "pipe", timeout: 15_000, encoding: "utf-8" });
+    const output = execFileSync(
+      "gh",
+      [
+        "pr",
+        "view",
+        String(prNumber),
+        "--repo",
+        repo,
+        "--json",
+        "number,title,state,statusCheckRollup,updatedAt",
+      ],
+      { stdio: "pipe", timeout: 15_000, encoding: "utf-8" },
+    );
 
     const data = JSON.parse(output) as {
       number: number;
@@ -130,8 +142,10 @@ export function detectPREvents(previous: PRState, current: PRState): readonly PR
 
   if (previous.state !== "merged" && current.state === "merged") events.push("merged");
   if (previous.state !== "closed" && current.state === "closed") events.push("closed");
-  if (previous.checksStatus !== "success" && current.checksStatus === "success") events.push("checks_passed");
-  if (previous.checksStatus !== "failure" && current.checksStatus === "failure") events.push("checks_failed");
+  if (previous.checksStatus !== "success" && current.checksStatus === "success")
+    events.push("checks_passed");
+  if (previous.checksStatus !== "failure" && current.checksStatus === "failure")
+    events.push("checks_failed");
 
   return events;
 }
@@ -180,10 +194,15 @@ export async function healthCheck(
 
 /**
  * Run health checks against all known provider endpoints.
+ *
+ * Round 8: the Ollama URL is now resolved through `resolveOllamaHost()`
+ * so a user with `OLLAMA_HOST` set sees the health probe hit the right
+ * box. Other providers' URLs are upstream constants.
  */
 export async function runProviderHealthChecks(): Promise<readonly HealthCheckResult[]> {
+  const { ollamaUrl } = await import("../providers/ollama-host.js");
   const checks = [
-    healthCheck("Ollama", "http://localhost:11434/api/tags"),
+    healthCheck("Ollama", ollamaUrl("/api/tags")),
     healthCheck("Anthropic API", "https://api.anthropic.com/v1/models"),
     healthCheck("OpenAI API", "https://api.openai.com/v1/models"),
     healthCheck("Gemini API", "https://generativelanguage.googleapis.com/v1beta/models"),
@@ -210,9 +229,7 @@ interface CostFileData {
  *
  * Sends a desktop notification for each issue found.
  */
-export async function proactiveCheck(
-  _costOracle?: unknown,
-): Promise<void> {
+export async function proactiveCheck(_costOracle?: unknown): Promise<void> {
   // 1. Check for stale daemon status (proxy for "pending approval > 5 min")
   const statusPath = join(process.cwd(), ".wotann", "daemon.status.json");
   if (existsSync(statusPath)) {
@@ -239,10 +256,16 @@ export async function proactiveCheck(
   const gitDir = join(process.cwd(), ".git");
   if (existsSync(gitDir)) {
     try {
-      const output = execFileSync("gh", [
-        "run", "list", "--limit", "1", "--json", "status,conclusion,name",
-      ], { stdio: "pipe", timeout: 10_000, encoding: "utf-8" });
-      const runs = JSON.parse(output) as readonly { status: string; conclusion: string; name: string }[];
+      const output = execFileSync(
+        "gh",
+        ["run", "list", "--limit", "1", "--json", "status,conclusion,name"],
+        { stdio: "pipe", timeout: 10_000, encoding: "utf-8" },
+      );
+      const runs = JSON.parse(output) as readonly {
+        status: string;
+        conclusion: string;
+        name: string;
+      }[];
       const lastRun = runs[0];
       if (lastRun && lastRun.conclusion === "failure") {
         pushNotification({
