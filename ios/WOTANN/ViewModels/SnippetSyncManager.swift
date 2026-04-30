@@ -75,6 +75,14 @@ final class SnippetSyncManager: ObservableObject {
     /// Pull from the daemon and merge into the local view. If the
     /// daemon is unreachable we keep the cached templates so the
     /// user doesn't see an empty list during a network hiccup.
+    ///
+    /// **Merge strategy**: a template with NO entry in `idMap` is an
+    /// offline-added snippet that hasn't synced to the daemon yet.
+    /// Those are PRESERVED at the top of the merged list and a
+    /// background retry is kicked off so they reach the daemon on
+    /// the next round-trip. Without this preservation the user's
+    /// offline-authored snippet would silently vanish when the
+    /// daemon came back online — a data-loss bug.
     func refresh(rpc: RPCClient) async {
         isRefreshing = true
         defer { isRefreshing = false }
@@ -91,9 +99,30 @@ final class SnippetSyncManager: ObservableObject {
                     createdAt: Date(timeIntervalSince1970: TimeInterval(snippet.createdAt) / 1000)
                 )
             }
-            templates = mapped
+            // Preserve offline-only templates (no daemon id mapping yet).
+            let offlineOnly = templates.filter { idMap[$0.id] == nil }
+            templates = offlineOnly + mapped
             writeCache()
             lastError = nil
+
+            // Retry pending offline writes one-by-one. Failures here
+            // are logged as lastError but don't stop subsequent retries
+            // — a partial sync is better than an all-or-nothing one.
+            for pending in offlineOnly {
+                do {
+                    let snippet = try await rpc.snippetSave(
+                        title: pending.title,
+                        body: pending.prompt,
+                        category: pending.category,
+                        isFavorite: pending.isFavorite
+                    )
+                    idMap[pending.id] = snippet.id
+                } catch {
+                    // Leave pending in idMap-less limbo for the next refresh.
+                    lastError = error.localizedDescription
+                }
+            }
+            writeCache()
         } catch {
             // Keep cached state; surface error for UI to optionally show.
             lastError = error.localizedDescription
