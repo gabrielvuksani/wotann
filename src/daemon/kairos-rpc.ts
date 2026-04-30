@@ -7750,6 +7750,137 @@ export class KairosRPCHandler {
       }
     });
 
+    // ── Snippet (cross-surface prompt library) ────────────────
+    //
+    // Round 8 feature. The iOS app shipped a `PromptLibraryView` that
+    // stored to `UserDefaults` — phone-only, no sync. These RPC
+    // handlers promote it to a daemon-backed SQLite store so a
+    // snippet written on phone shows up on desktop, in TUI ⌃P, and
+    // in `wotann snip use`. Built on `SnippetStore` (src/snippets/
+    // snippet-store.ts) which provides FTS5 search, `{{var}}`
+    // substitution, and use-count ranking.
+
+    this.handlers.set("snippet.list", async (params) => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const store = this.runtime.getSnippetStore();
+      if (!store) return { error: "SnippetStore not available" };
+      try {
+        const filter: { category?: string; favOnly?: boolean; query?: string } = {};
+        if (typeof params["category"] === "string") {
+          filter.category = params["category"] as string;
+        }
+        if (params["favOnly"] === true) filter.favOnly = true;
+        if (typeof params["query"] === "string") filter.query = params["query"] as string;
+        const snippets = store.list(filter);
+        return { snippets, count: snippets.length };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("snippet.save", async (params) => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const store = this.runtime.getSnippetStore();
+      if (!store) return { error: "SnippetStore not available" };
+      const title = typeof params["title"] === "string" ? (params["title"] as string).trim() : "";
+      const body = typeof params["body"] === "string" ? (params["body"] as string) : "";
+      if (title.length === 0) return { error: "title required" };
+      if (body.length === 0) return { error: "body required" };
+      try {
+        const id =
+          typeof params["id"] === "string" && (params["id"] as string).trim().length > 0
+            ? (params["id"] as string).trim()
+            : undefined;
+        const category =
+          typeof params["category"] === "string" ? (params["category"] as string) : null;
+        const tags = Array.isArray(params["tags"])
+          ? ((params["tags"] as unknown[]).filter((t) => typeof t === "string") as string[])
+          : [];
+        const isFavorite = params["isFavorite"] === true;
+        const upsertInput: {
+          id?: string;
+          title: string;
+          body: string;
+          category: string | null;
+          tags: string[];
+          isFavorite: boolean;
+        } = { title, body, category, tags, isFavorite };
+        if (id !== undefined) upsertInput.id = id;
+        const snippet = store.upsert(upsertInput);
+        return { ok: true, snippet };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("snippet.delete", async (params) => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const store = this.runtime.getSnippetStore();
+      if (!store) return { error: "SnippetStore not available" };
+      const id = typeof params["id"] === "string" ? (params["id"] as string).trim() : "";
+      if (id.length === 0) return { error: "id required" };
+      try {
+        const removed = store.delete(id);
+        return { ok: removed, id };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("snippet.use", async (params) => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const store = this.runtime.getSnippetStore();
+      if (!store) return { error: "SnippetStore not available" };
+      const id = typeof params["id"] === "string" ? (params["id"] as string).trim() : "";
+      if (id.length === 0) return { error: "id required" };
+      const varsRaw = params["vars"];
+      const vars: Record<string, string> = {};
+      if (typeof varsRaw === "object" && varsRaw !== null) {
+        for (const [k, v] of Object.entries(varsRaw as Record<string, unknown>)) {
+          if (typeof v === "string") vars[k] = v;
+          else if (typeof v === "number" || typeof v === "boolean") vars[k] = String(v);
+        }
+      }
+      try {
+        const result = store.use(id, vars);
+        if (!result) return { error: `snippet not found: ${id}` };
+        return {
+          ok: true,
+          rendered: result.render.rendered,
+          missingVars: result.render.missingVars,
+          snippet: result.snippet,
+        };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("snippet.get", async (params) => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const store = this.runtime.getSnippetStore();
+      if (!store) return { error: "SnippetStore not available" };
+      const id = typeof params["id"] === "string" ? (params["id"] as string).trim() : "";
+      if (id.length === 0) return { error: "id required" };
+      try {
+        const snippet = store.getById(id);
+        if (!snippet) return { error: `snippet not found: ${id}` };
+        return { snippet };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    this.handlers.set("snippet.count", async () => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const store = this.runtime.getSnippetStore();
+      if (!store) return { error: "SnippetStore not available" };
+      try {
+        return { count: store.count() };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
     // 23. Hooks Inventory — list registered hooks. Audit found the
     // daemon registered zero `hooks.*` methods despite shipping 21
     // hook events + 23 BUILT_IN guards (per CLAUDE.md). UIs had no

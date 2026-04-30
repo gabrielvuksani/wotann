@@ -1180,6 +1180,139 @@ final class RPCClient: ObservableObject {
         }
     }
 
+    // MARK: Snippets (Round 8 cross-surface prompt library)
+    //
+    // Wraps the daemon's snippet.* RPC handlers. Replaces the iOS-only
+    // UserDefaults snippet store in `PromptLibraryView` so a snippet
+    // written on phone shows up on desktop and vice versa.
+
+    /// List snippets, optionally filtered. Returns favorites-first,
+    /// then most-recently-used desc.
+    func snippetList(
+        category: String? = nil,
+        favOnly: Bool = false,
+        query: String? = nil
+    ) async throws -> [Snippet] {
+        var params: [String: RPCValue] = [:]
+        if let category { params["category"] = .string(category) }
+        if favOnly { params["favOnly"] = .bool(true) }
+        if let query, !query.isEmpty { params["query"] = .string(query) }
+        let response = try await send("snippet.list", params: params)
+        guard let obj = response.result?.objectValue else { return [] }
+        if let err = rpcString(obj, ["error"]) { throw RPCError(code: -32000, message: err) }
+        let arr = obj["snippets"]?.arrayValue ?? []
+        return arr.compactMap { v in
+            guard let snipObj = v.objectValue else { return nil }
+            return parseSnippet(snipObj)
+        }
+    }
+
+    /// Save (insert or update) a snippet. If `id` is omitted a new
+    /// snippet is created; passing an existing id updates in place.
+    func snippetSave(
+        title: String,
+        body: String,
+        id: String? = nil,
+        category: String? = nil,
+        tags: [String] = [],
+        isFavorite: Bool = false
+    ) async throws -> Snippet {
+        var params: [String: RPCValue] = [
+            "title": .string(title),
+            "body": .string(body),
+            "tags": .array(tags.map { .string($0) }),
+            "isFavorite": .bool(isFavorite),
+        ]
+        if let id { params["id"] = .string(id) }
+        if let category { params["category"] = .string(category) }
+        let response = try await send("snippet.save", params: params)
+        guard let obj = response.result?.objectValue else {
+            throw RPCError(code: -32603, message: "snippet.save returned non-object")
+        }
+        if let err = rpcString(obj, ["error"]) { throw RPCError(code: -32000, message: err) }
+        guard let snippetObj = obj["snippet"]?.objectValue else {
+            throw RPCError(code: -32603, message: "snippet.save missing snippet field")
+        }
+        guard let snippet = parseSnippet(snippetObj) else {
+            throw RPCError(code: -32603, message: "snippet.save returned malformed snippet")
+        }
+        return snippet
+    }
+
+    /// Hard-delete a snippet by id.
+    @discardableResult
+    func snippetDelete(id: String) async throws -> Bool {
+        let response = try await send("snippet.delete", params: ["id": .string(id)])
+        guard let obj = response.result?.objectValue else { return false }
+        if let err = rpcString(obj, ["error"]) { throw RPCError(code: -32000, message: err) }
+        return rpcBool(obj, ["ok"]) ?? false
+    }
+
+    /// Render a snippet with `{{var}}` substitution AND record the use
+    /// (bumps useCount + lastUsedAt). Returns the rendered prompt
+    /// plus the names of variables the caller didn't supply, so the
+    /// UI can warn about partial renders.
+    func snippetUse(
+        id: String,
+        vars: [String: String] = [:]
+    ) async throws -> (rendered: String, missingVars: [String], snippet: Snippet) {
+        let varsValue: RPCValue = .object(
+            Dictionary(uniqueKeysWithValues: vars.map { ($0.key, RPCValue.string($0.value)) })
+        )
+        let response = try await send("snippet.use", params: ["id": .string(id), "vars": varsValue])
+        guard let obj = response.result?.objectValue else {
+            throw RPCError(code: -32603, message: "snippet.use returned non-object")
+        }
+        if let err = rpcString(obj, ["error"]) { throw RPCError(code: -32000, message: err) }
+        let rendered = rpcString(obj, ["rendered"]) ?? ""
+        let missingArr = obj["missingVars"]?.arrayValue ?? []
+        let missingVars = missingArr.compactMap { $0.stringValue }
+        let snippetObj = obj["snippet"]?.objectValue ?? [:]
+        guard let snippet = parseSnippet(snippetObj) else {
+            throw RPCError(code: -32603, message: "snippet.use missing snippet field")
+        }
+        return (rendered, missingVars, snippet)
+    }
+
+    /// Look up a single snippet by id.
+    func snippetGet(id: String) async throws -> Snippet? {
+        let response = try await send("snippet.get", params: ["id": .string(id)])
+        guard let obj = response.result?.objectValue else { return nil }
+        if let err = rpcString(obj, ["error"]) {
+            // Distinguish "not found" (return nil) from real errors (throw)
+            if err.contains("not found") { return nil }
+            throw RPCError(code: -32000, message: err)
+        }
+        guard let snippetObj = obj["snippet"]?.objectValue else { return nil }
+        return parseSnippet(snippetObj)
+    }
+
+    /// Helper: parse a JSON-RPC object into a typed Snippet. Returns
+    /// nil if the required fields are missing or malformed.
+    private func parseSnippet(_ obj: [String: RPCValue]) -> Snippet? {
+        guard let id = rpcString(obj, ["id"]),
+              let title = rpcString(obj, ["title"]) ?? Optional("")
+        else { return nil }
+        let body = rpcString(obj, ["body"]) ?? ""
+        let tagsArr = obj["tags"]?.arrayValue ?? []
+        let tags = tagsArr.compactMap { $0.stringValue }
+        let varsArr = obj["variables"]?.arrayValue ?? []
+        let variables = varsArr.compactMap { $0.stringValue }
+        return Snippet(
+            id: id,
+            title: title,
+            body: body,
+            category: rpcString(obj, ["category"]),
+            tags: tags,
+            isFavorite: rpcBool(obj, ["isFavorite"]) ?? false,
+            useCount: Int(rpcDouble(obj, ["useCount"]) ?? 0),
+            lastUsedAt: rpcDouble(obj, ["lastUsedAt"]).map { Int64($0) },
+            createdAt: Int64(rpcDouble(obj, ["createdAt"]) ?? 0),
+            updatedAt: Int64(rpcDouble(obj, ["updatedAt"]) ?? 0),
+            variables: variables
+        )
+    }
+
     // MARK: Incoming Handler
 
     private func handleIncoming(_ data: Data) {

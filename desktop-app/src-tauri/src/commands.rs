@@ -4109,6 +4109,93 @@ pub async fn render_block() -> Result<String, String> {
         .to_string())
 }
 
+// ── Snippets (Round 8 cross-surface prompt library) ─────────
+//
+// Thin pass-throughs to the daemon's snippet.* handlers (see
+// src/daemon/kairos-rpc.ts). We forward params verbatim and project
+// `{error: string}` envelopes into Rust `Err(...)` so JS callers
+// don't have to special-case the success channel.
+
+#[tauri::command]
+pub async fn snippet_list(
+    category: Option<String>,
+    fav_only: Option<bool>,
+    query: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let mut params = serde_json::json!({});
+    if let Some(c) = category {
+        params["category"] = serde_json::Value::String(c);
+    }
+    if let Some(f) = fav_only {
+        params["favOnly"] = serde_json::Value::Bool(f);
+    }
+    if let Some(q) = query {
+        params["query"] = serde_json::Value::String(q);
+    }
+    let result = client.call("snippet.list", params).map_err(|e| e.to_string())?;
+    project_daemon_error(result)
+}
+
+#[tauri::command]
+pub async fn snippet_save(
+    title: String,
+    body: String,
+    id: Option<String>,
+    category: Option<String>,
+    tags: Option<Vec<String>>,
+    is_favorite: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let mut params = serde_json::json!({"title": title, "body": body});
+    if let Some(i) = id {
+        params["id"] = serde_json::Value::String(i);
+    }
+    if let Some(c) = category {
+        params["category"] = serde_json::Value::String(c);
+    }
+    if let Some(t) = tags {
+        params["tags"] = serde_json::Value::Array(t.into_iter().map(serde_json::Value::String).collect());
+    }
+    if let Some(f) = is_favorite {
+        params["isFavorite"] = serde_json::Value::Bool(f);
+    }
+    let result = client.call("snippet.save", params).map_err(|e| e.to_string())?;
+    project_daemon_error(result)
+}
+
+#[tauri::command]
+pub async fn snippet_delete(id: String) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call("snippet.delete", serde_json::json!({"id": id}))
+        .map_err(|e| e.to_string())?;
+    project_daemon_error(result)
+}
+
+#[tauri::command]
+pub async fn snippet_use(
+    id: String,
+    vars: Option<std::collections::HashMap<String, String>>,
+) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let mut params = serde_json::json!({"id": id});
+    if let Some(v) = vars {
+        params["vars"] = serde_json::to_value(v).unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+    }
+    let result = client.call("snippet.use", params).map_err(|e| e.to_string())?;
+    project_daemon_error(result)
+}
+
+#[tauri::command]
+pub async fn snippet_get(id: String) -> Result<serde_json::Value, String> {
+    let client = ipc_client::try_kairos().map_err(|e| e.to_string())?;
+    let result = client
+        .call("snippet.get", serde_json::json!({"id": id}))
+        .map_err(|e| e.to_string())?;
+    project_daemon_error(result)
+}
+
 // Operations: Inspect / Attest / Policy / Canary / Teams.
 // Thin wrappers around the daemon RPC. We pass `serde_json::Value`
 // through verbatim because the Desktop UI only needs to render shapes

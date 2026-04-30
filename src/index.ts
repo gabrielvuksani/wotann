@@ -8962,6 +8962,172 @@ if (firstArg && firstArg.startsWith("wotann://")) {
 // of launching the TUI — a regression in the most common entry point.
 // Re-route the no-arg invocation back to `start` explicitly so the user-
 // visible UX is unchanged while unknown-verb errors now surface as
+// ── wotann snip — Round 8 cross-surface prompt library CLI ──
+//
+// Talks directly to the SnippetStore (no daemon required) so users
+// can manage their library entirely offline. The same SQLite file is
+// what the daemon RPC reads, so a snippet saved via CLI shows up in
+// Desktop and iOS once the daemon is started.
+const snipCmd = program
+  .command("snip")
+  .description("Cross-surface prompt library (list/save/use/delete favorite)");
+
+snipCmd
+  .command("list")
+  .description("List saved snippets")
+  .option("--cat <category>", "Filter by category")
+  .option("--fav", "Only show favorites", false)
+  .option("--search <query>", "Free-text search via FTS5")
+  .action(async (opts: { cat?: string; fav?: boolean; search?: string }) => {
+    const { SnippetStore } = await import("./snippets/snippet-store.js");
+    const { resolveWotannHomeSubdir } = await import("./utils/wotann-home.js");
+    const { join } = await import("node:path");
+    const dbPath = join(resolveWotannHomeSubdir(""), "snippets.db");
+    const store = new SnippetStore(dbPath);
+    try {
+      const filter: { category?: string; favOnly?: boolean; query?: string } = {};
+      if (opts.cat) filter.category = opts.cat;
+      if (opts.fav) filter.favOnly = true;
+      if (opts.search) filter.query = opts.search;
+      const list = store.list(filter);
+      if (list.length === 0) {
+        process.stdout.write(
+          chalk.dim('No snippets. Save one with `wotann snip save "title" "body"`.\n'),
+        );
+        return;
+      }
+      for (const s of list) {
+        const star = s.isFavorite ? chalk.yellow("★ ") : "  ";
+        const used = s.useCount > 0 ? chalk.dim(` (used ${s.useCount}×)`) : "";
+        const cat = s.category ? chalk.dim(` [${s.category}]`) : "";
+        const vars = s.variables.length > 0 ? chalk.cyan(` {${s.variables.join(", ")}}`) : "";
+        process.stdout.write(`${star}${chalk.bold(s.title)}${cat}${vars}${used}\n`);
+        process.stdout.write(chalk.dim(`  id: ${s.id}\n`));
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+snipCmd
+  .command("save <title> [body...]")
+  .description("Create or update a snippet (body taken from stdin if omitted)")
+  .option("--id <id>", "Update an existing snippet by id")
+  .option("--cat <category>", "Category tag")
+  .option("--fav", "Mark as favorite", false)
+  .option("--tags <csv>", "Comma-separated tags")
+  .action(
+    async (
+      title: string,
+      bodyWords: string[],
+      opts: { id?: string; cat?: string; fav?: boolean; tags?: string },
+    ) => {
+      let body = (bodyWords ?? []).join(" ").trim();
+      if (body.length === 0 && !process.stdin.isTTY) {
+        // Read from stdin so users can pipe long prompts: `cat prompt.md | wotann snip save "review"`
+        const chunks: Buffer[] = [];
+        for await (const chunk of process.stdin as AsyncIterable<Buffer>) {
+          chunks.push(chunk);
+        }
+        body = Buffer.concat(chunks).toString("utf-8").trim();
+      }
+      if (body.length === 0) {
+        process.stderr.write(chalk.red("error: body required (pass as args or via stdin)\n"));
+        process.exit(2);
+      }
+      const { SnippetStore } = await import("./snippets/snippet-store.js");
+      const { resolveWotannHomeSubdir } = await import("./utils/wotann-home.js");
+      const { join } = await import("node:path");
+      const dbPath = join(resolveWotannHomeSubdir(""), "snippets.db");
+      const store = new SnippetStore(dbPath);
+      try {
+        const upsertInput: {
+          id?: string;
+          title: string;
+          body: string;
+          category: string | null;
+          tags: string[];
+          isFavorite: boolean;
+        } = {
+          title,
+          body,
+          category: opts.cat ?? null,
+          tags: opts.tags
+            ? opts.tags
+                .split(",")
+                .map((t) => t.trim())
+                .filter((t) => t.length > 0)
+            : [],
+          isFavorite: opts.fav ?? false,
+        };
+        if (opts.id) upsertInput.id = opts.id;
+        const snippet = store.upsert(upsertInput);
+        process.stdout.write(chalk.green(`✓ saved ${snippet.id}\n`));
+        if (snippet.variables.length > 0) {
+          process.stdout.write(chalk.dim(`  variables: ${snippet.variables.join(", ")}\n`));
+        }
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+snipCmd
+  .command("use <id>")
+  .description("Render a snippet (with optional --var key=value overrides) to stdout")
+  .option("--var <kv...>", "Variable bindings (key=value, repeatable)")
+  .action(async (id: string, opts: { var?: string[] }) => {
+    const { SnippetStore } = await import("./snippets/snippet-store.js");
+    const { resolveWotannHomeSubdir } = await import("./utils/wotann-home.js");
+    const { join } = await import("node:path");
+    const dbPath = join(resolveWotannHomeSubdir(""), "snippets.db");
+    const store = new SnippetStore(dbPath);
+    try {
+      const vars: Record<string, string> = {};
+      for (const kv of opts.var ?? []) {
+        const idx = kv.indexOf("=");
+        if (idx <= 0) continue;
+        vars[kv.slice(0, idx).trim()] = kv.slice(idx + 1);
+      }
+      const result = store.use(id, vars);
+      if (!result) {
+        process.stderr.write(chalk.red(`snippet not found: ${id}\n`));
+        process.exit(2);
+      }
+      if (result.render.missingVars.length > 0) {
+        process.stderr.write(
+          chalk.yellow(`warning: unbound variables: ${result.render.missingVars.join(", ")}\n`),
+        );
+      }
+      process.stdout.write(result.render.rendered);
+      if (!result.render.rendered.endsWith("\n")) process.stdout.write("\n");
+    } finally {
+      store.close();
+    }
+  });
+
+snipCmd
+  .command("delete <id>")
+  .description("Delete a snippet by id")
+  .action(async (id: string) => {
+    const { SnippetStore } = await import("./snippets/snippet-store.js");
+    const { resolveWotannHomeSubdir } = await import("./utils/wotann-home.js");
+    const { join } = await import("node:path");
+    const dbPath = join(resolveWotannHomeSubdir(""), "snippets.db");
+    const store = new SnippetStore(dbPath);
+    try {
+      const removed = store.delete(id);
+      if (removed) {
+        process.stdout.write(chalk.green(`✓ deleted ${id}\n`));
+      } else {
+        process.stderr.write(chalk.red(`not found: ${id}\n`));
+        process.exit(2);
+      }
+    } finally {
+      store.close();
+    }
+  });
+
 // "unknown command" instead of "too many arguments for 'start'".
 const argvAfterNode = process.argv.slice(2);
 if (argvAfterNode.length === 0) {

@@ -56,6 +56,29 @@ export interface BlockRenderResult {
   readonly content: string;
 }
 
+// ── Snippets (Round 8 cross-surface prompt library) ──────
+/**
+ * One snippet from the daemon's SQLite-backed prompt library.
+ * `variables` is server-derived from the body via `extractVariables()`
+ * and tells the UI which form fields to render in a "use snippet"
+ * dialog.
+ */
+export interface Snippet {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly category: string | null;
+  readonly tags: readonly string[];
+  readonly isFavorite: boolean;
+  readonly useCount: number;
+  /** Unix-ms; null when never used. */
+  readonly lastUsedAt: number | null;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  /** Distinct {{var}} placeholders extracted from `body`. */
+  readonly variables: readonly string[];
+}
+
 // ── Teams (ClawTeam port) ─────────────────────────────────
 export interface TeamTemplateSummary {
   readonly name: string;
@@ -509,6 +532,46 @@ export const commands = {
   /// affordance — closes the gap where `blocks.render` was daemon-
   /// only and Memory panel had no preview surface.
   renderBlock: () => invoke<string>("render_block"),
+
+  // ── Snippets (Round 8 cross-surface prompt library) ──────
+  //
+  // Daemon-backed prompt template library with `{{var}}` substitution.
+  // Replaces the iOS-only UserDefaults snippet store; Desktop now
+  // shares the same persistence so a snippet written on phone shows
+  // up here and vice versa.
+  snippetList: (filter?: { category?: string; favOnly?: boolean; query?: string }) =>
+    invoke<{ snippets: readonly Snippet[]; count: number }>("snippet_list", {
+      category: filter?.category,
+      favOnly: filter?.favOnly,
+      query: filter?.query,
+    }),
+  snippetSave: (input: {
+    title: string;
+    body: string;
+    id?: string;
+    category?: string;
+    tags?: readonly string[];
+    isFavorite?: boolean;
+  }) =>
+    invoke<{ ok: boolean; snippet: Snippet }>("snippet_save", {
+      title: input.title,
+      body: input.body,
+      id: input.id,
+      category: input.category,
+      tags: input.tags ?? [],
+      isFavorite: input.isFavorite,
+    }),
+  snippetDelete: (id: string) =>
+    invoke<{ ok: boolean; id: string }>("snippet_delete", { id }),
+  snippetUse: (id: string, vars?: Readonly<Record<string, string>>) =>
+    invoke<{
+      ok: boolean;
+      rendered: string;
+      missingVars: readonly string[];
+      snippet: Snippet;
+    }>("snippet_use", { id, vars: vars ?? {} }),
+  snippetGet: (id: string) =>
+    invoke<{ snippet: Snippet }>("snippet_get", { id }),
 
   // ── Inspect (magika port) ─────────────────────────────────
   inspectPath: (path: string, declared?: string) =>

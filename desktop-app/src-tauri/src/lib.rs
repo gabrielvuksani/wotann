@@ -86,6 +86,12 @@ pub fn run() {
             commands::clear_block,
             commands::list_block_kinds,
             commands::render_block,
+            // Round 8: snippet (cross-surface prompt library)
+            commands::snippet_list,
+            commands::snippet_save,
+            commands::snippet_delete,
+            commands::snippet_use,
+            commands::snippet_get,
             commands::inspect_path,
             commands::attest_genkey,
             commands::attest_sign,

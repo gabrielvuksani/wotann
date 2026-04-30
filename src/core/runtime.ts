@@ -76,6 +76,7 @@ import { canBypass, executeBypass } from "../utils/wasm-bypass.js";
 import { CostTracker, shouldZeroForSubscription } from "../telemetry/cost-tracker.js";
 import { ToolTimingLogger, ToolTimingBaseline } from "../tools/tool-timing.js";
 import { MemoryStore, type AutoCaptureEntry } from "../memory/store.js";
+import { SnippetStore } from "../snippets/snippet-store.js";
 import {
   UnifiedKnowledgeFabric,
   type KnowledgeQuery,
@@ -711,6 +712,14 @@ export class WotannRuntime {
   private modelPerformanceStore: RepoModelPerformanceStore;
   private pluginPanels: readonly string[] = [];
   private memoryStore: MemoryStore | null = null;
+  /**
+   * Round 8: cross-surface prompt library. Lives in the same .wotann
+   * state dir as memory.db so users can back up both with one tar.
+   * `null` until the SQLite handle opens — the daemon-side `snippet.*`
+   * RPCs return "SnippetStore not available" until then. Never throws
+   * at constructor time so a corrupt prior db doesn't kill the daemon.
+   */
+  private snippetStore: SnippetStore | null = null;
   private session: SessionState;
   /**
    * F9: O(1) message lookup. Updated alongside `this.session.messages` so
@@ -1197,6 +1206,17 @@ export class WotannRuntime {
           ? legacyDir
           : wotannDir;
       const dbPath = join(stateDir, "memory.db");
+      // Round 8: open the snippet store alongside memory.db. Same
+      // state-dir convention; failures are isolated (snippet store
+      // failure won't block memory store init).
+      try {
+        const snippetDbPath = join(stateDir, "snippets.db");
+        this.snippetStore = new SnippetStore(snippetDbPath);
+      } catch (err) {
+        console.warn(
+          `[WOTANN] SnippetStore init failed (continuing without prompt library): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       try {
         this.memoryStore = new MemoryStore(dbPath);
         // V9 T1.3 — auto-attach sqlite-vec backend if the native
@@ -5533,6 +5553,15 @@ export class WotannRuntime {
   }
   getMemoryStore(): MemoryStore | null {
     return this.memoryStore;
+  }
+  /**
+   * Round 8: expose the runtime's SnippetStore over a public getter
+   * so the daemon RPC layer can drive the cross-surface prompt
+   * library. Returns null when the daemon failed to open the SQLite
+   * handle (e.g. on a corrupt prior db).
+   */
+  getSnippetStore(): SnippetStore | null {
+    return this.snippetStore;
   }
   /**
    * Round 7: expose the runtime's HookEngine over a public getter
