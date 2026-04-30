@@ -126,6 +126,74 @@ const SECRET_PATTERNS: readonly SecretPattern[] = [
     severity: "high",
     description: "Bearer authentication token",
   },
+  // ── Hermes-port additions (Round 6 audit, 2026-04-29) ──
+  // Hermes-agent's redact module ships ~30 known API-key prefixes; the
+  // patterns below close gaps in WOTANN's existing detector for the
+  // providers an agent harness is most likely to encounter.
+  {
+    name: "google_api_key",
+    pattern: /AIza[0-9A-Za-z_-]{35}/g,
+    severity: "critical",
+    description: "Google API key (Maps/Cloud/Gemini)",
+  },
+  {
+    name: "huggingface_token",
+    pattern: /hf_[a-zA-Z0-9]{34,}/g,
+    severity: "critical",
+    description: "Hugging Face access token",
+  },
+  {
+    name: "npm_token",
+    pattern: /npm_[A-Za-z0-9]{36,}/g,
+    severity: "critical",
+    description: "npm publish token",
+  },
+  {
+    name: "pypi_token",
+    pattern: /pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]+/g,
+    severity: "critical",
+    description: "PyPI upload token",
+  },
+  {
+    name: "sendgrid_key",
+    pattern: /SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}/g,
+    severity: "critical",
+    description: "SendGrid API key",
+  },
+  {
+    name: "fal_ai_key",
+    pattern: /fal_[A-Za-z0-9]{20,}/g,
+    severity: "critical",
+    description: "fal.ai API key",
+  },
+  {
+    name: "mem0_key",
+    pattern: /mem0_[A-Za-z0-9]{20,}/g,
+    severity: "critical",
+    description: "mem0.ai API key",
+  },
+  {
+    name: "codex_fernet",
+    // Fernet-encrypted Codex creds always start with the version byte
+    // 0x80 base64-encoded as "gAAAAA". Hermes-agent's `redact.py`
+    // surfaces these because LLM responses occasionally echo them when
+    // debugging "I tried to call your API but got auth_error".
+    pattern: /gAAAAA[A-Za-z0-9_-]{40,}/g,
+    severity: "critical",
+    description: "Fernet-encrypted credential blob (Codex/Hermes shape)",
+  },
+  {
+    name: "telegram_bot_token",
+    pattern: /\b\d{9,10}:[A-Za-z0-9_-]{35}\b/g,
+    severity: "critical",
+    description: "Telegram bot token",
+  },
+  {
+    name: "discord_bot_token",
+    pattern: /[MN][A-Za-z\d]{23}\.[\w-]{6}\.[\w-]{27}/g,
+    severity: "critical",
+    description: "Discord bot token",
+  },
 ];
 
 /**
