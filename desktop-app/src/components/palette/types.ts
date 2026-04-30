@@ -8,6 +8,7 @@ export type PaletteCategory =
   | "Models"
   | "Skills"
   | "Memory"
+  | "Snippets"
   | "Agents"
   | "Session"
   | "Intelligence"

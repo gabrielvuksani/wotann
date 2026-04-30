@@ -376,6 +376,46 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
           void rpcCall("Memory fence", () => tauriCommands.sendMessage(toRpc("memory.fence"))),
       },
 
+      // ── Snippets (Round 8 cross-surface prompt library) ──
+      {
+        id: "snippet-list",
+        title: "Browse Snippets",
+        subtitle: "snippet.list — your prompt library across CLI/Desktop/iOS",
+        category: "Snippets",
+        icon: "📋",
+        action: () =>
+          void rpcCall("Snippet list", async () => {
+            try {
+              const result = await tauriCommands.snippetList();
+              const count = result.snippets.length;
+              return count === 0
+                ? "No snippets yet. Save one with `wotann snip save \"title\" \"body\"`."
+                : `${count} snippet${count === 1 ? "" : "s"} in library`;
+            } catch (e) {
+              return e instanceof Error ? e.message : String(e);
+            }
+          }),
+      },
+      {
+        id: "snippet-favorites",
+        title: "Favorite Snippets",
+        subtitle: "snippet.list?favOnly — pinned prompts",
+        category: "Snippets",
+        icon: "⭐",
+        action: () =>
+          void rpcCall("Favorite snippets", async () => {
+            try {
+              const result = await tauriCommands.snippetList({ favOnly: true });
+              const count = result.snippets.length;
+              return count === 0
+                ? "No favorites. Mark a snippet as favorite to pin it here."
+                : `${count} favorite snippet${count === 1 ? "" : "s"}`;
+            } catch (e) {
+              return e instanceof Error ? e.message : String(e);
+            }
+          }),
+      },
+
       // ── Skills ──
       {
         id: "skills-list",
