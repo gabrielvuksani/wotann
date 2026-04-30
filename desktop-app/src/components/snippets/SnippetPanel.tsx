@@ -17,6 +17,8 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { commands, type Snippet } from "../../hooks/useTauriCommand";
+import { useStore } from "../../store";
+import { useStreaming } from "../../hooks/useStreaming";
 
 const cardStyle: React.CSSProperties = {
   display: "flex",
@@ -95,6 +97,14 @@ export function SnippetPanel(): React.ReactElement {
   const [renderedPreview, setRenderedPreview] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  // Cross-feature: "Use as Chat Prompt" dispatches the rendered
+  // snippet into a new conversation. Hooks below mirror what
+  // ChatComposerBar does on submit (chat/ChatView.tsx:262-297).
+  const setView = useStore((s) => s.setView);
+  const addConversation = useStore((s) => s.addConversation);
+  const setActiveConversation = useStore((s) => s.setActiveConversation);
+  const { sendMessage } = useStreaming();
 
   const refresh = useCallback(async (): Promise<void> => {
     setIsLoading(true);
@@ -230,6 +240,65 @@ export function SnippetPanel(): React.ReactElement {
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [selectedSnippet, vars, refresh]);
+
+  /**
+   * Cross-feature: render the snippet, create a new conversation
+   * with the rendered text as the first user message, dispatch via
+   * the streaming hook, then switch focus to the chat view. One
+   * click takes the user from "I want to run this prompt" to "the
+   * agent is responding."
+   *
+   * Mirrors the auto-conversation-creation logic in ChatComposerBar
+   * (chat/ChatView.tsx:270-296) so the snippet path produces the
+   * same conversation shape as a manually-typed prompt.
+   */
+  const useInChat = useCallback(async (): Promise<void> => {
+    if (!selectedSnippet) return;
+    try {
+      const result = await commands.snippetUse(selectedSnippet.id, vars);
+      if (result.missingVars.length > 0) {
+        setError(`Unbound variables: ${result.missingVars.join(", ")}`);
+        return;
+      }
+      const trimmed = result.rendered.trim();
+      if (trimmed.length === 0) {
+        setError("Rendered prompt is empty");
+        return;
+      }
+      const convId = `conv-${Date.now()}`;
+      const preview = trimmed.slice(0, 80);
+      const state = useStore.getState();
+      addConversation({
+        id: convId,
+        title: selectedSnippet.title || preview,
+        preview,
+        updatedAt: Date.now(),
+        // Empty-string sentinel matches ChatComposerBar's auto-create
+        // path so the daemon's discovery routing kicks in instead of
+        // biasing toward a default provider.
+        provider: state.provider || "",
+        model: state.model || "",
+        cost: 0,
+        messageCount: 0,
+      });
+      setActiveConversation(convId);
+      sendMessage(convId, trimmed);
+      setView("chat");
+      // Refresh in the background so the use-count bump is reflected
+      // next time the panel is opened.
+      void refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [
+    selectedSnippet,
+    vars,
+    addConversation,
+    setActiveConversation,
+    sendMessage,
+    setView,
+    refresh,
+  ]);
 
   return (
     <div
@@ -459,9 +528,14 @@ export function SnippetPanel(): React.ReactElement {
               This snippet has no variables. Click <strong>Render</strong> to see the
               prompt and bump its use-count.
             </div>
-            <button onClick={renderPreview} style={primaryButtonStyle}>
-              Render
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={renderPreview} style={buttonStyle}>
+                Render
+              </button>
+              <button onClick={useInChat} style={primaryButtonStyle}>
+                Use in Chat →
+              </button>
+            </div>
             {renderedPreview && (
               <pre
                 style={{
@@ -496,9 +570,14 @@ export function SnippetPanel(): React.ReactElement {
                 />
               </div>
             ))}
-            <button onClick={renderPreview} style={primaryButtonStyle}>
-              Render
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={renderPreview} style={buttonStyle}>
+                Render
+              </button>
+              <button onClick={useInChat} style={primaryButtonStyle}>
+                Use in Chat →
+              </button>
+            </div>
             {renderedPreview && (
               <>
                 <div
