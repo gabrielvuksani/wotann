@@ -7616,6 +7616,192 @@ export class KairosRPCHandler {
       return miner.mineGenericText(text);
     });
 
+    // 20. Memory Add — insert a new memory entry. Round 7 audit
+    // (HIGH #5) found the daemon had no write surface for individual
+    // memory entries — Engram + claude-mem are advertised in CLAUDE.md
+    // but iOS/Desktop UIs couldn't author memories. This handler
+    // closes the gap for first-class authoring across all surfaces.
+    this.handlers.set("memory.add", async (params) => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const key = typeof params["key"] === "string" ? (params["key"] as string).trim() : "";
+      const value = typeof params["value"] === "string" ? (params["value"] as string).trim() : "";
+      if (key.length === 0 || value.length === 0) {
+        return { error: "key and value required" };
+      }
+      const layer = typeof params["layer"] === "string" ? (params["layer"] as string) : "user";
+      const blockType =
+        typeof params["blockType"] === "string" ? (params["blockType"] as string) : "fact";
+      const verified = params["verified"] === true;
+      const confidence =
+        typeof params["confidence"] === "number"
+          ? Math.max(0, Math.min(1, params["confidence"] as number))
+          : 0.85;
+      const tags = Array.isArray(params["tags"])
+        ? ((params["tags"] as unknown[]).filter((t) => typeof t === "string") as string[])
+        : [];
+      const sessionId =
+        typeof params["sessionId"] === "string" ? (params["sessionId"] as string) : null;
+      const id =
+        typeof params["id"] === "string" && (params["id"] as string).trim().length > 0
+          ? (params["id"] as string).trim()
+          : `mem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      try {
+        const store = this.runtime.getMemoryStore();
+        if (!store) return { error: "MemoryStore not available" };
+        // MemoryLayer is one of: auto_capture / core_blocks / working /
+        // knowledge_graph / archival / recall / team / proactive.
+        const VALID_LAYERS = [
+          "auto_capture",
+          "core_blocks",
+          "working",
+          "knowledge_graph",
+          "archival",
+          "recall",
+          "team",
+          "proactive",
+        ] as const;
+        type ValidLayer = (typeof VALID_LAYERS)[number];
+        const validatedLayer: ValidLayer = (VALID_LAYERS as readonly string[]).includes(layer)
+          ? (layer as ValidLayer)
+          : "working";
+        // MemoryBlockType: user / feedback / project / reference / cases /
+        // patterns / decisions / issues.
+        const VALID_BLOCKS = [
+          "user",
+          "feedback",
+          "project",
+          "reference",
+          "cases",
+          "patterns",
+          "decisions",
+          "issues",
+        ] as const;
+        type ValidBlock = (typeof VALID_BLOCKS)[number];
+        const validatedBlock: ValidBlock = (VALID_BLOCKS as readonly string[]).includes(blockType)
+          ? (blockType as ValidBlock)
+          : "reference";
+        // tags is a single comma-joined string in MemoryEntry, not array.
+        const tagsString = Array.isArray(tags)
+          ? (tags as string[]).join(",")
+          : typeof tags === "string"
+            ? (tags as string)
+            : "";
+        store.insert({
+          id,
+          layer: validatedLayer,
+          blockType: validatedBlock,
+          key,
+          value,
+          ...(typeof sessionId === "string" && sessionId.length > 0 ? { sessionId } : {}),
+          verified,
+          confidence,
+          tags: tagsString,
+          freshnessScore: 1.0,
+          confidenceLevel: confidence,
+          verificationStatus: verified ? "verified" : "unverified",
+        });
+        return { ok: true, id };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // 21. Memory Update — patch an existing entry (key/value/verified/confidence).
+    this.handlers.set("memory.update", async (params) => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const store = this.runtime.getMemoryStore();
+      if (!store) return { error: "MemoryStore not available" };
+      const id = typeof params["id"] === "string" ? (params["id"] as string).trim() : "";
+      if (id.length === 0) return { error: "id required" };
+      const updates: { key?: string; value?: string; verified?: boolean; confidence?: number } = {};
+      if (typeof params["key"] === "string") updates.key = params["key"] as string;
+      if (typeof params["value"] === "string") updates.value = params["value"] as string;
+      if (typeof params["verified"] === "boolean") updates.verified = params["verified"] as boolean;
+      if (typeof params["confidence"] === "number") {
+        updates.confidence = Math.max(0, Math.min(1, params["confidence"] as number));
+      }
+      if (Object.keys(updates).length === 0) {
+        return { error: "no fields to update (key/value/verified/confidence)" };
+      }
+      try {
+        store.update(id, updates);
+        return { ok: true, id, updated: Object.keys(updates) };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // 22. Memory Delete — hard-delete by id. Audit-Agent flagged that
+    // Desktop/iOS UIs couldn't remove memory entries except via raw
+    // CLI. This closes the loop. Distinct from `memory.archive` (soft
+    // delete via archived column) — daemon doesn't currently expose
+    // archive over RPC; if needed, add `memory.archive` next to this.
+    this.handlers.set("memory.delete", async (params) => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const store = this.runtime.getMemoryStore();
+      if (!store) return { error: "MemoryStore not available" };
+      const id = typeof params["id"] === "string" ? (params["id"] as string).trim() : "";
+      if (id.length === 0) return { error: "id required" };
+      try {
+        store.delete(id);
+        return { ok: true, id };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // 23. Hooks Inventory — list registered hooks. Audit found the
+    // daemon registered zero `hooks.*` methods despite shipping 21
+    // hook events + 23 BUILT_IN guards (per CLAUDE.md). UIs had no
+    // way to surface what's enforcing what. Read-side first; enable/
+    // disable + custom-hook authoring can come in a later round once
+    // the per-hook config persistence story is settled.
+    this.handlers.set("hooks.list", async () => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      try {
+        const engine = this.runtime.getHookEngine();
+        const hooks = engine.listAll();
+        return {
+          hooks: hooks.map((h) => ({
+            name: h.name,
+            event: h.event,
+            priority: h.priority,
+            profile: h.profile,
+            kind: h.kind,
+          })),
+          totalHooks: hooks.length,
+          activeProfile: engine.getProfile(),
+        };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
+    // 24. Hooks Profile — set the active hook profile (off / minimal /
+    // standard / strict). Real persistence is the runtime's job; this
+    // RPC just flips the in-memory active profile so iOS/Desktop UIs
+    // can offer a "guardrails: minimal" toggle for power users who
+    // want to investigate a false positive without editing config.
+    this.handlers.set("hooks.setProfile", async (params) => {
+      if (!this.runtime) return { error: "Runtime not initialized" };
+      const profile = typeof params["profile"] === "string" ? (params["profile"] as string) : "";
+      // HookProfile is exactly "minimal" | "standard" | "strict"
+      // (see src/core/types.ts:204). To turn hooks fully off, use the
+      // engine's pause() — that's a separate RPC if needed.
+      const VALID = ["minimal", "standard", "strict"] as const;
+      type ValidProfile = (typeof VALID)[number];
+      if (!(VALID as readonly string[]).includes(profile)) {
+        return { error: `profile must be one of: ${VALID.join(", ")}` };
+      }
+      try {
+        const engine = this.runtime.getHookEngine();
+        engine.setProfile(profile as ValidProfile);
+        return { ok: true, activeProfile: profile };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    });
+
     // 20. Adaptive Prompts — model classification + profile
     this.handlers.set("prompts.adaptive", async (params) => {
       if (!this.runtime) return { error: "Runtime not initialized" };

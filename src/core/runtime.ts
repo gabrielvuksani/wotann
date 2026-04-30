@@ -5534,6 +5534,15 @@ export class WotannRuntime {
   getMemoryStore(): MemoryStore | null {
     return this.memoryStore;
   }
+  /**
+   * Round 7: expose the runtime's HookEngine over a public getter
+   * so the daemon RPC layer (kairos-rpc.ts hooks.list / hooks.setEnabled)
+   * can drive the engine. Previously the field was private with no
+   * accessor, leaving `hooks.*` RPC unable to compile.
+   */
+  getHookEngine(): HookEngine {
+    return this.hookEngine;
+  }
 
   /**
    * Fire ToolResultReceived for a runtime-handled tool's raw output,

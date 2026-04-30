@@ -189,6 +189,43 @@ export class HookEngine {
     return this.activeProfile;
   }
 
+  /**
+   * Round 7: enumerate every registered hook so the daemon RPC layer
+   * (`hooks.list`) can show the user what's enforcing what. Returns a
+   * flat array sorted by event then priority — same order they would
+   * fire if dispatch happened today.
+   */
+  listAll(): readonly {
+    name: string;
+    event: HookEvent;
+    priority: number;
+    profile: HookProfile;
+    kind: HookKind;
+  }[] {
+    const out: {
+      name: string;
+      event: HookEvent;
+      priority: number;
+      profile: HookProfile;
+      kind: HookKind;
+    }[] = [];
+    for (const [event, handlers] of this.hooks.entries()) {
+      for (const h of handlers) {
+        out.push({
+          name: h.name,
+          event,
+          priority: h.priority ?? DEFAULT_PRIORITY,
+          profile: h.profile,
+          kind: h.kind ?? "tool",
+        });
+      }
+    }
+    return out.sort((a, b) => {
+      if (a.event !== b.event) return a.event.localeCompare(b.event);
+      return a.priority - b.priority;
+    });
+  }
+
   /** Pause all hook execution (for guardrails-off mode) */
   pause(): void {
     this.paused = true;
