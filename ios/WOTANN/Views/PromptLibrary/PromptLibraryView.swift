@@ -30,16 +30,29 @@ struct PromptTemplate: Identifiable, Codable {
 // MARK: - PromptLibraryView
 
 /// Searchable prompt library with categories, favorites, and one-tap use.
+///
+/// Round 8: backed by the daemon-side `SnippetStore` via
+/// `SnippetSyncManager`. UserDefaults remains as an offline cache so
+/// the view continues to function when the desktop daemon is
+/// unreachable. A snippet authored here syncs to Desktop CommandPalette
+/// + `wotann snip` CLI; conversely, anything saved on those surfaces
+/// shows up here on the next refresh.
 struct PromptLibraryView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var connectionManager: ConnectionManager
     @Environment(\.dismiss) private var dismiss
-    @State private var templates: [PromptTemplate] = PromptLibraryView.defaultTemplates
+    @StateObject private var sync = SnippetSyncManager()
     @State private var searchQuery = ""
     @State private var selectedCategory: String?
     @State private var showAddSheet = false
 
-    private let storageKey = "com.wotann.promptLibrary"
+    /// View-level accessor for the synced prompt list. Falls back to
+    /// the bundled default catalogue when the sync manager has zero
+    /// entries (first-launch UX) so the user always sees something
+    /// rather than an empty screen.
+    private var templates: [PromptTemplate] {
+        sync.templates.isEmpty ? Self.defaultTemplates : sync.templates
+    }
 
     var categories: [String] {
         Array(Set(templates.map(\.category))).sorted()
@@ -81,11 +94,19 @@ struct PromptLibraryView: View {
             }
             .sheet(isPresented: $showAddSheet) {
                 AddPromptSheet { newTemplate in
-                    templates.append(newTemplate)
-                    saveTemplates()
+                    Task {
+                        await sync.add(newTemplate, rpc: connectionManager.rpcClient)
+                    }
                 }
             }
-            .onAppear { loadTemplates() }
+            .refreshable {
+                await sync.refresh(rpc: connectionManager.rpcClient)
+            }
+            .onAppear {
+                Task {
+                    await sync.refresh(rpc: connectionManager.rpcClient)
+                }
+            }
         }
     }
 
@@ -161,32 +182,14 @@ struct PromptLibraryView: View {
     }
 
     private func toggleFavorite(_ template: PromptTemplate) {
-        if let idx = templates.firstIndex(where: { $0.id == template.id }) {
-            var updated = templates
-            updated[idx].isFavorite.toggle()
-            templates = updated
-            saveTemplates()
+        Task {
+            await sync.toggleFavorite(template, rpc: connectionManager.rpcClient)
         }
     }
 
     private func deleteTemplate(_ template: PromptTemplate) {
-        templates = templates.filter { $0.id != template.id }
-        saveTemplates()
-    }
-
-    // MARK: - Persistence
-
-    private func loadTemplates() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let saved = try? JSONDecoder().decode([PromptTemplate].self, from: data) else { return }
-        templates = saved + Self.defaultTemplates.filter { def in
-            !saved.contains { $0.title == def.title }
-        }
-    }
-
-    private func saveTemplates() {
-        if let data = try? JSONEncoder().encode(templates) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+        Task {
+            await sync.delete(template, rpc: connectionManager.rpcClient)
         }
     }
 

@@ -162,6 +162,7 @@
 		9FBFA9C82DA6256A88B85A91 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC4279027D915B49348FAA83 /* TaskDetailView.swift */; };
 		A03D49902DB81EDABBF7AA7E /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C012EDDADB27EC369CCE908 /* ChatViewModel.swift */; };
 		A06637D2F6798AE52479F327 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B13E4DA73820D9FCF4970BD /* Conversation.swift */; };
+		A0B449C0F8F730DC77F3E67D /* SnippetSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A930BA07F35AA09B14322FE /* SnippetSyncManager.swift */; };
 		A17C57967C2E2210BD12C130 /* DynamicType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 343ECC15B823B45B47D8E5A1 /* DynamicType.swift */; };
 		A180D7C55613211C0E2CBC3C /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 858AA65551925BEBA0EA15AB /* CameraService.swift */; };
 		A2EAEB19960526504850A4B2 /* EditorFindBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A26C169C39F688EC9293DC /* EditorFindBar.swift */; };
@@ -412,6 +413,7 @@
 		93EFE65AEEFF4E0EF383473B /* EnhancePromptIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnhancePromptIntent.swift; sourceTree = "<group>"; };
 		970D819FAD2DACD72B9298A0 /* AgentDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDetailView.swift; sourceTree = "<group>"; };
 		97B03ED4AEC0513C072A328F /* CheckCostIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckCostIntent.swift; sourceTree = "<group>"; };
+		9A930BA07F35AA09B14322FE /* SnippetSyncManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SnippetSyncManager.swift; sourceTree = "<group>"; };
 		9BA0CD3724CA1F7EC99FA705 /* ContinuityCameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuityCameraService.swift; sourceTree = "<group>"; };
 		9C012EDDADB27EC369CCE908 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
 		9C79A41A4A15C264BCCF2C8D /* ExpandWithWOTANNIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandWithWOTANNIntent.swift; sourceTree = "<group>"; };
@@ -1048,6 +1050,7 @@
 				9C012EDDADB27EC369CCE908 /* ChatViewModel.swift */,
 				8687FA620D2D98DCCB752FE9 /* ConversationListVM.swift */,
 				0C15FCB52E102C803EB082B5 /* PairingViewModel.swift */,
+				9A930BA07F35AA09B14322FE /* SnippetSyncManager.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -1638,6 +1641,7 @@
 				C62DC85ADDB85398CA4DC2C7 /* OperationsView.swift in Sources */,
 				5FD4F2C0493905DDB93C3627 /* TeamsView.swift in Sources */,
 				897871422623949FA041D929 /* Snippets.swift in Sources */,
+				A0B449C0F8F730DC77F3E67D /* SnippetSyncManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
