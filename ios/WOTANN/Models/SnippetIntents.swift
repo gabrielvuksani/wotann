@@ -72,23 +72,10 @@ struct RunSnippetIntent: AppIntent {
 
 // MARK: - App Shortcuts Provider
 //
-// Apple's `AppShortcutsProvider` exposes our intents to Spotlight,
-// Shortcuts, and Siri's "What can I do here?" picker. The provider
-// MUST be a non-generic struct conforming to the protocol — runtime
-// scans the binary for it on app launch.
-
-@available(iOS 18.0, *)
-struct WotannSnippetShortcuts: AppShortcutsProvider {
-    static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: RunSnippetIntent(),
-            phrases: [
-                "Run \(.applicationName) snippet",
-                "Use \(.applicationName) prompt",
-                "Run snippet in \(.applicationName)",
-            ],
-            shortTitle: "Run Snippet",
-            systemImageName: "doc.text.below.ecg"
-        )
-    }
-}
+// iOS only allows ONE `AppShortcutsProvider` per app target. The
+// existing `WOTANNControlAppShortcuts` in `Models/ControlWidgetIntents.swift`
+// is the consolidated provider. The snippet shortcut declaration lives
+// THERE, NOT here — defining a second provider triggers
+// "Only 1 AppShortcutsProvider conformance is allowed per app" at the
+// AppIntents metadata processor stage and breaks the build. Round 8
+// fix in 30ad0f1 follow-up.

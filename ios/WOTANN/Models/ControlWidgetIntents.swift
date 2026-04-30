@@ -293,6 +293,21 @@ struct WOTANNControlAppShortcuts: AppShortcutsProvider {
             systemImageName: "w.circle.fill"
         )
         AppShortcut(
+            // Round 8 cross-surface prompt library — surfaces saved
+            // snippets via Siri/Spotlight. The Shortcuts app passes
+            // a snippet-title parameter; donation in
+            // PromptLibraryView.useTemplate teaches Siri the user's
+            // most-frequent prompts so they bubble to the top.
+            intent: RunSnippetIntent(),
+            phrases: [
+                "Run \(.applicationName) snippet",
+                "Use \(.applicationName) prompt",
+                "Run snippet in \(.applicationName)",
+            ],
+            shortTitle: "Run Snippet",
+            systemImageName: "doc.text.below.ecg"
+        )
+        AppShortcut(
             intent: RewriteWithWOTANNFromShortcutIntent(),
             phrases: [
                 "Rewrite with \(.applicationName)",
